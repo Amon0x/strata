@@ -190,12 +190,12 @@ struct Renderer::Impl {
     std::uint64_t scratch_frame = 0;
     std::vector<std::uint32_t> vertex, fullscreen;
     /**
-     * Raster job kernels (gpu/raster_shaders.hpp), made on the first raster job: accumulate,
-     * resolve_coverage, resolve_composite and finish, over five storage buffers.
+     * Raster job kernels (gpu/raster_shaders.hpp), made on the first raster job: accumulate, stroke,
+     * resolve_coverage, resolve_composite and finish, over six storage buffers.
      */
     VkDescriptorSetLayout raster_descriptors{};
     VkPipelineLayout raster_layout{};
-    std::array<VkPipeline, 4U> raster_pipelines{};
+    std::array<VkPipeline, 5U> raster_pipelines{};
     /** GPU-only work buffers the kernels leave zeroed, and the region they write. */
     std::unique_ptr<Buffer> raster_cells, raster_sums, raster_output;
     bool poisoned = false;
@@ -232,6 +232,8 @@ struct Renderer::Impl {
     /** Rasterizes a raster operation's job into its region of `image` (vulkan/raster.cpp). */
     void rasterize(const host::ResourceOperation& operation, Image& image);
     void create_raster_kernels();
+    /** Starts compiling the raster kernels in the background, so no frame waits on them. */
+    void prepare_raster_kernels();
     /** A zeroed GPU-only storage buffer of at least `bytes`, replacing `buffer` if smaller. */
     void reserve_raster_buffer(std::unique_ptr<Buffer>& buffer, VkDeviceSize bytes, bool zeroed);
     VkRenderPass render_pass(VkFormat format);

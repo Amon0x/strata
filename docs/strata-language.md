@@ -697,8 +697,9 @@ stage, so they stay exact while they animate and a stroke thinner than a pixel d
 proportionally lighter rather than a pixel wide. Every other outline (polygons, polylines, paths,
 dashed or gradient-painted shapes, and imported SVG icons) becomes a coverage mask the way text
 glyphs are, at the shape's device size and sub-pixel position, and cached; the GPU rasterizes it
-from the outline's edges in compute shaders, so a shape that changes every frame costs the CPU
-only its outline. Fills
+in compute shaders from the outline's edges, or for a stroke from its centreline, which it widens
+itself (joins, caps and all), so a shape that changes every frame costs the CPU only its flattened
+path. Fills
 follow their fill rule, strokes are a union, so a translucent stroke stays one even alpha where it
 crosses itself, and shapes larger than an atlas page are drawn in seamless tiles. Gradient paints
 are evaluated per pixel over the mask: every stop, `extend` mode and radial distance is exact.

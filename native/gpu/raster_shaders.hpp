@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 
@@ -29,17 +30,33 @@ struct Constants final {
     /** Uints between output rows (Vulkan's buffer output only). */
     std::uint32_t output_stride = 0U;
     float parameters[8]{};
+    /** A stroke layer's pieces and style. */
+    std::uint32_t first_piece = 0U;
+    std::uint32_t piece_count = 0U;
+    std::uint32_t join = 0U;
+    std::uint32_t cap = 0U;
+    float half_width = 0.0F;
+    float miter_limit = 4.0F;
+    float tolerance = 0.03F;
+    float stroke_reserved = 0.0F;
 };
-static_assert(sizeof(Constants) == 96U);
+/** The most push constant bytes every Vulkan device offers. */
+static_assert(sizeof(Constants) == 128U);
 
 /** Threads per group of every kernel: one segment or one row each. */
 inline constexpr std::uint32_t group_size = 64U;
+
+/** The kernels, in the order backends keep them. */
+inline constexpr std::array<const char*, 5U> entries{"accumulate", "stroke", "resolve_coverage",
+                                                     "resolve_composite", "finish"};
 
 /**
  * The raster job kernels (strata/raster_job.hpp), a line-for-line port of host/raster_job.cpp's
  * integer core so the GPU's coverage is the reference's exactly:
  *
  *   accumulate         one thread a segment: its exact area into the cells it crosses (atomics)
+ *   stroke             one thread a stroke piece: its band, join and caps as convex polygons,
+ *                      clipped and quantized in float, then accumulated like segments
  *   resolve_coverage   one thread a region row: cells to coverage, written to the R8 atlas
  *   resolve_composite  one thread a content row: cells to coverage, composited into the sums
  *   finish             one thread a region row: the sums to straight RGBA, written to the atlas
@@ -73,6 +90,22 @@ struct RasterData {
     uint output_stride;
     float4 parameters_a;
     float4 parameters_b;
+    uint first_piece;
+    uint piece_count;
+    uint join;
+    uint cap;
+    float half_width;
+    float miter_limit;
+    float tolerance;
+    float stroke_reserved;
+};
+
+struct StrokePiece {
+    float2 p0;
+    float2 p1;
+    float2 p2;
+    uint flags;
+    uint reserved;
 };
 
 #ifdef STRATA_VULKAN
@@ -87,6 +120,7 @@ BIND(0) StructuredBuffer<int4> segments : register(t0);
 BIND(1) StructuredBuffer<uint> luts : register(t1);
 BIND(2) RWStructuredBuffer<int> cells : register(u0);
 BIND(3) RWStructuredBuffer<uint> sums : register(u1);
+BIND(5) StructuredBuffer<StrokePiece> pieces : register(t2);
 #ifdef STRATA_VULKAN
 BIND(4) RWStructuredBuffer<uint> output : register(u2);
 #elif defined(STRATA_RASTER_RGBA)
@@ -113,18 +147,11 @@ void emit(int column, int row, int xa, int xb, int ya, int yb, int sign) {
     InterlockedAdd(cells[at + 1], sign * (xa - left + xb - left) * height);
 }
 
-[numthreads(64, 1, 1)]
-void accumulate(uint3 id : SV_DispatchThreadID) {
-    if (id.x >= raster.segment_count)
-        return;
-    int4 segment = segments[raster.first_segment + id.x];
-    int x0 = segment.x;
-    int y0 = segment.y;
-    int x1 = segment.z;
-    int y1 = segment.w;
+/** Adds a fixed-point edge's exact area, times `orientation`, to the cells it crosses. */
+void walk(int x0, int y0, int x1, int y1, int orientation) {
     if (y0 == y1)
         return;
-    int sign = 1;
+    int sign = orientation;
     if (y0 > y1) {
         int swap_x = x0;
         x0 = x1;
@@ -132,14 +159,14 @@ void accumulate(uint3 id : SV_DispatchThreadID) {
         int swap_y = y0;
         y0 = y1;
         y1 = swap_y;
-        sign = -1;
+        sign = -orientation;
     }
     int dx = x1 - x0;
     int dy = y1 - y0;
     int xa = x0;
     int ya = y0;
     int last_row = (y1 - 1) / one;
-    for (int row = y0 / one; row <= last_row; ++row) {
+    [loop] for (int row = y0 / one; row <= last_row; ++row) {
         int top = row * one;
         int yb = min(y1, top + one);
         int xb = yb == y1 ? x1 : x0 + floor_divide(dx * (yb - y0), dy);
@@ -150,7 +177,7 @@ void accumulate(uint3 id : SV_DispatchThreadID) {
             emit(xa / one, row, xa, xb, cy, end_y, sign);
         } else if (xa < xb) {
             int column = xa / one;
-            for (;;) {
+            [loop] for (;;) {
                 int side = (column + 1) * one;
                 if (side >= xb) {
                     emit(column, row, cx, xb, cy, end_y, sign);
@@ -164,7 +191,7 @@ void accumulate(uint3 id : SV_DispatchThreadID) {
             }
         } else {
             int column = (xa - 1) / one;
-            for (;;) {
+            [loop] for (;;) {
                 int side = column * one;
                 if (side <= xb) {
                     emit(column, row, cx, xb, cy, end_y, sign);
@@ -179,6 +206,290 @@ void accumulate(uint3 id : SV_DispatchThreadID) {
         }
         xa = xb;
         ya = yb;
+    }
+}
+
+[numthreads(64, 1, 1)]
+void accumulate(uint3 id : SV_DispatchThreadID) {
+    if (id.x >= raster.segment_count)
+        return;
+    int4 segment = segments[raster.first_segment + id.x];
+    walk(segment.x, segment.y, segment.z, segment.w, 1);
+}
+
+/** A fixed-point edge in pieces no longer than 16 pixels, so every product fits 32 bits. */
+void walk_long(int x0, int y0, int x1, int y1, int orientation) {
+    if (y0 == y1)
+        return;
+    int dx = x1 - x0;
+    int dy = y1 - y0;
+    int count = max(1, (max(abs(dx), abs(dy)) + 16 * one - 1) / (16 * one));
+    int px = x0;
+    int py = y0;
+    [loop] for (int piece = 1; piece <= count; ++piece) {
+        int x = piece == count ? x1 : x0 + floor_divide(dx * piece, count);
+        int y = piece == count ? y1 : y0 + floor_divide(dy * piece, count);
+        if (y != py)
+            walk(px, py, x, y, orientation);
+        px = x;
+        py = y;
+    }
+}
+
+int2 to_fixed(float2 position, float2 size) {
+    return int2(round(clamp(position, 0.0, size) * float(one)));
+}
+
+/**
+ * An edge in content pixels, clipped as the encoder clips: above and below dropped, right of the
+ * content dropped, left of it kept as a vertical edge on its left side. HLSL inlines every call,
+ * so the stroke kernel calls this from one place: the walk behind it is most of the kernel.
+ */
+void edge(float2 a, float2 b, int orientation) {
+    float2 size = float2(raster.content_width, raster.content_height);
+    if (a.y == b.y || (a.y <= 0.0 && b.y <= 0.0) || (a.y >= size.y && b.y >= size.y))
+        return;
+    float2 d = b - a;
+    float enter = (0.0 - a.y) / d.y;
+    float leave = (size.y - a.y) / d.y;
+    if (enter > leave) {
+        float swap_value = enter;
+        enter = leave;
+        leave = swap_value;
+    }
+    float from = max(0.0, enter);
+    float to = min(1.0, leave);
+    if (!(from < to))
+        return;
+    float2 p = from > 0.0 ? float2(a.x + d.x * from, d.y > 0.0 ? 0.0 : size.y) : a;
+    float2 q = to < 1.0 ? float2(a.x + d.x * to, d.y > 0.0 ? size.y : 0.0) : b;
+    // Split where it crosses the content's left and right sides.
+    float2 points[4];
+    points[0] = p;
+    int count = 1;
+    float ex = q.x - p.x;
+    if (ex != 0.0) {
+        float c0 = (0.0 - p.x) / ex;
+        float c1 = (size.x - p.x) / ex;
+        float first = min(c0, c1);
+        float second = max(c0, c1);
+        if (first > 0.0 && first < 1.0) {
+            points[count] = float2(ex > 0.0 ? 0.0 : size.x, p.y + (q.y - p.y) * first);
+            ++count;
+        }
+        if (second > 0.0 && second < 1.0) {
+            points[count] = float2(ex > 0.0 ? size.x : 0.0, p.y + (q.y - p.y) * second);
+            ++count;
+        }
+    }
+    points[count] = q;
+    ++count;
+    [loop] for (int index = 0; index + 1 < count; ++index) {
+        float2 u = points[index];
+        float2 v = points[index + 1];
+        float middle = (u.x + v.x) * 0.5;
+        if (middle >= size.x)
+            continue;
+        int2 fu = to_fixed(u, size);
+        int2 fv = to_fixed(v, size);
+        if (middle <= 0.0) {
+            fu.x = 0;
+            fv.x = 0;
+        }
+        walk_long(fu.x, fu.y, fv.x, fv.y, orientation);
+    }
+}
+
+/** Which way a convex polygon through a, b and c winds: every stroke polygon counts one way. */
+int winding_of(float2 a, float2 b, float2 c) {
+    float z = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    return z > 0.0 ? 1 : (z < 0.0 ? -1 : 0);
+}
+
+float2 rotated(float2 value, float angle) {
+    float cosine = cos(angle);
+    float sine = sin(angle);
+    return float2(value.x * cosine - value.y * sine, value.x * sine + value.y * cosine);
+}
+
+/**
+ * One of a stroke piece's convex polygons, as data: three or four corners, or a fan of chords
+ * about c0 starting at c0 + c1 and turning `sweep` in `steps`. `edges` is zero for none.
+ */
+struct Polygon {
+    int edges;
+    int fan;
+    float2 c0;
+    float2 c1;
+    float2 c2;
+    float2 c3;
+    float sweep;
+    int steps;
+};
+
+Polygon no_polygon() {
+    Polygon polygon;
+    polygon.edges = 0;
+    polygon.fan = 0;
+    polygon.c0 = float2(0.0, 0.0);
+    polygon.c1 = float2(0.0, 0.0);
+    polygon.c2 = float2(0.0, 0.0);
+    polygon.c3 = float2(0.0, 0.0);
+    polygon.sweep = 0.0;
+    polygon.steps = 0;
+    return polygon;
+}
+
+Polygon corners(float2 a, float2 b, float2 c, float2 d, int count) {
+    Polygon polygon = no_polygon();
+    polygon.edges = count;
+    polygon.c0 = a;
+    polygon.c1 = b;
+    polygon.c2 = c;
+    polygon.c3 = d;
+    return polygon;
+}
+
+/** The disc sector about `center` from `center + from` turning `sweep`, in chords. */
+Polygon fan_of(float2 center, float2 from, float sweep) {
+    float radius = raster.half_width;
+    float step = radius > raster.tolerance
+                     ? max(2.0 * acos(clamp(1.0 - raster.tolerance / radius, -1.0, 1.0)), 0.02)
+                     : 0.39269908;
+    Polygon polygon = no_polygon();
+    polygon.fan = 1;
+    polygon.c0 = center;
+    polygon.c1 = from;
+    polygon.sweep = sweep;
+    polygon.steps = clamp(int(ceil(abs(sweep) / step)), 1, 256);
+    polygon.edges = polygon.steps + 2;
+    return polygon;
+}
+
+float2 corner(Polygon polygon, int index) {
+    if (index == 0)
+        return polygon.c0;
+    if (index == 1)
+        return polygon.c1;
+    return index == 2 ? polygon.c2 : polygon.c3;
+}
+
+float2 fan_point(Polygon polygon, int index) {
+    return polygon.c0 + rotated(polygon.c1, polygon.sweep * index / polygon.steps);
+}
+
+void edge_of(Polygon polygon, int index, out float2 a, out float2 b) {
+    if (polygon.fan != 0) {
+        a = index == 0 ? polygon.c0 : fan_point(polygon, index - 1);
+        b = index + 1 == polygon.edges ? polygon.c0 : fan_point(polygon, index);
+    } else {
+        a = corner(polygon, index);
+        b = corner(polygon, index + 1 == polygon.edges ? 0 : index + 1);
+    }
+}
+
+Polygon cap_of(float2 position, float2 outward) {
+    if (raster.cap == 0)
+        return no_polygon();
+    float radius = raster.half_width;
+    float2 across = float2(-outward.y, outward.x) * radius;
+    if (raster.cap == 2) {
+        return corners(position + across, position + across + outward * radius,
+                       position - across + outward * radius, position - across, 4);
+    }
+    // From one side round the outward end to the other.
+    float sweep = (across.x * outward.y - across.y * outward.x) > 0.0 ? 3.14159265 : -3.14159265;
+    return fan_of(position, across, sweep);
+}
+
+[numthreads(64, 1, 1)]
+void stroke(uint3 id : SV_DispatchThreadID) {
+    if (id.x >= raster.piece_count)
+        return;
+    StrokePiece piece = pieces[raster.first_piece + id.x];
+    float radius = raster.half_width;
+    // A piece's polygons are closed and lie within its reach: one that misses the content adds
+    // nothing to it.
+    float reach = radius * max(max(1.0, raster.join == 0 ? raster.miter_limit : 1.0),
+                               raster.cap == 2 ? 1.4142136 : 1.0) + 1.0;
+    float2 low = min(piece.p0, piece.p1) - reach;
+    float2 high = max(piece.p0, piece.p1) + reach;
+    if (any(high < 0.0) || low.x > float(raster.content_width) ||
+        low.y > float(raster.content_height))
+        return;
+    float2 d = piece.p1 - piece.p0;
+    float length_value = length(d);
+    if (!(length_value > 1.0e-6) || !(radius > 0.0))
+        return;
+    float2 along = d / length_value;
+    float2 side = float2(-along.y, along.x) * radius;
+    // The band; the join with the next piece, on the side the path turns away from (the bands
+    // overlap on the other); the caps of a run's ends.
+    Polygon band = corners(piece.p0 + side, piece.p1 + side, piece.p1 - side, piece.p0 - side, 4);
+    Polygon join = no_polygon();
+    if ((piece.flags & 1) != 0) {
+        float2 e = piece.p2 - piece.p1;
+        float next_length = length(e);
+        if (next_length > 1.0e-6) {
+            float2 next = e / next_length;
+            float2 next_side = float2(-next.y, next.x) * radius;
+            float turn = along.x * next.y - along.y * next.x;
+            if (abs(turn) > 1.0e-6 || dot(along, next) < 0.0) {
+                float outer = turn > 0.0 ? -1.0 : 1.0;
+                float2 a = piece.p1 + side * outer;
+                float2 b = piece.p1 + next_side * outer;
+                float2 from = a - piece.p1;
+                float2 to = b - piece.p1;
+                if (raster.join == 1) {
+                    join = fan_of(piece.p1, from,
+                                  atan2(from.x * to.y - from.y * to.x, dot(from, to)));
+                } else {
+                    float2 bisector = from + to;
+                    float bisector_length = length(bisector);
+                    float cosine = bisector_length > 1.0e-9
+                                       ? dot(bisector, from) / (bisector_length * radius)
+                                       : 0.0;
+                    if (raster.join == 0 && cosine > 1.0e-6 && 1.0 / cosine <= raster.miter_limit)
+                        join = corners(piece.p1, a,
+                                       piece.p1 + bisector * (radius / cosine / bisector_length),
+                                       b, 4);
+                    else
+                        join = corners(piece.p1, a, b, b, 3);
+                }
+            }
+        }
+    }
+    Polygon start = no_polygon();
+    if ((piece.flags & 2) != 0)
+        start = cap_of(piece.p0, -along);
+    Polygon end = no_polygon();
+    if ((piece.flags & 4) != 0)
+        end = cap_of(piece.p1, along);
+    [loop] for (int shape = 0; shape < 4; ++shape) {
+        Polygon polygon = band;
+        if (shape == 1)
+            polygon = join;
+        else if (shape == 2)
+            polygon = start;
+        else if (shape == 3)
+            polygon = end;
+        if (polygon.edges == 0)
+            continue;
+        float2 a0;
+        float2 b0;
+        float2 a1;
+        float2 b1;
+        edge_of(polygon, 0, a0, b0);
+        edge_of(polygon, 1, a1, b1);
+        int orientation = winding_of(a0, b0, b1);
+        if (orientation == 0)
+            continue;
+        [loop] for (int index = 0; index < polygon.edges; ++index) {
+            float2 a;
+            float2 b;
+            edge_of(polygon, index, a, b);
+            edge(a, b, orientation);
+        }
     }
 }
 
@@ -215,7 +526,7 @@ void resolve_coverage(uint3 id : SV_DispatchThreadID) {
 #ifdef STRATA_VULKAN
     uint packed = 0;
 #endif
-    for (uint column = 0; column < raster.region_width; ++column) {
+    [loop] for (uint column = 0; column < raster.region_width; ++column) {
         uint value = 0;
         if (content_row && column >= raster.content_x &&
             column < raster.content_x + raster.content_width) {
@@ -261,7 +572,7 @@ void resolve_composite(uint3 id : SV_DispatchThreadID) {
     if (row >= raster.content_height)
         return;
     int running = 0;
-    for (uint column = 0; column < raster.content_width; ++column) {
+    [loop] for (uint column = 0; column < raster.content_width; ++column) {
         int2 cell = take_cell(column, row);
         running += cell.x;
         int covered = resolved(running, cell.y);
@@ -298,7 +609,7 @@ void finish(uint3 id : SV_DispatchThreadID) {
     if (row >= raster.region_height)
         return;
     bool content_row = row >= raster.content_y && row < raster.content_y + raster.content_height;
-    for (uint column = 0; column < raster.region_width; ++column) {
+    [loop] for (uint column = 0; column < raster.region_width; ++column) {
         uint texel = 0;
         if (content_row && column >= raster.content_x &&
             column < raster.content_x + raster.content_width) {

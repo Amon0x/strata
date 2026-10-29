@@ -1114,6 +1114,21 @@ void append_stroke_run(std::vector<PathContour>& regions, const std::vector<Poin
 
 } // namespace
 
+std::vector<StrokeRun> stroke_runs(const std::vector<PathContour>& centrelines,
+                                   const StrokeStyle& style) {
+    std::vector<StrokeRun> runs;
+    for (const PathContour& contour : centrelines) {
+        for (std::vector<Point>& polyline : dashed(contour.points, contour.closed, style)) {
+            const bool closed = polyline.size() > 2U &&
+                                length(polyline.back() - polyline.front()) <= geometry_epsilon;
+            if (closed)
+                polyline.pop_back();
+            runs.push_back(StrokeRun{std::move(polyline), closed});
+        }
+    }
+    return runs;
+}
+
 std::vector<PathContour> stroke_outline(const std::vector<PathContour>& centrelines,
                                         const StrokeStyle& style, const double tolerance) {
     std::vector<PathContour> regions;

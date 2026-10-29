@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 
@@ -15,10 +16,13 @@ namespace {
 
 static_assert(std::endian::native == std::endian::little, "raster jobs are little-endian");
 
-/** Header words: content x, y, width, height, layer count, segment count. */
-constexpr std::size_t header_words = 6U;
-/** Layer words before its colour table: fill, paint, colour, extend, six parameters, range. */
-constexpr std::size_t layer_words = 12U;
+/** Header words: content x, y, width, height, layer count, segment count, piece count. */
+constexpr std::size_t header_words = 7U;
+/**
+ * Layer words before its colour table: fill, paint, colour, extend, six parameters, segment range,
+ * stroke half width, join, cap, mitre limit and tolerance, piece range.
+ */
+constexpr std::size_t layer_words = 19U;
 /** One pixel's full coverage as resolved area: 2 x raster_one x raster_one. */
 constexpr std::int32_t full_area = 2 * raster_one * raster_one;
 /** Composite fractions are fifteen-bit fixed point. */
@@ -237,50 +241,23 @@ class Reader final {
     std::size_t offset_ = 0U;
 };
 
-} // namespace
-
-RasterJobBuilder::RasterJobBuilder(const std::uint32_t width, const std::uint32_t height)
-    : width_(width), height_(height) {
-    if (width == 0U || height == 0U || width > maximum_raster_extent ||
-        height > maximum_raster_extent) {
-        throw std::invalid_argument("raster job content must be between 1 and 4096 pixels");
-    }
-}
-
-void RasterJobBuilder::add_layer(const RasterFill fill, const RasterLayer& paint,
-                                 const std::span<const std::vector<RasterPoint>> polygons,
-                                 const RasterPoint origin) {
-    if (layers_.size() >= maximum_raster_layers)
-        throw std::length_error("raster job has too many layers");
-    RasterLayer layer = paint;
-    layer.fill = fill;
-    layer.first_segment = static_cast<std::uint32_t>(segments_.size());
-    for (const std::vector<RasterPoint>& polygon : polygons) {
-        if (polygon.size() < 2U)
-            continue;
-        for (std::size_t index = 0U; index < polygon.size(); ++index) {
-            const RasterPoint a = polygon[index];
-            const RasterPoint b = polygon[(index + 1U) % polygon.size()];
-            add_edge(a.x - origin.x, a.y - origin.y, b.x - origin.x, b.y - origin.y);
-        }
-    }
-    layer.segment_count = static_cast<std::uint32_t>(segments_.size()) - layer.first_segment;
-    layers_.push_back(std::move(layer));
-}
-
-void RasterJobBuilder::add_edge(const double ax, const double ay, const double bx,
-                                const double by) {
+/**
+ * Clips an edge to a `width` x `height` content in pixels and quantizes it: parts above or below
+ * are dropped, the part right of it too, and the part left of it becomes a vertical edge on its
+ * left side. `emit` takes each kept part's fixed-point ends.
+ */
+template <class Emit>
+void clip_edge(const double ax, const double ay, const double bx, const double by,
+               const double width, const double height, Emit&& emit) {
     if (!std::isfinite(ax) || !std::isfinite(ay) || !std::isfinite(bx) || !std::isfinite(by) ||
         ay == by) {
         return;
     }
-    const double width = width_;
-    const double height = height_;
     constexpr double unit = raster_one;
     if (ax >= 0.0 && ax <= width && bx >= 0.0 && bx <= width && ay >= 0.0 && ay <= height &&
         by >= 0.0 && by <= height) {
-        add_piece(std::llround(ax * unit), std::llround(ay * unit), std::llround(bx * unit),
-                  std::llround(by * unit));
+        emit(std::llround(ax * unit), std::llround(ay * unit), std::llround(bx * unit),
+             std::llround(by * unit));
         return;
     }
     if ((ay <= 0.0 && by <= 0.0) || (ay >= height && by >= height))
@@ -329,17 +306,17 @@ void RasterJobBuilder::add_edge(const double ax, const double ay, const double b
         const double middle = (u.x + v.x) * 0.5;
         if (middle >= width)
             continue;
-        if (middle <= 0.0) {
-            add_piece(0, fixed(u.y, height), 0, fixed(v.y, height));
-        } else {
-            add_piece(fixed(u.x, width), fixed(u.y, height), fixed(v.x, width),
-                      fixed(v.y, height));
-        }
+        if (middle <= 0.0)
+            emit(0, fixed(u.y, height), 0, fixed(v.y, height));
+        else
+            emit(fixed(u.x, width), fixed(u.y, height), fixed(v.x, width), fixed(v.y, height));
     }
 }
 
-void RasterJobBuilder::add_piece(const std::int64_t x0, const std::int64_t y0,
-                                 const std::int64_t x1, const std::int64_t y1) {
+/** Splits a fixed-point edge into segments no longer than raster_piece along either axis. */
+template <class Emit>
+void split_edge(const std::int64_t x0, const std::int64_t y0, const std::int64_t x1,
+                const std::int64_t y1, Emit&& emit) {
     if (y0 == y1)
         return;
     const std::int64_t dx = x1 - x0;
@@ -352,18 +329,240 @@ void RasterJobBuilder::add_piece(const std::int64_t x0, const std::int64_t y0,
         const std::int64_t x = piece == pieces ? x1 : x0 + dx * piece / pieces;
         const std::int64_t y = piece == pieces ? y1 : y0 + dy * piece / pieces;
         if (y != previous_y) {
-            segments_.push_back(RasterSegment{
-                static_cast<std::int32_t>(previous_x), static_cast<std::int32_t>(previous_y),
-                static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)});
+            emit(RasterSegment{static_cast<std::int32_t>(previous_x),
+                               static_cast<std::int32_t>(previous_y), static_cast<std::int32_t>(x),
+                               static_cast<std::int32_t>(y)});
         }
         previous_x = x;
         previous_y = y;
     }
 }
 
+/**
+ * The convex polygons one stroke piece expands to (gpu/raster_shaders.hpp's stroke kernel does
+ * the same in float): its band, its join with the next piece (on the outer side; the bands
+ * overlap on the inner one) and the caps of a run's ends.
+ */
+template <class Polygon>
+void expand_piece(const RasterStrokePiece& piece, const RasterStroke& stroke, Polygon&& polygon) {
+    const double half = stroke.half_width;
+    const RasterPoint p0{piece.x0, piece.y0};
+    const RasterPoint p1{piece.x1, piece.y1};
+    const double length = std::hypot(p1.x - p0.x, p1.y - p0.y);
+    if (!(length > 1.0e-9) || !(half > 0.0))
+        return;
+    const RasterPoint along{(p1.x - p0.x) / length, (p1.y - p0.y) / length};
+    const RasterPoint side{-along.y * half, along.x * half};
+    const auto at = [](const RasterPoint point, const RasterPoint offset, const double scale) {
+        return RasterPoint{point.x + offset.x * scale, point.y + offset.y * scale};
+    };
+    std::vector<RasterPoint> vertices;
+    const auto fan = [&](const RasterPoint center, const RasterPoint from, const double sweep) {
+        const double step = half > stroke.tolerance
+                                ? std::max(2.0 * std::acos(std::clamp(
+                                                     1.0 - stroke.tolerance / half, -1.0, 1.0)),
+                                           0.02)
+                                : std::numbers::pi / 8.0;
+        const int steps = std::clamp(static_cast<int>(std::ceil(std::abs(sweep) / step)), 1, 256);
+        vertices.assign(1U, center);
+        for (int index = 0; index <= steps; ++index) {
+            const double angle = sweep * index / steps;
+            const double cosine = std::cos(angle);
+            const double sine = std::sin(angle);
+            vertices.push_back(RasterPoint{center.x + from.x * cosine - from.y * sine,
+                                           center.y + from.x * sine + from.y * cosine});
+        }
+        polygon(std::span<const RasterPoint>(vertices));
+    };
+    const std::array<RasterPoint, 4U> band{at(p0, side, 1.0), at(p1, side, 1.0),
+                                           at(p1, side, -1.0), at(p0, side, -1.0)};
+    polygon(std::span<const RasterPoint>(band));
+    if ((piece.flags & raster_piece_join) != 0U) {
+        const RasterPoint p2{piece.x2, piece.y2};
+        const double next_length = std::hypot(p2.x - p1.x, p2.y - p1.y);
+        if (next_length > 1.0e-9) {
+            const RasterPoint next{(p2.x - p1.x) / next_length, (p2.y - p1.y) / next_length};
+            const RasterPoint next_side{-next.y * half, next.x * half};
+            const double turn = along.x * next.y - along.y * next.x;
+            const double straight = along.x * next.x + along.y * next.y;
+            if (std::abs(turn) > 1.0e-9 || straight < 0.0) {
+                // The outer side is the one the path turns away from.
+                const double outer = turn > 0.0 ? -1.0 : 1.0;
+                const RasterPoint a = at(p1, side, outer);
+                const RasterPoint b = at(p1, next_side, outer);
+                const RasterPoint from{a.x - p1.x, a.y - p1.y};
+                const RasterPoint to{b.x - p1.x, b.y - p1.y};
+                if (stroke.join == RasterJoin::round) {
+                    fan(p1, from, std::atan2(from.x * to.y - from.y * to.x,
+                                             from.x * to.x + from.y * to.y));
+                } else {
+                    const double bx = from.x + to.x;
+                    const double by = from.y + to.y;
+                    const double bisector = std::hypot(bx, by);
+                    const double cosine = bisector > 1.0e-12
+                                              ? (bx * from.x + by * from.y) / (bisector * half)
+                                              : 0.0;
+                    if (stroke.join == RasterJoin::miter && cosine > 1.0e-9 &&
+                        1.0 / cosine <= stroke.miter_limit) {
+                        const double reach = half / cosine / bisector;
+                        const std::array<RasterPoint, 4U> mitre{
+                            p1, a, RasterPoint{p1.x + bx * reach, p1.y + by * reach}, b};
+                        polygon(std::span<const RasterPoint>(mitre));
+                    } else {
+                        const std::array<RasterPoint, 3U> bevel{p1, a, b};
+                        polygon(std::span<const RasterPoint>(bevel));
+                    }
+                }
+            }
+        }
+    }
+    const auto cap = [&](const RasterPoint point, const RasterPoint outward) {
+        if (stroke.cap == RasterCap::butt)
+            return;
+        const RasterPoint across{-outward.y * half, outward.x * half};
+        if (stroke.cap == RasterCap::square) {
+            const std::array<RasterPoint, 4U> square{
+                at(point, across, 1.0), at(at(point, across, 1.0), outward, half),
+                at(at(point, across, -1.0), outward, half), at(point, across, -1.0)};
+            polygon(std::span<const RasterPoint>(square));
+            return;
+        }
+        // From one side round the outward end to the other.
+        const double sweep = (across.x * outward.y - across.y * outward.x) > 0.0
+                                 ? std::numbers::pi
+                                 : -std::numbers::pi;
+        fan(point, across, sweep);
+    };
+    if ((piece.flags & raster_piece_start_cap) != 0U)
+        cap(p0, RasterPoint{-along.x, -along.y});
+    if ((piece.flags & raster_piece_end_cap) != 0U)
+        cap(p1, along);
+}
+
+} // namespace
+
+RasterJobBuilder::RasterJobBuilder(const std::uint32_t width, const std::uint32_t height)
+    : width_(width), height_(height) {
+    if (width == 0U || height == 0U || width > maximum_raster_extent ||
+        height > maximum_raster_extent) {
+        throw std::invalid_argument("raster job content must be between 1 and 4096 pixels");
+    }
+}
+
+void RasterJobBuilder::add_layer(const RasterFill fill, const RasterLayer& paint,
+                                 const std::span<const std::vector<RasterPoint>> polygons,
+                                 const RasterPoint origin) {
+    if (layers_.size() >= maximum_raster_layers)
+        throw std::length_error("raster job has too many layers");
+    RasterLayer layer = paint;
+    layer.fill = fill;
+    layer.first_segment = static_cast<std::uint32_t>(segments_.size());
+    for (const std::vector<RasterPoint>& polygon : polygons) {
+        if (polygon.size() < 2U)
+            continue;
+        for (std::size_t index = 0U; index < polygon.size(); ++index) {
+            const RasterPoint a = polygon[index];
+            const RasterPoint b = polygon[(index + 1U) % polygon.size()];
+            add_edge(a.x - origin.x, a.y - origin.y, b.x - origin.x, b.y - origin.y);
+        }
+    }
+    layer.segment_count = static_cast<std::uint32_t>(segments_.size()) - layer.first_segment;
+    layers_.push_back(std::move(layer));
+}
+
+void RasterJobBuilder::add_edge(const double ax, const double ay, const double bx,
+                                const double by) {
+    clip_edge(ax, ay, bx, by, width_, height_,
+              [&](const std::int64_t x0, const std::int64_t y0, const std::int64_t x1,
+                  const std::int64_t y1) { add_piece(x0, y0, x1, y1); });
+}
+
+void RasterJobBuilder::add_piece(const std::int64_t x0, const std::int64_t y0,
+                                 const std::int64_t x1, const std::int64_t y1) {
+    split_edge(x0, y0, x1, y1,
+               [&](const RasterSegment segment) { segments_.push_back(segment); });
+}
+
+void RasterJobBuilder::add_stroke_layer(const RasterLayer& paint, const RasterStroke& stroke,
+                                        const std::span<const RasterStrokeRun> runs,
+                                        const RasterPoint origin) {
+    if (layers_.size() >= maximum_raster_layers)
+        throw std::length_error("raster job has too many layers");
+    RasterLayer layer = paint;
+    layer.fill = RasterFill::nonzero;
+    layer.stroke = stroke;
+    layer.first_segment = static_cast<std::uint32_t>(segments_.size());
+    layer.segment_count = 0U;
+    layer.first_piece = static_cast<std::uint32_t>(pieces_.size());
+    // A piece's polygons are closed and lie within its reach, so one whose reach misses the
+    // content adds nothing to it.
+    const double reach = raster_stroke_reach(stroke) + 1.0;
+    const double width = width_;
+    const double height = height_;
+    std::vector<RasterPoint> points;
+    for (const RasterStrokeRun& run : runs) {
+        points.clear();
+        for (const RasterPoint point : run.points) {
+            const RasterPoint local{point.x - origin.x, point.y - origin.y};
+            if (!std::isfinite(local.x) || !std::isfinite(local.y))
+                continue;
+            if (points.empty() || std::abs(local.x - points.back().x) > 1.0e-9 ||
+                std::abs(local.y - points.back().y) > 1.0e-9) {
+                points.push_back(local);
+            }
+        }
+        bool closed = run.closed;
+        if (closed && points.size() > 1U && std::abs(points.front().x - points.back().x) <= 1.0e-9 &&
+            std::abs(points.front().y - points.back().y) <= 1.0e-9) {
+            points.pop_back();
+        }
+        const std::size_t count = points.size();
+        if (count < 2U)
+            continue;
+        closed = closed && count >= 3U;
+        const std::size_t pieces = closed ? count : count - 1U;
+        for (std::size_t index = 0U; index < pieces; ++index) {
+            const RasterPoint p0 = points[index];
+            const RasterPoint p1 = points[(index + 1U) % count];
+            if (std::max(p0.x, p1.x) < -reach || std::min(p0.x, p1.x) > width + reach ||
+                std::max(p0.y, p1.y) < -reach || std::min(p0.y, p1.y) > height + reach) {
+                continue;
+            }
+            RasterStrokePiece piece;
+            piece.x0 = static_cast<float>(p0.x);
+            piece.y0 = static_cast<float>(p0.y);
+            piece.x1 = static_cast<float>(p1.x);
+            piece.y1 = static_cast<float>(p1.y);
+            if (closed || index + 2U < count) {
+                const RasterPoint p2 = points[(index + 2U) % count];
+                piece.x2 = static_cast<float>(p2.x);
+                piece.y2 = static_cast<float>(p2.y);
+                piece.flags |= raster_piece_join;
+            }
+            if (!closed && index == 0U)
+                piece.flags |= raster_piece_start_cap;
+            if (!closed && index + 1U == pieces)
+                piece.flags |= raster_piece_end_cap;
+            pieces_.push_back(piece);
+        }
+    }
+    layer.piece_count = static_cast<std::uint32_t>(pieces_.size()) - layer.first_piece;
+    layers_.push_back(std::move(layer));
+}
+
+double raster_stroke_reach(const RasterStroke& stroke) noexcept {
+    double factor = 1.0;
+    if (stroke.join == RasterJoin::miter)
+        factor = std::max(factor, static_cast<double>(stroke.miter_limit));
+    if (stroke.cap == RasterCap::square)
+        factor = std::max(factor, 1.4142135623730951);
+    return static_cast<double>(stroke.half_width) * factor;
+}
+
 std::vector<std::uint8_t> RasterJobBuilder::encode(const std::uint32_t x,
                                                    const std::uint32_t y) const {
-    std::size_t size = header_words * 4U + segments_.size() * sizeof(RasterSegment);
+    std::size_t size = header_words * 4U + segments_.size() * sizeof(RasterSegment) +
+                       pieces_.size() * sizeof(RasterStrokePiece);
     for (const RasterLayer& layer : layers_)
         size += layer_words * 4U + (gradient(layer.paint) ? raster_lut_size * 4U : 0U);
     Writer output(size);
@@ -373,6 +572,7 @@ std::vector<std::uint8_t> RasterJobBuilder::encode(const std::uint32_t x,
     output.u32(height_);
     output.u32(static_cast<std::uint32_t>(layers_.size()));
     output.u32(static_cast<std::uint32_t>(segments_.size()));
+    output.u32(static_cast<std::uint32_t>(pieces_.size()));
     for (const RasterLayer& layer : layers_) {
         output.u32(static_cast<std::uint32_t>(layer.fill));
         output.u32(static_cast<std::uint32_t>(layer.paint));
@@ -382,6 +582,13 @@ std::vector<std::uint8_t> RasterJobBuilder::encode(const std::uint32_t x,
             output.f32(parameter);
         output.u32(layer.first_segment);
         output.u32(layer.segment_count);
+        output.f32(layer.stroke.half_width);
+        output.u32(static_cast<std::uint32_t>(layer.stroke.join));
+        output.u32(static_cast<std::uint32_t>(layer.stroke.cap));
+        output.f32(layer.stroke.miter_limit);
+        output.f32(layer.stroke.tolerance);
+        output.u32(layer.first_piece);
+        output.u32(layer.piece_count);
         if (gradient(layer.paint)) {
             if (layer.lut.size() != raster_lut_size)
                 throw std::invalid_argument("raster gradient layer needs a full colour table");
@@ -390,6 +597,8 @@ std::vector<std::uint8_t> RasterJobBuilder::encode(const std::uint32_t x,
     }
     static_assert(sizeof(RasterSegment) == 16U);
     output.append(segments_.data(), segments_.size() * sizeof(RasterSegment));
+    static_assert(sizeof(RasterStrokePiece) == 32U);
+    output.append(pieces_.data(), pieces_.size() * sizeof(RasterStrokePiece));
     return std::move(output).take();
 }
 
@@ -406,6 +615,7 @@ RasterJob decode_raster_job(const std::span<const std::uint8_t> bytes,
     job.height = input.u32();
     const std::uint32_t layer_count = input.u32();
     const std::uint32_t segment_count = input.u32();
+    const std::uint32_t piece_count = input.u32();
     if (job.width == 0U || job.height == 0U || job.width > maximum_raster_extent ||
         job.height > maximum_raster_extent ||
         static_cast<std::uint64_t>(job.x) + job.width > region_width ||
@@ -438,15 +648,48 @@ RasterJob decode_raster_job(const std::span<const std::uint8_t> bytes,
         layer.segment_count = input.u32();
         if (static_cast<std::uint64_t>(layer.first_segment) + layer.segment_count > segment_count)
             throw std::invalid_argument("raster job layer names missing segments");
+        layer.stroke.half_width = input.f32();
+        const std::uint32_t join = input.u32();
+        const std::uint32_t cap = input.u32();
+        layer.stroke.miter_limit = input.f32();
+        layer.stroke.tolerance = input.f32();
+        layer.first_piece = input.u32();
+        layer.piece_count = input.u32();
+        if (join > 2U || cap > 2U)
+            throw std::invalid_argument("raster job stroke is outside the supported domain");
+        layer.stroke.join = static_cast<RasterJoin>(join);
+        layer.stroke.cap = static_cast<RasterCap>(cap);
+        if (static_cast<std::uint64_t>(layer.first_piece) + layer.piece_count > piece_count)
+            throw std::invalid_argument("raster job layer names missing stroke pieces");
+        if (layer.piece_count > 0U &&
+            (layer.fill != RasterFill::nonzero || !(layer.stroke.half_width > 0.0F) ||
+             !(layer.stroke.half_width <= 1.0e5F) || !(layer.stroke.miter_limit >= 1.0F) ||
+             !(layer.stroke.miter_limit <= 1.0e3F) || !(layer.stroke.tolerance >= 1.0e-3F) ||
+             !(layer.stroke.tolerance <= 1.0e3F))) {
+            throw std::invalid_argument("raster job stroke style is invalid");
+        }
         if (gradient(layer.paint)) {
             layer.lut.resize(raster_lut_size);
             input.copy(layer.lut.data(), raster_lut_size * 4U);
         }
     }
-    if (input.remaining() != static_cast<std::uint64_t>(segment_count) * 16U)
+    if (input.remaining() != static_cast<std::uint64_t>(segment_count) * sizeof(RasterSegment) +
+                                 static_cast<std::uint64_t>(piece_count) *
+                                     sizeof(RasterStrokePiece)) {
         throw std::invalid_argument("raster job segment bytes differ from its count");
+    }
     job.segments.resize(segment_count);
     input.copy(job.segments.data(), job.segments.size() * sizeof(RasterSegment));
+    job.pieces.resize(piece_count);
+    input.copy(job.pieces.data(), job.pieces.size() * sizeof(RasterStrokePiece));
+    for (const RasterStrokePiece& piece : job.pieces) {
+        for (const float value : {piece.x0, piece.y0, piece.x1, piece.y1, piece.x2, piece.y2}) {
+            if (!(std::abs(value) <= 1.0e6F))
+                throw std::invalid_argument("raster job stroke piece is out of range");
+        }
+        if (piece.flags > 7U)
+            throw std::invalid_argument("raster job stroke piece flags are unknown");
+    }
     const std::int64_t right = static_cast<std::int64_t>(job.width) * raster_one;
     const std::int64_t bottom = static_cast<std::int64_t>(job.height) * raster_one;
     for (const RasterSegment& segment : job.segments) {
@@ -482,16 +725,42 @@ void rasterize_job(const RasterJob& job, const std::uint32_t format,
     const auto accumulate = [&](const RasterLayer& layer) {
         std::fill(cover.begin(), cover.end(), 0);
         std::fill(area.begin(), area.end(), 0);
-        for (std::uint32_t index = 0U; index < layer.segment_count; ++index) {
-            walk_segment(job.segments[layer.first_segment + index], width,
-                         [&](const std::int32_t column, const std::int32_t row,
+        std::int32_t orientation = 1;
+        const auto add = [&](const std::int32_t column, const std::int32_t row,
                              const std::int32_t c, const std::int32_t a) {
-                             const std::size_t at = static_cast<std::size_t>(row) * job.width +
-                                                    static_cast<std::size_t>(column);
-                             cover[at] += c;
-                             area[at] += a;
-                         });
-        }
+            const std::size_t at = static_cast<std::size_t>(row) * job.width +
+                                   static_cast<std::size_t>(column);
+            cover[at] += c * orientation;
+            area[at] += a * orientation;
+        };
+        for (std::uint32_t index = 0U; index < layer.segment_count; ++index)
+            walk_segment(job.segments[layer.first_segment + index], width, add);
+        // A stroke's polygons all count one way, so where they overlap they union.
+        const auto polygon = [&](const std::span<const RasterPoint> vertices) {
+            double twice_area = 0.0;
+            for (std::size_t index = 0U; index < vertices.size(); ++index) {
+                const RasterPoint a = vertices[index];
+                const RasterPoint b = vertices[(index + 1U) % vertices.size()];
+                twice_area += a.x * b.y - b.x * a.y;
+            }
+            if (twice_area == 0.0)
+                return;
+            orientation = twice_area > 0.0 ? 1 : -1;
+            for (std::size_t index = 0U; index < vertices.size(); ++index) {
+                const RasterPoint a = vertices[index];
+                const RasterPoint b = vertices[(index + 1U) % vertices.size()];
+                clip_edge(a.x, a.y, b.x, b.y, job.width, job.height,
+                          [&](const std::int64_t x0, const std::int64_t y0, const std::int64_t x1,
+                              const std::int64_t y1) {
+                              split_edge(x0, y0, x1, y1, [&](const RasterSegment segment) {
+                                  walk_segment(segment, width, add);
+                              });
+                          });
+            }
+            orientation = 1;
+        };
+        for (std::uint32_t index = 0U; index < layer.piece_count; ++index)
+            expand_piece(job.pieces[layer.first_piece + index], layer.stroke, polygon);
     };
     if (channels == 1U) {
         const RasterLayer& layer = job.layers.front();

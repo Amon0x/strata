@@ -62,6 +62,7 @@ struct TextureStore::Impl final {
         if (device == nullptr || context == nullptr) {
             throw std::invalid_argument("D3D11 texture store requires a device and context");
         }
+        RasterPass::prepare();
         constexpr std::array<std::uint8_t, 4U> pixel{255U, 255U, 255U, 255U};
         white = create_texture(1U, 1U, DXGI_FORMAT_R8G8B8A8_UNORM, 0U, pixel.data(),
                                static_cast<std::uint32_t>(pixel.size()));

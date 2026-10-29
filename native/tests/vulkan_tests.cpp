@@ -150,6 +150,30 @@ void test_raster_jobs_match_the_reference(vulkan::detail::Offscreen& context) {
                   << " covered texels differ\n";
         require(covered > 0 && differing == 0, "Vulkan compute coverage differs from the reference");
     }
+    // Strokes the kernel expands in float: within a level or so of the reference along edges.
+    const std::vector<host::RasterStrokeRun> runs{
+        {wobbly, true},
+        {{{8.0, 100.0}, {40.0, 20.0}, {60.0, 95.0}, {90.0, 15.0}, {146.0, 60.0}}, false}};
+    for (const auto& [label, stroke] :
+         {std::pair{"round stroke", host::RasterStroke{3.5F, host::RasterJoin::round,
+                                                       host::RasterCap::round, 4.0F, 0.03F}},
+          std::pair{"mitred stroke", host::RasterStroke{2.0F, host::RasterJoin::miter,
+                                                        host::RasterCap::square, 4.0F, 0.03F}},
+          std::pair{"bevelled hairline", host::RasterStroke{0.35F, host::RasterJoin::bevel,
+                                                            host::RasterCap::butt, 4.0F, 0.03F}}}) {
+        host::RasterJobBuilder builder(width, height);
+        builder.add_stroke_layer(host::RasterLayer{}, stroke, runs, host::RasterPoint{0.25, -0.375});
+        const auto [pixels, reference] = draw(builder, false);
+        int largest = 0;
+        std::size_t covered = 0;
+        for (std::size_t index = 0; index < reference.size(); ++index) {
+            largest = std::max(largest, std::abs(int{pixels[index * 4]} - int{reference[index]}));
+            covered += reference[index] != 0 ? 1U : 0U;
+        }
+        std::cout << "  Vulkan " << label << ": " << covered << " covered texels, largest difference "
+                  << largest << "\n";
+        require(covered > 0 && largest <= 4, "Vulkan compute stroke differs from the reference");
+    }
     host::RasterLayer opaque;
     opaque.paint = host::RasterPaint::solid;
     opaque.color = 0xFF2080F0U;

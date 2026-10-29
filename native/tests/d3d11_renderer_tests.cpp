@@ -360,6 +360,36 @@ void test_raster_jobs_match_the_reference(const D3D_DRIVER_TYPE driver, const st
               std::string(name) + " compute coverage differs from the reference: " + label);
     }
 
+    // Strokes the kernel expands in float: within a level or so of the reference along edges.
+    std::vector<host::RasterStrokeRun> runs{{blob(70.3, 55.7, 41.0, 300U, 5.0), true},
+                                            {{{8.0, 100.0}, {40.0, 20.0}, {60.0, 95.0},
+                                              {90.0, 15.0}, {146.0, 60.0}},
+                                             false}};
+    for (const auto& [label, stroke] :
+         {std::pair{"round stroke", host::RasterStroke{3.5F, host::RasterJoin::round,
+                                                       host::RasterCap::round, 4.0F, 0.03F}},
+          std::pair{"mitred stroke", host::RasterStroke{2.0F, host::RasterJoin::miter,
+                                                        host::RasterCap::square, 4.0F, 0.03F}},
+          std::pair{"bevelled hairline", host::RasterStroke{0.35F, host::RasterJoin::bevel,
+                                                            host::RasterCap::butt, 4.0F, 0.03F}}}) {
+        host::RasterJobBuilder builder(width, height);
+        builder.add_stroke_layer(host::RasterLayer{}, stroke, runs, RasterPoint{0.25, -0.375});
+        const auto [gpu, reference] = rasterize(builder, false);
+        int largest = 0;
+        std::size_t off = 0U;
+        std::size_t covered = 0U;
+        for (std::size_t index = 0U; index < gpu.size(); ++index) {
+            const int difference = std::abs(int{gpu[index]} - int{reference[index]});
+            largest = std::max(largest, difference);
+            off += difference > 2 ? 1U : 0U;
+            covered += reference[index] != 0U ? 1U : 0U;
+        }
+        std::cout << "  " << name << " " << label << ": " << off << " of " << covered
+                  << " covered texels off by more than 2, largest " << largest << "\n";
+        check(covered > 0U && off == 0U && largest <= 4,
+              std::string(name) + " compute stroke differs from the reference: " + label);
+    }
+
     // Colour: an opaque star in front of a translucent blob, over gradients.
     host::RasterLayer opaque;
     opaque.paint = host::RasterPaint::solid;

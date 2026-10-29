@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <future>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -33,8 +35,10 @@ void require_hresult(const HRESULT result, const std::string_view operation) {
     }
 }
 
-[[nodiscard]] ComPtr<ID3D11ComputeShader> compile(ID3D11Device* const device,
-                                                  const char* const entry, const bool rgba) {
+using shaders::entries;
+using Bytecode = std::array<ComPtr<ID3DBlob>, entries.size()>;
+
+[[nodiscard]] ComPtr<ID3DBlob> compile(const char* const entry, const bool rgba) {
     const D3D_SHADER_MACRO rgba_macros[]{{"STRATA_RASTER_RGBA", "1"}, {nullptr, nullptr}};
     ComPtr<ID3DBlob> code;
     ComPtr<ID3DBlob> diagnostics;
@@ -51,6 +55,26 @@ void require_hresult(const HRESULT result, const std::string_view operation) {
                               diagnostics->GetBufferSize());
         throw std::runtime_error("D3D11 raster shader compilation failed: " + detail);
     }
+    return code;
+}
+
+/** The kernels' bytecode, compiled once per process; it needs no device. */
+[[nodiscard]] std::shared_future<Bytecode>& bytecode() {
+    static std::once_flag started;
+    static std::shared_future<Bytecode> result;
+    std::call_once(started, [] {
+        result = std::async(std::launch::async, [] {
+                     Bytecode code;
+                     for (std::size_t index = 0U; index < entries.size(); ++index)
+                         code[index] = compile(entries[index], index + 1U == entries.size());
+                     return code;
+                 }).share();
+    });
+    return result;
+}
+
+[[nodiscard]] ComPtr<ID3D11ComputeShader> create(ID3D11Device* const device,
+                                                 const ComPtr<ID3DBlob>& code) {
     ComPtr<ID3D11ComputeShader> shader;
     require_hresult(device->CreateComputeShader(code->GetBufferPointer(), code->GetBufferSize(),
                                                 nullptr, &shader),
@@ -138,10 +162,12 @@ struct RasterPass::Impl final {
         }
         if ((support & D3D11_FORMAT_SUPPORT2_UAV_TYPED_STORE) == 0U)
             throw std::runtime_error("D3D11 device cannot store R8 coverage from compute shaders");
-        accumulate = compile(device, "accumulate", false);
-        resolve_coverage = compile(device, "resolve_coverage", false);
-        resolve_composite = compile(device, "resolve_composite", false);
-        finish = compile(device, "finish", true);
+        const Bytecode& code = bytecode().get();
+        accumulate = create(device, code[0]);
+        stroke = create(device, code[1]);
+        resolve_coverage = create(device, code[2]);
+        resolve_composite = create(device, code[3]);
+        finish = create(device, code[4]);
         D3D11_BUFFER_DESC descriptor{};
         descriptor.ByteWidth = sizeof(shaders::Constants);
         descriptor.Usage = D3D11_USAGE_DYNAMIC;
@@ -179,6 +205,8 @@ struct RasterPass::Impl final {
             lut_data.push_back(0U);
         segments.write(device.Get(), context.Get(), job.segments.data(), job.segments.size(),
                        sizeof(host::RasterSegment));
+        pieces.write(device.Get(), context.Get(), job.pieces.data(), job.pieces.size(),
+                     sizeof(host::RasterStrokePiece));
         luts.write(device.Get(), context.Get(), lut_data.data(), lut_data.size(), 4U);
         const std::size_t pixels = static_cast<std::size_t>(job.width) * job.height;
         cells.reserve(device.Get(), context.Get(), pixels * 2U);
@@ -190,8 +218,8 @@ struct RasterPass::Impl final {
         // The atlas may still be bound for sampling from the frame before.
         ID3D11ShaderResourceView* const no_view = nullptr;
         context->PSSetShaderResources(0U, 1U, &no_view);
-        const std::array<ID3D11ShaderResourceView*, 2U> views{segments.view.Get(),
-                                                              luts.view.Get()};
+        const std::array<ID3D11ShaderResourceView*, 3U> views{
+            segments.view.Get(), luts.view.Get(), pieces.view.Get()};
         context->CSSetShaderResources(0U, static_cast<UINT>(views.size()), views.data());
         const std::array<ID3D11UnorderedAccessView*, 3U> outputs{cells.view.Get(),
                                                                  sums.view.Get(), target};
@@ -219,7 +247,15 @@ struct RasterPass::Impl final {
             values.extend = static_cast<std::uint32_t>(layer.extend);
             values.lut_offset = lut_offsets[index];
             std::copy(layer.parameters.begin(), layer.parameters.end(), values.parameters);
+            values.first_piece = layer.first_piece;
+            values.piece_count = layer.piece_count;
+            values.join = static_cast<std::uint32_t>(layer.stroke.join);
+            values.cap = static_cast<std::uint32_t>(layer.stroke.cap);
+            values.half_width = layer.stroke.half_width;
+            values.miter_limit = layer.stroke.miter_limit;
+            values.tolerance = layer.stroke.tolerance;
             dispatch(accumulate.Get(), values, layer.segment_count);
+            dispatch(stroke.Get(), values, layer.piece_count);
             if (rgba)
                 dispatch(resolve_composite.Get(), values, job.height);
             else
@@ -232,7 +268,7 @@ struct RasterPass::Impl final {
         const std::array<ID3D11UnorderedAccessView*, 3U> no_outputs{};
         context->CSSetUnorderedAccessViews(0U, static_cast<UINT>(no_outputs.size()),
                                            no_outputs.data(), nullptr);
-        const std::array<ID3D11ShaderResourceView*, 2U> no_views{};
+        const std::array<ID3D11ShaderResourceView*, 3U> no_views{};
         context->CSSetShaderResources(0U, static_cast<UINT>(no_views.size()), no_views.data());
         context->CSSetShader(nullptr, nullptr, 0U);
     }
@@ -240,17 +276,23 @@ struct RasterPass::Impl final {
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<ID3D11ComputeShader> accumulate;
+    ComPtr<ID3D11ComputeShader> stroke;
     ComPtr<ID3D11ComputeShader> resolve_coverage;
     ComPtr<ID3D11ComputeShader> resolve_composite;
     ComPtr<ID3D11ComputeShader> finish;
     ComPtr<ID3D11Buffer> constants;
     UploadBuffer segments;
     UploadBuffer luts;
+    UploadBuffer pieces;
     WorkBuffer cells;
     WorkBuffer sums;
     std::vector<std::uint32_t> lut_data;
     shaders::Constants last;
 };
+
+void RasterPass::prepare() {
+    static_cast<void>(bytecode());
+}
 
 RasterPass::RasterPass(ID3D11Device* const device, ID3D11DeviceContext* const context)
     : impl_(std::make_unique<Impl>(device, context)) {}

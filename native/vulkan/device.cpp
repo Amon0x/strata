@@ -131,6 +131,7 @@ void Renderer::Impl::initialize() {
     check(vkCreateSampler(device.device, &si, nullptr, &linear), "create linear sampler");
     si.magFilter = si.minFilter = VK_FILTER_NEAREST;
     check(vkCreateSampler(device.device, &si, nullptr, &nearest), "create nearest sampler");
+    prepare_raster_kernels();
     vertex = compile_hlsl(gpu::shaders::vertex, true, "strata.vertex");
     fullscreen = compile_hlsl(gpu::blur_shaders::vertex, true, "strata.fullscreen");
     add_program("builtin", std::string(gpu::shaders::pixel_common) +

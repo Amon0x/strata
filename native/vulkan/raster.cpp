@@ -1,6 +1,9 @@
 #include "gpu/raster_shaders.hpp"
 #include "renderer_internal.hpp"
 
+#include <future>
+#include <mutex>
+
 #include <strata/raster_job.hpp>
 
 namespace strata::vulkan {
@@ -8,9 +11,8 @@ namespace {
 
 namespace shaders = gpu::raster_shaders;
 
-constexpr std::uint32_t raster_bindings = 5U;
-constexpr std::array<const char*, 4U> raster_entries{"accumulate", "resolve_coverage",
-                                                     "resolve_composite", "finish"};
+constexpr std::uint32_t raster_bindings = 6U;
+constexpr const auto& raster_entries = shaders::entries;
 
 /** Orders everything the queue did before (kernels, copies) ahead of the next kernel. */
 void compute_barrier(const VkCommandBuffer command) {
@@ -28,7 +30,30 @@ void compute_barrier(const VkCommandBuffer command) {
     return (threads + shaders::group_size - 1U) / shaders::group_size;
 }
 
+using Kernels = std::array<std::vector<std::uint32_t>, raster_entries.size()>;
+
+/** The kernels' SPIR-V, compiled once per process on a background thread; it needs no device. */
+[[nodiscard]] std::shared_future<Kernels>& kernels() {
+    static std::once_flag started;
+    static std::shared_future<Kernels> result;
+    std::call_once(started, [] {
+        result = std::async(std::launch::async, [] {
+                     Kernels code;
+                     for (std::size_t index = 0U; index < raster_entries.size(); ++index) {
+                         code[index] = compile_hlsl_compute(shaders::source, raster_entries[index],
+                                                            "strata.raster");
+                     }
+                     return code;
+                 }).share();
+    });
+    return result;
+}
+
 } // namespace
+
+void Renderer::Impl::prepare_raster_kernels() {
+    static_cast<void>(kernels());
+}
 
 void Renderer::Impl::create_raster_kernels() {
     std::array<VkDescriptorSetLayoutBinding, raster_bindings> bindings{};
@@ -52,8 +77,7 @@ void Renderer::Impl::create_raster_kernels() {
     check(vkCreatePipelineLayout(device.device, &li, nullptr, &raster_layout),
           "create raster pipeline layout");
     for (std::size_t index = 0U; index < raster_entries.size(); ++index) {
-        const std::vector<std::uint32_t> code =
-            compile_hlsl_compute(shaders::source, raster_entries[index], "strata.raster");
+        const std::vector<std::uint32_t>& code = kernels().get()[index];
         VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
         mi.codeSize = code.size() * sizeof(std::uint32_t);
         mi.pCode = code.data();
@@ -112,6 +136,8 @@ void Renderer::Impl::rasterize(const host::ResourceOperation& operation, Image& 
     const Slice segments =
         arena->upload(job.segments.data(), job.segments.size() * sizeof(host::RasterSegment));
     const Slice tables = arena->upload(luts.data(), luts.size() * sizeof(std::uint32_t));
+    const Slice strokes =
+        arena->upload(job.pieces.data(), job.pieces.size() * sizeof(host::RasterStrokePiece));
     const std::size_t pixels = static_cast<std::size_t>(job.width) * job.height;
     // R8 rows are packed four texels a uint; RGBA rows one texel a uint.
     const std::uint32_t stride = rgba ? operation.width : (operation.width + 3U) / 4U;
@@ -154,6 +180,7 @@ void Renderer::Impl::rasterize(const host::ResourceOperation& operation, Image& 
         {raster_cells->buffer, 0, VK_WHOLE_SIZE},
         {raster_sums->buffer, 0, VK_WHOLE_SIZE},
         {raster_output->buffer, 0, VK_WHOLE_SIZE},
+        {strokes.buffer, strokes.offset, strokes.size},
     }};
     std::array<VkWriteDescriptorSet, raster_bindings> writes{};
     for (std::uint32_t index = 0U; index < raster_bindings; ++index) {
@@ -196,11 +223,19 @@ void Renderer::Impl::rasterize(const host::ResourceOperation& operation, Image& 
         values.lut_offset = lut_offsets[index];
         values.output_stride = stride;
         std::copy(layer.parameters.begin(), layer.parameters.end(), values.parameters);
+        values.first_piece = layer.first_piece;
+        values.piece_count = layer.piece_count;
+        values.join = static_cast<std::uint32_t>(layer.stroke.join);
+        values.cap = static_cast<std::uint32_t>(layer.stroke.cap);
+        values.half_width = layer.stroke.half_width;
+        values.miter_limit = layer.stroke.miter_limit;
+        values.tolerance = layer.stroke.tolerance;
         dispatch(0U, layer.segment_count);
-        dispatch(rgba ? 2U : 1U, rgba ? job.height : operation.height);
+        dispatch(1U, layer.piece_count);
+        dispatch(rgba ? 3U : 2U, rgba ? job.height : operation.height);
     }
     if (rgba)
-        dispatch(3U, operation.height);
+        dispatch(4U, operation.height);
 
     // The region's texels into the atlas.
     VkMemoryBarrier written{VK_STRUCTURE_TYPE_MEMORY_BARRIER};

@@ -29,4 +29,17 @@ namespace strata::ui {
 [[nodiscard]] std::vector<PathContour> stroke_outline(const std::vector<PathContour>& centrelines,
                                                       const StrokeStyle& style, double tolerance);
 
+/** A run of a stroke's centreline: its points, and whether its last joins its first. */
+struct StrokeRun final {
+    std::vector<Point> points;
+    bool closed = false;
+};
+
+/**
+ * The runs a stroke's centrelines (already flattened) draw as, after dashing: what the GPU
+ * expands into the stroke itself.
+ */
+[[nodiscard]] std::vector<StrokeRun> stroke_runs(const std::vector<PathContour>& centrelines,
+                                                 const StrokeStyle& style);
+
 } // namespace strata::ui

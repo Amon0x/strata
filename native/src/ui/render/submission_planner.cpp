@@ -798,6 +798,77 @@ struct DeviceBox final {
     return fill == host::RasterFill::even_odd ? (winding & 1) != 0 : winding != 0;
 }
 
+/** A stroke's centreline runs on the device grid, which the backend expands into the stroke. */
+using DeviceRuns = std::vector<host::RasterStrokeRun>;
+
+/** The device box of a stroke: its runs grown by its reach. */
+[[nodiscard]] DeviceBox stroke_box(const DeviceRuns& runs, const double reach) noexcept {
+    DeviceBox box;
+    for (const host::RasterStrokeRun& run : runs) {
+        for (const host::RasterPoint point : run.points) {
+            box.left = std::min(box.left, point.x - reach);
+            box.top = std::min(box.top, point.y - reach);
+            box.right = std::max(box.right, point.x + reach);
+            box.bottom = std::max(box.bottom, point.y + reach);
+        }
+    }
+    return box;
+}
+
+/** Whether any segment of a stroke, grown by its reach, meets `box`. */
+[[nodiscard]] bool stroke_meets(const DeviceRuns& runs, const double reach,
+                                const DeviceBox& box) noexcept {
+    for (const host::RasterStrokeRun& run : runs) {
+        const std::size_t count = run.points.size();
+        const std::size_t segments = run.closed ? count : count - (count > 0U ? 1U : 0U);
+        for (std::size_t index = 0U; index < segments; ++index) {
+            const host::RasterPoint a = run.points[index];
+            const host::RasterPoint b = run.points[(index + 1U) % count];
+            if (std::max(a.x, b.x) + reach >= box.left && std::min(a.x, b.x) - reach <= box.right &&
+                std::max(a.y, b.y) + reach >= box.top && std::min(a.y, b.y) - reach <= box.bottom) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * A stroke's style in device pixels for the backend to expand, or nothing when the device grid
+ * scales the shape's axes differently: the backend's pen is round, so such a stroke (an elliptic
+ * pen on screen) is outlined on the CPU instead.
+ */
+[[nodiscard]] std::optional<host::RasterStroke> device_stroke(const StrokeStyle& style,
+                                                              const MaskGrid& grid) {
+    const double x = std::abs(grid.device_x);
+    const double y = std::abs(grid.device_y);
+    if (std::abs(x - y) > 1.0e-3 * std::max(x, y))
+        return std::nullopt;
+    host::RasterStroke stroke;
+    stroke.half_width = static_cast<float>(style.width * 0.5 * x);
+    stroke.join = static_cast<host::RasterJoin>(style.join);
+    stroke.cap = static_cast<host::RasterCap>(style.cap);
+    stroke.miter_limit = static_cast<float>(std::max(style.miter_limit, 1.0));
+    stroke.tolerance = static_cast<float>(mask_flatness);
+    return stroke;
+}
+
+/** Centrelines (in the shape's pixels) dashed into runs and placed on the device grid. */
+[[nodiscard]] DeviceRuns device_runs(const std::vector<PathContour>& centrelines,
+                                     const StrokeStyle& style, const MaskGrid& grid) {
+    DeviceRuns runs;
+    for (StrokeRun& run : stroke_runs(centrelines, style)) {
+        host::RasterStrokeRun placed;
+        placed.closed = run.closed;
+        placed.points.reserve(run.points.size());
+        for (const Point point : run.points)
+            placed.points.push_back(host::RasterPoint{grid.phase.x + point.x * grid.device_x,
+                                                      grid.phase.y + point.y * grid.device_y});
+        runs.push_back(std::move(placed));
+    }
+    return runs;
+}
+
 /** A colour as a raster job packs it: straight RGBA8, red in the low byte. */
 [[nodiscard]] std::uint32_t packed_color(const runtime::ColorValue color) noexcept {
     return std::uint32_t{color.red} | (std::uint32_t{color.green} << 8U) |
@@ -998,6 +1069,16 @@ struct DeviceBox final {
         host::RasterFill fill = host::RasterFill::nonzero;
         const Paint* paint = nullptr;
         DeviceBox box;
+        /** A stroke the backend expands: its runs and style, instead of polygons. */
+        DeviceRuns runs;
+        std::optional<host::RasterStroke> pen;
+        /** Whether any of its outline or stroke passes through `region`. */
+        [[nodiscard]] bool crosses(const DeviceBox& region) const {
+            if (!box.meets(region))
+                return false;
+            return pen.has_value() ? stroke_meets(runs, host::raster_stroke_reach(*pen), region)
+                                   : edges_cross(polygons, region);
+        }
     };
     std::optional<std::vector<Layer>> made;
     const auto layers = [&]() -> const std::vector<Layer>& {
@@ -1036,17 +1117,27 @@ struct DeviceBox final {
                                       shape->fill_rule == PathFillRule::evenodd
                                           ? host::RasterFill::even_odd
                                           : host::RasterFill::nonzero,
-                                      &*shape->fill, {}});
+                                      &*shape->fill, {}, {}, std::nullopt});
             }
             const StrokeStyle style = shape->stroke_style.value_or(StrokeStyle{});
             if (shape->stroke.has_value() && !shape->stroke->transparent() && style.width > 0.0) {
-                made->push_back(Layer{device(stroke_outline(centrelines, style, tolerance)),
-                                      host::RasterFill::nonzero, &*shape->stroke, {}});
+                if (const std::optional<host::RasterStroke> pen = device_stroke(style, *grid)) {
+                    made->push_back(Layer{{}, host::RasterFill::nonzero, &*shape->stroke, {},
+                                          device_runs(centrelines, style, *grid), pen});
+                } else {
+                    made->push_back(Layer{device(stroke_outline(centrelines, style, tolerance)),
+                                          host::RasterFill::nonzero, &*shape->stroke, {}, {},
+                                          std::nullopt});
+                }
             }
         }
         std::ranges::reverse(*made);
-        for (Layer& layer : *made)
-            layer.box.include(layer.polygons);
+        for (Layer& layer : *made) {
+            if (layer.pen.has_value())
+                layer.box = stroke_box(layer.runs, host::raster_stroke_reach(*layer.pen));
+            else
+                layer.box.include(layer.polygons);
+        }
         return *made;
     };
 
@@ -1059,8 +1150,13 @@ struct DeviceBox final {
         for (const Layer& layer : layers()) {
             if (!layer.box.meets(region))
                 continue;
-            builder.add_layer(layer.fill, raster_paint(*layer.paint, *grid, bounds, origin),
-                              layer.polygons, origin);
+            if (layer.pen.has_value()) {
+                builder.add_stroke_layer(raster_paint(*layer.paint, *grid, bounds, origin),
+                                         *layer.pen, layer.runs, origin);
+            } else {
+                builder.add_layer(layer.fill, raster_paint(*layer.paint, *grid, bounds, origin),
+                                  layer.polygons, origin);
+            }
             any = true;
         }
         if (!any) {
@@ -1153,15 +1249,15 @@ struct DeviceBox final {
                     [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
                         const host::RasterPoint origin{core.left - 1.0, core.top - 1.0};
                         const DeviceBox region{origin.x, origin.y, origin.x + side, origin.y + side};
-                        const bool crossed = std::ranges::any_of(layers(), [&](const Layer& layer) {
-                            return layer.box.meets(region) && edges_cross(layer.polygons, region);
-                        });
+                        const bool crossed = std::ranges::any_of(
+                            layers(), [&](const Layer& layer) { return layer.crosses(region); });
                         if (!crossed) {
                             const double x = origin.x + side * 0.5;
                             const double y = origin.y + side * 0.5;
                             const Layer* front = nullptr;
                             for (const Layer& layer : layers()) {
-                                if (layer.box.meets(region) &&
+                                // A stroke that reaches none of the tile covers none of it.
+                                if (!layer.pen.has_value() && layer.box.meets(region) &&
                                     covers(layer.polygons, layer.fill, x, y)) {
                                     front = &layer;
                                     break;
@@ -1370,11 +1466,24 @@ struct DeviceBox final {
         const host::RasterFill fill = !part.stroke && shape.fill_rule == PathFillRule::evenodd
                                           ? host::RasterFill::even_odd
                                           : host::RasterFill::nonzero;
+        // A stroke the backend expands from its centreline runs, made once.
+        const std::optional<host::RasterStroke> pen =
+            part.stroke ? device_stroke(style, *grid) : std::nullopt;
+        const double pen_reach = pen.has_value() ? host::raster_stroke_reach(*pen) : 0.0;
+        std::optional<DeviceRuns> runs;
+        const auto stroke_runs_on_device = [&]() -> const DeviceRuns& {
+            if (!runs.has_value())
+                runs = device_runs(local_contours(), style, *grid);
+            return *runs;
+        };
         // The part's coverage over a `width` x `height` region whose top-left is `origin`.
         const auto mask = [&](const std::uint32_t width, const std::uint32_t height,
                               const host::RasterPoint origin, const std::uint32_t gutter) {
             host::RasterJobBuilder builder(width, height);
-            builder.add_layer(fill, host::RasterLayer{}, outline_polygons(), origin);
+            if (pen.has_value())
+                builder.add_stroke_layer(host::RasterLayer{}, *pen, stroke_runs_on_device(), origin);
+            else
+                builder.add_layer(fill, host::RasterLayer{}, outline_polygons(), origin);
             return builder.encode(gutter, gutter);
         };
 
@@ -1405,7 +1514,10 @@ struct DeviceBox final {
                 key, font::GlyphRasterMode::coverage,
                 [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
                     DeviceBox outline;
-                    outline.include(outline_polygons());
+                    if (pen.has_value())
+                        outline = stroke_box(stroke_runs_on_device(), pen_reach);
+                    else
+                        outline.include(outline_polygons());
                     if (outline.empty() || outline.right - outline.left > maximum_mask_extent ||
                         outline.bottom - outline.top > maximum_mask_extent) {
                         return std::nullopt;
@@ -1471,7 +1583,13 @@ struct DeviceBox final {
                             const host::RasterPoint origin{core.left - 1.0, core.top - 1.0};
                             const DeviceBox region{origin.x, origin.y, origin.x + side,
                                                    origin.y + side};
-                            if (!edges_cross(outline_polygons(), region)) {
+                            if (pen.has_value()) {
+                                // A stroke reaching none of the tile is none of it.
+                                if (!stroke_meets(stroke_runs_on_device(), pen_reach, region)) {
+                                    found_class = std::uint8_t{0U};
+                                    return std::nullopt;
+                                }
+                            } else if (!edges_cross(outline_polygons(), region)) {
                                 found_class = covers(outline_polygons(), fill,
                                                      origin.x + side * 0.5, origin.y + side * 0.5)
                                                   ? std::uint8_t{1U}
