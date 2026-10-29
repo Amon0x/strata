@@ -232,7 +232,8 @@ void spirograph(Present& present, const Rect area) {
 /**
  * A Maurer rose: the rose r = sin(6a) visited every `step` degrees and joined by straight lines,
  * a web that refolds as the step drifts, over the rose itself (parameter 0 at 1: a step of one
- * degree). A step between two whole degrees is the blend of their two webs, so the web closes.
+ * degree). A step between two whole degrees is the blend of their two webs, so the web closes;
+ * smoothstep holds each whole web a moment before the next.
  */
 constexpr std::string_view maurer_art = R"hlsl(
 float2 roseAt(float index, float step, float spin) {
@@ -245,7 +246,9 @@ float2 artPoint(uint index, uint count) {
     float spin = artTime() * 0.08;
     if (artParameter(0) > 0.5)
         return artCentred(roseAt(float(index), 1.0, spin), 0.92);
-    float step = 50.0 + 21.0 * sin(artTime() * 0.448799);
+    // Each whole step is a different web: a new one every three seconds, out from 30 to 70
+    // degrees and back.
+    float step = 30.0 + 40.0 * abs(frac(artTime() / 240.0) * 2.0 - 1.0);
     float below = floor(step);
     return artCentred(lerp(roseAt(float(index), below, spin), roseAt(float(index), below + 1.0, spin),
                            smoothstep(0.0, 1.0, step - below)),
