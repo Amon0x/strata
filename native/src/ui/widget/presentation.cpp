@@ -199,18 +199,29 @@ struct TextDecoration final {
 }
 
 [[nodiscard]] std::optional<RenderBorder>
-resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& fallback) noexcept {
+resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& fallback) {
     if (value == nullptr)
         return fallback;
     if (value->kind() == runtime::ValueKind::null_value)
         return std::nullopt;
     if (value->object() == nullptr)
         return fallback;
+    // `paint` takes any paint (a colour or a gradient) and wins over `color`.
+    std::optional<Paint> paint;
+    try {
+        paint = paint_from_value(value->field("paint"));
+    } catch (const std::invalid_argument&) {
+        paint.reset();
+    }
+    if (!paint.has_value()) {
+        paint = Paint(widget_color(value->field("color"),
+                                   fallback.has_value()
+                                       ? fallback->paint.representative()
+                                       : token_color(fallback_tokens().muted_foreground)));
+    }
     return RenderBorder{
         value_number(value->field("width"), fallback.has_value() ? fallback->width : 1.0),
-        widget_color(value->field("color"),
-                     fallback.has_value() ? fallback->color
-                                          : token_color(fallback_tokens().muted_foreground)),
+        std::move(*paint),
         value_boolean(value->field("inside"), true),
     };
 }
@@ -296,6 +307,10 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
     result.active_thumb_width = optional_dimension("activeThumbWidth");
     result.active_thumb_height = optional_dimension("activeThumbHeight");
     result.thumb_radius = optional_dimension("thumbRadius");
+    if (const runtime::Value* value = scope.style("paintRotate");
+        value != nullptr && value->number() != nullptr && std::isfinite(*value->number())) {
+        result.paint_rotate = *value->number();
+    }
     return NodeVisualCache{profile, std::move(result),
                            scope.string("appearance", "DEFAULT") == "BARE"};
 }
@@ -353,6 +368,22 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
         if (const auto value = motion->number(MotionProperty::opacity); value.has_value()) {
             result.opacity = std::clamp(*value, 0.0, 1.0);
         }
+        if (const auto value = motion->number(MotionProperty::paint_rotate);
+            value.has_value() && std::isfinite(*value)) {
+            result.paint_rotate = *value;
+        }
+    }
+    // Turning is applied last, to whatever paint motion left, so an animated colour and a spin
+    // compose. A solid colour has nothing to turn.
+    if (result.paint_rotate != 0.0) {
+        const double turn = result.paint_rotate;
+        if (result.background.has_value())
+            result.background = rotated_paint(std::move(*result.background), turn);
+        if (result.border.has_value())
+            result.border->paint = rotated_paint(std::move(result.border->paint), turn);
+        result.fill = rotated_paint(std::move(result.fill), turn);
+        result.track = rotated_paint(std::move(result.track), turn);
+        result.scrim = rotated_paint(std::move(result.scrim), turn);
     }
     if (cached->bare) {
         result.background.reset();
@@ -409,6 +440,15 @@ RenderColor widget_opacity(RenderColor color, const double multiplier) noexcept 
         static_cast<int>(static_cast<double>(color.alpha) * std::clamp(multiplier, 0.0, 1.0)), 0,
         255));
     return color;
+}
+
+Paint widget_opacity(Paint paint, const double multiplier) {
+    if (const RenderColor* solid = paint.color(); solid != nullptr)
+        return Paint(widget_opacity(*solid, multiplier));
+    Gradient gradient = *paint.gradient();
+    for (GradientStop& stop : gradient.stops)
+        stop.color = widget_opacity(stop.color, multiplier);
+    return Paint(std::move(gradient));
 }
 
 std::string widget_number_text(const double value) {
@@ -650,7 +690,7 @@ void WidgetRenderScope::rounded_rect(const Rect bounds, Paint fill,
                                      const std::optional<double> radius) {
     fill.multiply_alpha(alpha());
     if (border_value.has_value())
-        border_value->color = widget_opacity(border_value->color, alpha());
+        border_value->paint = widget_opacity(std::move(border_value->paint), alpha());
     output_.emplace_back(RoundedRectRenderCommand{
         bounds,
         corners(radius),
@@ -662,7 +702,7 @@ void WidgetRenderScope::rounded_rect(const Rect bounds, Paint fill,
 
 void WidgetRenderScope::border(const Rect bounds, RenderBorder border_value,
                                const std::optional<double> radius) {
-    border_value.color = widget_opacity(border_value.color, alpha());
+    border_value.paint = widget_opacity(std::move(border_value.paint), alpha());
     output_.emplace_back(BorderRenderCommand{
         bounds,
         border_value,

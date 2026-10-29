@@ -31,7 +31,8 @@ constexpr std::int32_t full_area = 2 * raster_one * raster_one;
 constexpr std::int32_t one = 32768;
 
 [[nodiscard]] bool gradient(const RasterPaint paint) noexcept {
-    return paint == RasterPaint::linear || paint == RasterPaint::radial;
+    return paint == RasterPaint::linear || paint == RasterPaint::radial ||
+           paint == RasterPaint::conic;
 }
 
 [[nodiscard]] bool r8(const std::uint32_t format) noexcept {
@@ -188,6 +189,10 @@ void composite(Sum& sum, const std::int32_t covered, const std::uint32_t color) 
     if (layer.paint == RasterPaint::radial) {
         const float v = p[3] * x + p[4] * y + p[5];
         t = std::sqrt(t * t + v * v);
+    } else if (layer.paint == RasterPaint::conic) {
+        const float v = p[3] * x + p[4] * y + p[5];
+        t = std::atan2(t, -v) * 0.15915494F;
+        t = t < 0.0F ? t + 1.0F : t;
     }
     if (layer.extend == RasterExtend::repeat) {
         t = t - std::floor(t);
@@ -675,7 +680,7 @@ RasterJob decode_raster_job(const std::span<const std::uint8_t> bytes,
         const std::uint32_t paint = input.u32();
         layer.color = input.u32();
         const std::uint32_t extend = input.u32();
-        if (fill > 1U || paint > 3U || extend > 2U)
+        if (fill > 1U || paint > 4U || extend > 2U)
             throw std::invalid_argument("raster job layer is outside the supported domain");
         layer.fill = static_cast<RasterFill>(fill);
         layer.paint = static_cast<RasterPaint>(paint);

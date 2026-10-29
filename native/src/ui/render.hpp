@@ -55,9 +55,14 @@ struct CornerRadii final {
  */
 [[nodiscard]] std::optional<CornerRadii> corner_radii_value(const runtime::Value* value) noexcept;
 
+/**
+ * A border stroked inside its shape's edge. Its paint is any paint a fill takes: a colour, or a
+ * linear, radial or conic gradient laid over the bordered shape's own bounds, so a ring of colour
+ * follows the shape's rounded corners.
+ */
 struct RenderBorder final {
     double width = 0.0;
-    RenderColor color;
+    Paint paint;
     bool inside = true;
     [[nodiscard]] friend bool operator==(const RenderBorder&, const RenderBorder&) = default;
 };

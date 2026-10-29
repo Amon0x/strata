@@ -297,23 +297,31 @@ inline float analytic_shape_coverage(const int mode, const float u, const float 
 /**
  * Coverage masks (draw mode 10) paint gradients per pixel in bands: a gradient becomes one masked
  * quad per interval between its stops, each carrying in its draw data the interval's stop offsets
- * (4 and 5), the paint (6: zero for a solid colour, otherwise 1 + kind + 2 * extend, kind 0 linear
- * and 1 radial, extend 0 clamp, 1 repeat, 2 mirror), whether the band also takes everything before
- * its start (7, bit 0: the first band) or after its end (bit 1: the last), the interval's end
- * colour (8-11, its start colour being the vertex colour) and the gradient position (12-13,
- * interpolated across the quad: the linear parameter, or the radial offset whose length is the
- * parameter). A pixel belongs to exactly the band its wrapped parameter falls in and lerps across
- * it, held at the end colours outside the stops, so the bands together draw each pixel once with
- * the exact gradient colour.
+ * (4 and 5), the paint (6: zero for a solid colour, otherwise 1 + kind + 3 * extend, kind 0
+ * linear, 1 radial and 2 conic, extend 0 clamp, 1 repeat, 2 mirror), whether the band also takes
+ * everything before its start (7, bit 0: the first band) or after its end (bit 1: the last), the
+ * interval's end colour (8-11, its start colour being the vertex colour) and the gradient position
+ * (12-13, interpolated across the quad: the linear parameter; the radial offset whose length is the
+ * parameter; or the conic offset whose clockwise turn from up, as a fraction of a whole turn, is
+ * the parameter). A pixel belongs to exactly the band its wrapped parameter falls in and lerps
+ * across it, held at the end colours outside the stops, so the bands together draw each pixel once
+ * with the exact gradient colour.
  */
 constexpr int draw_mode_coverage_mask = 10;
+
+/** The clockwise turn of (x, y) from up (-y), as a fraction of a whole turn in [0, 1). */
+[[nodiscard]] inline float conic_turn(const float x, const float y) noexcept {
+    const float turn = std::atan2(x, -y) * 0.15915494F;
+    return turn < 0.0F ? turn + 1.0F : turn;
+}
 
 /** The gradient parameter of a banded draw at one pixel, wrapped by its extend mode. */
 [[nodiscard]] inline float gradient_band_parameter(const float paint, const float x,
                                                    const float y) noexcept {
     const int packed = static_cast<int>(std::floor(paint + 0.5F)) - 1;
-    float t = (packed & 1) != 0 ? std::sqrt(x * x + y * y) : x;
-    const int extend = packed >> 1;
+    const int kind = packed % 3;
+    float t = kind == 1 ? std::sqrt(x * x + y * y) : kind == 2 ? conic_turn(x, y) : x;
+    const int extend = packed / 3;
     if (extend == 1) {
         t -= std::floor(t);
     } else if (extend == 2) {

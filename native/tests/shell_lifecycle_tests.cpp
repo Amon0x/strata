@@ -561,8 +561,8 @@ overlay Main { root ShellFixture() }
         ) {
             const auto* border = std::get_if<ui::BorderRenderCommand>(&command);
             return border != nullptr && border->bounds == focus_bounds &&
-                border->border.width == 2.0 && border->border.color.alpha == 255U &&
-                border->border.inside;
+                   border->border.width == 2.0 &&
+                   border->border.paint.representative().alpha == 255U && border->border.inside;
         });
     };
     toolbar_targets = surface.input().subtargets(toolbar->identity());

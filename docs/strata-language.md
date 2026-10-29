@@ -1149,9 +1149,10 @@ ancestor clip still constrains the composed subtree.
 
 ## Paints and gradients
 
-`background`, `fill`, `track` and `scrim` take a paint: a colour, or a gradient authored in the
-filled shape's normalized space, where `(0,0)` is its top-left corner and `(1,1)` its bottom-right
-one. A gradient therefore survives resizing, motion and fragment reuse without being re-authored.
+`background`, `fill`, `track`, `scrim` and a border's `paint` take a paint: a colour, or a
+linear, radial or conic gradient authored in the filled shape's normalized space, where `(0,0)` is
+its top-left corner and `(1,1)` its bottom-right one. A gradient therefore survives resizing,
+motion and fragment reuse without being re-authored.
 
 ```strata
 style Card {
@@ -1178,9 +1179,59 @@ style Glow {
 ```
 
 A linear axis can also be given explicitly as `from`/`to` instead of `angle`. Stops are ordered,
-between two and sixteen, and `offset` may be omitted to spread them evenly. Gradients are expanded
-into geometry whose vertex colours reproduce the ramp exactly at every stop, so they cost no shader
-switch and behave identically on every backend.
+between two and sixteen, and `offset` may be omitted to spread them evenly.
+
+A `conic` gradient sweeps its stops once around `center` (the middle by default), clockwise,
+starting from `angle` degrees (0 points up, as for a linear angle; 0 by default). The angle is
+measured in the shape's own pixels, so a quarter of the sweep is a quarter turn on screen however
+wide the shape is. Repeat a first stop's colour as the last to close the sweep without a seam, or
+put two stops at one offset for a hard edge, as in a pie or a checker:
+
+```strata
+style Wheel {
+  background: {
+    kind: "conic",
+    center: { x: 0.5, y: 0.5 },
+    angle: 0,
+    stops: [ { color: #FF0055FF }, { color: #FFD500FF }, { color: #00E5A0FF },
+             { color: #2E7BFFFF }, { color: #FF0055FF } ]
+  };
+}
+```
+
+Gradients fill panels by geometry whose vertex colours reproduce the ramp exactly at every stop
+(a hard stop stays a hard edge), so they cost no shader switch and behave identically on every
+backend; a conic sweep is cut into wedges of at most two degrees, far finer than one colour level.
+Drawn shapes evaluate their gradients per pixel instead (see [Vector drawing](#vector-drawing)).
+
+A `border` takes a paint too: `border: { width, paint }` strokes the node's rounded outline with
+any paint, laid over the node's own bounds like its background, and `paint` wins over `color`. The
+border covers the fill beneath it, as a solid border does, so a translucent gradient ring does
+not show the background through it.
+
+```strata
+style GlowCard {
+  radius: 16;
+  background: #141A2BFF;
+  border: { width: 2, paint: { kind: "conic", stops: [
+    { color: #7CFFDA00 }, { color: #7CFFDA00, offset: 0.6 }, { color: #7CFFDAFF } ] } };
+}
+```
+
+`paintRotate` turns a node's gradient paints (its `background`, `border`, `fill`, `track` and
+`scrim`) clockwise by degrees about the node's centre: a linear angle and a conic start advance by
+it, and an explicit linear axis, a radial ellipse and an off-centre conic centre turn with it. It
+is an animatable property, so keyframes, `motions` and `animateChanges` can drive it; a looping
+animation spins a conic border without the interface changing:
+
+```strata
+animation BorderSpin {
+  duration: 3000ms; easing: "linear"; repeat: "forever";
+  from { paintRotate: 0 }
+  to { paintRotate: 360 }
+}
+Panel(style: GlowCard, enter: BorderSpin) { CardBody() }
+```
 
 ## Vector drawing
 
@@ -1224,7 +1275,8 @@ itself (joins, caps and all), so a shape that changes every frame costs the CPU 
 path. Fills
 follow their fill rule, strokes are a union, so a translucent stroke stays one even alpha where it
 crosses itself, and shapes larger than an atlas page are drawn in seamless tiles. Gradient paints
-are evaluated per pixel over the mask: every stop, `extend` mode and radial distance is exact.
+are evaluated per pixel over the mask: every stop, `extend` mode, radial distance and conic angle is
+exact.
 Shapes of one `Draw` that meet along an edge, straight or curved (pie slices without a gap, the
 rings of a sunburst, tiles, the pieces of a shape cut apart), are drawn as one picture: each pixel
 on the seam is split between them by area, so nothing behind them shows through as a hairline, and

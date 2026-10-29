@@ -794,6 +794,11 @@ uint layer_color(uint column, uint row) {
     if (raster.paint == 3) {
         float v = raster.parameters_a.w * x + raster.parameters_b.x * y + raster.parameters_b.y;
         t = sqrt(t * t + v * v);
+    } else if (raster.paint == 4) {
+        // Conic: the clockwise turn from up, as a fraction of a whole turn.
+        float v = raster.parameters_a.w * x + raster.parameters_b.x * y + raster.parameters_b.y;
+        t = atan2(t, -v) * 0.15915494;
+        t = t < 0.0 ? t + 1.0 : t;
     }
     if (raster.extend == 1) {
         t = t - floor(t);

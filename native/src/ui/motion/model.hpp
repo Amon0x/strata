@@ -63,6 +63,11 @@ enum class MotionProperty {
     shapes,
     /** The numbers a widget publishes as `$motionData` for its own data to animate (a Chart's). */
     data,
+    /**
+     * Degrees clockwise the node's gradient paints (background, border, fill, track, scrim) turn
+     * about its centre: a conic start or linear angle advances, so a border can spin.
+     */
+    paint_rotate,
 };
 
 enum class MotionTrigger {

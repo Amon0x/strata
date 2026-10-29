@@ -56,10 +56,17 @@ inline constexpr std::uint32_t maximum_raster_extent = 4096U;
 enum class RasterFill : std::uint32_t { nonzero = 0U, even_odd = 1U };
 /**
  * What a layer paints: coverage alone (an R8 job's one layer), one colour, or a gradient whose
- * parameter is an affine function of the pixel centre (linear) or the length of a two-row affine
- * map of it (radial), looked up in a raster_lut_size colour table after its extend.
+ * parameter is an affine function of the pixel centre (linear), the length of a two-row affine
+ * map of it (radial), or the clockwise turn of that map's point from up (conic: `atan2(u, -v)`
+ * over a full turn, in [0, 1)), looked up in a raster_lut_size colour table after its extend.
  */
-enum class RasterPaint : std::uint32_t { coverage = 0U, solid = 1U, linear = 2U, radial = 3U };
+enum class RasterPaint : std::uint32_t {
+    coverage = 0U,
+    solid = 1U,
+    linear = 2U,
+    radial = 3U,
+    conic = 4U,
+};
 enum class RasterExtend : std::uint32_t { clamp = 0U, repeat = 1U, mirror = 2U };
 enum class RasterJoin : std::uint32_t { miter = 0U, round = 1U, bevel = 2U };
 enum class RasterCap : std::uint32_t { butt = 0U, round = 1U, square = 2U };
@@ -139,7 +146,8 @@ struct RasterLayer final {
     RasterExtend extend = RasterExtend::clamp;
     /**
      * The gradient parameter at content pixel centre (x, y): linear p0 x + p1 y + p2; radial the
-     * length of (p0 x + p1 y + p2, p3 x + p4 y + p5).
+     * length of (u, v) = (p0 x + p1 y + p2, p3 x + p4 y + p5); conic the turn of (u, v) from up,
+     * clockwise, as a fraction of a whole turn.
      */
     std::array<float, 6U> parameters{};
     std::uint32_t first_segment = 0U;

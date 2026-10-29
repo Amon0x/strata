@@ -3619,11 +3619,11 @@ overlay Nested {
     for (const ui::RenderCommand& command : surface->render_commands().commands()) {
         if (const auto* rect = std::get_if<ui::RoundedRectRenderCommand>(&command);
             rect != nullptr && rect->border.has_value() && rect->border->width == 2.0) {
-            border = rect->border->color == tokens.danger;
+            border = rect->border->paint.representative() == tokens.danger;
         }
         if (const auto* line = std::get_if<ui::BorderRenderCommand>(&command);
             line != nullptr && line->border.width == 2.0) {
-            border = line->border.color == tokens.danger;
+            border = line->border.paint.representative() == tokens.danger;
         }
         if (const auto* cast = std::get_if<ui::ShadowRenderCommand>(&command)) {
             shadow = cast->color.red == tokens.accent.red && cast->color.green == tokens.accent.green &&

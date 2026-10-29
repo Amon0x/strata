@@ -3443,8 +3443,8 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `activeThumbHeight` | number |
 | `activeThumbWidth` | number |
 | `activeTrackGap` | number |
-| `background` | color \| { angle?: number, center?: { x: number, y: number }, extend?: "clamp" \| "mirror" \| "repeat", from?: { x: number, y: number }, kind: "linear" \| "radial", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } } |
-| `border` | { color: color, inside?: boolean, width: number } |
+| `background` | color \| { angle?: number, center?: { x: number, y: number }, extend?: "clamp" \| "mirror" \| "repeat", from?: { x: number, y: number }, kind: "conic" \| "linear" \| "radial", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } } |
+| `border` | { color?: color, inside?: boolean, paint?: paint, width: number } |
 | `caretColor` | color |
 | `clip` | boolean |
 | `color` | color |
@@ -3457,8 +3457,8 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } |
 | `effect` | effect |
 | `fallbackFonts` | list of string |
-| `fill` | color \| { angle?: number, center?: { x: number, y: number }, extend?: "clamp" \| "mirror" \| "repeat", from?: { x: number, y: number }, kind: "linear" \| "radial", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } } |
-| `focusRing` | { color: color, inside?: boolean, width: number } |
+| `fill` | color \| { angle?: number, center?: { x: number, y: number }, extend?: "clamp" \| "mirror" \| "repeat", from?: { x: number, y: number }, kind: "conic" \| "linear" \| "radial", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } } |
+| `focusRing` | { color?: color, inside?: boolean, paint?: paint, width: number } |
 | `font` | string |
 | `fontStyle` | "ITALIC" \| "NORMAL" |
 | `fontStyleFlags` | number |
@@ -3496,6 +3496,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `opacity` | number |
 | `overflow` | "CLIP" \| "ELLIPSIS" |
 | `padding` | number \| { all?: number, bottom?: number, horizontal?: number, left?: number, right?: number, top?: number, vertical?: number } |
+| `paintRotate` | number |
 | `pixelSize` | number |
 | `placement` | { anchorX?: number, anchorY?: number, offsetX?: number, offsetY?: number, x?: position, y?: position } |
 | `portalTarget` | string |
@@ -3517,7 +3518,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `scale` | number |
 | `scaleX` | number |
 | `scaleY` | number |
-| `scrim` | color \| { angle?: number, center?: { x: number, y: number }, extend?: "clamp" \| "mirror" \| "repeat", from?: { x: number, y: number }, kind: "linear" \| "radial", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } } |
+| `scrim` | color \| { angle?: number, center?: { x: number, y: number }, extend?: "clamp" \| "mirror" \| "repeat", from?: { x: number, y: number }, kind: "conic" \| "linear" \| "radial", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } } |
 | `selection` | color |
 | `shadows` | list of { color: color, radius: number, spread?: number, offsetX?: number, offsetY?: number } |
 | `sharedKey` | string |
@@ -3532,7 +3533,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `textDecorationColor` | color |
 | `tone` | number |
 | `transformOrigin` | { x: number, y: number } |
-| `track` | color \| { angle?: number, center?: { x: number, y: number }, extend?: "clamp" \| "mirror" \| "repeat", from?: { x: number, y: number }, kind: "linear" \| "radial", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } } |
+| `track` | color \| { angle?: number, center?: { x: number, y: number }, extend?: "clamp" \| "mirror" \| "repeat", from?: { x: number, y: number }, kind: "conic" \| "linear" \| "radial", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } } |
 | `trackGap` | number |
 | `trackHeight` | number |
 | `trackRadius` | number |
@@ -3629,6 +3630,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `paddingLeft` | number |
 | `paddingRight` | number |
 | `paddingTop` | number |
+| `paintRotate` | number |
 | `placementX` | number |
 | `placementY` | number |
 | `radius` | number |

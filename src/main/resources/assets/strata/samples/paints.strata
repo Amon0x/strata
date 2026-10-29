@@ -1,0 +1,108 @@
+// Every paint kind on every surface that takes one: fills, borders and drawn shapes, so the
+// reference renderer and each GPU backend can be compared on linear, radial and conic gradients.
+
+style Root {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 16;
+  gap: 12;
+  background: #10131AFF;
+}
+
+style Row {
+  kind: "ROW";
+  gap: 12;
+  width: { weight: 1 };
+  height: "content";
+}
+
+style Swatch {
+  width: 120;
+  height: 72;
+  radius: 14;
+}
+
+style Ringed {
+  width: 120;
+  height: 72;
+  radius: 16;
+  background: #1A2030FF;
+}
+
+overlay PaintGallery {
+  root Panel(key: "paints.root", style: Root) {
+    Panel(key: "paints.fills", style: Row) {
+      Panel(key: "paints.linear", style: style(Swatch, background: {
+        kind: "linear", angle: 120,
+        stops: [ { color: #FF5F6DFF }, { color: #FFC371FF } ]
+      }))
+      Panel(key: "paints.radial", style: style(Swatch, background: {
+        kind: "radial", center: { x: 0.3, y: 0.3 }, radius: 0.9,
+        stops: [ { color: #7CFFDAFF }, { color: #1B2338FF } ]
+      }))
+      Panel(key: "paints.conic", style: style(Swatch, background: {
+        kind: "conic",
+        stops: [ { color: #FF0055FF }, { color: #FFD500FF }, { color: #00E5A0FF },
+                 { color: #2E7BFFFF }, { color: #C724FFFF }, { color: #FF0055FF } ]
+      }))
+      Panel(key: "paints.conic.hard", style: style(Swatch, background: {
+        kind: "conic", center: { x: 0.3, y: 0.6 }, angle: 45,
+        stops: [ { color: #F4F4F4FF, offset: 0 }, { color: #F4F4F4FF, offset: 0.25 },
+                 { color: #222222FF, offset: 0.25 }, { color: #222222FF, offset: 0.5 },
+                 { color: #F4F4F4FF, offset: 0.5 }, { color: #F4F4F4FF, offset: 0.75 },
+                 { color: #222222FF, offset: 0.75 }, { color: #222222FF, offset: 1 } ]
+      }))
+      Panel(key: "paints.conic.turned", style: style(Swatch, paintRotate: 90, background: {
+        kind: "conic", stops: [ { color: #00000000 }, { color: #22C7FFFF } ]
+      }))
+    }
+    Panel(key: "paints.borders", style: Row) {
+      Panel(key: "paints.border.linear", style: style(Ringed, border: { width: 4, paint: {
+        kind: "linear", angle: 90, stops: [ { color: #FF5F6DFF }, { color: #6E8BFFFF } ]
+      } }))
+      Panel(key: "paints.border.radial", style: style(Ringed, border: { width: 6, paint: {
+        kind: "radial", radius: 0.7, stops: [ { color: #FFFFFFFF }, { color: #22C7FF40 } ]
+      } }))
+      Panel(key: "paints.border.conic", style: style(Ringed, radius: 24, border: { width: 3, paint: {
+        kind: "conic",
+        stops: [ { color: #FF0055FF }, { color: #FFD500FF }, { color: #00E5A0FF },
+                 { color: #2E7BFFFF }, { color: #FF0055FF } ]
+      } }))
+      Panel(key: "paints.border.glow", style: style(Ringed, background: null, paintRotate: 135,
+          border: { width: 2, paint: { kind: "conic",
+            stops: [ { color: #00000000 }, { color: #00000000, offset: 0.6 },
+                     { color: #7CFFDAFF, offset: 1 } ] } }))
+      Panel(key: "paints.border.translucent", style: style(Ringed, background: #3A4560FF,
+          border: { width: 8, paint: { kind: "conic",
+            stops: [ { color: #FFFFFF20 }, { color: #FFFFFFA0 }, { color: #FFFFFF20 } ] } }))
+    }
+    Panel(key: "paints.shapes", style: Row) {
+      Draw(key: "paints.shape.circle", layout: { width: 120, height: 120 }, shapes: [
+        { kind: "circle", center: { x: 0.5, y: 0.5 }, radius: 0.45,
+          fill: { kind: "conic", stops: [ { color: #FF0055FF }, { color: #2E7BFFFF }, { color: #FF0055FF } ] } }
+      ])
+      Draw(key: "paints.shape.ring", layout: { width: 120, height: 120 }, shapes: [
+        { kind: "ring", center: { x: 0.5, y: 0.5 }, radius: 0.45, innerRadius: 0.3,
+          fill: { kind: "conic", angle: 90, stops: [ { color: #00E5A0FF }, { color: #C724FFFF } ] } }
+      ])
+      Draw(key: "paints.shape.polygon", layout: { width: 120, height: 120 }, shapes: [
+        { kind: "polygon", points: [ { x: 0.5, y: 0.05 }, { x: 0.95, y: 0.5 }, { x: 0.5, y: 0.95 }, { x: 0.05, y: 0.5 } ],
+          fill: { kind: "conic", center: { x: 0.4, y: 0.6 }, extend: "repeat",
+            stops: [ { color: #FFD500FF }, { color: #1B2338FF } ] } }
+      ])
+      Draw(key: "paints.shape.stroke", layout: { width: 120, height: 120 }, shapes: [
+        { kind: "path", commands: "M 0.1 0.85 C 0.25 0.05, 0.75 0.05, 0.9 0.85",
+          stroke: { kind: "conic", center: { x: 0.5, y: 0.6 },
+            stops: [ { color: #FF5F6DFF }, { color: #FFC371FF }, { color: #FF5F6DFF } ] },
+          strokeStyle: { width: 10, cap: "round" } }
+      ])
+      Draw(key: "paints.shape.pie", layout: { width: 120, height: 120 }, shapes: [
+        { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.45, start: -90, sweep: 120,
+          fill: { kind: "conic", stops: [ { color: #FF0055FF }, { color: #FFD500FF } ] } },
+        { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.45, start: 30, sweep: 240,
+          fill: { kind: "conic", angle: 180, stops: [ { color: #2E7BFFFF }, { color: #00E5A0FF } ] } }
+      ])
+    }
+  }
+}

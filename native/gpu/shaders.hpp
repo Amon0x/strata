@@ -277,12 +277,19 @@ StrataShape strataSegmentDistance(float2 p, float2 end, float halfWidth, int cap
     return shape;
 }
 
+/** host::conic_turn: the clockwise turn of `p` from up, as a fraction of a whole turn. */
+float strataConicTurn(float2 p) {
+    float turn = atan2(p.x, -p.y) * 0.15915494;
+    return turn < 0.0 ? turn + 1.0 : turn;
+}
+
 /** host::gradient_band_parameter and host::gradient_band_factor. */
 float strataGradientBand(PixelInput input) {
     int packed = (int)floor(input.drawData1.z + 0.5) - 1;
     float2 position = input.drawData3.xy;
-    float t = (packed & 1) != 0 ? length(position) : position.x;
-    int extend = packed >> 1;
+    int kind = packed % 3;
+    float t = kind == 1 ? length(position) : (kind == 2 ? strataConicTurn(position) : position.x);
+    int extend = packed / 3;
     if (extend == 1) {
         t -= floor(t);
     } else if (extend == 2) {

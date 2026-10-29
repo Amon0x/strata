@@ -63,6 +63,11 @@ struct WidgetVisualStyle final {
     std::optional<double> active_thumb_height;
     std::optional<double> thumb_radius;
     std::optional<double> indicator_position;
+    /**
+     * Degrees clockwise the gradient paints turn about the node's centre (`paintRotate`), already
+     * applied to `background`, `border`, `fill`, `track` and `scrim`.
+     */
+    double paint_rotate = 0.0;
 };
 
 /** A node's chrome as its description alone resolves it, before motion; kept on the node. */
@@ -270,6 +275,8 @@ widget_texture_region(const runtime::Value* value,
                       TextureRegion fallback = TextureRegion{}) noexcept;
 [[nodiscard]] RenderColor widget_color(const runtime::Value* value, RenderColor fallback) noexcept;
 [[nodiscard]] RenderColor widget_opacity(RenderColor color, double multiplier) noexcept;
+/** widget_opacity applied to a paint's colour, or to every stop of its gradient. */
+[[nodiscard]] Paint widget_opacity(Paint paint, double multiplier);
 [[nodiscard]] std::string widget_number_text(double value);
 
 void register_primitive_widget_presenters(WidgetRegistry& registry);

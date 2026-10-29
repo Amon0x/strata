@@ -640,30 +640,18 @@ class MaskHash final {
 [[nodiscard]] MaskGradient mask_gradient(const Gradient& gradient, const Rect bounds) {
     MaskGradient result;
     result.paint = static_cast<float>(1U + static_cast<std::uint32_t>(gradient.kind) +
-                                      2U * static_cast<std::uint32_t>(gradient.extend));
+                                      3U * static_cast<std::uint32_t>(gradient.extend));
     const double width = std::max(bounds.width, 1.0e-9);
     const double height = std::max(bounds.height, 1.0e-9);
-    // Normalized position: n = ((x - bounds.x) / width, (y - bounds.y) / height).
-    if (gradient.kind == GradientKind::linear) {
-        const auto [start, end] = gradient.axis(Size{bounds.width, bounds.height});
-        const Point direction{end.x - start.x, end.y - start.y};
-        const double length_squared = direction.x * direction.x + direction.y * direction.y;
-        if (length_squared > 0.0) {
-            const double ax = direction.x / length_squared;
-            const double ay = direction.y / length_squared;
-            result.position = {
-                ax / width, ay / height,
-                (-bounds.x / width - start.x) * ax + (-bounds.y / height - start.y) * ay,
-                0.0, 0.0, 0.0,
-            };
-        }
-    } else {
-        const double radius_x = std::max(gradient.radius_x, 1.0e-9);
-        const double radius_y = std::max(gradient.radius_y, 1.0e-9);
-        result.position = {
-            1.0 / (width * radius_x), 0.0, (-bounds.x / width - gradient.center.x) / radius_x,
-            0.0, 1.0 / (height * radius_y), (-bounds.y / height - gradient.center.y) / radius_y,
-        };
+    // The gradient's frame composed with the normalized position
+    // n = ((x - bounds.x) / width, (y - bounds.y) / height).
+    const std::array<double, 6U> frame = gradient.frame(Size{bounds.width, bounds.height});
+    for (std::size_t row = 0U; row < 2U; ++row) {
+        const double a = frame[row * 3U] / width;
+        const double b = frame[row * 3U + 1U] / height;
+        result.position[row * 3U] = a;
+        result.position[row * 3U + 1U] = b;
+        result.position[row * 3U + 2U] = frame[row * 3U + 2U] - a * bounds.x - b * bounds.y;
     }
     const std::vector<GradientStop>& stops = gradient.stops;
     if (stops.empty())
@@ -815,6 +803,7 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
     hash.add(gradient.center);
     hash.add(gradient.radius_x);
     hash.add(gradient.radius_y);
+    hash.add(gradient.rotation_degrees);
     for (const GradientStop& stop : gradient.stops) {
         hash.add(stop.offset);
         hash.add(stop.color);
@@ -1007,25 +996,25 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
     const double scale_y = 1.0 / (grid.device_y * bounds.height);
     const double offset_x = (origin.x - grid.phase.x) * scale_x;
     const double offset_y = (origin.y - grid.phase.y) * scale_y;
-    std::array<double, 6U> parameters{};
-    if (gradient->kind == GradientKind::linear) {
+    switch (gradient->kind) {
+    case GradientKind::linear:
         layer.paint = host::RasterPaint::linear;
-        const auto [start, end] = gradient->axis(Size{bounds.width, bounds.height});
-        const double dx = end.x - start.x;
-        const double dy = end.y - start.y;
-        const double length_squared = dx * dx + dy * dy;
-        if (length_squared > 0.0) {
-            parameters[0] = scale_x * dx / length_squared;
-            parameters[1] = scale_y * dy / length_squared;
-            parameters[2] =
-                ((offset_x - start.x) * dx + (offset_y - start.y) * dy) / length_squared;
-        }
-    } else {
+        break;
+    case GradientKind::radial:
         layer.paint = host::RasterPaint::radial;
-        parameters[0] = scale_x / gradient->radius_x;
-        parameters[2] = (offset_x - gradient->center.x) / gradient->radius_x;
-        parameters[4] = scale_y / gradient->radius_y;
-        parameters[5] = (offset_y - gradient->center.y) / gradient->radius_y;
+        break;
+    case GradientKind::conic:
+        layer.paint = host::RasterPaint::conic;
+        break;
+    }
+    // The gradient's frame composed with the content pixel's normalized position.
+    const std::array<double, 6U> frame = gradient->frame(Size{bounds.width, bounds.height});
+    std::array<double, 6U> parameters{};
+    for (std::size_t row = 0U; row < 2U; ++row) {
+        parameters[row * 3U] = frame[row * 3U] * scale_x;
+        parameters[row * 3U + 1U] = frame[row * 3U + 1U] * scale_y;
+        parameters[row * 3U + 2U] =
+            frame[row * 3U] * offset_x + frame[row * 3U + 1U] * offset_y + frame[row * 3U + 2U];
     }
     for (std::size_t index = 0U; index < parameters.size(); ++index)
         layer.parameters[index] = static_cast<float>(parameters[index]);
@@ -2274,6 +2263,29 @@ class Planner final {
                                            skipped_draws_, cache_.shape_atlas,
                                            cache_.shape_tile_classes,
                                            cache_.group_raster_scales, animated(source_order))) {
+                        return;
+                    }
+                }
+                if constexpr (std::is_same_v<Type, RoundedRectRenderCommand>) {
+                    if (value.border.has_value() && value.border->paint.is_gradient()) {
+                        // The rounded-rect shading carries one solid border colour, so a gradient
+                        // border draws as a border of its own over the fill. The fill keeps a
+                        // border of its own colour at no opacity, which clears the ring exactly
+                        // where the border will cover it: under a translucent gradient the fill
+                        // does not show through, just as under a translucent solid border.
+                        RenderColor clear = value.fill.representative();
+                        clear.alpha = 0U;
+                        RoundedRectRenderCommand fill = value;
+                        fill.border =
+                            RenderBorder{value.border->width, clear, value.border->inside};
+                        append_draw(output_, PreparedCommand{std::move(fill)}, source_order,
+                                    transform_, clip_, batch_rounded_clips(), material_override_,
+                                    opacity_, group_, context_, skipped_draws_);
+                        append_draw(output_,
+                                    PreparedCommand{BorderRenderCommand{value.bounds, *value.border,
+                                                                        value.radii}},
+                                    source_order, transform_, clip_, batch_rounded_clips(),
+                                    material_override_, opacity_, group_, context_, skipped_draws_);
                         return;
                     }
                 }

@@ -96,11 +96,15 @@ using data::JsonValue;
     }
     JsonValue::Object fields{
         {"extend", JsonValue(std::string(gradient_extend_name(gradient.extend)))},
-        {"kind",
-         JsonValue(std::string(gradient.kind == GradientKind::linear ? "linear" : "radial"))},
+        {"kind", JsonValue(std::string(gradient_kind_name(gradient.kind)))},
         {"stops", array(std::move(stops))},
     };
-    if (gradient.kind == GradientKind::linear) {
+    if (gradient.rotation_degrees != 0.0)
+        fields.emplace_back("rotation", JsonValue(gradient.rotation_degrees));
+    if (gradient.kind == GradientKind::conic) {
+        fields.emplace_back("angle", JsonValue(gradient.angle_degrees.value_or(0.0)));
+        fields.emplace_back("center", point(gradient.center));
+    } else if (gradient.kind == GradientKind::linear) {
         if (gradient.angle_degrees.has_value()) {
             fields.emplace_back("angle", JsonValue(*gradient.angle_degrees));
         } else {
@@ -116,9 +120,16 @@ using data::JsonValue;
     return JsonValue(std::move(fields));
 }
 
+/** A border's paint: `color` for a solid one, as it always was, or `paint` for a gradient. */
+[[nodiscard]] data::JsonEntry border_paint(const RenderBorder& value) {
+    if (const RenderColor* solid = value.paint.color(); solid != nullptr)
+        return {"color", JsonValue(color_string(*solid))};
+    return {"paint", paint(value.paint)};
+}
+
 [[nodiscard]] JsonValue border(const RenderBorder& value) {
     return object({
-        {"color", JsonValue(color_string(value.color))},
+        border_paint(value),
         {"inside", JsonValue(value.inside)},
         {"width", JsonValue(value.width)},
     });
@@ -319,7 +330,7 @@ JsonValue render_command_json(const RenderCommand& command) {
             } else if constexpr (std::is_same_v<Type, BorderRenderCommand>) {
                 return draw("border", {
                                           {"bounds", rectangle(value.bounds)},
-                                          {"color", JsonValue(color_string(value.border.color))},
+                                          border_paint(value.border),
                                           {"inside", JsonValue(value.border.inside)},
                                           {"radii", radii(value.radii)},
                                           {"width", JsonValue(value.border.width)},

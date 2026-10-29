@@ -348,8 +348,9 @@ void menu_overlay(WidgetRenderScope& scope) {
         if (item.separator) {
             scope.solid_rect(Rect{bounds.x + 8.0, bounds.y + bounds.height * 0.5,
                                   std::max(0.0, bounds.width - 16.0), 1.0},
-                             scope.visual().border.value_or(
-                                 RenderBorder{1.0, scope.visual().text_hint, true}).color);
+                             scope.visual()
+                                 .border.value_or(RenderBorder{1.0, scope.visual().text_hint, true})
+                                 .paint);
             continue;
         }
         const bool selected =
@@ -417,9 +418,8 @@ void status_content(WidgetRenderScope& scope) {
             scope.layout().bounds.x + 10.0,
             scope.layout().bounds.y + (scope.layout().bounds.height - shaped.metrics.height) * 0.5,
         },
-        scope.visual().border.has_value() ? scope.visual().border->color
-                                          : scope.palette("disabledForeground",
-                                                          std::uint8_t{220U}),
+        scope.visual().border.has_value() ? scope.visual().border->paint.representative()
+                                          : scope.palette("disabledForeground", std::uint8_t{220U}),
         std::max(0.0, scope.layout().bounds.width - 20.0), WidgetTextAlignment::end);
 }
 

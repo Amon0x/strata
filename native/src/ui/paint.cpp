@@ -90,6 +90,27 @@ namespace {
     return Point{*x, *y};
 }
 
+/** A shape's size with each empty axis taken as one, so a degenerate shape keeps finite maps. */
+[[nodiscard]] Size safe_size(const Size shape) noexcept {
+    return Size{shape.width > 0.0 ? shape.width : 1.0, shape.height > 0.0 ? shape.height : 1.0};
+}
+
+/** A normalized point turned clockwise by `radians` about the shape's centre, in pixel space. */
+[[nodiscard]] Point turned(const Point point, const Size shape, const double radians) noexcept {
+    if (radians == 0.0)
+        return point;
+    const double cosine = std::cos(radians);
+    const double sine = std::sin(radians);
+    const double x = (point.x - 0.5) * shape.width;
+    const double y = (point.y - 0.5) * shape.height;
+    return Point{0.5 + (x * cosine - y * sine) / shape.width,
+                 0.5 + (x * sine + y * cosine) / shape.height};
+}
+
+[[nodiscard]] double radians(const double degrees) noexcept {
+    return degrees * std::numbers::pi / 180.0;
+}
+
 [[nodiscard]] GradientExtend extend_from_text(const std::string& text) {
     if (text == "clamp") return GradientExtend::clamp;
     if (text == "repeat") return GradientExtend::repeat;
@@ -122,6 +143,18 @@ void Gradient::validate() const {
     const auto finite_point = [](const Point point) {
         return std::isfinite(point.x) && std::isfinite(point.y);
     };
+    if (!std::isfinite(rotation_degrees)) {
+        throw std::invalid_argument("a gradient rotation must be finite");
+    }
+    if (kind == GradientKind::conic) {
+        if (!finite_point(center)) {
+            throw std::invalid_argument("a conic gradient centre must be finite");
+        }
+        if (angle_degrees.has_value() && !std::isfinite(*angle_degrees)) {
+            throw std::invalid_argument("a conic gradient start angle must be finite");
+        }
+        return;
+    }
     if (kind == GradientKind::linear) {
         if (angle_degrees.has_value()) {
             if (!std::isfinite(*angle_degrees)) {
@@ -162,18 +195,65 @@ runtime::ColorValue Gradient::sample(const double offset) const noexcept {
 }
 
 std::pair<Point, Point> Gradient::axis(const Size shape) const noexcept {
-    if (!angle_degrees.has_value()) return {start, end};
+    const Size size = safe_size(shape);
+    if (!angle_degrees.has_value()) {
+        // An explicit axis turns with the paint about the shape's centre.
+        const double turn = radians(rotation_degrees);
+        return {turned(start, size, turn), turned(end, size, turn)};
+    }
     // 0 degrees points up and angles advance clockwise, matching how designers state them. The
     // direction is built in the shape's own pixel space and then normalized, so the painted angle
-    // survives a non-square shape; the axis spans the shape's projection onto that direction.
-    const double width = shape.width > 0.0 ? shape.width : 1.0;
-    const double height = shape.height > 0.0 ? shape.height : 1.0;
-    const double radians = *angle_degrees * std::numbers::pi / 180.0;
-    const double dx = std::sin(radians);
-    const double dy = -std::cos(radians);
+    // survives a non-square shape; the axis spans the shape's projection onto that direction. A
+    // rotation advances the angle, so a turning ramp keeps spanning the shape.
+    const double width = size.width;
+    const double height = size.height;
+    const double angle = radians(*angle_degrees + rotation_degrees);
+    const double dx = std::sin(angle);
+    const double dy = -std::cos(angle);
     const double extent = (std::abs(dx) * width + std::abs(dy) * height) * 0.5;
     const Point half{dx * extent / width, dy * extent / height};
     return {Point{0.5 - half.x, 0.5 - half.y}, Point{0.5 + half.x, 0.5 + half.y}};
+}
+
+std::array<double, 6U> Gradient::frame(const Size shape) const noexcept {
+    const Size size = safe_size(shape);
+    if (kind == GradientKind::linear) {
+        const auto [from, to] = axis(size);
+        const double dx = to.x - from.x;
+        const double dy = to.y - from.y;
+        const double length_squared = dx * dx + dy * dy;
+        if (!(length_squared > 0.0))
+            return {};
+        const double ax = dx / length_squared;
+        const double ay = dy / length_squared;
+        // The second row measures across the axis, in the same units.
+        return {ax, ay, -(from.x * ax + from.y * ay), -ay, ax, from.x * ay - from.y * ax};
+    }
+    const double turn = radians(rotation_degrees);
+    if (kind == GradientKind::radial) {
+        // Pixel offsets from the turned centre, turned back, then measured in radii.
+        const Point middle = turned(center, size, turn);
+        const double cosine = std::cos(turn);
+        const double sine = std::sin(turn);
+        const double rx = std::max(radius_x, 1.0e-9);
+        const double ry = std::max(radius_y, 1.0e-9);
+        const double m0 = cosine / rx;
+        const double m1 = sine * size.height / (rx * size.width);
+        const double m3 = -sine * size.width / (ry * size.height);
+        const double m4 = cosine / ry;
+        return {m0, m1, -(m0 * middle.x + m1 * middle.y), m3, m4, -(m3 * middle.x + m4 * middle.y)};
+    }
+    // Conic: pixel offsets from the turned centre, turned back by the start angle so the start
+    // direction points up.
+    const Point middle = turned(center, size, turn);
+    const double start_angle = radians(angle_degrees.value_or(0.0)) + turn;
+    const double cosine = std::cos(start_angle);
+    const double sine = std::sin(start_angle);
+    const double m0 = cosine * size.width;
+    const double m1 = sine * size.height;
+    const double m3 = -sine * size.width;
+    const double m4 = cosine * size.height;
+    return {m0, m1, -(m0 * middle.x + m1 * middle.y), m3, m4, -(m3 * middle.x + m4 * middle.y)};
 }
 
 Paint::Paint(const runtime::ColorValue color) noexcept : value_(color) {}
@@ -224,17 +304,42 @@ double gradient_parameter(
     const Point normalized,
     const Size shape
 ) noexcept {
-    if (gradient.kind == GradientKind::linear) {
-        const auto [start, end] = gradient.axis(shape);
-        const Point direction{end.x - start.x, end.y - start.y};
-        const double length_squared = direction.x * direction.x + direction.y * direction.y;
-        if (length_squared <= 0.0) return 0.0;
-        const Point offset{normalized.x - start.x, normalized.y - start.y};
-        return (offset.x * direction.x + offset.y * direction.y) / length_squared;
+    const std::array<double, 6U> map = gradient.frame(shape);
+    const double x = map[0] * normalized.x + map[1] * normalized.y + map[2];
+    if (gradient.kind == GradientKind::linear)
+        return x;
+    const double y = map[3] * normalized.x + map[4] * normalized.y + map[5];
+    if (gradient.kind == GradientKind::radial)
+        return std::sqrt(x * x + y * y);
+    return conic_parameter(x, y);
+}
+
+double conic_parameter(const double x, const double y) noexcept {
+    double turn = std::atan2(x, -y) / (2.0 * std::numbers::pi);
+    if (turn < 0.0)
+        turn += 1.0;
+    return turn >= 1.0 ? 0.0 : turn;
+}
+
+std::string_view gradient_kind_name(const GradientKind kind) noexcept {
+    switch (kind) {
+    case GradientKind::linear:
+        return "linear";
+    case GradientKind::radial:
+        return "radial";
+    case GradientKind::conic:
+        return "conic";
     }
-    const double x = (normalized.x - gradient.center.x) / gradient.radius_x;
-    const double y = (normalized.y - gradient.center.y) / gradient.radius_y;
-    return std::sqrt(x * x + y * y);
+    return "linear";
+}
+
+Paint rotated_paint(Paint paint, const double degrees) {
+    const Gradient* gradient = paint.gradient();
+    if (gradient == nullptr || degrees == 0.0 || !std::isfinite(degrees))
+        return paint;
+    Gradient turned_gradient = *gradient;
+    turned_gradient.rotation_degrees += degrees;
+    return Paint(std::move(turned_gradient));
 }
 
 std::string_view gradient_extend_name(const GradientExtend extend) noexcept {
@@ -258,6 +363,8 @@ std::optional<Paint> paint_from_value(const runtime::Value* const value) {
         gradient.kind = GradientKind::linear;
     } else if (kind == "radial") {
         gradient.kind = GradientKind::radial;
+    } else if (kind == "conic") {
+        gradient.kind = GradientKind::conic;
     } else {
         return std::nullopt;
     }
@@ -283,6 +390,9 @@ std::optional<Paint> paint_from_value(const runtime::Value* const value) {
         } else {
             gradient.angle_degrees = angle.value_or(180.0);
         }
+    } else if (gradient.kind == GradientKind::conic) {
+        gradient.center = point_field(*value, "center").value_or(Point{0.5, 0.5});
+        gradient.angle_degrees = number_field(*value, "angle").value_or(0.0);
     } else {
         gradient.center = point_field(*value, "center").value_or(Point{0.5, 0.5});
         const std::optional<double> radius = number_field(*value, "radius");

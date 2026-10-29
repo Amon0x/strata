@@ -175,14 +175,17 @@ void parameter_data(
             values[2] = static_cast<float>(command.softness);
             values[3] = command.border.has_value() ? static_cast<float>(command.border->width) : 0.0F;
             radii_data(values, command.radii);
-            if (command.border.has_value()) color_data(values, 8U, command.border->color);
+            // Planning splits a gradient border into a border draw of its own, so the colour here
+            // is the border's one solid colour.
+            if (command.border.has_value())
+                color_data(values, 8U, command.border->paint.representative());
         } else if constexpr (std::is_same_v<Type, BorderRenderCommand>) {
             values[0] = static_cast<float>(draw.local_bounds.width);
             values[1] = static_cast<float>(draw.local_bounds.height);
             values[2] = static_cast<float>(command.border.width);
             values[3] = 1.0F;
             radii_data(values, command.radii);
-            color_data(values, 8U, command.border.color);
+            color_data(values, 8U, command.border.paint.representative());
         } else if constexpr (std::is_same_v<Type, ShadowRenderCommand>) {
             values[0] = static_cast<float>(command.bounds.width);
             values[1] = static_cast<float>(command.bounds.height);
@@ -671,6 +674,24 @@ void paint_mesh_geometry(
     };
 }
 
+/**
+ * A gradient-painted rounded rect or border: the gradient's tessellation over the same outset
+ * region the solid quad covers, its shape-local coordinates doubling as the texture coordinates
+ * the signed-distance shading masks it with, so the fill or ring keeps its rounded corners and its
+ * whole antialiased edge.
+ */
+void gradient_geometry(RenderSubmission& output, const PreparedDraw& draw, const Rect bounds,
+                       const Gradient& gradient,
+                       const std::array<float, draw_data_float_count>& data,
+                       const std::uint32_t batch_base_vertex, const SubmissionContext& context) {
+    const TextureRegion region = edge_outset(draw, bounds, context).second;
+    paint_mesh_geometry(output, draw, bounds,
+                        tessellate_gradient(gradient, Size{bounds.width, bounds.height},
+                                            context.scale,
+                                            Rect{region.u, region.v, region.width, region.height}),
+                        data, batch_base_vertex);
+}
+
 /** The analytic draw modes and their draw data: include/strata/render_shapes.hpp. */
 constexpr int analytic_ellipse_mode = 7;
 constexpr int analytic_sector_mode = 8;
@@ -892,26 +913,22 @@ void geometry(
         if constexpr (std::is_same_v<Type, SolidRectRenderCommand> ||
                       std::is_same_v<Type, RoundedRectRenderCommand>) {
             if (const Gradient* gradient = command.fill.gradient(); gradient != nullptr) {
-                paint_mesh_geometry(
-                    output,
-                    draw,
-                    command.bounds,
-                    tessellate_gradient(
-                        *gradient,
-                        Size{command.bounds.width, command.bounds.height},
-                        context.scale
-                    ),
-                    data,
-                    batch_base_vertex
-                );
+                gradient_geometry(output, draw, command.bounds, *gradient, data, batch_base_vertex,
+                                  context);
             } else {
                 const auto [bounds, uv] = edge_outset(draw, command.bounds, context);
                 quad(output, draw, bounds, command.fill.representative(), uv, data,
                      batch_base_vertex);
             }
         } else if constexpr (std::is_same_v<Type, BorderRenderCommand>) {
-            const auto [bounds, uv] = edge_outset(draw, command.bounds, context);
-            quad(output, draw, bounds, command.border.color, uv, data, batch_base_vertex);
+            if (const Gradient* gradient = command.border.paint.gradient(); gradient != nullptr) {
+                gradient_geometry(output, draw, command.bounds, *gradient, data, batch_base_vertex,
+                                  context);
+            } else {
+                const auto [bounds, uv] = edge_outset(draw, command.bounds, context);
+                quad(output, draw, bounds, command.border.paint.representative(), uv, data,
+                     batch_base_vertex);
+            }
         } else if constexpr (std::is_same_v<Type, ImageRenderCommand>) {
             quad(output, draw, command.bounds, command.tint, command.source, data, batch_base_vertex);
         } else if constexpr (std::is_same_v<Type, NinePatchRenderCommand>) {

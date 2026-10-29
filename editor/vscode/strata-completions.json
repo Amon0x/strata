@@ -2547,6 +2547,11 @@
       "type": "number"
     },
     {
+      "name": "paintRotate",
+      "nullable": false,
+      "type": "number"
+    },
+    {
       "name": "placementX",
       "nullable": false,
       "type": "number"
@@ -4552,12 +4557,12 @@
     {
       "name": "background",
       "nullable": true,
-      "type": "color | { angle?: number, center?: { x: number, y: number }, extend?: \"clamp\" | \"mirror\" | \"repeat\", from?: { x: number, y: number }, kind: \"linear\" | \"radial\", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } }"
+      "type": "color | { angle?: number, center?: { x: number, y: number }, extend?: \"clamp\" | \"mirror\" | \"repeat\", from?: { x: number, y: number }, kind: \"conic\" | \"linear\" | \"radial\", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } }"
     },
     {
       "name": "border",
       "nullable": true,
-      "type": "{ color: color, inside?: boolean, width: number }"
+      "type": "{ color?: color, inside?: boolean, paint?: paint, width: number }"
     },
     {
       "name": "caretColor",
@@ -4622,12 +4627,12 @@
     {
       "name": "fill",
       "nullable": true,
-      "type": "color | { angle?: number, center?: { x: number, y: number }, extend?: \"clamp\" | \"mirror\" | \"repeat\", from?: { x: number, y: number }, kind: \"linear\" | \"radial\", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } }"
+      "type": "color | { angle?: number, center?: { x: number, y: number }, extend?: \"clamp\" | \"mirror\" | \"repeat\", from?: { x: number, y: number }, kind: \"conic\" | \"linear\" | \"radial\", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } }"
     },
     {
       "name": "focusRing",
       "nullable": true,
-      "type": "{ color: color, inside?: boolean, width: number }"
+      "type": "{ color?: color, inside?: boolean, paint?: paint, width: number }"
     },
     {
       "name": "font",
@@ -4815,6 +4820,11 @@
       "type": "number | { all?: number, bottom?: number, horizontal?: number, left?: number, right?: number, top?: number, vertical?: number }"
     },
     {
+      "name": "paintRotate",
+      "nullable": false,
+      "type": "number"
+    },
+    {
       "name": "pixelSize",
       "nullable": false,
       "type": "number"
@@ -4922,7 +4932,7 @@
     {
       "name": "scrim",
       "nullable": true,
-      "type": "color | { angle?: number, center?: { x: number, y: number }, extend?: \"clamp\" | \"mirror\" | \"repeat\", from?: { x: number, y: number }, kind: \"linear\" | \"radial\", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } }"
+      "type": "color | { angle?: number, center?: { x: number, y: number }, extend?: \"clamp\" | \"mirror\" | \"repeat\", from?: { x: number, y: number }, kind: \"conic\" | \"linear\" | \"radial\", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } }"
     },
     {
       "name": "selection",
@@ -4997,7 +5007,7 @@
     {
       "name": "track",
       "nullable": true,
-      "type": "color | { angle?: number, center?: { x: number, y: number }, extend?: \"clamp\" | \"mirror\" | \"repeat\", from?: { x: number, y: number }, kind: \"linear\" | \"radial\", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } }"
+      "type": "color | { angle?: number, center?: { x: number, y: number }, extend?: \"clamp\" | \"mirror\" | \"repeat\", from?: { x: number, y: number }, kind: \"conic\" | \"linear\" | \"radial\", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } }"
     },
     {
       "name": "trackGap",

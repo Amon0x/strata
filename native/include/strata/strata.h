@@ -1936,7 +1936,12 @@ typedef struct strata_surface_frame_info {
  * turned in depth far from the origin can have the origin behind the viewer.
  */
 #define STRATA_RENDER_PACKET_VERSION_19 UINT32_C(19)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_19
+/*
+ * Version 20 adds conic gradients: a raster job layer may paint a conic gradient (paint 4),
+ * and a banded gradient draw encodes its paint as 1 + kind + 3 * extend, kind 2 being conic.
+ */
+#define STRATA_RENDER_PACKET_VERSION_20 UINT32_C(20)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_20
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES UINT32_C(2)

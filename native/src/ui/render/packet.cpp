@@ -96,6 +96,10 @@ void paint(Bytes& output, const Paint& value) {
     point(output, gradient.center);
     number(output, gradient.radius_x);
     number(output, gradient.radius_y);
+    // A conic start angle and the paint's rotation, which the axis above already folds in for a
+    // linear gradient.
+    number(output, gradient.angle_degrees.value_or(0.0));
+    number(output, gradient.rotation_degrees);
     integer(output, static_cast<std::uint32_t>(gradient.stops.size()));
     for (const GradientStop& stop : gradient.stops) {
         number(output, stop.offset);
@@ -105,7 +109,7 @@ void paint(Bytes& output, const Paint& value) {
 
 void border(Bytes& output, const RenderBorder& value) {
     number(output, value.width);
-    color(output, value.color);
+    paint(output, value.paint);
     boolean(output, value.inside);
 }
 

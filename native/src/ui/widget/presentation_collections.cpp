@@ -114,10 +114,8 @@ void tree_foreground(WidgetRenderScope& scope) {
                     1.0,
                     child_layout->bounds.height,
                 },
-                scope.visual().border.has_value()
-                    ? scope.visual().border->color
-                    : scope.visual().foreground
-            );
+                scope.visual().border.has_value() ? scope.visual().border->paint
+                                                  : Paint(scope.visual().foreground));
         }
         if (!row_boolean(*child, "$treeExpandable")) continue;
         const double x = child_layout->bounds.x + 18.0 * static_cast<double>(depth) + 3.0;
@@ -157,16 +155,14 @@ void table_foreground(WidgetRenderScope& scope) {
         }
         scope.solid_rect(
             Rect{viewport.x, std::max(viewport.y, row->bounds.bottom() - 1.0), viewport.width, 1.0},
-            scope.visual().border.has_value()
-                ? scope.visual().border->color
-                : scope.palette("tableRowDivider")
-        );
+            scope.visual().border.has_value() ? scope.visual().border->paint
+                                              : Paint(scope.palette("tableRowDivider")));
     }
     scope.solid_rect(Rect{viewport.x, viewport.y, viewport.width, header_height},
                      scope.visual().track);
     scope.solid_rect(
         Rect{viewport.x, viewport.y + header_height - 1.0, viewport.width, 1.0},
-        scope.visual().border.value_or(RenderBorder{1.0, scope.visual().text_hint, true}).color);
+        scope.visual().border.value_or(RenderBorder{1.0, scope.visual().text_hint, true}).paint);
     if (scope.property("columns") != nullptr && scope.text_engine() != nullptr) {
         const collection::TableGeometry geometry = collection::table_geometry(
             collection::resolve_table_columns(

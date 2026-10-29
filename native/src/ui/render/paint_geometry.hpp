@@ -26,15 +26,14 @@ struct PaintMesh final {
 };
 
 /**
- * Expands a gradient into indexed triangles covering `shape`, whose vertex colours reproduce the
- * ramp exactly at every stop boundary. `pixel_scale` converts shape units to device pixels and
- * only bounds angular tessellation. The mesh may extend past the shape; the shape's own material
- * masks the surplus.
+ * Expands a gradient into indexed triangles covering `region` of `shape` (normalized; the whole
+ * shape by default, or a little more so a masked edge's antialiasing ramp is not cut off), whose
+ * vertex colours reproduce the ramp exactly at every stop boundary, with hard stops kept sharp.
+ * `pixel_scale` converts shape units to device pixels and only bounds angular tessellation. The
+ * mesh may extend past the region; the shape's own material masks the surplus.
  */
-[[nodiscard]] PaintMesh tessellate_gradient(
-    const Gradient& gradient,
-    Size shape,
-    double pixel_scale
-);
+[[nodiscard]] PaintMesh tessellate_gradient(const Gradient& gradient, Size shape,
+                                            double pixel_scale,
+                                            Rect region = Rect{0.0, 0.0, 1.0, 1.0});
 
 } // namespace strata::ui

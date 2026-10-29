@@ -258,10 +258,10 @@ RenderCommand render_command_with_opacity(RenderCommand command, const double op
             } else if constexpr (std::is_same_v<Command, RoundedRectRenderCommand>) {
                 value.fill.multiply_alpha(opacity);
                 if (value.border.has_value()) {
-                    value.border->color = widget_opacity(value.border->color, opacity);
+                    value.border->paint = widget_opacity(std::move(value.border->paint), opacity);
                 }
             } else if constexpr (std::is_same_v<Command, BorderRenderCommand>) {
-                value.border.color = widget_opacity(value.border.color, opacity);
+                value.border.paint = widget_opacity(std::move(value.border.paint), opacity);
             } else if constexpr (std::is_same_v<Command, TextRunRenderCommand> ||
                                  std::is_same_v<Command, ShadowRenderCommand>) {
                 value.color = widget_opacity(value.color, opacity);

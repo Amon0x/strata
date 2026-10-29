@@ -1510,6 +1510,160 @@ void test_native_custom_mesh_geometry(const std::filesystem::path& resource_root
           "native custom mesh was not encoded from its owned vertex/index geometry");
 }
 
+void test_conic_gradients_rotation_and_gradient_borders() {
+    using namespace strata;
+    const auto near = [](const double left, const double right, const double tolerance = 1.0e-6) {
+        return std::abs(left - right) <= tolerance;
+    };
+    const auto stop = [](const runtime::ColorValue color, const double offset) {
+        return runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{
+            {"color", runtime::Value(color)},
+            {"offset", runtime::Value(offset)},
+        });
+    };
+    const runtime::ColorValue red{255U, 0U, 0U, 255U};
+    const runtime::ColorValue blue{0U, 0U, 255U, 255U};
+    const runtime::Value authored(std::vector<std::pair<std::string, runtime::Value>>{
+        {"angle", runtime::Value(90.0)},
+        {"center", runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{
+                       {"x", runtime::Value(0.5)}, {"y", runtime::Value(0.5)}})},
+        {"kind", runtime::Value("conic")},
+        {"stops", runtime::Value(std::vector<runtime::Value>{stop(red, 0.0), stop(blue, 1.0)})},
+    });
+    const std::optional<ui::Paint> paint = ui::paint_from_value(&authored);
+    check(paint.has_value() && paint->is_gradient() &&
+              paint->gradient()->kind == ui::GradientKind::conic,
+          "an authored conic gradient was not read as a paint");
+    const ui::Gradient& conic = *paint->gradient();
+    // Starting at 90 degrees (pointing right) and sweeping clockwise: right is 0, down a quarter
+    // turn, left half, up three quarters, whatever the shape's aspect.
+    const ui::Size wide{200.0, 50.0};
+    check(near(ui::gradient_parameter(conic, ui::Point{0.9, 0.5}, wide), 0.0) &&
+              near(ui::gradient_parameter(conic, ui::Point{0.5, 0.9}, wide), 0.25) &&
+              near(ui::gradient_parameter(conic, ui::Point{0.1, 0.5}, wide), 0.5) &&
+              near(ui::gradient_parameter(conic, ui::Point{0.5, 0.1}, wide), 0.75),
+          "a conic gradient did not sweep clockwise from its start angle");
+    // 45 degrees past the start in pixel space, not in the stretched normalized space.
+    check(
+        near(ui::gradient_parameter(conic, ui::Point{0.5 + 25.0 / 200.0, 0.5 + 25.0 / 50.0}, wide),
+             0.125),
+        "a conic gradient measured its angle in the stretched normalized space");
+    check(near(ui::conic_parameter(0.0, -1.0), 0.0) &&
+              near(ui::conic_parameter(-1.0e-9, -1.0), 1.0, 1.0e-6) &&
+              near(ui::conic_parameter(-1.0, 0.0), 0.75),
+          "the conic parameter did not wrap into one turn");
+
+    // A rotation turns the paint about the shape's centre: the conic start advances by it.
+    const ui::Paint turned = ui::rotated_paint(*paint, 90.0);
+    check(near(ui::gradient_parameter(*turned.gradient(), ui::Point{0.5, 0.9}, wide), 0.0),
+          "a rotated conic gradient did not advance its start");
+    // A linear angle advances too, and an explicit axis turns about the centre.
+    ui::Gradient linear;
+    linear.stops = conic.stops;
+    linear.start = ui::Point{0.0, 0.5};
+    linear.end = ui::Point{1.0, 0.5};
+    linear.rotation_degrees = 90.0;
+    const auto [from, to] = linear.axis(ui::Size{100.0, 100.0});
+    check(near(from.x, 0.5) && near(from.y, 0.0) && near(to.x, 0.5) && near(to.y, 1.0),
+          "an explicit linear axis did not turn with its paint");
+    check(ui::rotated_paint(ui::Paint(red), 45.0) == ui::Paint(red),
+          "turning a solid paint changed it");
+
+    // A conic tessellation covers its region (here the shape and a pixel beyond it) with a fan
+    // whose start ray splits: the last stop's colour on one side, the first's on the other.
+    const ui::Rect region{-0.05, -0.05, 1.1, 1.1};
+    const ui::PaintMesh fan = ui::tessellate_gradient(conic, wide, 1.0, region);
+    check(!fan.indices.empty() && fan.indices.size() % 3U == 0U &&
+              std::ranges::all_of(
+                  fan.indices,
+                  [&fan](const std::uint32_t index) { return index < fan.vertices.size(); }),
+          "conic tessellation produced no valid triangles");
+    double reach = 0.0;
+    for (const ui::PaintVertex& vertex : fan.vertices) {
+        reach = std::max(reach, std::hypot((vertex.normalized.x - 0.5) * wide.width,
+                                           (vertex.normalized.y - 0.5) * wide.height));
+    }
+    check(reach >= std::hypot(0.55 * wide.width, 0.55 * wide.height),
+          "conic tessellation did not reach the corners of its region");
+    check(fan.vertices.size() >= 180U, "conic tessellation was too coarse to follow its sweep");
+    const bool seam =
+        std::ranges::any_of(fan.vertices,
+                            [&](const ui::PaintVertex& vertex) { return vertex.color == red; }) &&
+        std::ranges::any_of(fan.vertices,
+                            [&](const ui::PaintVertex& vertex) { return vertex.color == blue; });
+    check(seam, "conic tessellation lost the colours either side of its seam");
+
+    // A hard stop splits a linear band boundary rather than smearing across the band.
+    ui::Gradient stepped;
+    stepped.angle_degrees = 90.0;
+    stepped.stops = {ui::GradientStop{0.0, red}, ui::GradientStop{0.5, red},
+                     ui::GradientStop{0.5, blue}, ui::GradientStop{1.0, blue}};
+    const ui::PaintMesh bands = ui::tessellate_gradient(stepped, ui::Size{100.0, 20.0}, 1.0);
+    std::size_t at_step = 0U;
+    for (const ui::PaintVertex& vertex : bands.vertices) {
+        if (near(vertex.normalized.x, 0.5, 1.0e-6))
+            ++at_step;
+    }
+    check(at_step == 4U, "a hard stop did not split its band boundary into two colours");
+    for (std::size_t index = 0U; index < bands.indices.size(); index += 3U) {
+        bool has_red = false;
+        bool has_blue = false;
+        for (std::size_t corner = 0U; corner < 3U; ++corner) {
+            const runtime::ColorValue color = bands.vertices[bands.indices[index + corner]].color;
+            has_red = has_red || color == red;
+            has_blue = has_blue || color == blue;
+        }
+        check(!(has_red && has_blue), "a hard stop's two colours shared a triangle");
+    }
+
+    // A gradient border on a filled rounded rect draws as the fill, its ring cleared, then the
+    // border as a draw of its own; a solid border stays one draw.
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::RoundedRectRenderCommand{
+        ui::Rect{10.0, 10.0, 120.0, 60.0},
+        ui::CornerRadii::all(12.0),
+        ui::Paint(runtime::ColorValue{30U, 34U, 48U, 255U}),
+        ui::RenderBorder{3.0, *paint, true},
+        1.0,
+    });
+    commands.append(ui::RoundedRectRenderCommand{
+        ui::Rect{10.0, 90.0, 120.0, 60.0},
+        ui::CornerRadii::all(12.0),
+        ui::Paint(runtime::ColorValue{30U, 34U, 48U, 255U}),
+        ui::RenderBorder{3.0, ui::Paint(blue), true},
+        1.0,
+    });
+    font::GlyphAtlas atlas("gradient-border-test");
+    const ui::RenderSubmission submission =
+        ui::build_render_submission(commands, atlas, nullptr, 1.0, 640, 480, 640.0, 480.0);
+    check(submission.planned_draws == 3U, "a gradient border was not split into a draw of its own");
+    // The border draw is a fan in border mode (3) whose vertices carry the sweep's colours.
+    constexpr std::size_t vertex_bytes = 88U;
+    constexpr std::size_t mode_offset = 24U + 14U * sizeof(float);
+    std::size_t border_vertices = 0U;
+    bool swept = false;
+    for (std::size_t offset = 0U; offset + vertex_bytes <= submission.used_vertex_bytes;
+         offset += vertex_bytes) {
+        float mode = 0.0F;
+        std::memcpy(&mode, submission.vertex_bytes.data() + offset + mode_offset, sizeof(mode));
+        if (mode != 3.0F)
+            continue;
+        ++border_vertices;
+        const std::uint8_t* color = submission.vertex_bytes.data() + offset + 20U;
+        swept = swept || (color[0] > 200U && color[2] < 50U);
+    }
+    check(border_vertices >= 180U && swept,
+          "a conic border was not drawn as a swept fan in border mode");
+
+    // Every stop's alpha follows the border's opacity, as a solid border's colour does.
+    const ui::RenderCommand faded =
+        ui::render_command_with_opacity(commands.commands().front(), 0.5);
+    const ui::RenderBorder& faded_border = *std::get<ui::RoundedRectRenderCommand>(faded).border;
+    check(faded_border.paint.is_gradient() &&
+              faded_border.paint.gradient()->stops.front().color.alpha == 127U,
+          "opacity did not reach a gradient border's stops");
+}
+
 void test_gradient_paint_authoring_and_tessellation() {
     using namespace strata;
     const auto stop = [](const runtime::ColorValue color, const double offset) {
@@ -4033,7 +4187,7 @@ void test_portable_description_and_declaration_state(const std::filesystem::path
                                   const auto* border =
                                       std::get_if<ui::BorderRenderCommand>(&command);
                                   return border != nullptr && border->border.width == 2.0 &&
-                                         border->border.color ==
+                                         border->border.paint.representative() ==
                                              ui::RenderColor{255U, 191U, 76U, 255U};
                               }),
           "inspector selection did not append its visible layout-bounds overlay");
@@ -5891,7 +6045,8 @@ overlay Collections {
             if (rectangle == nullptr ||
                 rectangle->fill != ui::Paint(ui::RenderColor{70U, 137U, 230U, 50U}) ||
                 !rectangle->border.has_value() ||
-                rectangle->border->color != ui::RenderColor{104U, 169U, 255U, 220U}) {
+                rectangle->border->paint.representative() !=
+                    ui::RenderColor{104U, 169U, 255U, 220U}) {
                 continue;
             }
             return rectangle->bounds;
@@ -6238,7 +6393,7 @@ overlay Grouped {
     const auto border_alpha = [](const ui::RenderCommandBuffer& commands) {
         for (const ui::RenderCommand& command : commands.commands()) {
             if (const auto* border = std::get_if<ui::BorderRenderCommand>(&command))
-                return static_cast<int>(border->border.color.alpha);
+                return static_cast<int>(border->border.paint.representative().alpha);
         }
         return -1;
     };
@@ -8935,6 +9090,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_authored_material_scope_is_fill_local();
         test_shadow_submission_extends_beyond_the_source_shape();
         test_gradient_paint_authoring_and_tessellation();
+        test_conic_gradients_rotation_and_gradient_borders();
         test_vector_shape_tessellation();
         test_svg_image_projection_and_compound_fill();
         test_full_mask_atlas_reuses_a_page_of_the_other_kind();

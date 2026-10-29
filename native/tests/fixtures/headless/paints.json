@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "application": {
+    "id": "paints.headless",
+    "module": "assets/strata/samples/paints.strata",
+    "root": "PaintGallery",
+    "actions": []
+  },
+  "surface": {
+    "id": "paints.headless",
+    "role": "overlay",
+    "backend": "reference",
+    "width": 720,
+    "height": 420,
+    "scale": 1,
+    "reducedMotion": false,
+    "clearColor": "#090b0fff",
+    "fonts": [
+      {
+        "id": "strata:fonts/default-medium",
+        "resource": "assets/strata/fonts/medium.ttf"
+      },
+      {
+        "id": "strata:fonts/default",
+        "resource": "assets/strata/fonts/default.ttf"
+      }
+    ],
+    "images": []
+  },
+  "snapshots": [],
+  "steps": [
+    {"advance": {"milliseconds": 0, "frames": 1}},
+    {"capture": "paints"}
+  ]
+}

@@ -88,10 +88,14 @@ class PaintSampler final {
         return gradient_parameter(*gradient, normalized_point, shape_);
     }
 
-    /** Radial ramps are not linear in position, so their triangles need finer geometry. */
+    /**
+     * Radial and conic ramps are not linear in position, so their triangles need finer geometry;
+     * a conic sweep's seam, where it wraps from its last stop to its first, subdivides down to the
+     * finest triangles too.
+     */
     [[nodiscard]] bool subdivides() const noexcept {
         const Gradient* gradient = paint_->gradient();
-        return gradient != nullptr && gradient->kind == GradientKind::radial;
+        return gradient != nullptr && gradient->kind != GradientKind::linear;
     }
 
   private:
