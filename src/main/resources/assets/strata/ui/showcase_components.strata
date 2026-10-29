@@ -1278,6 +1278,8 @@ component PageViewport(selectedPage: string, chrome: Binding<string>) {
       MenuPage()
     } else if selectedPage == "TYPE" {
       Scroll(key: "targets.page.scroll.type", persistenceKey: "showcase.page.scroll.type", vertical: true, horizontal: false, style: PageScroll) { TypePage() }
+    } else if selectedPage == "LAYOUT" {
+      Scroll(key: "targets.page.scroll.layout", persistenceKey: "showcase.page.scroll.layout", vertical: true, horizontal: false, style: PageScroll) { LayoutPage() }
     } else if selectedPage == "INTERACT" {
       Scroll(key: "targets.page.scroll.interact", persistenceKey: "showcase.page.scroll.interact", vertical: true, horizontal: false, style: PageScroll) { InteractPage() }
     } else if selectedPage == "DRAW" {
@@ -1314,6 +1316,7 @@ component ShowcaseHeader(selectedPage: Binding<string>, chrome: Binding<string>)
         { id: "MENU", label: "MENU" },
         { id: "INTERACT", label: "INTERACT" },
         { id: "TYPE", label: "TYPE" },
+        { id: "LAYOUT", label: "LAYOUT" },
         { id: "EXTEND", label: "EXTEND" },
         { id: "DRAW", label: "DRAW" },
         { id: "STATE", label: "STATE" },
@@ -2482,6 +2485,453 @@ component TypePage() {
   }
 }
 
+style ReadingFrame extends Transparent {
+  kind: "OVERLAY";
+  width: { weight: 1 };
+  height: 380;
+  radius: 12;
+  clip: true;
+  border: { width: 1, color: #2A3342FF };
+}
+
+style ReadingScroll {
+  kind: "SCROLL";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  background: #0D1118FF;
+  border: null;
+}
+
+style ReadingColumn extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  gap: 12;
+  padding: { left: 18, right: 18, top: 0, bottom: 24 };
+}
+
+style HeroWindow extends Transparent {
+  kind: "PANEL";
+  width: { weight: 1 };
+  height: 240;
+  clip: true;
+  radius: 10;
+}
+
+style HeroArt {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: 340;
+  padding: 24;
+  justifyContent: "END";
+  border: null;
+  background: { kind: "linear", angle: 160, stops: [{ offset: 0, color: #3B2F8CFF }, { offset: 0.55, color: #0E5A6BFF }, { offset: 1, color: #0B0F19FF }] };
+}
+
+style ReadingChrome extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+}
+
+style ShrinkHeader {
+  kind: "ROW";
+  width: { weight: 1 };
+  padding: { horizontal: 16 };
+  gap: 10;
+  alignItems: "CENTER";
+  background: #0B0F19E6;
+  border: null;
+}
+
+style ReadingTrack extends Transparent {
+  kind: "PANEL";
+  width: { weight: 1 };
+  height: 3;
+  background: #FFFFFF14;
+}
+
+style ReadingBar {
+  kind: "PANEL";
+  width: { weight: 1 };
+  height: 3;
+  border: null;
+  radius: 0;
+  background: { kind: "linear", angle: 90, stops: [{ offset: 0, color: #22D3EEFF }, { offset: 1, color: #A78BFAFF }] };
+  transformOrigin: { x: 0, y: 0.5 };
+}
+
+style QueryCard {
+  kind: "COLUMN";
+  height: "content";
+  padding: 14;
+  radius: 12;
+  background: #121924FF;
+  border: { width: 1, color: #2A3342FF };
+}
+
+style QueryArt {
+  width: 150;
+  height: 110;
+  radius: 10;
+  border: null;
+  background: { kind: "linear", angle: 135, stops: [{ offset: 0, color: #F472B6FF }, { offset: 1, color: #7C3AEDFF }] };
+}
+
+style ThumbGrid extends Transparent {
+  kind: "GRID";
+  width: { weight: 1 };
+  height: "content";
+  gap: 10;
+}
+
+style Thumb {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: 96;
+  padding: 10;
+  radius: 10;
+  justifyContent: "END";
+  border: null;
+  cursor: "POINTER";
+}
+
+style DetailFrame extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  gap: 10;
+}
+
+style DetailImage {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: 300;
+  padding: 18;
+  radius: 16;
+  justifyContent: "END";
+  border: null;
+}
+
+style SheetStage extends Transparent {
+  kind: "OVERLAY";
+  width: { weight: 1 };
+  height: 360;
+  radius: 12;
+  clip: true;
+  background: #131A26FF;
+  border: { width: 1, color: #2A3342FF };
+}
+
+// Laid out half way up its stage and reaching past its bottom edge, so it still fills the stage
+// when dragged open.
+style Sheet {
+  kind: "COLUMN";
+  padding: { horizontal: 18, top: 10, bottom: 18 };
+  gap: 10;
+  radius: 18;
+  background: #1C2636FF;
+  border: { width: 1, color: #3A4660FF };
+  position: "ABSOLUTE";
+  inset: { left: 0, right: 0, top: 170, bottom: -160 };
+}
+
+style SheetGrip {
+  width: 44;
+  height: 5;
+  radius: 3;
+  border: null;
+  background: #8FA6BA88;
+  alignSelf: "CENTER";
+}
+
+style DeckStage extends Transparent {
+  kind: "OVERLAY";
+  width: { weight: 1 };
+  height: 360;
+  radius: 12;
+  clip: true;
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+  background: #0D1118FF;
+  border: { width: 1, color: #2A3342FF };
+}
+
+style DeckCard {
+  kind: "COLUMN";
+  width: 220;
+  height: 290;
+  padding: 18;
+  gap: 6;
+  radius: 18;
+  justifyContent: "END";
+  border: { width: 1, color: #FFFFFF2A };
+  cursor: "GRAB";
+}
+
+style MasonryWall extends Transparent {
+  kind: "MASONRY";
+  width: { weight: 1 };
+  height: "content";
+  minColumnWidth: 170;
+  gap: 10;
+}
+
+style Brick {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  padding: 12;
+  gap: 4;
+  radius: 12;
+  justifyContent: "END";
+  border: null;
+}
+
+style CanvasFrame {
+  width: { weight: 1 };
+  height: 460;
+  radius: 12;
+  background: #0A0E15FF;
+  border: { width: 1, color: #2A3342FF };
+}
+
+style CanvasPaper {
+  kind: "CANVAS";
+  width: 1400;
+  height: 860;
+  radius: 18;
+  background: #111723FF;
+  border: { width: 1, color: #222C3CFF };
+}
+
+style GraphNode {
+  kind: "COLUMN";
+  width: 240;
+  height: "content";
+  padding: 14;
+  gap: 8;
+  radius: 14;
+  background: #1A2333F2;
+  border: { width: 1, color: #3A4A66FF };
+}
+
+component GraphCard(title: string, note: string, left: number, top: number, tint: color) {
+  state runs = 0;
+  Panel(style: GraphNode, layout: { inset: { left: left, top: top } }) {
+    Panel(style: style(ActionRow, gap: 8, alignItems: "CENTER", wrap: false)) {
+      Panel(style: style(RaceDot, width: 12, height: 12, radius: 6, background: tint))
+      Text(text: title, style: CardTitle)
+    }
+    Text(text: note, style: CardNote, wrapMode: "WORD")
+    Panel(style: style(ActionRow, alignItems: "CENTER", wrap: false)) {
+      Button(label: "Run", onClick: action("state.set", name: "runs", value: runs + 1))
+      Text(text: format("{0} runs", runs), style: CardNote)
+    }
+  }
+}
+
+component LayoutPage() {
+  state reading = { x: 0, y: 0, progressX: 0, progressY: 0, velocityX: 0, velocityY: 0, contentWidth: 0, contentHeight: 0, viewportWidth: 0, viewportHeight: 0 };
+  state queryWidth = 560;
+  state querySize = { width: 0, height: 0 };
+  state selected = -1;
+  state sheet = { phase: "", x: 0, y: 0, snapped: 1 };
+  state swipe = { phase: "", x: 0, y: 0, snapped: 1 };
+  state deal = 0;
+  state view = { x: 0, y: 0, zoom: 1 };
+  Panel(style: PageColumn) {
+    Card(title: "SCROLL-LINKED: PARALLAX, A READING BAR AND A HEADER THAT SHRINKS") {
+      Panel(style: ReadingFrame) {
+        Scroll(
+          key: "layout.reading",
+          vertical: true,
+          horizontal: false,
+          style: ReadingScroll,
+          behaviors: [{ id: "strata.scroll", action: action("state.setFromEvent", name: "reading") }]
+        ) {
+          Panel(style: ReadingColumn) {
+            Panel(style: style(HeroWindow, margin: { top: 96 })) {
+              // The art moves at half the scroll's speed: it lags behind the page, as if further away.
+              Panel(style: style(HeroArt, translateY: reading.y * 0.5 - 50)) {
+                Text(text: "Parallax", style: HeroText)
+                Text(text: "The art behind this title scrolls at half speed.", style: CardNote)
+              }
+            }
+            for index in [1, 2, 3, 4, 5, 6, 7, 8] {
+              Text(
+                key: format("layout.reading.paragraph.{0}", index),
+                text: format("Paragraph {0}. strata.scroll reports the scroll's offset, its progress through the range, its velocity and its extents after every layout that moved it, whether a wheel, a drag, an animated scroll or a reveal moved it. The header above shrinks with the offset, the bar under it fills with the progress, and the hero art lags behind at half speed.", index),
+                style: CardNote,
+                wrapMode: "WORD"
+              )
+            }
+          }
+        }
+        // Drawn over the scroll: shrinks from 88 to 48 as the page moves under it.
+        Panel(style: ReadingChrome) {
+          Panel(style: style(ShrinkHeader, height: clamp(88 - reading.y * 0.5, 48, 88))) {
+            Text(text: "Reading", style: style(CardTitle, pixelSize: clamp(26 - reading.y * 0.12, 17, 26)))
+            Text(text: format("{0}%  ·  {1} px/s", round(reading.progressY * 100), round(reading.velocityY)), style: CardNote)
+          }
+          Panel(style: ReadingTrack) {
+            Panel(style: style(ReadingBar, scaleX: reading.progressY))
+          }
+        }
+      }
+    }
+
+    Card(title: "CONTAINER QUERIES: A CARD THAT LAYS ITSELF OUT BY ITS OWN WIDTH") {
+      Slider(key: "layout.query.width", min: 240, max: 900, step: 10, bind: queryWidth, layout: { width: 460 })
+      Panel(
+        key: "layout.query.card",
+        style: style(QueryCard, width: queryWidth),
+        behaviors: [{ id: "strata.size", action: action("state.setFromEvent", name: "querySize") }]
+      ) {
+        if querySize.width < 440 {
+          Panel(key: "layout.query.narrow", style: style(ContentSlot, gap: 12)) {
+            Panel(style: style(QueryArt, width: { weight: 1 }, height: 120))
+            Text(text: "Narrow layout", style: CardTitle)
+            Text(text: format("strata.size says this card is {0} × {1}. Below 440 it stacks its art above the text; above, they sit side by side. The card decides from its own width, not the window's.", round(querySize.width), round(querySize.height)), style: CardNote, wrapMode: "WORD")
+          }
+        } else {
+          Panel(key: "layout.query.wide", style: style(ActionRow, gap: 14, wrap: false)) {
+            Panel(style: QueryArt)
+            Panel(style: style(ContentSlot, gap: 4)) {
+              Text(text: "Wide layout", style: CardTitle)
+              Text(text: format("strata.size says this card is {0} × {1}. Below 440 it stacks its art above the text; above, they sit side by side. The card decides from its own width, not the window's.", round(querySize.width), round(querySize.height)), style: CardNote, wrapMode: "WORD")
+            }
+          }
+        }
+      }
+    }
+
+    Card(title: "SHARED ELEMENTS: A THUMBNAIL THAT BECOMES THE DETAIL VIEW") {
+      if selected < 0 {
+        Grid(key: "layout.thumbs", columns: [{ weight: 1 }, { weight: 1 }, { weight: 1 }, { weight: 1 }], style: ThumbGrid) {
+          for index in [0, 1, 2, 3, 4, 5, 6, 7] {
+            Panel(
+              key: format("layout.thumb.{0}", index),
+              style: style(Thumb,
+                           background: [#3B2F8CFF, #0E5A6BFF, #7A2E2EFF, #5B4BD6FF, #1F6F43FF, #8C5A1FFF, #26466BFF, #6B2660FF][index],
+                           sharedKey: format("layout.photo.{0}", index),
+                           sharedTransition: "spring"),
+              behaviors: [{ id: "strata.activate", action: action("state.set", name: "selected", value: index) }]
+            ) {
+              Text(text: ["Aurora", "Lagoon", "Ember", "Iris", "Fern", "Amber", "Tide", "Plum"][index], style: SectionText)
+            }
+          }
+        }
+      } else {
+        Panel(style: DetailFrame) {
+          Panel(
+            key: "layout.detail.image",
+            style: style(DetailImage,
+                         background: [#3B2F8CFF, #0E5A6BFF, #7A2E2EFF, #5B4BD6FF, #1F6F43FF, #8C5A1FFF, #26466BFF, #6B2660FF][selected],
+                         sharedKey: format("layout.photo.{0}", selected),
+                         sharedTransition: "spring")
+          ) {
+            Text(text: ["Aurora", "Lagoon", "Ember", "Iris", "Fern", "Amber", "Tide", "Plum"][selected], style: HeroText)
+          }
+          Panel(style: style(ActionRow, alignItems: "CENTER")) {
+            Button(key: "layout.detail.back", label: "Back", onClick: action("state.set", name: "selected", value: -1))
+            Text(text: "The image flew here from its thumbnail on a spring (sharedKey, sharedTransition); Back flies it home.", style: CardNote)
+          }
+        }
+      }
+    }
+
+    Card(title: "FLING, SNAP AND BOUNDS: A BOTTOM SHEET AND A SWIPE DECK") {
+      Panel(style: style(ActionRow, wrap: false, gap: 12)) {
+        Panel(style: SheetStage) {
+          Panel(style: style(ContentSlot, padding: 16)) {
+            Text(text: "Map", style: HeroText)
+            Text(text: sheet.phase == "settle" ? format("Settled on snap point {0} at y {1}", sheet.snapped, round(sheet.y)) : (sheet.phase == "" ? "Resting half way, on snap point 1" : format("{0} at y {1}", sheet.phase, round(sheet.y))), style: CardNote)
+          }
+          Panel(
+            key: "layout.sheet",
+            style: Sheet,
+            behaviors: [{
+              id: "strata.movable",
+              action: action("state.setFromEvent", name: "sheet"),
+              options: { axis: "y", fling: true, snapY: [-130, 0, 132], bounds: { minY: -130, maxY: 132 } }
+            }]
+          ) {
+            Panel(style: SheetGrip)
+            Text(text: "Drag or flick me", style: CardTitle)
+            Text(text: "Three snap points: open, half way (where it starts) and tucked away. A flick carries past the nearest one; past the ends the sheet resists like a rubber band.", style: CardNote, wrapMode: "WORD")
+          }
+        }
+        Panel(style: style(ContentSlot, width: { weight: 1 })) {
+          Panel(key: format("layout.deck.{0}", deal), style: DeckStage) {
+            for index in [4, 3, 2, 1, 0] {
+              Panel(
+                key: format("layout.deck.{0}.card.{1}", deal, index),
+                style: style(DeckCard,
+                             background: [#5B4BD6FF, #0E5A6BFF, #7A2E2EFF, #1F6F43FF, #8C5A1FFF][index],
+                             translateY: index * 12, scale: 1 - index * 0.05),
+                behaviors: [{
+                  id: "strata.movable",
+                  action: action("state.setFromEvent", name: "swipe"),
+                  options: { fling: true, bounds: "none", snapPoints: [{ x: -520, y: 0 }, { x: 0, y: 0 }, { x: 520, y: 0 }], friction: 3 }
+                }]
+              ) {
+                Text(text: ["Kyoto", "Lisbon", "Oslo", "Lima", "Cairo"][index], style: CardTitle)
+                Text(text: "Fling left or right", style: CardNote)
+              }
+            }
+          }
+          Panel(style: style(ActionRow, alignItems: "CENTER")) {
+            Button(key: "layout.deck.deal", label: "Deal again", onClick: action("state.set", name: "deal", value: deal + 1))
+            Text(text: swipe.phase == "settle" ? (swipe.snapped == 1 ? "Kept" : (swipe.snapped == 0 ? "Swiped left" : "Swiped right")) : "Fling a card", style: CardNote)
+          }
+        }
+      }
+    }
+
+    Card(title: "MASONRY: CARDS IN THE SHORTEST COLUMN") {
+      Panel(key: "layout.masonry", style: MasonryWall) {
+        for index in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] {
+          Panel(
+            key: format("layout.brick.{0}", index),
+            style: style(Brick,
+                         height: [150, 230, 120, 190, 260, 140, 210, 170, 120, 240, 160, 200, 130, 220][index],
+                         background: [#3B2F8CFF, #0E5A6BFF, #7A2E2EFF, #5B4BD6FF, #1F6F43FF, #8C5A1FFF, #26466BFF][index % 7])
+          ) {
+            Text(text: format("Card {0}", index + 1), style: SectionText)
+            Text(text: format("{0} px tall", [150, 230, 120, 190, 260, 140, 210, 170, 120, 240, 160, 200, 130, 220][index]), style: CardNote)
+          }
+        }
+      }
+      Text(text: "kind: \"MASONRY\" with minColumnWidth: 170 — the column count follows the width, and each card goes where the wall is lowest.", style: CardNote, wrapMode: "WORD")
+    }
+
+    Card(title: "ZOOMVIEW: AN INFINITE CANVAS") {
+      Panel(style: style(ActionRow, alignItems: "CENTER")) {
+        Button(key: "layout.canvas.fit", label: "Fit", onClick: action("zoom.fit", key: "layout.canvas", padding: 32))
+        Button(key: "layout.canvas.reset", label: "Reset", onClick: action("zoom.reset", key: "layout.canvas"))
+        Button(key: "layout.canvas.zoom", label: "200%", onClick: action("state.set", name: "view", value: { x: view.x, y: view.y, zoom: 2 }))
+        Text(text: format("Zoom {0}%  ·  pan {1}, {2}", round(view.zoom * 100), round(view.x), round(view.y)), style: CardNote)
+      }
+      ZoomView(key: "layout.canvas", bind: view, minZoom: 0.25, maxZoom: 4, style: CanvasFrame) {
+        Panel(style: CanvasPaper) {
+          Draw(layout: { width: 1400, height: 860 }, shapes: [
+            { kind: "path", commands: "M 0.257 0.2 C 0.33 0.2, 0.33 0.48, 0.4 0.48", stroke: #22D3EEAA, strokeStyle: { width: 3, cap: "round" } },
+            { kind: "path", commands: "M 0.257 0.62 C 0.33 0.62, 0.33 0.5, 0.4 0.5", stroke: #A78BFAAA, strokeStyle: { width: 3, cap: "round" } },
+            { kind: "path", commands: "M 0.571 0.5 C 0.65 0.5, 0.65 0.26, 0.73 0.26", stroke: #F59E0BAA, strokeStyle: { width: 3, cap: "round" } },
+            { kind: "path", commands: "M 0.571 0.52 C 0.65 0.52, 0.65 0.72, 0.73 0.72", stroke: #4ADE80AA, strokeStyle: { width: 3, cap: "round" } }
+          ])
+          GraphCard(title: "Source", note: "Reads frames from the camera.", left: 120, top: 110, tint: #22D3EEFF)
+          GraphCard(title: "Noise", note: "Adds film grain.", left: 120, top: 470, tint: #A78BFAFF)
+          GraphCard(title: "Mix", note: "Blends its two inputs.", left: 560, top: 360, tint: #F472B6FF)
+          GraphCard(title: "Preview", note: "Shows the result.", left: 1020, top: 150, tint: #F59E0BFF)
+          GraphCard(title: "Export", note: "Writes the video.", left: 1020, top: 560, tint: #4ADE80FF)
+        }
+      }
+      Text(text: "Wheel zooms at the cursor (eased), drag the paper or middle-drag anywhere to pan, Shift+wheel pans. Buttons inside still click, and the text is rasterized again at the zoom it shows.", style: CardNote, wrapMode: "WORD")
+    }
+  }
+}
+
 component InteractPage() {
   state racing = false;
   state selected = 2;
@@ -3157,6 +3607,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "Tree expansion never reconciles collapsed descendants; keyboard/range/typeahead and drag positions emit stable keys. Table sort is a host request, widths/order persist, and sticky/pinned regions align. Grid marquee, 2D arrows, stationary edge scroll, and sticky push-off stay current.", wrapMode: "WORD")
   } else if selectedPage == "TYPE" {
     Text(text: "Emoji, Arabic, Hebrew, Han, kana, Hangul and Devanagari draw from the system's own fonts, Arabic joined and right-to-left runs ordered inside left-to-right lines. Bahnschrift and Segoe UI Variable change weight and width from one file (fontWeight, fontVariation); drag the sliders. Shapes clip their content to circles, hexagons, stars, diamonds, ellipses and polygons (clipShape), the star turning as it goes. The list fades out at its top and bottom as it scrolls (fadeEdges). The headings are drawn with a gradient, an outline, a neon glow and a soft shadow (textGradient, textOutline, textGlow, textShadow).", wrapMode: "WORD")
+  } else if selectedPage == "LAYOUT" {
+    Text(text: "Scroll the reading pane: the header shrinks, the bar fills and the hero art lags at half speed (strata.scroll). Drag the slider: the card switches between stacked and side-by-side by its own width (strata.size). Open a thumbnail: it flies into the detail view and back (sharedKey). Flick the sheet between its snap points and fling cards off the deck (strata.movable fling, snapY, snapPoints, rubber-band bounds). The masonry wall fills its shortest column. Zoom the canvas with the wheel, pan by dragging the paper; Fit and Reset ease the view, buttons on the cards still click, and the text stays sharp at every zoom.", wrapMode: "WORD")
   } else if selectedPage == "INTERACT" {
     Text(text: "Spotlight cards light up under the pointer, and their rims glow from across the grid: the material reads the pointer on the GPU (materialPointer). Tilt cards turn in 3D toward it (strata.pointer drives rotateX and rotateY, perspective is real). The carousel springs between cards, the race compares easings from linear to bouncy springs, and the heart beats on a five-keyframe animation.", wrapMode: "WORD")
   } else if selectedPage == "MENU" {
