@@ -53,6 +53,9 @@ struct PreparedText final {
     double atlas_pixel_range = 1.0;
     double layout_pixel_range = 1.0;
     std::vector<PreparedGlyph> glyphs;
+    TextEffects effects{};
+    /** A run's shadow: its glyphs moved by the shadow's offset, in its colour, softened. */
+    bool shadow = false;
 };
 
 using PreparedTextPtr = std::shared_ptr<const PreparedText>;

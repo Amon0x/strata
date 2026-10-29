@@ -198,6 +198,21 @@ void parameter_data(
                 values[0] = static_cast<float>(command->atlas_pixel_range);
                 values[1] = static_cast<float>(command->layout_pixel_range);
                 values[2] = static_cast<float>(command->pixel_size);
+                // MSDF text effects: outline width and colour, glow colour and radius, and a
+                // shadow's softness (draw data 3, 4-7, 8-11, 12 and 13).
+                const TextEffects& effects = command->effects;
+                if (command->shadow) {
+                    values[13] = static_cast<float>(std::max(effects.shadow_blur, 0.0));
+                } else {
+                    if (effects.outline_width > 0.0 && effects.outline_color.alpha != 0U) {
+                        values[3] = static_cast<float>(effects.outline_width);
+                        color_data(values, 4U, effects.outline_color);
+                    }
+                    if (effects.glow_radius > 0.0 && effects.glow_color.alpha != 0U) {
+                        color_data(values, 8U, effects.glow_color);
+                        values[12] = static_cast<float>(effects.glow_radius);
+                    }
+                }
             }
         }
     }, draw.command);
@@ -295,6 +310,38 @@ void quad(
     });
 }
 
+/** A quad whose left corners are `left` and right corners `right` (a gradient across it). */
+void quad_colors(RenderSubmission& output, const PreparedDraw& draw, const Rect bounds,
+                 const RenderColor left, const RenderColor right, const TextureRegion uv,
+                 const std::array<float, draw_data_float_count>& data,
+                 const std::uint32_t batch_base_vertex) {
+    const std::size_t offset = output.vertex_bytes.size();
+    const std::size_t global_base_size = offset / vertex_bytes;
+    if (global_base_size > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::length_error("render submission vertex count exceeds uint32");
+    }
+    const std::uint32_t global_base = static_cast<std::uint32_t>(global_base_size);
+    const std::uint32_t local_base = global_base - batch_base_vertex;
+    const double z = group_depth(draw);
+    output.vertex_bytes.resize(offset + 4U * vertex_bytes);
+    std::uint8_t* destination = output.vertex_bytes.data() + offset;
+    vertex_at(destination, draw.transform, bounds.x, bounds.y, z, left, uv.u, uv.v, data);
+    vertex_at(destination + vertex_bytes, draw.transform, bounds.x, bounds.bottom(), z, left, uv.u,
+              uv.v + uv.height, data);
+    vertex_at(destination + 2U * vertex_bytes, draw.transform, bounds.right(), bounds.bottom(), z,
+              right, uv.u + uv.width, uv.v + uv.height, data);
+    vertex_at(destination + 3U * vertex_bytes, draw.transform, bounds.right(), bounds.y, z, right,
+              uv.u + uv.width, uv.v, data);
+    output.indices.insert(output.indices.end(), {
+                                                    local_base,
+                                                    local_base + 1U,
+                                                    local_base + 2U,
+                                                    local_base + 2U,
+                                                    local_base + 3U,
+                                                    local_base,
+                                                });
+}
+
 /**
  * A gradient-painted mask: one quad per band, each vertex carrying the gradient position at its
  * corner so the pixel stage evaluates the gradient exactly.
@@ -367,6 +414,33 @@ void text_geometry(
     // Geometry is encoded into a fresh per-draw fragment, so size it for every glyph's quad.
     output.vertex_bytes.reserve(output.vertex_bytes.size() + text.glyphs.size() * 4U * vertex_bytes);
     output.indices.reserve(output.indices.size() + text.glyphs.size() * 6U);
+    // A gradient runs across the whole run, left to right: each glyph's corners take its colour
+    // where they stand, which is exact for two stops and close for more.
+    const std::vector<RenderColor>& gradient = text.effects.gradient;
+    double left = 0.0;
+    double right = 0.0;
+    if (gradient.size() >= 2U && !text.shadow && !text.glyphs.empty()) {
+        left = std::numeric_limits<double>::infinity();
+        right = -left;
+        for (const PreparedGlyph& glyph : text.glyphs) {
+            left = std::min(left, glyph.bounds.x);
+            right = std::max(right, glyph.bounds.right());
+        }
+    }
+    const auto gradient_at = [&](const double x) {
+        const double t = right > left ? std::clamp((x - left) / (right - left), 0.0, 1.0) : 0.0;
+        const double scaled = t * static_cast<double>(gradient.size() - 1U);
+        const std::size_t index = std::min(static_cast<std::size_t>(scaled), gradient.size() - 2U);
+        const double f = scaled - static_cast<double>(index);
+        const RenderColor& a = gradient[index];
+        const RenderColor& b = gradient[index + 1U];
+        const auto mix = [f](const std::uint8_t from, const std::uint8_t to) {
+            return static_cast<std::uint8_t>(std::lround(from + (to - from) * f));
+        };
+        return RenderColor{mix(a.red, b.red), mix(a.green, b.green), mix(a.blue, b.blue),
+                           static_cast<std::uint8_t>(std::lround(
+                               (a.alpha + (b.alpha - a.alpha) * f) * text.color.alpha / 255.0))};
+    };
     for (const PreparedGlyph& glyph : text.glyphs) {
         const Rect bounds{
             origin.x + glyph.bounds.x,
@@ -374,7 +448,12 @@ void text_geometry(
             glyph.bounds.width,
             glyph.bounds.height,
         };
-        quad(output, draw, bounds, text.color, glyph.uv, data, batch_base_vertex);
+        if (right > left) {
+            quad_colors(output, draw, bounds, gradient_at(glyph.bounds.x),
+                        gradient_at(glyph.bounds.right()), glyph.uv, data, batch_base_vertex);
+        } else {
+            quad(output, draw, bounds, text.color, glyph.uv, data, batch_base_vertex);
+        }
     }
 }
 

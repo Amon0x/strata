@@ -149,11 +149,16 @@ class GlyphAtlas final {
     request_coverage(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
                      double pixel_size, SubpixelPhase phase, std::uint32_t font_style_flags = 0U);
 
-    /** Requests an explicit raster mode; ordinary callers default to size-specific grayscale. */
+    /**
+     * Requests an explicit raster mode; ordinary callers default to size-specific grayscale. An
+     * MSDF glyph whose distance must reach `reach` layout pixels beyond its edge (text with an
+     * outline, a glow or a shadow) rasterizes with a range and padding wide enough for it, as an
+     * entry of its own.
+     */
     [[nodiscard]] std::optional<GlyphAtlasEntry>
     request(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
             double pixel_size, SubpixelPhase coverage_phase, std::uint32_t font_style_flags = 0U,
-            GlyphRasterMode mode = GlyphRasterMode::coverage);
+            GlyphRasterMode mode = GlyphRasterMode::coverage, double reach = 0.0);
 
     /**
      * The pages something still drawn uses, given before planning a frame. With it, a full atlas
@@ -249,7 +254,7 @@ class GlyphAtlas final {
     [[nodiscard]] std::optional<GlyphAtlasEntry>
     request_mode(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
                  double pixel_size, SubpixelPhase phase, GlyphRasterMode mode,
-                 std::uint32_t font_style_flags);
+                 std::uint32_t font_style_flags, double reach = 0.0);
     [[nodiscard]] bool recycle_for_capacity(Key& key);
     [[nodiscard]] std::optional<Allocation> reuse_unretained_page(std::uint32_t width,
                                                                   std::uint32_t height,

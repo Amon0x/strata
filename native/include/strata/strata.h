@@ -1883,7 +1883,9 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_PACKET_VERSION_16 UINT32_C(16)
 /* Version 17 adds each presentation group's two projection terms, so groups can turn in depth. */
 #define STRATA_RENDER_PACKET_VERSION_17 UINT32_C(17)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_17
+/* Version 18 adds each rounded clip's shape (ellipse, polygon, star) and fading edges. */
+#define STRATA_RENDER_PACKET_VERSION_18 UINT32_C(18)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_18
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES UINT32_C(2)

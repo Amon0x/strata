@@ -392,7 +392,31 @@ float4 strataShade(PixelInput input) {
             max(float2(textureWidth, textureHeight), 1.0);
         float2 screenTexSize = 1.0 / max(fwidth(input.uv), 0.000001);
         float screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
-        color.a *= saturate(signedDistance * screenPxRange + 0.5);
+        // The distance from the glyph's edge in screen pixels, positive inside.
+        float edge = signedDistance * screenPxRange;
+        float softness = min(input.drawData3.y, max(0.5 * screenPxRange - 1.0, 0.0));
+        float fill = softness > 0.0 ? saturate(edge / softness + 0.5) : saturate(edge + 0.5);
+        float4 text = float4(color.rgb, color.a * fill);
+        // An outline around the glyph and a glow beyond it, each under what is in front.
+        // Each effect stops short of where the field ends, so it never paints the glyph's box.
+        float available = max(0.5 * screenPxRange - 1.0, 0.0);
+        float outlineWidth = min(input.drawData0.w, available);
+        if (outlineWidth > 0.0) {
+            float4 outline = float4(input.drawData1.rgb,
+                                    input.drawData1.a * saturate(edge + outlineWidth + 0.5));
+            float a = text.a + outline.a * (1.0 - text.a);
+            text = float4((text.rgb * text.a + outline.rgb * outline.a * (1.0 - text.a)) /
+                              max(a, 0.0001), a);
+        }
+        float glowRadius = min(input.drawData3.x, available);
+        if (glowRadius > 0.0) {
+            float reach = saturate(1.0 + edge / glowRadius);
+            float4 glow = float4(input.drawData2.rgb, input.drawData2.a * reach * reach);
+            float a = text.a + glow.a * (1.0 - text.a);
+            text = float4((text.rgb * text.a + glow.rgb * glow.a * (1.0 - text.a)) /
+                              max(a, 0.0001), a);
+        }
+        color = text;
     } else if (mode == 6) {
         float2 shapeSize = max(input.drawData0.xy, 1.0);
         float2 quadSize = max(input.drawData2.xy, shapeSize);

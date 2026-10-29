@@ -208,6 +208,10 @@ struct IdTables final {
         output.number(clip.radii.bottom_left);
         for (const double value : clip.inverse_transform)
             output.number(value);
+        output.integer(clip.shape.kind);
+        output.number(clip.shape.sides);
+        for (const double value : clip.shape.fade)
+            output.number(value);
     }
     if (batch.kind == SubmissionBatchKind::draw) {
         const auto [blend, coverage] = packet_blend(batch.blend_mode, !batch.rounded_clips.empty());

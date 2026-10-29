@@ -552,6 +552,58 @@ style CardNote {
   color: #9AA7BAFF;
 }
 
+style ShapeFrame extends Transparent {
+  kind: "PANEL";
+  width: 128;
+  height: 128;
+  clip: true;
+}
+
+style ShapeFill {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+  background: {
+    kind: "linear", angle: 135,
+    stops: [ { color: #7C6BFFFF }, { color: #39C0A8FF } ]
+  };
+  border: null;
+}
+
+style ShapeLabel {
+  font: "strata:fonts/default-medium";
+  pixelSize: 14;
+  color: #FFFFFFFF;
+}
+
+style HeroText {
+  font: "strata:fonts/default-medium";
+  pixelSize: 54;
+  color: #F4F7FBFF;
+}
+
+style FadeList {
+  kind: "SCROLL";
+  width: { weight: 1 };
+  height: 230;
+  clip: true;
+}
+
+style FadeRow {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 34;
+  padding: { horizontal: 12 };
+  alignItems: "CENTER";
+  radius: 8;
+  background: #1A2230FF;
+  border: null;
+}
+
+animation SlowSpin { duration: 12s; repeat: "forever"; easing: "linear"; from { rotate: 0 } to { rotate: 360 } }
+
 style MenuField extends Transparent {
   kind: "COLUMN";
   width: { weight: 1 };
@@ -1222,6 +1274,8 @@ component PageViewport(selectedPage: string) {
       Scroll(key: "targets.page.scroll.data", persistenceKey: "showcase.page.scroll.data", vertical: true, horizontal: false, style: PageScroll) { DataPage() }
     } else if selectedPage == "MENU" {
       MenuPage()
+    } else if selectedPage == "TYPE" {
+      Scroll(key: "targets.page.scroll.type", persistenceKey: "showcase.page.scroll.type", vertical: true, horizontal: false, style: PageScroll) { TypePage() }
     } else if selectedPage == "INTERACT" {
       Scroll(key: "targets.page.scroll.interact", persistenceKey: "showcase.page.scroll.interact", vertical: true, horizontal: false, style: PageScroll) { InteractPage() }
     } else if selectedPage == "DRAW" {
@@ -1245,6 +1299,7 @@ component ShowcaseHeader(selectedPage: Binding<string>) {
       tabs: [
         { id: "MENU", label: "MENU" },
         { id: "INTERACT", label: "INTERACT" },
+        { id: "TYPE", label: "TYPE" },
         { id: "EXTEND", label: "EXTEND" },
         { id: "DRAW", label: "DRAW" },
         { id: "STATE", label: "STATE" },
@@ -1541,6 +1596,50 @@ component RaceLane(label: string, running: boolean, motion: animation, tint: col
   Panel(style: RaceTrack) {
     Text(text: label, style: CardNote, layout: { width: 170 })
     Panel(style: style(RaceDot, background: tint), motions: [{ id: "race", target: running, animation: motion }])
+  }
+}
+
+component ShapeTile(shape: string, sides: number = 6) {
+  Panel(style: style(ShapeFrame, clipShape: shape, clipSides: sides)) {
+    Panel(style: ShapeFill) { Text(text: shape, style: ShapeLabel) }
+  }
+}
+
+component TypePage() {
+  Panel(style: PageColumn) {
+    Card(title: "CLIP SHAPES: CONTENT CUT TO ANY SHAPE") {
+      Panel(style: style(ActionRow, gap: 18)) {
+        ShapeTile(shape: "circle")
+        ShapeTile(shape: "hexagon")
+        Panel(style: style(ShapeFrame, clipShape: "star", clipSides: 5), enter: SlowSpin) {
+          Panel(style: ShapeFill) { Text(text: "star", style: ShapeLabel) }
+        }
+        ShapeTile(shape: "diamond", sides: 4)
+        Panel(style: style(ShapeFrame, width: 180, clipShape: "ellipse")) {
+          Panel(style: ShapeFill) { Text(text: "ellipse", style: ShapeLabel) }
+        }
+        ShapeTile(shape: "polygon", sides: 8)
+      }
+    }
+    Card(title: "FADING EDGES: A LIST THAT FADES AS IT SCROLLS") {
+      Scroll(key: "type.fade.list", vertical: true, horizontal: false,
+             style: style(FadeList, fadeEdges: { top: 42, bottom: 42 })) {
+        Panel(style: style(PageColumn, gap: 6)) {
+          for index in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30] {
+            Panel(key: format("type.fade.row.{0}", index), style: FadeRow) {
+              Text(text: format("Row {0}: content dissolves into the edges instead of being cut", index), style: CardNote)
+            }
+          }
+        }
+      }
+    }
+    Card(title: "TEXT EFFECTS: GRADIENT, OUTLINE, GLOW, SHADOW") {
+      Text(text: "Gradient headline", style: style(HeroText, textGradient: [#FF6A88FF, #FFB86BFF, #7C6BFFFF]))
+      Text(text: "Outlined", style: style(HeroText, color: #0B0F19FF, textOutline: { width: 2, color: #7FD3FFFF }))
+      Text(text: "NEON GLOW", style: style(HeroText, color: #E8FBFFFF, textGlow: { radius: 9, color: #22C7FFCC }))
+      Text(text: "Soft shadow", style: style(HeroText, textShadow: { x: 5, y: 6, blur: 5, color: #7C6BFFDD }))
+      Text(text: "All at once", style: style(HeroText, textGradient: [#FFE29AFF, #FF6A88FF], textOutline: { width: 1.5, color: #FFFFFFCC }, textShadow: { x: 4, y: 5, blur: 4, color: #FF2D7ACC }))
+    }
   }
 }
 
@@ -2213,6 +2312,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "Selection and pick update outlines/metadata without activating the underlying target. Coalesce shows PASS with +23. The no-GPU probe reports two frames, one activation, and one node. Dynamic probe reports UNHANDLED with a source-aware diagnostic.", wrapMode: "WORD")
   } else if selectedPage == "DATA" {
     Text(text: "Tree expansion never reconciles collapsed descendants; keyboard/range/typeahead and drag positions emit stable keys. Table sort is a host request, widths/order persist, and sticky/pinned regions align. Grid marquee, 2D arrows, stationary edge scroll, and sticky push-off stay current.", wrapMode: "WORD")
+  } else if selectedPage == "TYPE" {
+    Text(text: "Shapes clip their content to circles, hexagons, stars, diamonds, ellipses and polygons (clipShape), the star turning as it goes. The list fades out at its top and bottom as it scrolls (fadeEdges). The headings are drawn with a gradient, an outline, a neon glow and a soft shadow (textGradient, textOutline, textGlow, textShadow).", wrapMode: "WORD")
   } else if selectedPage == "INTERACT" {
     Text(text: "Spotlight cards light up under the pointer, and their rims glow from across the grid: the material reads the pointer on the GPU (materialPointer). Tilt cards turn in 3D toward it (strata.pointer drives rotateX and rotateY, perspective is real). The carousel springs between cards, the race compares easings from linear to bouncy springs, and the heart beats on a five-keyframe animation.", wrapMode: "WORD")
   } else if selectedPage == "MENU" {

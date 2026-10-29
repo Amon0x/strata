@@ -90,6 +90,14 @@ struct RoundedClip final {
     double height = 0.0;
     std::array<double, 4U> radii{};
     std::array<double, 6U> inverse_transform{1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
+    /**
+     * 0 the rounded rectangle, 1 an ellipse, 2 a regular polygon and 3 a star of `sides`, each
+     * filling the rectangle; `fade` ramps coverage out over that many logical pixels toward the
+     * top, right, bottom and left edges.
+     */
+    std::uint32_t shape = 0U;
+    double sides = 0.0;
+    std::array<double, 4U> fade{};
     [[nodiscard]] friend bool operator==(const RoundedClip&, const RoundedClip&) = default;
 };
 

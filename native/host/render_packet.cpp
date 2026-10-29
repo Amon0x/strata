@@ -192,6 +192,16 @@ class Reader final {
         clip.height = input.number();
         for (double& radius : clip.radii) radius = input.number();
         for (double& value : clip.inverse_transform) value = input.number();
+        clip.shape = input.u32();
+        clip.sides = input.number();
+        for (double& value : clip.fade)
+            value = input.number();
+        if (clip.shape > 3U || !std::isfinite(clip.sides) || clip.sides < 0.0 ||
+            clip.sides > 64.0 || std::ranges::any_of(clip.fade, [](const double value) {
+                return !std::isfinite(value) || value < 0.0;
+            })) {
+            throw std::invalid_argument("render rounded clip shape is outside the portable domain");
+        }
         const double determinant =
             clip.inverse_transform[0U] * clip.inverse_transform[4U] -
             clip.inverse_transform[1U] * clip.inverse_transform[3U];

@@ -233,6 +233,33 @@ struct NinePatchRenderCommand final {
     [[nodiscard]] friend bool operator==(const NinePatchRenderCommand&,
                                          const NinePatchRenderCommand&) = default;
 };
+/**
+ * What a run of text adds to its glyphs: a gradient across it (`gradient`, two or more colours,
+ * left to right, in place of its colour), an outline around each glyph, a glow beyond it, and a
+ * shadow under it. Outline, glow and shadow read the glyphs' distance field, so a run with any of
+ * them rasterizes as MSDF; each reaches about as far as that field does.
+ */
+struct TextEffects final {
+    std::vector<RenderColor> gradient;
+    double outline_width = 0.0;
+    RenderColor outline_color{0U, 0U, 0U, 0U};
+    double glow_radius = 0.0;
+    RenderColor glow_color{0U, 0U, 0U, 0U};
+    double shadow_x = 0.0;
+    double shadow_y = 0.0;
+    double shadow_blur = 0.0;
+    RenderColor shadow_color{0U, 0U, 0U, 0U};
+    [[nodiscard]] bool shadowed() const noexcept {
+        return shadow_color.alpha != 0U;
+    }
+    /** Whether it needs the glyphs' distance field: an outline, a glow or a shadow. */
+    [[nodiscard]] bool distance() const noexcept {
+        return (outline_width > 0.0 && outline_color.alpha != 0U) ||
+               (glow_radius > 0.0 && glow_color.alpha != 0U) || shadowed();
+    }
+    [[nodiscard]] friend bool operator==(const TextEffects&, const TextEffects&) = default;
+};
+
 struct TextRunRenderCommand final {
     Point origin;
     RenderColor color;
@@ -241,6 +268,7 @@ struct TextRunRenderCommand final {
     FontRasterization font_rasterization = FontRasterization::grayscale;
     /** Conservative local-space bounds used to reject clipped runs before atlas warmup. */
     std::optional<Rect> cull_bounds = std::nullopt;
+    TextEffects effects{};
     [[nodiscard]] friend bool operator==(const TextRunRenderCommand&,
                                          const TextRunRenderCommand&) = default;
 };
@@ -344,9 +372,26 @@ struct ContentEffectPopRenderCommand final {
     [[nodiscard]] friend bool operator==(ContentEffectPopRenderCommand,
                                          ContentEffectPopRenderCommand) = default;
 };
+/**
+ * The shape a clip cuts and how its edges fade. `kind` 0 is the rounded rectangle its radii give;
+ * 1 an ellipse filling the rectangle; 2 a regular polygon of `sides` sides and 3 a star of
+ * `sides` points, both filling it. `fade` (top, right, bottom, left, in logical pixels) ramps the
+ * content out toward each edge: a list that fades at the top and bottom as it scrolls.
+ */
+struct ClipShape final {
+    std::uint32_t kind = 0U;
+    double sides = 0.0;
+    std::array<double, 4U> fade{};
+    [[nodiscard]] bool plain() const noexcept {
+        return kind == 0U && fade[0] <= 0.0 && fade[1] <= 0.0 && fade[2] <= 0.0 && fade[3] <= 0.0;
+    }
+    [[nodiscard]] friend bool operator==(const ClipShape&, const ClipShape&) = default;
+};
+
 struct ClipPushRenderCommand final {
     Rect rect;
     CornerRadii radii;
+    ClipShape shape{};
     [[nodiscard]] friend bool operator==(const ClipPushRenderCommand&,
                                          const ClipPushRenderCommand&) = default;
 };

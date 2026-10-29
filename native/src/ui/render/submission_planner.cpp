@@ -218,14 +218,15 @@ struct CommandTexture final {
             requested_x * display_scale, coverage_subpixel_divisions
         );
         const std::optional<font::GlyphAtlasEntry> atlas_entry = atlas.request(
-            logical.font_id,
-            text_engine.font(logical.font_id),
-            static_cast<std::uint16_t>(logical.glyph_id),
-            command.pixel_size,
-            phase,
-            logical.font_style_flags,
-            raster_mode(command.font_rasterization)
-        );
+            logical.font_id, text_engine.font(logical.font_id),
+            static_cast<std::uint16_t>(logical.glyph_id), command.pixel_size, phase,
+            logical.font_style_flags, raster_mode(command.font_rasterization),
+            // Text effects read the distance this far beyond the glyph's edge.
+            command.effects.distance()
+                ? std::max({command.effects.outline_width, command.effects.glow_radius,
+                            command.effects.shadow_blur}) +
+                      1.0
+                : 0.0);
         if (!atlas_entry.has_value()) continue;
         const double pen_x = atlas_entry->mode == font::GlyphRasterMode::coverage
             ? quantized_position(requested_x, display_scale, coverage_subpixel_divisions)
@@ -269,6 +270,8 @@ struct CommandTexture final {
             glyphs[begin].atlas.atlas_pixel_range,
             glyphs[begin].atlas.layout_pixel_range,
             {},
+            command.effects,
+            false,
         };
         text.glyphs.reserve(end - begin);
         for (std::size_t index = begin; index < end; ++index) {
@@ -276,6 +279,24 @@ struct CommandTexture final {
         }
         groups.push_back(std::move(text));
         begin = end;
+    }
+    // A shadow is the run again under it: moved, in the shadow's colour, and softened.
+    if (command.effects.shadowed() && !groups.empty()) {
+        std::vector<PreparedText> shadowed;
+        shadowed.reserve(groups.size() * 2U);
+        for (const PreparedText& text : groups) {
+            if (text.mode != font::GlyphRasterMode::msdf)
+                continue;
+            PreparedText shadow = text;
+            shadow.origin.x += command.effects.shadow_x;
+            shadow.origin.y += command.effects.shadow_y;
+            shadow.color = command.effects.shadow_color;
+            shadow.shadow = true;
+            shadowed.push_back(std::move(shadow));
+        }
+        for (PreparedText& text : groups)
+            shadowed.push_back(std::move(text));
+        groups = std::move(shadowed);
     }
     return groups;
 }
@@ -285,7 +306,8 @@ struct CommandTexture final {
     const TextRunRenderCommand& right
 ) {
     return left.color == right.color && left.pixel_size == right.pixel_size &&
-        left.font_rasterization == right.font_rasterization && left.glyphs == right.glyphs;
+           left.font_rasterization == right.font_rasterization && left.glyphs == right.glyphs &&
+           left.effects == right.effects;
 }
 
 void align_text_cache(
@@ -1974,7 +1996,8 @@ class Planner final {
                 // A rotated rectangle is not its scissor box: it clips through the same
                 // per-pixel mask a rounded corner does, with square corners.
                 const bool has_rounded_geometry =
-                    (rounded(safe_radii) || !transform_.axis_aligned()) && !clip_.empty();
+                    (rounded(safe_radii) || !transform_.axis_aligned() || !value.shape.plain()) &&
+                    !clip_.empty();
                 rounded_clip_stack_.push_back(has_rounded_geometry);
                 if (has_rounded_geometry) {
                     if (active_rounded_clips_.size() == maximum_rounded_clip_depth) {
@@ -1998,6 +2021,7 @@ class Planner final {
                                 inverse->m11,
                                 inverse->m12,
                             },
+                            value.shape,
                         });
                         rounded_clips_snapshot_.reset();
                     }

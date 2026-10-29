@@ -560,6 +560,33 @@ Panel(style: style(Card, rotateY: open ? 0 : -60, perspective: 600),
       animateChanges: { properties: ["rotateY"], policy: "bouncy" })
 ```
 
+### Clip shapes and fading edges
+
+A node that clips (`clip: true`, or a `Scroll`'s viewport) can cut its content to a shape other than
+its rounded rectangle and fade it out toward its edges. `clipShape` is `circle` or `ellipse` (filling
+the box), `diamond`, `hexagon` or `polygon` (a regular polygon, `clipSides` sides, a corner up) or
+`star` (`clipSides` points); any other value keeps the rectangle. `fadeEdges` takes `top`, `right`,
+`bottom` and `left` distances in logical pixels over which content fades to nothing, so a list
+dissolves into its edges as it scrolls instead of being cut. Both are evaluated per pixel on the GPU
+with the clip, under any transform.
+
+```strata
+Panel(style: style(width: 96, height: 96, clip: true, clipShape: "hexagon")) { Avatar() }
+Scroll(style: style(FeedList, fadeEdges: { top: 40, bottom: 40 })) { Feed() }
+```
+
+### Text effects
+
+Text styles take four effects. `textGradient` lists two or more colours drawn across the text from
+left to right in place of its colour. `textOutline` (`{ width, color }`) rings each glyph,
+`textGlow` (`{ radius, color }`) lights the space around it, and `textShadow` (`{ x, y, blur,
+color }`) draws a softened copy under it. Outline, glow and shadow read the glyphs' distance field,
+so text that uses them rasterizes as MSDF, with a field wide enough for the largest of them.
+
+```strata
+Text(text: "NEON", style: style(Title, color: #E8FBFFFF, textGlow: { radius: 9, color: #22C7FFCC }))
+```
+
 ### Following the pointer
 
 The `strata.pointer` behavior tells a node where the pointer is over it. Its action receives an

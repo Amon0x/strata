@@ -48,6 +48,48 @@ namespace {
     };
 }
 
+/**
+ * The node's text effects: `textGradient` (a list of colours across the text), `textOutline`
+ * ({ width, color }), `textGlow` ({ radius, color }) and `textShadow` ({ x, y, blur, color }).
+ */
+[[nodiscard]] TextEffects text_effects(const RetainedNode& node) {
+    TextEffects effects;
+    if (const runtime::Value* gradient = visual_value(node, "textGradient");
+        gradient != nullptr && gradient->list() != nullptr) {
+        for (const runtime::Value& entry : gradient->list()->values) {
+            if (const std::optional<RenderColor> color = optional_color(&entry))
+                effects.gradient.push_back(*color);
+        }
+        if (effects.gradient.size() < 2U)
+            effects.gradient.clear();
+    }
+    const auto number = [](const runtime::Value* object, const std::string_view name) {
+        const runtime::Value* value = object != nullptr ? object->field(name) : nullptr;
+        return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())
+                   ? *value->number()
+                   : 0.0;
+    };
+    const auto color = [](const runtime::Value* object) {
+        return optional_color(object != nullptr ? object->field("color") : nullptr)
+            .value_or(RenderColor{0U, 0U, 0U, 0U});
+    };
+    if (const runtime::Value* outline = visual_value(node, "textOutline"); outline != nullptr) {
+        effects.outline_width = std::max(0.0, number(outline, "width"));
+        effects.outline_color = color(outline);
+    }
+    if (const runtime::Value* glow = visual_value(node, "textGlow"); glow != nullptr) {
+        effects.glow_radius = std::max(0.0, number(glow, "radius"));
+        effects.glow_color = color(glow);
+    }
+    if (const runtime::Value* shadow = visual_value(node, "textShadow"); shadow != nullptr) {
+        effects.shadow_x = number(shadow, "x");
+        effects.shadow_y = number(shadow, "y");
+        effects.shadow_blur = std::max(0.0, number(shadow, "blur"));
+        effects.shadow_color = color(shadow);
+    }
+    return effects;
+}
+
 /** Which lines a `textDecoration` draws through a run. */
 struct TextDecoration final {
     bool underline = false;
@@ -979,6 +1021,12 @@ void WidgetRenderScope::draw_text_layout(const TextLayout& layout_value, const P
         });
     }
     color = widget_opacity(color, alpha());
+    TextEffects effects = text_effects(node_);
+    for (RenderColor& stop : effects.gradient)
+        stop = widget_opacity(stop, alpha());
+    effects.outline_color = widget_opacity(effects.outline_color, alpha());
+    effects.glow_color = widget_opacity(effects.glow_color, alpha());
+    effects.shadow_color = widget_opacity(effects.shadow_color, alpha());
     for (const TextResolvedRun& resolved_run : layout_value.resolved_runs) {
         const SharedFontId run_font(resolved_run.font_id);
         std::vector<LogicalGlyph> glyphs;
@@ -1009,8 +1057,10 @@ void WidgetRenderScope::draw_text_layout(const TextLayout& layout_value, const P
                 color,
                 resolved_run.pixel_size,
                 std::move(glyphs),
-                resolved_run.font_rasterization,
+                // An outline, a glow or a shadow reads the glyphs' distance field.
+                effects.distance() ? FontRasterization::msdf : resolved_run.font_rasterization,
                 text_cull_bounds,
+                effects,
             });
         }
         if (const TextDecoration decoration =

@@ -214,6 +214,39 @@ struct PixelRect final {
         const std::array<float, 2U> point = local(x, y);
         const float half_width = static_cast<float>(clip.width * 0.5);
         const float half_height = static_cast<float>(clip.height * 0.5);
+        const float px = point[0U] - static_cast<float>(clip.x) - half_width;
+        const float py = point[1U] - static_cast<float>(clip.y) - half_height;
+        const float rx = std::max(half_width, 0.0001F);
+        const float ry = std::max(half_height, 0.0001F);
+        if (clip.shape == 1U)
+            return (std::hypot(px / rx, py / ry) - 1.0F) * std::min(rx, ry);
+        if (clip.shape == 2U || clip.shape == 3U) {
+            // As the shader's roundedClipPolygonSdf.
+            const float qx = px / rx;
+            const float qy = py / ry;
+            const float n = std::max(static_cast<float>(clip.sides), 3.0F);
+            const float sector = 6.28318531F / n;
+            const float angle = std::atan2(qx, -qy) + sector * 0.5F;
+            const float local_angle = angle - sector * std::floor(angle / sector + 0.5F);
+            const float radius = std::hypot(qx, qy);
+            float result = 0.0F;
+            if (clip.shape == 3U) {
+                const float inner = 0.5F;
+                const float t = std::abs(local_angle) / (sector * 0.5F);
+                const float ax = 0.0F, ay = 1.0F;
+                const float bx = std::sin(sector * 0.5F) * inner,
+                            by = std::cos(sector * 0.5F) * inner;
+                const float pointx = std::sin(std::abs(local_angle)) * radius;
+                const float pointy = std::cos(std::abs(local_angle)) * radius;
+                const float ex = bx - ax, ey = by - ay;
+                const float length = std::max(std::hypot(ex, ey), 1.0e-6F);
+                const float nx = -ey / length, ny = ex / length;
+                result = t > 1.0F ? radius - inner : (pointx - ax) * nx + (pointy - ay) * ny;
+            } else {
+                result = radius * std::cos(local_angle) - std::cos(sector * 0.5F);
+            }
+            return result * std::min(rx, ry);
+        }
         std::array<float, 4U> radii{};
         const float radius_limit = std::max(0.0F, std::min(half_width, half_height));
         for (std::size_t index = 0U; index < radii.size(); ++index) {
@@ -238,6 +271,20 @@ struct PixelRect final {
             std::max(derivative, 0.0001F),
             center
         );
+        if (clip.fade[0U] > 0.0 || clip.fade[1U] > 0.0 || clip.fade[2U] > 0.0 ||
+            clip.fade[3U] > 0.0) {
+            const double x = clip.inverse_transform[0U] * logical_x +
+                             clip.inverse_transform[1U] * logical_y + clip.inverse_transform[2U];
+            const double y = clip.inverse_transform[3U] * logical_x +
+                             clip.inverse_transform[4U] * logical_y + clip.inverse_transform[5U];
+            const auto ramp = [](const double distance, const double fade) {
+                return fade > 0.0 ? static_cast<float>(std::clamp(distance / fade, 0.0, 1.0))
+                                  : 1.0F;
+            };
+            coverage *=
+                ramp(y - clip.y, clip.fade[0U]) * ramp(clip.x + clip.width - x, clip.fade[1U]) *
+                ramp(clip.y + clip.height - y, clip.fade[2U]) * ramp(x - clip.x, clip.fade[3U]);
+        }
     }
     return coverage;
 }

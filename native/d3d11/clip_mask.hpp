@@ -72,14 +72,16 @@ class RoundedClipBuffer final {
                 static_cast<float>(clip.inverse_transform[0U]),
                 static_cast<float>(clip.inverse_transform[1U]),
                 static_cast<float>(clip.inverse_transform[2U]),
-                0.0F,
+                static_cast<float>(clip.shape),
             };
             constants.inverse_y[index] = {
                 static_cast<float>(clip.inverse_transform[3U]),
                 static_cast<float>(clip.inverse_transform[4U]),
                 static_cast<float>(clip.inverse_transform[5U]),
-                0.0F,
+                static_cast<float>(clip.sides),
             };
+            for (std::size_t edge = 0U; edge < 4U; ++edge)
+                constants.fade[index][edge] = static_cast<float>(clip.fade[edge]);
         }
         D3D11_MAPPED_SUBRESOURCE mapped{};
         const HRESULT status = context_->Map(

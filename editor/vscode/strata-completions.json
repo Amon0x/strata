@@ -3554,6 +3554,41 @@
       "type": "number"
     },
     {
+      "name": "clipShape",
+      "nullable": false,
+      "type": "clip shape: circle, diamond, ellipse, hexagon, polygon, rect or star"
+    },
+    {
+      "name": "textGradient",
+      "nullable": false,
+      "type": "list of color"
+    },
+    {
+      "name": "textOutline",
+      "nullable": false,
+      "type": "{ color: color, width: number }"
+    },
+    {
+      "name": "textGlow",
+      "nullable": false,
+      "type": "{ color: color, radius: number }"
+    },
+    {
+      "name": "textShadow",
+      "nullable": false,
+      "type": "{ blur?: number, color: color, x?: number, y?: number }"
+    },
+    {
+      "name": "clipSides",
+      "nullable": false,
+      "type": "number"
+    },
+    {
+      "name": "fadeEdges",
+      "nullable": false,
+      "type": "{ bottom?: number, left?: number, right?: number, top?: number }"
+    },
+    {
       "name": "scale",
       "nullable": false,
       "type": "number"

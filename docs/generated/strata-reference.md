@@ -2996,6 +2996,13 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `rotateX` | number |
 | `rotateY` | number |
 | `perspective` | number |
+| `clipShape` | clip shape: circle, diamond, ellipse, hexagon, polygon, rect or star |
+| `textGradient` | list of color |
+| `textOutline` | { color: color, width: number } |
+| `textGlow` | { color: color, radius: number } |
+| `textShadow` | { blur?: number, color: color, x?: number, y?: number } |
+| `clipSides` | number |
+| `fadeEdges` | { bottom?: number, left?: number, right?: number, top?: number } |
 | `scale` | number |
 | `scaleX` | number |
 | `scaleY` | number |

@@ -24,6 +24,32 @@
 namespace strata::ui {
 namespace {
 
+/** A clipping node's `clipShape`, `clipSides` and `fadeEdges` (see ClipShape). */
+[[nodiscard]] ClipShape clip_shape(const RetainedNode& node) {
+    ClipShape shape;
+    if (const runtime::Value* value = visual_value(node, "clipShape");
+        value != nullptr && value->string() != nullptr) {
+        const std::string& name = *value->string();
+        shape.kind = name == "ellipse" || name == "circle"                         ? 1U
+                     : name == "polygon" || name == "hexagon" || name == "diamond" ? 2U
+                     : name == "star"                                              ? 3U
+                                                                                   : 0U;
+        shape.sides = name == "hexagon" ? 6.0 : name == "diamond" ? 4.0 : 5.0;
+    }
+    if (const std::optional<double> sides = visual_number(node, "clipSides"); sides.has_value())
+        shape.sides = std::clamp(std::round(*sides), 3.0, 64.0);
+    if (const runtime::Value* fade = visual_value(node, "fadeEdges"); fade != nullptr) {
+        const auto edge = [fade](const std::string_view name) {
+            const runtime::Value* value = fade->field(name);
+            return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())
+                       ? std::max(0.0, *value->number())
+                       : 0.0;
+        };
+        shape.fade = {edge("top"), edge("right"), edge("bottom"), edge("left")};
+    }
+    return shape;
+}
+
 /**
  * A layout-space clip in the space the planner is in. Under scale and translation the clip stays
  * where layout put it, so the transform is cancelled; once something rotates, the clip turns with
@@ -841,9 +867,11 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         // recomputes their intersection. Retaining the pre-intersected rectangle can preserve an
         // empty/offscreen clip after scrolling and blank newly visible content.
         if (lifecycle_clip.has_value()) {
+            // A widget's own clip (a Scroll's viewport) fades and shapes as its node asks.
             output.append(ClipPushRenderCommand{
                 layout_clip(*lifecycle_clip, effective_transform),
                 {},
+                record->local_clip.has_value() ? ClipShape{} : clip_shape(node),
             });
             ++counters.commands_emitted;
         }
@@ -851,6 +879,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             output.append(ClipPushRenderCommand{
                 layout_clip(*record->local_clip, effective_transform),
                 corners,
+                clip_shape(node),
             });
             ++counters.commands_emitted;
         }

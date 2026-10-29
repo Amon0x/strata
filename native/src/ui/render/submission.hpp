@@ -42,6 +42,8 @@ struct SubmissionRoundedClip final {
     Rect bounds;
     CornerRadii radii;
     std::array<double, 6U> inverse_transform{1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
+    /** Its shape and fading edges (ClipShape): a plain rounded rectangle unless set. */
+    ClipShape shape{};
     [[nodiscard]] friend bool operator==(const SubmissionRoundedClip&,
                                          const SubmissionRoundedClip&) = default;
 };
