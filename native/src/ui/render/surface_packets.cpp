@@ -11,10 +11,16 @@
 namespace strata::ui {
 namespace {
 
-/** Shape masks are resampled under rotation and scaled groups, so they are sampled bilinearly. */
+/**
+ * Shape masks are resampled under rotation and scaled groups, so they are sampled bilinearly.
+ * Animated shapes replace their masks every frame while the rest keep theirs, so the atlas may
+ * grow to more pages (made only as needed) than text's: a page frees only once nothing drawn
+ * uses it, and too few pages would leave every one holding some mask still in use.
+ */
 [[nodiscard]] font::GlyphAtlasConfig shape_atlas_config() noexcept {
     font::GlyphAtlasConfig config;
     config.filtered_coverage = true;
+    config.maximum_pages = 16U;
     return config;
 }
 

@@ -300,8 +300,10 @@ struct CommandRange final {
 /**
  * Plans the given ranges of a stream whose other commands equal the planned one, into their
  * commands' items. Returns the items whose draws changed, or nothing, with the planned items as
- * they were, when a command's items would change in number or kind, an effect batch would
- * change, or text could not be prepared against the current atlas generation.
+ * they were, when a scope's items would change in number or kind, an effect batch would change,
+ * or text could not be prepared against the current atlas generation. A single draw command may
+ * change its number of items (a label whose text changed length): its items are spliced in, the
+ * later commands' items move, and `resized` says the items must be encoded again whole.
  */
 [[nodiscard]] std::optional<std::vector<std::size_t>> replan_ranges(
     const RenderCommandBuffer& commands,
@@ -310,7 +312,8 @@ struct CommandRange final {
     const TextEngine* text_engine,
     const SubmissionContext& context,
     RenderSubmission& telemetry,
-    PreparationCache& cache
+    PreparationCache& cache,
+    bool& resized
 );
 
 /**

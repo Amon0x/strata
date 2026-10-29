@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <numbers>
 #include <optional>
@@ -881,81 +882,125 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
     // with them through their transparency.
     const auto composite = [&](const std::uint32_t width, const std::uint32_t height,
                                const font::CoveragePoint origin) {
-        const std::size_t pixels = static_cast<std::size_t>(width) * height;
-        std::vector<float> red(pixels, 0.0F);
-        std::vector<float> green(pixels, 0.0F);
-        std::vector<float> blue(pixels, 0.0F);
-        std::vector<float> alpha(pixels, 0.0F);
-        std::vector<float> area(pixels, 0.0F);
+        std::vector<std::uint8_t> texels(static_cast<std::size_t>(width) * height * 4U, 0U);
         const std::vector<Layer>& parts = layers();
-        for (auto layer = parts.rbegin(); layer != parts.rend(); ++layer) {
-            // Only the part of the region the layer's box covers.
-            if (!std::isfinite(layer->left))
+        const auto clamp_to = [](const double value, const std::uint32_t limit) {
+            return static_cast<std::uint32_t>(std::clamp(value, 0.0, static_cast<double>(limit)));
+        };
+        // Each layer's part of the region, and the part any layer reaches: only that is worked.
+        struct Span final {
+            std::uint32_t x0 = 0U;
+            std::uint32_t y0 = 0U;
+            std::uint32_t x1 = 0U;
+            std::uint32_t y1 = 0U;
+        };
+        std::vector<Span> spans(parts.size());
+        Span reach{width, height, 0U, 0U};
+        for (std::size_t index = 0U; index < parts.size(); ++index) {
+            const Layer& layer = parts[index];
+            if (!std::isfinite(layer.left))
                 continue;
-            const auto clamp_to = [](const double value, const std::uint32_t limit) {
-                return static_cast<std::uint32_t>(
-                    std::clamp(value, 0.0, static_cast<double>(limit)));
-            };
-            const std::uint32_t x0 = clamp_to(std::floor(layer->left - origin.x) - 1.0, width);
-            const std::uint32_t y0 = clamp_to(std::floor(layer->top - origin.y) - 1.0, height);
-            const std::uint32_t x1 = clamp_to(std::ceil(layer->right - origin.x) + 1.0, width);
-            const std::uint32_t y1 = clamp_to(std::ceil(layer->bottom - origin.y) + 1.0, height);
-            if (x1 <= x0 || y1 <= y0)
+            Span& span = spans[index];
+            span.x0 = clamp_to(std::floor(layer.left - origin.x) - 1.0, width);
+            span.y0 = clamp_to(std::floor(layer.top - origin.y) - 1.0, height);
+            span.x1 = clamp_to(std::ceil(layer.right - origin.x) + 1.0, width);
+            span.y1 = clamp_to(std::ceil(layer.bottom - origin.y) + 1.0, height);
+            if (span.x1 <= span.x0 || span.y1 <= span.y0)
                 continue;
-            const std::uint32_t span = x1 - x0;
+            reach.x0 = std::min(reach.x0, span.x0);
+            reach.y0 = std::min(reach.y0, span.y0);
+            reach.x1 = std::max(reach.x1, span.x1);
+            reach.y1 = std::max(reach.y1, span.y1);
+        }
+        if (reach.x1 <= reach.x0 || reach.y1 <= reach.y0)
+            return texels;
+        const std::uint32_t reach_width = reach.x1 - reach.x0;
+        // Premultiplied colour, opacity and covered area of each reached pixel.
+        struct Sum final {
+            float red = 0.0F;
+            float green = 0.0F;
+            float blue = 0.0F;
+            float alpha = 0.0F;
+            float area = 0.0F;
+        };
+        std::vector<Sum> sums(static_cast<std::size_t>(reach_width) * (reach.y1 - reach.y0));
+        for (std::size_t index = parts.size(); index-- > 0U;) {
+            const Layer& layer = parts[index];
+            const Span span = spans[index];
+            if (span.x1 <= span.x0 || span.y1 <= span.y0)
+                continue;
+            const std::uint32_t span_width = span.x1 - span.x0;
             const std::optional<std::vector<std::uint8_t>> coverage = font::rasterize_polygons(
-                layer->polygons, span, y1 - y0, layer->even_odd,
-                font::CoveragePoint{origin.x + x0, origin.y + y0});
+                layer.polygons, span_width, span.y1 - span.y0, layer.even_odd,
+                font::CoveragePoint{origin.x + span.x0, origin.y + span.y0});
             if (!coverage.has_value())
                 continue;
-            const Gradient* gradient = layer->paint->gradient();
-            const runtime::ColorValue solid = layer->paint->representative();
-            for (std::uint32_t row = y0; row < y1; ++row) {
-                for (std::uint32_t column = x0; column < x1; ++column) {
-                    const std::size_t at = static_cast<std::size_t>(row) * width + column;
-                    const float covered =
-                        static_cast<float>(
-                            (*coverage)[static_cast<std::size_t>(row - y0) * span + (column - x0)]) /
-                        255.0F;
-                    if (covered <= 0.0F || alpha[at] >= 1.0F)
+            const Gradient* gradient = layer.paint->gradient();
+            const runtime::ColorValue solid = layer.paint->representative();
+            // A solid paint over a pixel it covers whole with nothing yet in front.
+            const float solid_alpha = static_cast<float>(solid.alpha) / 255.0F;
+            const Sum solid_sum{static_cast<float>(solid.red) * solid_alpha,
+                                static_cast<float>(solid.green) * solid_alpha,
+                                static_cast<float>(solid.blue) * solid_alpha, solid_alpha, 1.0F};
+            for (std::uint32_t row = span.y0; row < span.y1; ++row) {
+                const std::uint8_t* covers =
+                    coverage->data() + static_cast<std::size_t>(row - span.y0) * span_width;
+                Sum* line = sums.data() + static_cast<std::size_t>(row - reach.y0) * reach_width +
+                            (span.x0 - reach.x0);
+                for (std::uint32_t column = 0U; column < span_width; ++column) {
+                    if (covers[column] == 0U)
                         continue;
+                    Sum& sum = line[column];
+                    if (sum.area <= 0.0F && covers[column] == 255U && gradient == nullptr) {
+                        sum = solid_sum;
+                        continue;
+                    }
+                    if (sum.alpha >= 1.0F)
+                        continue;
+                    const float covered = static_cast<float>(covers[column]) * (1.0F / 255.0F);
                     runtime::ColorValue paint = solid;
                     if (gradient != nullptr) {
-                        const Point local{(origin.x + column + 0.5 - grid->phase.x) / grid->device_x,
-                                          (origin.y + row + 0.5 - grid->phase.y) / grid->device_y};
+                        const double x = origin.x + span.x0 + column + 0.5;
+                        const double y = origin.y + row + 0.5;
+                        const Point local{(x - grid->phase.x) / grid->device_x,
+                                          (y - grid->phase.y) / grid->device_y};
                         paint = gradient->sample(gradient_parameter(
                             *gradient, Point{local.x / bounds.width, local.y / bounds.height},
                             Size{bounds.width, bounds.height}));
                     }
-                    const float exposed = std::min(covered, 1.0F - area[at]);
+                    const float exposed = std::min(covered, 1.0F - sum.area);
                     const float shared = covered - exposed;
                     const float through =
-                        area[at] > 0.0F ? std::clamp((area[at] - alpha[at]) / area[at], 0.0F, 1.0F)
+                        sum.area > 0.0F ? std::clamp((sum.area - sum.alpha) / sum.area, 0.0F, 1.0F)
                                         : 1.0F;
                     const float weight =
                         static_cast<float>(paint.alpha) / 255.0F * (exposed + shared * through);
-                    red[at] += static_cast<float>(paint.red) * weight;
-                    green[at] += static_cast<float>(paint.green) * weight;
-                    blue[at] += static_cast<float>(paint.blue) * weight;
-                    alpha[at] = std::min(1.0F, alpha[at] + weight);
-                    area[at] = std::min(1.0F, area[at] + exposed);
+                    sum.red += static_cast<float>(paint.red) * weight;
+                    sum.green += static_cast<float>(paint.green) * weight;
+                    sum.blue += static_cast<float>(paint.blue) * weight;
+                    sum.alpha = std::min(1.0F, sum.alpha + weight);
+                    sum.area = std::min(1.0F, sum.area + exposed);
                 }
             }
         }
-        std::vector<std::uint8_t> texels(pixels * 4U, 0U);
-        for (std::size_t at = 0U; at < pixels; ++at) {
-            const float covered = alpha[at];
-            if (covered <= 0.0F)
-                continue;
-            const auto channel = [covered](const float premultiplied) {
-                return static_cast<std::uint8_t>(
-                    std::clamp(premultiplied / covered + 0.5F, 0.0F, 255.0F));
-            };
-            std::uint8_t* texel = texels.data() + at * 4U;
-            texel[0] = channel(red[at]);
-            texel[1] = channel(green[at]);
-            texel[2] = channel(blue[at]);
-            texel[3] = static_cast<std::uint8_t>(std::clamp(covered * 255.0F + 0.5F, 0.0F, 255.0F));
+        for (std::uint32_t row = reach.y0; row < reach.y1; ++row) {
+            const Sum* line = sums.data() + static_cast<std::size_t>(row - reach.y0) * reach_width;
+            std::uint8_t* texel =
+                texels.data() + (static_cast<std::size_t>(row) * width + reach.x0) * 4U;
+            for (std::uint32_t column = 0U; column < reach_width; ++column, texel += 4) {
+                const Sum& sum = line[column];
+                if (sum.alpha <= 0.0F)
+                    continue;
+                const float scale = 1.0F / sum.alpha;
+                const auto channel = [scale](const float premultiplied) {
+                    return static_cast<std::uint8_t>(
+                        std::clamp(premultiplied * scale + 0.5F, 0.0F, 255.0F));
+                };
+                texel[0] = channel(sum.red);
+                texel[1] = channel(sum.green);
+                texel[2] = channel(sum.blue);
+                texel[3] = static_cast<std::uint8_t>(std::clamp(sum.alpha * 255.0F + 0.5F, 0.0F, 255.0F));
+            }
         }
         return texels;
     };
@@ -2156,8 +2201,10 @@ std::optional<std::vector<std::size_t>> replan_ranges(
     const TextEngine* const text_engine,
     const SubmissionContext& context,
     RenderSubmission& telemetry,
-    PreparationCache& cache
+    PreparationCache& cache,
+    bool& resized
 ) {
+    resized = false;
     const std::vector<RenderCommand>& stream = commands.commands();
     const std::vector<bool> visible_text = visible_text_commands(commands, context);
     // Text in the ranges is prepared as the full plan would: a run keeps its prepared glyphs
@@ -2212,6 +2259,8 @@ std::optional<std::vector<std::size_t>> replan_ranges(
     struct Replanned final {
         std::vector<PlannedItem> items;
         std::vector<CommandPlan> plans;
+        /** A lone draw whose items changed in number. */
+        bool resized = false;
     };
     std::vector<Replanned> replanned;
     replanned.reserve(ranges.size());
@@ -2232,7 +2281,13 @@ std::optional<std::vector<std::size_t>> replan_ranges(
             planner.step(index, stream[index]);
             plan.item_count = next.items.size() - first_item;
             plan.skipped_draws = skipped_draws - skipped_before;
-            if (plan.item_count != previous.item_count) return std::nullopt;
+            if (plan.item_count != previous.item_count) {
+                // Only a lone draw may: its items are all draws, and none of a scope's batches
+                // move under it.
+                if (range.first != range.last || !draw_command(stream[index]))
+                    return std::nullopt;
+                next.resized = true;
+            }
             skipped_delta_added += plan.skipped_draws;
             skipped_delta_removed += previous.skipped_draws;
             next.plans.push_back(std::move(plan));
@@ -2245,6 +2300,15 @@ std::optional<std::vector<std::size_t>> replan_ranges(
     std::vector<std::size_t> changed_items;
     for (std::size_t range_index = 0U; range_index < ranges.size(); ++range_index) {
         const Replanned& next = replanned[range_index];
+        if (next.resized) {
+            if (!std::ranges::all_of(next.items, [](const PlannedItem& item) {
+                    return std::holds_alternative<PreparedDraw>(item.value);
+                })) {
+                return std::nullopt;
+            }
+            resized = true;
+            continue;
+        }
         const std::size_t first_item = cache.command_plans[ranges[range_index].first].first_item;
         for (std::size_t offset = 0U; offset < next.items.size(); ++offset) {
             const PlannedItem& previous = cache.planned_items[first_item + offset];
@@ -2261,15 +2325,47 @@ std::optional<std::vector<std::size_t>> replan_ranges(
             if (*draw != *previous_draw) changed_items.push_back(first_item + offset);
         }
     }
-    for (std::size_t range_index = 0U; range_index < ranges.size(); ++range_index) {
-        Replanned& next = replanned[range_index];
-        const CommandRange& range = ranges[range_index];
-        const std::size_t first_item = cache.command_plans[range.first].first_item;
-        for (std::size_t offset = 0U; offset < next.items.size(); ++offset) {
-            cache.planned_items[first_item + offset] = std::move(next.items[offset]);
+    if (resized) {
+        // Splice: the items between the ranges stay, each range's items replace its old ones,
+        // and every command's first item follows from the counts before it.
+        std::vector<PlannedItem> items;
+        items.reserve(cache.planned_items.size());
+        std::size_t cursor = 0U;
+        for (std::size_t range_index = 0U; range_index < ranges.size(); ++range_index) {
+            Replanned& next = replanned[range_index];
+            const CommandRange& range = ranges[range_index];
+            const std::size_t first_item = cache.command_plans[range.first].first_item;
+            std::size_t old_count = 0U;
+            for (std::size_t index = range.first; index <= range.last; ++index)
+                old_count += cache.command_plans[index].item_count;
+            std::move(cache.planned_items.begin() + static_cast<std::ptrdiff_t>(cursor),
+                      cache.planned_items.begin() + static_cast<std::ptrdiff_t>(first_item),
+                      std::back_inserter(items));
+            std::move(next.items.begin(), next.items.end(), std::back_inserter(items));
+            cursor = first_item + old_count;
+            for (std::size_t offset = 0U; offset < next.plans.size(); ++offset)
+                cache.command_plans[range.first + offset] = std::move(next.plans[offset]);
         }
-        for (std::size_t offset = 0U; offset < next.plans.size(); ++offset) {
-            cache.command_plans[range.first + offset] = std::move(next.plans[offset]);
+        std::move(cache.planned_items.begin() + static_cast<std::ptrdiff_t>(cursor),
+                  cache.planned_items.end(), std::back_inserter(items));
+        cache.planned_items = std::move(items);
+        std::size_t running = 0U;
+        for (CommandPlan& plan : cache.command_plans) {
+            plan.first_item = running;
+            running += plan.item_count;
+        }
+        changed_items.clear();
+    } else {
+        for (std::size_t range_index = 0U; range_index < ranges.size(); ++range_index) {
+            Replanned& next = replanned[range_index];
+            const CommandRange& range = ranges[range_index];
+            const std::size_t first_item = cache.command_plans[range.first].first_item;
+            for (std::size_t offset = 0U; offset < next.items.size(); ++offset) {
+                cache.planned_items[first_item + offset] = std::move(next.items[offset]);
+            }
+            for (std::size_t offset = 0U; offset < next.plans.size(); ++offset) {
+                cache.command_plans[range.first + offset] = std::move(next.plans[offset]);
+            }
         }
     }
     telemetry.skipped_draws = telemetry.skipped_draws + skipped_delta_added -

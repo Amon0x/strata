@@ -1021,8 +1021,40 @@ void append_stroke_run(std::vector<PathContour>& regions, const std::vector<Poin
             const Vector outgoing = heading[joint];
             const Vector before = perpendicular(incoming) * half_width;
             const Vector after = perpendicular(outgoing) * half_width;
-            contour.push_back(pivot + before);
             const double turn = cross(incoming, outgoing);
+            // A slight bend, as along a densely flattened curve: the side's two offset edges meet
+            // at one point. On the inner side that point is the union's own corner, when it lies
+            // within both segments; on the outer side it strays from the join by under the
+            // flattening tolerance. One point instead of the join's arc and the pivot's detour.
+            if (const std::optional<Vector> bisector = normalized(before + after);
+                tolerance > 0.0 && bisector.has_value() && dot(incoming, outgoing) > 0.0) {
+                const double cosine = dot(*bisector, before) / half_width;
+                const double corner = half_width / cosine;
+                bool single = false;
+                if (turn > 0.0) {
+                    const double intrusion =
+                        half_width * std::sqrt(std::max(0.0, 1.0 - cosine * cosine)) / cosine;
+                    single = intrusion * 2.0 <= length(pivot - along[joint - 1U]) &&
+                             intrusion * 2.0 <= length(along[joint + 1U] - pivot);
+                } else {
+                    switch (style.join) {
+                    case PathJoin::round:
+                        single = corner - half_width <= tolerance;
+                        break;
+                    case PathJoin::miter:
+                        single = 1.0 / cosine <= style.miter_limit;
+                        break;
+                    case PathJoin::bevel:
+                        single = corner - half_width * cosine <= tolerance;
+                        break;
+                    }
+                }
+                if (single) {
+                    contour.push_back(pivot + *bisector * corner);
+                    continue;
+                }
+            }
+            contour.push_back(pivot + before);
             if (std::abs(turn) <= geometry_epsilon && dot(incoming, outgoing) > 0.0)
                 continue;
             if (turn > 0.0) {

@@ -252,12 +252,19 @@ int main(int argc, char** argv) {
         Phase draw_settle{"draw tab (settle)", {}};
         driver.click(draw, draw_open, draw_settle, 30);
         Phase drawing{"draw tab (animating)", {}};
+        Phase slow{"draw tab (frames over 5 ms)", {}};
         for (int index = 0; index < 240 * scale; ++index) {
             drawing.frames.push_back(driver.frame());
             attribute(host, drawing);
+            if (drawing.frames.back() > 5.0) {
+                slow.frames.push_back(drawing.frames.back());
+                attribute(host, slow);
+            }
         }
         report(drawing);
         breakdown(drawing);
+        report(slow);
+        breakdown(slow);
         host.close();
         return 0;
     } catch (const std::exception& error) {

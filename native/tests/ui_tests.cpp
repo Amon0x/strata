@@ -451,6 +451,67 @@ void test_bundled_font_metrics(const std::filesystem::path& resource_root) {
     }
 }
 
+void test_full_mask_atlas_reuses_a_page_of_the_other_kind() {
+    // Two pages: one of coverage masks nothing draws any more, one of colour pictures in use. A
+    // new colour picture remakes the coverage page as a colour one; the atlas never starts over.
+    strata::font::GlyphAtlasConfig config;
+    config.page_size = 64U;
+    config.maximum_pages = 2U;
+    config.filtered_coverage = true;
+    strata::font::GlyphAtlas atlas("ui-test-mask-page-kinds", config);
+    const auto mask = [](const strata::font::GlyphRasterMode mode) {
+        return [mode]() -> std::optional<strata::font::GlyphRasterBitmap> {
+            strata::font::GlyphRasterBitmap bitmap;
+            bitmap.width = 60U;
+            bitmap.height = 60U;
+            bitmap.mode = mode;
+            bitmap.bytes.assign(60U * 60U * (mode == strata::font::GlyphRasterMode::msdf ? 4U : 1U),
+                                255U);
+            bitmap.plane_bounds_layout_pixels = strata::font::RasterPlaneBounds{0.0, 60.0, 60.0, 0.0};
+            return bitmap;
+        };
+    };
+    using strata::font::GlyphRasterMode;
+    static_cast<void>(atlas.begin_frame_preparation());
+    atlas.retain_pages({});
+    const auto coverage = atlas.request_mask("coverage", mask(GlyphRasterMode::coverage));
+    const auto colour = atlas.request_mask("colour", mask(GlyphRasterMode::msdf), GlyphRasterMode::msdf);
+    atlas.end_frame_preparation();
+    check(coverage.has_value() && colour.has_value() && coverage->texture != colour->texture,
+          "mask atlas did not give each kind its own page");
+    static_cast<void>(atlas.take_operations());
+    const std::uint64_t generation = atlas.generation();
+
+    static_cast<void>(atlas.begin_frame_preparation());
+    const std::vector<std::string> drawn{colour->texture};
+    atlas.retain_pages(drawn);
+    const auto next = atlas.request_mask("next colour", mask(GlyphRasterMode::msdf),
+                                         GlyphRasterMode::msdf);
+    bool rasterized_again = false;
+    const auto kept = atlas.request_mask(
+        "colour",
+        [&]() -> std::optional<strata::font::GlyphRasterBitmap> {
+            rasterized_again = true;
+            return std::nullopt;
+        },
+        GlyphRasterMode::msdf);
+    atlas.end_frame_preparation();
+    check(atlas.generation() == generation,
+          "full mask atlas started over instead of remaking a page nothing draws from");
+    check(next.has_value() && next->mode == GlyphRasterMode::msdf &&
+              next->texture != colour->texture && next->texture != coverage->texture,
+          "full mask atlas did not remake the free page as a colour page");
+    check(kept.has_value() && !rasterized_again && kept->texture == colour->texture,
+          "remaking a free page lost a mask still in use");
+    const std::vector<strata::font::AtlasOperation> operations = atlas.take_operations();
+    check(operations.size() >= 2U &&
+              operations[0].kind == strata::font::AtlasOperationKind::release &&
+              operations[0].texture == coverage->texture &&
+              operations[1].kind == strata::font::AtlasOperationKind::create &&
+              operations[1].texture == next->texture,
+          "remade mask page did not release the old texture before creating its new one");
+}
+
 void test_svg_image_projection_and_compound_fill() {
     using namespace strata::ui;
     const strata::svg::Document document = strata::svg::parse(R"SVG(
@@ -1180,8 +1241,9 @@ void test_render_submission_changed_draws_match_full_plan(
               "updating only the changed draws made a different submission from a full plan "
               "(frame " + std::to_string(index) + ")");
     }
-    // Only the label leaving its clip and coming back change item counts and plan fully.
-    check(fast_cache.changed_draw_update_count == frames.size() - 3U,
+    // Every frame after the first updates in place, even the label leaving its clip and coming
+    // back, which changes its number of items.
+    check(fast_cache.changed_draw_update_count == frames.size() - 1U,
           "a stream changing a few draws or scopes was planned in full");
 }
 
@@ -8517,6 +8579,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_gradient_paint_authoring_and_tessellation();
         test_vector_shape_tessellation();
         test_svg_image_projection_and_compound_fill();
+        test_full_mask_atlas_reuses_a_page_of_the_other_kind();
         test_render_submission_opacity_scope_reuse();
         test_presentation_group_animation();
         test_rotating_presentation_group();

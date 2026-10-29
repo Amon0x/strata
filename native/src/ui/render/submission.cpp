@@ -65,6 +65,35 @@ namespace {
  * except a few draws, so every other command's items, placements and batches stand. False,
  * leaving the full plan to run, when the stream or the text atlas moved on in any other way.
  */
+/**
+ * Tells the shape atlas which pages the planned draws use, leaving out the items of `skipped`
+ * command ranges: their draws are planned again, so their old masks may go.
+ */
+void retain_drawn_pages(PreparationCache& cache, const std::span<const CommandRange> skipped) {
+    std::vector<std::string> drawn;
+    const auto retain = [&](const std::size_t first, const std::size_t last) {
+        for (std::size_t index = first; index < last; ++index) {
+            const auto* draw = std::get_if<PreparedDraw>(&cache.planned_items[index].value);
+            if (draw == nullptr)
+                continue;
+            if (const auto* mask = std::get_if<PreparedMaskPtr>(&draw->command);
+                mask != nullptr && *mask != nullptr &&
+                std::ranges::find(drawn, (*mask)->texture) == drawn.end()) {
+                drawn.push_back((*mask)->texture);
+            }
+        }
+    };
+    std::size_t cursor = 0U;
+    for (const CommandRange& range : skipped) {
+        const CommandPlan& first = cache.command_plans[range.first];
+        const CommandPlan& last = cache.command_plans[range.last];
+        retain(cursor, first.first_item);
+        cursor = last.first_item + last.item_count;
+    }
+    retain(cursor, cache.planned_items.size());
+    cache.shape_atlas->retain_pages(drawn);
+}
+
 [[nodiscard]] bool update_changed_draws(
     const RenderCommandBuffer& commands,
     font::GlyphAtlas& glyph_atlas,
@@ -113,6 +142,9 @@ namespace {
         covered = range.last + 1U;
     }
     if (ranges.empty()) return false;
+    // The changed draws' masks are about to be replaced: only the unchanged draws' pages stay.
+    if (cache.shape_atlas != nullptr)
+        retain_drawn_pages(cache, ranges);
 
     output.planning_nanos = 0;
     output.atlas_warmup_nanos = 0;
@@ -123,8 +155,9 @@ namespace {
     const auto planning_started = std::chrono::steady_clock::now();
     const std::uint64_t shape_generation =
         cache.shape_atlas != nullptr ? cache.shape_atlas->generation() : 0U;
-    const std::optional<std::vector<std::size_t>> changed_items =
-        replan_ranges(commands, ranges, glyph_atlas, text_engine, context, output, cache);
+    bool resized = false;
+    const std::optional<std::vector<std::size_t>> changed_items = replan_ranges(
+        commands, ranges, glyph_atlas, text_engine, context, output, cache, resized);
     if (!changed_items.has_value()) return false;
     // A shape atlas that recycled while these draws planned released every mask the unchanged
     // draws use too: the whole stream plans again.
@@ -136,12 +169,12 @@ namespace {
     const auto encoding_started = std::chrono::steady_clock::now();
     output.vertex_patches.clear();
     output.index_patches.clear();
-    if (encode_changed_draws(*changed_items, context, output, cache)) {
+    if (!resized && encode_changed_draws(*changed_items, context, output, cache)) {
         output.topology_change = SubmissionTopologyChange::none;
         output.topology_change_item = 0U;
     } else {
-        // A draw changed batch (a moved subtree's scissors) or outgrew its slot: encode the
-        // items again, as a full update would after its plan.
+        // A draw changed batch (a moved subtree's scissors), outgrew its slot or changed its
+        // number of items: encode the items again, as a full update would after its plan.
         output.planned_draws = 0U;
         output.texture_batch_breaks = 0U;
         output.clip_batch_breaks = 0U;
@@ -241,18 +274,7 @@ void update_cached(
         preparation.shapes = cache.shape_atlas;
         // The pages the current plan draws from stay; a full atlas reuses another page rather
         // than recycling them all, which would plan every draw again.
-        std::vector<std::string> drawn;
-        for (const PlannedItem& item : cache.planned_items) {
-            const auto* draw = std::get_if<PreparedDraw>(&item.value);
-            if (draw == nullptr)
-                continue;
-            if (const auto* mask = std::get_if<PreparedMaskPtr>(&draw->command);
-                mask != nullptr && *mask != nullptr &&
-                std::ranges::find(drawn, (*mask)->texture) == drawn.end()) {
-                drawn.push_back((*mask)->texture);
-            }
-        }
-        cache.shape_atlas->retain_pages(drawn);
+        retain_drawn_pages(cache, {});
     }
     if (update_changed_draws(commands, glyph_atlas, text_engine, context, cache, output)) return;
     output.planned_draws = 0U;

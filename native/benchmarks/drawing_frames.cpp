@@ -120,7 +120,7 @@ struct Workload final {
     {
         std::string commands = "M 0.02 0.5";
         for (int index = 1; index <= 2'000; ++index) {
-            const double t = static_cast<double>(index) / 5999.0;
+            const double t = static_cast<double>(index) / 2'000.0;
             const double angle = t * std::numbers::pi * 2.0 * 7.0;
             const double radius = 0.25 + 0.2 * std::sin(t * std::numbers::pi * 2.0 * 23.0);
             commands += " L " + std::to_string(0.5 + radius * std::cos(angle) * (0.4 + t * 0.6)) +
@@ -138,6 +138,71 @@ struct Workload final {
             1.0,
         });
     }
+
+    // The showcase's morphing tiles, their numbers changing every frame as they do mid-morph.
+    {
+        std::string body = "    Draw(layout: { width: 220, height: 220, placement: { x: 40, y: 40 } }, "
+                           "shapes: [\n";
+        const char* const colours[] = {"#5AA0F8", "#F59E0B", "#22C55E", "#7DB8FF",
+                                       "#3B82F6", "#FBBF24", "#4ADE80", "#A78BFA"};
+        for (int index = 0; index < 8; ++index) {
+            const bool inner = index < 3;
+            body += std::string("      { kind: \"sector\", center: { x: 0.5, y: 0.5 }, radius: ") +
+                    (inner ? "0.3, innerRadius: 0.13" : "0.47, innerRadius: 0.3") +
+                    ", start: bench.start[" + std::to_string(index) + "], sweep: bench.sweep[" +
+                    std::to_string(index) + "], fill: " + colours[index] + " },\n";
+        }
+        body += "    ])\n";
+        result.push_back(Workload{
+            "sunburst morphing",
+            std::move(body),
+            [](const int frame) {
+                JsonValue::Array starts;
+                JsonValue::Array sweeps;
+                const double wobble = std::sin(static_cast<double>(frame) * 0.07) * 30.0;
+                for (const auto& ring : {std::vector<double>{150.0 + wobble, 120.0, 90.0 - wobble},
+                                         std::vector<double>{80.0, 60.0 + wobble, 90.0, 70.0 - wobble, 60.0}}) {
+                    double start = -90.0;
+                    for (const double sweep : ring) {
+                        starts.push_back(number(start));
+                        sweeps.push_back(number(sweep));
+                        start += sweep;
+                    }
+                }
+                return bench({{"start", JsonValue(std::move(starts))}, {"sweep", JsonValue(std::move(sweeps))}});
+            },
+            1.5,
+        });
+    }
+    result.push_back(Workload{
+        "gradient gauge morphing",
+        "    Draw(layout: { width: 220, height: 220, placement: { x: 40, y: 40 } }, shapes: [\n"
+        "      { kind: \"arc\", center: { x: 0.5, y: 0.5 }, radius: 0.38, start: 135, sweep: 270, stroke: #1E2738, strokeStyle: { width: 18, cap: \"round\" } },\n"
+        "      { kind: \"arc\", center: { x: 0.5, y: 0.5 }, radius: 0.38, start: 135, sweep: bench.sweep, stroke: { kind: \"linear\", from: { x: 0.1, y: 0.5 }, to: { x: 0.9, y: 0.5 }, stops: [{ offset: 0, color: #22D3EE }, { offset: 0.5, color: #818CF8 }, { offset: 1, color: #F472B6 }] }, strokeStyle: { width: 18, cap: \"round\" } }\n"
+        "    ])\n",
+        [](const int frame) {
+            return bench({{"sweep", number(40.0 + std::fmod(static_cast<double>(frame) * 2.0, 220.0))}});
+        },
+        1.0,
+    });
+    result.push_back(Workload{
+        "gradient blob morphing",
+        "    Draw(layout: { width: 220, height: 220, placement: { x: 40, y: 40 } }, shapes: [\n"
+        "      { kind: \"polygon\", points: bench.blob, fill: { kind: \"radial\", center: { x: 0.42, y: 0.38 }, radius: 0.55, stops: [{ offset: 0, color: #FDE68A }, { offset: 0.45, color: #F472B6 }, { offset: 1, color: #6D28D9 }] }, stroke: #FFFFFF99, strokeStyle: { width: 2, join: \"round\" } }\n"
+        "    ])\n",
+        [](const int frame) {
+            JsonValue::Array points;
+            const double seed = static_cast<double>(frame) * 0.05;
+            for (int index = 0; index < 14; ++index) {
+                const double angle = 2.0 * std::numbers::pi * index / 14.0;
+                const double radius = 0.3 + 0.12 * std::sin(angle * 3.0 + seed) + 0.05 * std::cos(angle * 5.0 - seed);
+                points.push_back(JsonValue(JsonValue::Object{{"x", number(0.5 + std::cos(angle) * radius)},
+                                                             {"y", number(0.5 + std::sin(angle) * radius)}}));
+            }
+            return bench({{"blob", JsonValue(std::move(points))}});
+        },
+        1.0,
+    });
     return result;
 }
 

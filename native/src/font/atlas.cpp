@@ -794,22 +794,51 @@ std::optional<GlyphAtlas::Allocation> GlyphAtlas::reuse_unretained_page(
     const std::uint32_t width, const std::uint32_t height, const GlyphRasterMode mode) {
     if (!retention_known_ || !frame_preparation_active_)
         return std::nullopt;
-    for (Page& page : pages_) {
-        if (page.mode != mode || page.used_preparation == preparation_serial_ ||
-            retained_pages_.contains(page.texture)) {
-            continue;
+    // A page of the wanted kind first; then one of the other kind, made again as this kind, so a
+    // frame that swaps coverage masks for colour pictures still never empties the whole atlas.
+    for (const bool same_mode : {true, false}) {
+        for (Page& page : pages_) {
+            if ((page.mode == mode) != same_mode || page.used_preparation == preparation_serial_ ||
+                retained_pages_.contains(page.texture)) {
+                continue;
+            }
+            // Nothing drawn uses it: forget what it held and pack from its corner again. Its old
+            // texels stay until overwritten; no entry reaches them.
+            std::erase_if(cache_, [&page](const auto& entry) {
+                return entry.second.texture == page.texture;
+            });
+            if (!same_mode) {
+                operations_.push_back(AtlasOperation{
+                    AtlasOperationKind::release,
+                    page.texture,
+                    format_for(page.mode, config_.filtered_coverage),
+                    {},
+                    {},
+                });
+                page.texture = "strata:native-font-atlas/" + owner_token_ + "/" +
+                               std::to_string(generation_) + "/" + std::to_string(page.index) +
+                               "/" + std::to_string(preparation_serial_) +
+                               (mode == GlyphRasterMode::coverage ? "/coverage" : "/msdf");
+                page.mode = mode;
+                page.pixels.assign(static_cast<std::size_t>(config_.page_size) *
+                                       config_.page_size * bytes_per_pixel(mode),
+                                   0U);
+                page.dirty.reset();
+                operations_.push_back(AtlasOperation{
+                    AtlasOperationKind::create,
+                    page.texture,
+                    format_for(mode, config_.filtered_coverage),
+                    AtlasPixelRect{0U, 0U, config_.page_size, config_.page_size},
+                    {},
+                });
+            }
+            page.next_x = 0U;
+            page.next_y = 0U;
+            page.row_height = 0U;
+            std::optional<Allocation> allocation = allocate(width, height, mode);
+            if (allocation.has_value())
+                return allocation;
         }
-        // Nothing drawn uses it: forget what it held and pack from its corner again. Its old
-        // texels stay until overwritten; no entry reaches them.
-        std::erase_if(cache_, [&page](const auto& entry) {
-            return entry.second.texture == page.texture;
-        });
-        page.next_x = 0U;
-        page.next_y = 0U;
-        page.row_height = 0U;
-        std::optional<Allocation> allocation = allocate(width, height, mode);
-        if (allocation.has_value())
-            return allocation;
     }
     return std::nullopt;
 }
