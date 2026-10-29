@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -58,7 +60,26 @@ struct WindowApplication final {
     strata::desktop::win32::WindowInputState input;
     /** Where this window's bounds are remembered; empty for benchmark and hidden windows. */
     std::filesystem::path placement_path;
+    /** The id documents name this window by in window.close; "main" for the first. */
+    std::string window_id;
+    /** Opened by a document (window.open): closing it never ends the application. */
+    bool child = false;
     bool registered = false;
+
+    [[nodiscard]] std::vector<strata::desktop::WindowRequest> take_window_requests() {
+        if (host != nullptr)
+            return host->take_window_requests();
+        if (application_host != nullptr)
+            return application_host->take_window_requests();
+        return {};
+    }
+
+    void answer_window_request(const strata::desktop::WindowRequest& request, std::string json) {
+        if (host != nullptr)
+            host->answer_window_request(request, std::move(json));
+        else if (application_host != nullptr)
+            application_host->answer_window_request(request, std::move(json));
+    }
 
     void remember_placement() const noexcept {
         if (!placement_path.empty())
@@ -256,11 +277,13 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
             return 0;
         case WM_DESTROY:
             app->reset_host();
+            // The application lasts as long as a window it began with; the ones its documents
+            // opened close with it.
             if (app->registered) {
                 app->registered = false;
-                if (active_window_count > 0U)
+                if (!app->child && active_window_count > 0U)
                     --active_window_count;
-                if (active_window_count == 0U)
+                if (!app->child && active_window_count == 0U)
                     PostQuitMessage(0);
             }
             return 0;
@@ -275,6 +298,122 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
         app->failed(std::runtime_error("the desktop window procedure failed"));
         return 0;
     }
+}
+
+[[nodiscard]] std::string answer_json(strata::data::JsonValue::Object fields) {
+    return strata::data::encode_canonical_json(strata::data::JsonValue(std::move(fields)));
+}
+
+/** What a desktop application's windows have in common, for the ones its documents open. */
+struct WindowDefaults final {
+    bool vsync = true;
+    bool performance = false;
+    /** Registers actions and publishes snapshots on an application window's host. */
+    std::function<void(strata::desktop::ApplicationHost&)> configure_application;
+};
+
+/** Opens the window `request` asks `parent` for, answering with { id, opened }. */
+[[nodiscard]] std::string open_window(std::vector<std::unique_ptr<WindowApplication>>& applications,
+                                      WindowApplication& parent,
+                                      const strata::desktop::WindowRequest& request,
+                                      const WindowDefaults& defaults) {
+    using strata::data::JsonValue;
+    for (const auto& existing : applications) {
+        if (existing->window_id == request.id && existing->has_host()) {
+            // One window per id: asking again brings it forward.
+            ShowWindow(existing->window_handle,
+                       IsIconic(existing->window_handle) ? SW_RESTORE : SW_SHOW);
+            SetForegroundWindow(existing->window_handle);
+            return answer_json({{"existing", JsonValue(true)},
+                                {"id", JsonValue(request.id)},
+                                {"opened", JsonValue(false)}});
+        }
+    }
+    // Sizes are device-independent, at the DPI of the window that asked.
+    const UINT dpi = std::max(GetDpiForWindow(parent.window_handle), 96U);
+    const double scale = static_cast<double>(dpi) / 96.0;
+    constexpr DWORD window_style = WS_OVERLAPPEDWINDOW;
+    RECT bounds{0, 0, static_cast<LONG>(std::lround(request.width.value_or(800.0) * scale)),
+                static_cast<LONG>(std::lround(request.height.value_or(600.0) * scale))};
+    AdjustWindowRectExForDpi(&bounds, window_style, FALSE, 0U, dpi);
+    RECT parent_bounds{};
+    GetWindowRect(parent.window_handle, &parent_bounds);
+    const int x = request.x.has_value() ? static_cast<int>(std::lround(*request.x * scale))
+                                        : parent_bounds.left + static_cast<int>(48.0 * scale);
+    const int y = request.y.has_value() ? static_cast<int>(std::lround(*request.y * scale))
+                                        : parent_bounds.top + static_cast<int>(48.0 * scale);
+    auto app = std::make_unique<WindowApplication>();
+    app->window_id = request.id;
+    app->child = true;
+    const std::wstring title = utf8_to_wide(request.title.empty() ? request.root : request.title);
+    const HWND window = CreateWindowExW(0U, window_class_name, title.c_str(), window_style, x, y,
+                                        bounds.right - bounds.left, bounds.bottom - bounds.top,
+                                        nullptr, nullptr, GetModuleHandleW(nullptr), app.get());
+    if (window == nullptr) {
+        return answer_json({{"error", JsonValue("the window could not be created")},
+                            {"id", JsonValue(request.id)},
+                            {"opened", JsonValue(false)}});
+    }
+    app->window_handle = window;
+    try {
+        if (parent.host != nullptr) {
+            app->host = parent.host->open_window(window, request);
+        } else if (parent.application_host != nullptr) {
+            app->application_host = parent.application_host->open_window(
+                window, request, strata::desktop::ApplicationOptions{.vsync = defaults.vsync});
+            if (defaults.configure_application)
+                defaults.configure_application(*app->application_host);
+            app->application_host->activate();
+        }
+    } catch (const std::exception& error) {
+        app->reset_host();
+        DestroyWindow(window);
+        return answer_json({{"error", JsonValue(std::string(error.what()))},
+                            {"id", JsonValue(request.id)},
+                            {"opened", JsonValue(false)}});
+    }
+    app->registered = true;
+    ShowWindow(window, defaults.performance ? SW_SHOWNOACTIVATE : SW_SHOW);
+    UpdateWindow(window);
+    applications.push_back(std::move(app));
+    return answer_json({{"id", JsonValue(request.id)}, {"opened", JsonValue(true)}});
+}
+
+/**
+ * Opens and closes the windows documents asked for since the last frame, and forgets windows
+ * that have closed since.
+ */
+void serve_window_requests(std::vector<std::unique_ptr<WindowApplication>>& applications,
+                           const WindowDefaults& defaults) {
+    using strata::data::JsonValue;
+    using Kind = strata::desktop::WindowRequest::Kind;
+    // Opening appends to `applications`, so the askers are gathered first.
+    std::vector<std::pair<WindowApplication*, strata::desktop::WindowRequest>> asked;
+    for (const auto& app : applications) {
+        for (strata::desktop::WindowRequest& request : app->take_window_requests())
+            asked.emplace_back(app.get(), std::move(request));
+    }
+    for (auto& [asker, request] : asked) {
+        std::string answer;
+        if (request.kind == Kind::open) {
+            answer = open_window(applications, *asker, request, defaults);
+        } else {
+            bool closed = false;
+            for (const auto& app : applications) {
+                if (app->window_id == request.id && app->has_host()) {
+                    PostMessageW(app->window_handle, WM_CLOSE, 0, 0);
+                    closed = true;
+                }
+            }
+            answer = answer_json({{"closed", JsonValue(closed)}, {"id", JsonValue(request.id)}});
+        }
+        if (asker->has_host())
+            asker->answer_window_request(request, std::move(answer));
+    }
+    std::erase_if(applications, [](const std::unique_ptr<WindowApplication>& app) {
+        return app->child && !app->has_host() &&
+               (app->window_handle == nullptr || !IsWindow(app->window_handle));
+    });
 }
 
 [[nodiscard]] std::filesystem::path default_resource_root() {
@@ -413,6 +552,31 @@ int wmain(const int argument_count, wchar_t** const arguments) {
             throw std::runtime_error("could not register the native desktop window class");
         }
 
+        // Every window of a manifest application, the ones its documents open too, answers the
+        // manifest's actions and shows its snapshots.
+        WindowDefaults window_defaults{
+            .vsync = !uncapped && !headless,
+            .performance = performance,
+            .configure_application =
+                [&application_launch](strata::desktop::ApplicationHost& application) {
+                    if (!application_launch.has_value())
+                        return;
+                    for (const std::string& action_id : application_launch->actions) {
+                        application.bindings().on(
+                            action_id, [](const strata::host::ActionEvent& event) {
+                                std::cout << "STRATA ACTION " << event.id
+                                          << " payload=" << event.payload.json() << '\n';
+                                return strata::host::ActionResult::handled;
+                            });
+                    }
+                    for (const strata::headless::SnapshotConfig& snapshot :
+                         application_launch->snapshots) {
+                        application.publish(
+                            snapshot.id, strata::host::Value::parse(
+                                             strata::data::encode_canonical_json(snapshot.values)));
+                    }
+                },
+        };
         strata::desktop::PerformanceStartup performance_startup;
         if (performance)
             performance_startup.started_at = std::chrono::steady_clock::now();
@@ -421,6 +585,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         applications.reserve(window_count);
         for (std::size_t index = 0U; index < window_count; ++index) {
             auto app = std::make_unique<WindowApplication>();
+            app->window_id = index == 0U ? "main" : "window-" + std::to_string(index);
             const std::wstring application_title = application_launch.has_value()
                                                        ? utf8_to_wide(launch_manifest->title)
                                                        : std::wstring{};
@@ -537,20 +702,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                             .vsync = !uncapped && !headless,
                             .asynchronous_shader_compilation = !watch,
                         });
-                    for (const std::string& action_id : application_launch->actions) {
-                        app->application_host->bindings().on(
-                            action_id, [](const strata::host::ActionEvent& event) {
-                                std::cout << "STRATA ACTION " << event.id
-                                          << " payload=" << event.payload.json() << '\n';
-                                return strata::host::ActionResult::handled;
-                            });
-                    }
-                    for (const strata::headless::SnapshotConfig& snapshot :
-                         application_launch->snapshots) {
-                        app->application_host->publish(
-                            snapshot.id, strata::host::Value::parse(
-                                             strata::data::encode_canonical_json(snapshot.values)));
-                    }
+                    window_defaults.configure_application(*app->application_host);
                     app->application_host->activate();
                     if (watch) {
                         app->preview = std::make_unique<strata::desktop::PreviewSession>(
@@ -606,13 +758,19 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                 throw std::runtime_error(
                     "could not make the performance window foreground; no objective run was made");
             }
-            auto pump_messages = [&applications, &exit_code]() {
-                MSG message{};
+            // The scenario frames the first window; the pump frames any its documents opened.
+            WindowApplication* const measured = applications.front().get();
+            auto pump_messages = [&applications, &exit_code, &window_defaults, measured]() {
                 if (!dispatch_pending_messages(exit_code))
                     return false;
-                return std::ranges::all_of(applications, [](const auto& app) {
-                    return app->failure.empty() && app->host != nullptr;
-                });
+                for (const auto& app : applications) {
+                    if (app.get() != measured && app->has_host() && app->failure.empty())
+                        app->frame();
+                }
+                serve_window_requests(applications, window_defaults);
+                return measured->host != nullptr &&
+                       std::ranges::all_of(applications,
+                                           [](const auto& app) { return app->failure.empty(); });
             };
             strata::desktop::PerformanceRunner runner(applications.front()->window_handle,
                                                       *applications.front()->host,
@@ -651,6 +809,8 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                     break;
                 }
             }
+            if (running)
+                serve_window_requests(applications, window_defaults);
             if (show_frame_time && running) {
                 ++frame_time_window_frames;
                 const auto now = std::chrono::steady_clock::now();
@@ -704,6 +864,11 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                 static_cast<void>(MsgWaitForMultipleObjectsEx(0U, nullptr, 16U, QS_ALLINPUT,
                                                               MWMO_INPUTAVAILABLE));
             }
+        }
+        // The windows documents opened go first: they share their opener's model.
+        for (const auto& app : applications) {
+            if (app->child)
+                app->reset_host();
         }
         for (const auto& app : applications)
             app->reset_host();

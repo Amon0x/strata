@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <strata/desktop.hpp>
 #include <strata/strata.h>
 
 struct HWND__;
@@ -37,6 +38,33 @@ struct PlatformAnswer final {
     std::string json;
     std::optional<PlatformImage> image;
     std::optional<std::string> channel;
+};
+
+/** The look the user chose for the operating system (env.systemDark, env.systemAccent). */
+struct SystemAppearance final {
+    /** The app theme is dark. */
+    bool dark = false;
+    /** The accent colour, when the system says. */
+    std::optional<strata_color> accent;
+
+    [[nodiscard]] friend bool operator==(const SystemAppearance& left,
+                                         const SystemAppearance& right) noexcept {
+        const auto same_accent = [&] {
+            if (left.accent.has_value() != right.accent.has_value())
+                return false;
+            return !left.accent.has_value() || (left.accent->red == right.accent->red &&
+                                                left.accent->green == right.accent->green &&
+                                                left.accent->blue == right.accent->blue &&
+                                                left.accent->alpha == right.accent->alpha);
+        };
+        return left.dark == right.dark && same_accent();
+    }
+    /** Writes the appearance into a Surface environment. */
+    void apply(strata_surface_environment& environment) const noexcept {
+        environment.system_appearance = (dark ? STRATA_SYSTEM_APPEARANCE_DARK : 0U) |
+                                        (accent.has_value() ? STRATA_SYSTEM_APPEARANCE_ACCENT : 0U);
+        environment.system_accent = accent.value_or(strata_color{});
+    }
 };
 
 /**
@@ -72,11 +100,31 @@ class PlatformServices final {
      * Callable from any thread: sockets and watchers report from their own.
      */
     void post_event(std::string client, std::string channel, std::string data_json);
+    /** Answers request `request` of `client` with `json`, at the next pump. Callable from any
+     * thread. */
+    void answer(std::string client, std::uint64_t request, std::string json);
+    /** The windows documents asked to open, or to close by id, since the last call. */
+    [[nodiscard]] std::vector<WindowRequest> take_window_requests();
+    /** The system's look as last read; it changes when the user changes it. */
+    [[nodiscard]] const SystemAppearance& appearance() const noexcept;
+    /** Whether the system's look changed since the last call, so environments must follow. */
+    [[nodiscard]] bool take_appearance_changed() noexcept;
+    /** Whether a `node.capture` waits for the next presented frame's pixels (frame_presented). */
+    [[nodiscard]] bool wants_frame() const noexcept;
+    /**
+     * The pixels of the frame just presented (straight RGBA8 rows, top first): the captures that
+     * waited for it are cut from it and written; their answers come at the next pump.
+     */
+    void frame_presented(std::uint32_t width, std::uint32_t height,
+                         std::span<const std::uint8_t> rgba);
     /** The JSON a platform event input carries: {"channel", "data"}. */
     [[nodiscard]] static std::string event_json(const PlatformAnswer& event);
     /** Each playing video's newest frame since the last call, for the session that plays it. */
     [[nodiscard]] std::vector<std::pair<std::string, PlatformImage>> video_frames();
-    /** Whether a window drag ran since the last call: the press it began with never released. */
+    /**
+     * Whether a modal loop (a window drag, a drag out) ran since the last call: the press it began
+     * with never released, so the host cancels its interactions.
+     */
     [[nodiscard]] bool take_window_moved() noexcept;
     /** Accepts files dragged in from the shell, reporting them to `sink`. */
     void accept_files(FileSink sink);

@@ -1286,6 +1286,8 @@ component PageViewport(selectedPage: string, chrome: Binding<string>) {
       Scroll(key: "targets.page.scroll.media", persistenceKey: "showcase.page.scroll.media", vertical: true, horizontal: false, style: PageScroll) { MediaPage() }
     } else if selectedPage == "SYSTEM" {
       Scroll(key: "targets.page.scroll.system", persistenceKey: "showcase.page.scroll.system", vertical: true, horizontal: false, style: PageScroll) { SystemPage(chrome: chrome) }
+    } else if selectedPage == "DESKTOP" {
+      Scroll(key: "targets.page.scroll.desktop", persistenceKey: "showcase.page.scroll.desktop", vertical: true, horizontal: false, style: PageScroll) { DesktopPage() }
     } else if selectedPage == "SHELL" {
       Scroll(key: "targets.page.scroll.shell", persistenceKey: "showcase.page.scroll.shell", vertical: true, horizontal: false, style: PageScroll) { ShellPage() }
     } else {
@@ -1319,7 +1321,8 @@ component ShowcaseHeader(selectedPage: Binding<string>, chrome: Binding<string>)
         { id: "DATA", label: "DATA" },
         { id: "SHELL", label: "SHELL" },
         { id: "SYSTEM", label: "SYSTEM" },
-        { id: "MEDIA", label: "MEDIA" }
+        { id: "MEDIA", label: "MEDIA" },
+        { id: "DESKTOP", label: "DESKTOP" }
       ],
       selectedId: selectedPage,
       layout: { width: { weight: 1 }, height: 34 },
@@ -1860,6 +1863,267 @@ component SystemPage(chrome: Binding<string>) {
         }
       }
     }
+  }
+}
+
+style DesktopSwatch {
+  width: 64;
+  height: 64;
+  radius: 14;
+  border: { width: 1, color: #FFFFFF33 };
+}
+
+style DesktopFileCard {
+  kind: "ROW";
+  width: 300;
+  height: "content";
+  padding: 14;
+  gap: 12;
+  radius: 12;
+  alignItems: "CENTER";
+  background: #141C2AFF;
+  border: { width: 1, color: #34425CFF };
+}
+
+style DesktopFileIcon {
+  kind: "COLUMN";
+  width: 40;
+  height: 48;
+  radius: 6;
+  justifyContent: "END";
+  alignItems: "CENTER";
+  padding: { bottom: 6 };
+  background: #E8EEF8FF;
+}
+
+style DesktopCaptureCard {
+  kind: "COLUMN";
+  width: 360;
+  height: "content";
+  padding: 18;
+  gap: 8;
+  radius: 18;
+  border: { width: 1, color: #FFFFFF2A };
+}
+
+style DesktopLogRow {
+  pixelSize: 12;
+  color: #CFE0FFFF;
+}
+
+style ChannelScope extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  gap: 8;
+}
+
+// Runs `run` when the tray menu item `itemId` is chosen. A node attaches a behavior once, so each
+// choice listens on a node of its own, wrapped around the content.
+component TrayChoice(itemId: string, run: action) {
+  Panel(style: ChannelScope, behaviors: [{ id: "strata.channel", options: { channel: "tray", match: { id: itemId } }, action: run }]) {
+    Slot(name: "content", required: true, style: ChannelScope)
+  }
+}
+
+component DesktopPage() {
+  // The window as the host last described it (window.set answers with it).
+  state win = { alwaysOnTop: false, fullscreen: false, height: 0, maximized: false, minimized: false, opacity: 1, visible: true, width: 0, x: 0, y: 0 };
+  state opacity = 1;
+  // Where the user's folders are (system.paths), asked once when the page opens.
+  state paths = { appData: "", desktop: "", documents: "", downloads: "", home: "", pictures: "", temp: "" };
+  state trayShown = false;
+  state trayLog: List<string> = [];
+  state dropEffect = "";
+  state captured = { copied: false, error: "", height: 0, image: "", ok: false, path: "", width: 0 };
+  state secondOpen = false;
+  derived notePath = paths.temp + "\\Strata\\Strata note.txt";
+  Panel(
+    style: PageColumn,
+    timers: [
+      { id: "desktop.paths", every: 1ms, repeat: false, action: then(action("system.paths"), action("state.setFromEvent", name: "paths")) },
+      { id: "desktop.window", every: 1ms, repeat: false, action: then(action("window.set"), action("state.setFromEvent", name: "win")) }
+    ],
+    // Tray menu choices arrive on the "tray" channel: every one is logged, and some act (below).
+    behaviors: [
+      { id: "strata.channel", options: { channel: "tray" }, action: action("state.listAppend", name: "trayLog", fromEvent: true, field: "id") }
+    ]
+  ) {
+    Card(title: "THE WINDOW: FULLSCREEN, ON TOP, SIZE AND OPACITY") {
+      Panel(style: ActionRow) {
+        Button(key: "desktop.fullscreen", label: win.fullscreen ? "Leave fullscreen" : "Fullscreen", onClick: then(
+          action("window.set", fullscreen: !win.fullscreen), action("state.setFromEvent", name: "win")))
+        Button(key: "desktop.ontop", label: win.alwaysOnTop ? "Stop staying on top" : "Always on top", onClick: then(
+          action("window.set", alwaysOnTop: !win.alwaysOnTop), action("state.setFromEvent", name: "win")))
+        Button(key: "desktop.resize", label: "1280 x 800, centred", onClick: then(
+          action("window.set", width: 1280, height: 800, center: true), action("state.setFromEvent", name: "win")))
+        Button(key: "desktop.minimum", label: "No smaller than 900 x 600", onClick: then(
+          action("window.set", minWidth: 900, minHeight: 600), action("state.setFromEvent", name: "win")))
+        Button(key: "desktop.hide", label: "Hide to the tray", onClick: action("window.hideToTray"))
+        Button(key: "desktop.hide.briefly", label: "Hide for 3 s", onClick: sequence(
+          action("window.hideToTray"),
+          delay(3s, then(action("window.show"), action("state.setFromEvent", name: "win")))))
+      }
+      Panel(style: style(ActionRow, alignItems: "CENTER")) {
+        Text(text: format("Opacity {0}%", round(opacity * 100)), style: CardNote, layout: { width: 90 })
+        Slider(key: "desktop.opacity", min: 0.3, max: 1, step: 0.05, value: opacity, layout: { width: 320 }, onChange: sequence(
+          action("state.setFromEvent", name: "opacity"),
+          then(action("window.set", fromEvent: "opacity"), action("state.setFromEvent", name: "win"))))
+      }
+      Text(text: format("{0} x {1} at {2}, {3}, opacity {4}{5}{6}{7}", win.width, win.height, win.x, win.y, round(win.opacity * 100) / 100,
+                        win.fullscreen ? ", fullscreen" : "", win.alwaysOnTop ? ", always on top" : "",
+                        win.maximized ? ", maximized" : ""), style: style(CardNote, color: #CFE0FFFF))
+      Text(text: "Fullscreen covers the monitor the window is on and comes back to where it was. Sizes are in device-independent pixels. Hidden to the tray, the window comes back when the tray icon is clicked.", style: CardNote, wrapMode: "WORD")
+    }
+    Card(title: "FOLLOW THE SYSTEM'S LOOK") {
+      Panel(style: style(ActionRow, alignItems: "CENTER", gap: 14)) {
+        Panel(key: "desktop.accent", style: style(DesktopSwatch, background: env.systemAccent ?? #0078D4FF))
+        Panel(style: style(DesktopSwatch, background: env.systemDark ? #1B1F27FF : #F3F5F8FF))
+        Panel(style: style(PageColumn, gap: 4, width: { weight: 1 })) {
+          Text(text: format("Windows is in {0} mode. Its accent colour is {1}.", env.systemDark ? "dark" : "light", env.systemAccent ?? "unknown"), style: style(CardNote, color: #F4F7FBFF, pixelSize: 14))
+          Text(text: "env.systemDark and env.systemAccent change as soon as you change them in Settings > Personalization > Colors.", style: CardNote, wrapMode: "WORD")
+        }
+      }
+    }
+    TrayChoice(itemId: "show", run: action("window.show")) {
+    TrayChoice(itemId: "hide", run: action("window.hideToTray")) {
+    TrayChoice(itemId: "hello", run: action("system.notify", title: "Strata", body: "Hello from the tray menu.")) {
+    TrayChoice(itemId: "top", run: then(action("window.set", alwaysOnTop: !win.alwaysOnTop), action("state.setFromEvent", name: "win"))) {
+    Card(title: "A TRAY ICON WITH A MENU") {
+      Panel(style: ActionRow) {
+        Button(key: "desktop.tray", label: trayShown ? "Update the tray menu" : "Show the tray icon", onClick: sequence(
+          action("state.set", name: "trayShown", value: true),
+          action("system.tray", tooltip: "Strata showcase", items: [
+            { id: "show", label: "Show the window" },
+            { id: "hide", label: "Hide to the tray" },
+            { separator: true },
+            { id: "top", label: "Always on top", checked: win.alwaysOnTop },
+            { id: "hello", label: "Say hello" },
+            { id: "nothing", label: "Not available", enabled: false }
+          ])))
+        Button(key: "desktop.tray.remove", label: "Remove the tray icon", enabled: trayShown, onClick: sequence(
+          action("state.set", name: "trayShown", value: false),
+          action("system.tray", visible: false)))
+        Button(key: "desktop.tray.clear", label: "Clear the log", enabled: count(trayLog) > 0, onClick: action("state.listClear", name: "trayLog"))
+      }
+      Text(text: trayShown ? "Right-click the tray icon. What you choose arrives on the \"tray\" channel." : "The tray icon shows with a menu once you ask for it.", style: CardNote)
+      for entry, index in trayLog {
+        Text(key: format("desktop.tray.log.{0}", index), text: format("{0}. chose \"{1}\"", index + 1, entry), style: DesktopLogRow)
+      }
+    }
+    }
+    }
+    }
+    }
+    Card(title: "DRAG FILES OUT TO OTHER APPS") {
+      Panel(style: style(ActionRow, gap: 14)) {
+        Panel(
+          key: "desktop.file",
+          style: DesktopFileCard,
+          behaviors: [{ id: "strata.dragOut", enabled: paths.temp != "", options: { files: [notePath] },
+                        action: action("state.setFromEvent", name: "dropEffect", field: "effect") }]
+        ) {
+          Panel(style: DesktopFileIcon) { Text(text: "TXT", style: style(CardNote, color: #2B3A55FF)) }
+          Panel(style: style(PageColumn, gap: 2, width: { weight: 1 })) {
+            Text(text: "Strata note.txt", style: style(CardNote, color: #F4F7FBFF, pixelSize: 14))
+            Text(text: "Drag me onto Explorer or a chat", style: CardNote)
+          }
+        }
+        Panel(
+          key: "desktop.text",
+          style: DesktopFileCard,
+          behaviors: [{ id: "strata.dragOut", options: { text: "Dragged out of a Strata window." },
+                        action: action("state.setFromEvent", name: "dropEffect", field: "effect") }]
+        ) {
+          Panel(style: DesktopFileIcon) { Text(text: "Aa", style: style(CardNote, color: #2B3A55FF)) }
+          Panel(style: style(PageColumn, gap: 2, width: { weight: 1 })) {
+            Text(text: "A line of text", style: style(CardNote, color: #F4F7FBFF, pixelSize: 14))
+            Text(text: "Drag me into Notepad or a text box", style: CardNote)
+          }
+        }
+        if captured.ok && captured.path != "" {
+          Panel(
+            key: "desktop.capture.file",
+            style: DesktopFileCard,
+            behaviors: [{ id: "strata.dragOut", options: { files: [captured.path] },
+                          action: action("state.setFromEvent", name: "dropEffect", field: "effect") }]
+          ) {
+            Panel(style: DesktopFileIcon) { Text(text: "PNG", style: style(CardNote, color: #2B3A55FF)) }
+            Panel(style: style(PageColumn, gap: 2, width: { weight: 1 })) {
+              Text(text: "The capture below", style: style(CardNote, color: #F4F7FBFF, pixelSize: 14))
+              Text(text: "Drag the PNG anywhere", style: CardNote)
+            }
+          }
+        }
+      }
+      Text(text: dropEffect == "" ? format("The note is {0}", notePath) : format("The last drop was a {0}.", dropEffect == "none" ? "cancel (nothing taken)" : dropEffect), style: CardNote, maxLines: 2, wrapMode: "WORD")
+    }
+    Card(title: "CAPTURE WHAT A NODE SHOWS") {
+      Panel(style: style(ActionRow, gap: 18, alignItems: "START")) {
+        Panel(
+          key: "desktop.capture.card",
+          style: style(DesktopCaptureCard, rotate: -2, background: { kind: "linear", angle: 120, stops: [{ offset: 0, color: env.systemAccent ?? #0078D4FF }, { offset: 1, color: #141A2AFF }] })
+        ) {
+          Text(text: "Capture this card", style: style(CardTitle, pixelSize: 22))
+          Text(text: "Painted in your accent colour and turned two degrees: the capture is what the screen shows, turn and all.", style: style(CardNote, color: #E8EEF8FF), wrapMode: "WORD")
+        }
+        Panel(style: style(PageColumn, gap: 8, width: { weight: 1 })) {
+          Panel(style: ActionRow) {
+            Button(key: "desktop.capture", label: "Capture this card", enabled: paths.temp != "", onClick: then(
+              action("node.capture", key: "desktop.capture.card", path: paths.temp + "\\Strata\\Strata card.png", image: "desktop:capture"),
+              action("state.setFromEvent", name: "captured")))
+            Button(key: "desktop.capture.copy", label: "Copy it to the clipboard", onClick: then(
+              action("node.capture", key: "desktop.capture.card", clipboard: true, image: "desktop:capture"),
+              action("state.setFromEvent", name: "captured")))
+          }
+          Text(text: captured.ok ? format("{0} x {1} pixels{2}{3}", captured.width, captured.height, captured.path != "" ? format(", saved to {0}", captured.path) : "", captured.copied ? ", copied" : "") : (captured.error != "" ? captured.error : "Nothing captured yet."), style: CardNote, maxLines: 3, wrapMode: "WORD")
+          if captured.ok {
+            Panel(style: PastedFrame) {
+              Image(key: "desktop.capture.image", image: captured.image, layout: { width: { weight: 1 }, height: 130 }, fit: "CONTAIN")
+            }
+          }
+        }
+      }
+    }
+    Card(title: "MORE WINDOWS") {
+      Panel(style: ActionRow) {
+        Button(key: "desktop.window.open", label: "Open a second window", onClick: then(
+          action("window.open", id: "second", root: "SecondWindow", title: "Strata: a second window", width: 560, height: 440),
+          action("state.setFromEvent", name: "secondOpen", field: "opened")))
+        Button(key: "desktop.window.close", label: "Close it", onClick: sequence(
+          action("window.close", id: "second"),
+          action("state.set", name: "secondOpen", value: false)))
+        Button(key: "desktop.host.bump", label: format("Shared host value: {0}", demo.hostValue), onClick: action("demo.host.bump"))
+      }
+      Text(text: "The second window runs the SecondWindow overlay of this module as a surface of its own: its own input, frames, size and DPI, its own dialogs and tray. It shares this window's host model: bump the shared value in either window and both show it.", style: CardNote, wrapMode: "WORD")
+    }
+  }
+}
+
+component SecondWindowRoot() {
+  state clicks = 0;
+  state picked = { cancelled: true, path: "", paths: [] };
+  state win = { alwaysOnTop: false, fullscreen: false, height: 0, maximized: false, minimized: false, opacity: 1, visible: true, width: 0, x: 0, y: 0 };
+  Panel(
+    key: "second.root",
+    style: style(Root, kind: "COLUMN", padding: 22, gap: 12, background: env.systemDark ? #10141CFF : #EEF1F6FF),
+    timers: [{ id: "second.window", every: 1ms, repeat: false, action: then(action("window.set"), action("state.setFromEvent", name: "win")) }]
+  ) {
+    Panel(style: style(ActionRow, alignItems: "CENTER", gap: 12)) {
+      Panel(style: style(DesktopSwatch, width: 28, height: 28, radius: 8, background: env.systemAccent ?? #0078D4FF))
+      Text(text: "A second window", style: style(CardTitle, pixelSize: 22, color: env.systemDark ? #F4F7FBFF : #121722FF))
+    }
+    Text(text: format("{0} x {1} device-independent pixels at {2}x. Resize me, drag me to another monitor.", win.width, win.height, env.scale), style: style(CardNote, color: env.systemDark ? #9AA7BAFF : #4A5568FF), wrapMode: "WORD")
+    Panel(style: ActionRow) {
+      Button(key: "second.count", label: format("Clicked {0} times", clicks), onClick: action("state.adjust", name: "clicks", amount: 1))
+      Button(key: "second.bump", label: format("Shared host value: {0}", demo.hostValue), onClick: action("demo.host.bump"))
+    }
+    Panel(style: ActionRow) {
+      Button(key: "second.open", label: "Open a file…", onClick: then(action("system.openFile", title: "From the second window"), action("state.setFromEvent", name: "picked")))
+      Button(key: "second.size", label: "Where am I?", onClick: then(action("window.set"), action("state.setFromEvent", name: "win")))
+      Button(key: "second.close", label: "Close this window", onClick: action("window.close"))
+    }
+    Text(text: picked.cancelled ? "Its dialogs are its own, modal to it." : format("Picked {0}", picked.path), style: style(CardNote, color: env.systemDark ? #9AA7BAFF : #4A5568FF), maxLines: 2, wrapMode: "WORD")
   }
 }
 
@@ -2612,6 +2876,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "The GIF, APNG and WebP play by themselves, each frame for as long as its file says, looping as the file asks. The photo is a progressive JPEG. Play runs a ten-second H.264 clip with its sound through Media Foundation into a runtime image, so any Image can show it, clipped, rounded or turned; pause, resume, skip and restart it, or open or drop your own video.", wrapMode: "WORD")
   } else if selectedPage == "SYSTEM" {
     Text(text: "Drag files from Explorer onto the drop box: it lights up as they arrive and lists them when dropped. Open files, pick a folder or save: the dialogs are Windows' own, and their answers land in state. Send a notification from the tray icon; open a folder or link in its default app. Mica, Acrylic and Tabbed turn the header into the title bar (drag to move, double-click to maximize, buttons at its right) over the system backdrop. Paste an image from the clipboard and copy it back.", wrapMode: "WORD")
+  } else if selectedPage == "DESKTOP" {
+    Text(text: "Fullscreen fills the window's monitor and Leave fullscreen puts it back; Always on top keeps it above other windows; 1280 x 800 resizes and centres it; the slider fades the whole window. The swatches follow Windows' dark mode and accent colour live. Show the tray icon, right-click it: choices are logged, and Show, Hide, Always on top and Say hello act. Drag the note or the text card into Explorer, Notepad or a chat. Capture this card saves a PNG of exactly what the card shows and displays it; Open a second window opens SecondWindow with its own input, dialogs and DPI, sharing the host value.", wrapMode: "WORD")
   } else if selectedPage == "SHELL" {
     Text(text: "Menus, toolbars, command-bound controls, shortcut tooltips, and the palette resolve one live command definition. Disabled and checked states update everywhere. Palette search ranks prefix and word-boundary matches, Enter executes, Escape restores focus. Toasts stack without blocking input; breadcrumbs, disclosure, and chips emit typed events.", wrapMode: "WORD")
   } else {

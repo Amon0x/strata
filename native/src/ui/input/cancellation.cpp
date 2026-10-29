@@ -6,6 +6,7 @@ namespace strata::ui {
 
 InputOperationResult InputRouter::cancel_interactions() {
     InputOperationResult result;
+    drag_out_press_.reset();
 
     dismiss_transient_popups(nullptr, result, true, false);
     clear_focus("invalid_target", result, false);

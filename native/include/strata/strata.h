@@ -704,6 +704,13 @@ typedef struct strata_scale_context {
     uint32_t reserved;
 } strata_scale_context;
 
+typedef struct strata_color {
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+    uint8_t alpha;
+} strata_color;
+
 typedef uint32_t strata_surface_density;
 
 #define STRATA_SURFACE_DENSITY_COMPACT UINT32_C(0)
@@ -743,7 +750,25 @@ typedef struct strata_surface_environment {
     strata_surface_input_capabilities input_capabilities;
     uint32_t reduced_motion;
     uint32_t reserved;
+    /* Since version 2: the look the user chose for the operating system, for documents that follow
+     * it (env.systemDark, env.systemAccent). STRATA_SYSTEM_APPEARANCE_* flags; an older caller's
+     * layout ends before this field and reads as a light theme with no accent. */
+    uint32_t system_appearance;
+    /* The user's accent colour, read only when system_appearance has
+     * STRATA_SYSTEM_APPEARANCE_ACCENT. */
+    strata_color system_accent;
 } strata_surface_environment;
+
+/* The layout of strata_surface_environment before the system appearance fields. A
+ * strata_surface_config built against it embeds an environment of this size, and its later fields
+ * follow at once; the library reads either layout. */
+#define STRATA_SURFACE_ENVIRONMENT_VERSION_1_SIZE                                                  \
+    offsetof(strata_surface_environment, system_appearance)
+
+/* The operating system's app theme is dark. */
+#define STRATA_SYSTEM_APPEARANCE_DARK (UINT32_C(1) << 0)
+/* system_accent holds the user's accent colour. */
+#define STRATA_SYSTEM_APPEARANCE_ACCENT (UINT32_C(1) << 1)
 
 typedef struct strata_surface_font_resource {
     /* Logical id referenced by .strata styles, for example strata:fonts/mono. */
@@ -774,13 +799,6 @@ typedef struct strata_widget_semantics_context strata_widget_semantics_context;
 typedef struct strata_behavior_input_context strata_behavior_input_context;
 typedef struct strata_widget_value strata_widget_value;
 typedef struct strata_widget_subtargets_context strata_widget_subtargets_context;
-
-typedef struct strata_color {
-    uint8_t red;
-    uint8_t green;
-    uint8_t blue;
-    uint8_t alpha;
-} strata_color;
 
 typedef uint32_t strata_widget_value_kind;
 #define STRATA_WIDGET_VALUE_NULL UINT32_C(0)
@@ -1755,7 +1773,10 @@ typedef uint32_t strata_input_event_kind;
  * ...) reach
  * the host as the effect `strata.platform`, whose payload JSON carries `request` (that number),
  * `kind` (the action id) and the action's own fields; a `then(request, next)` action runs `next`
- * with the answer as its event once it arrives.
+ * with the answer as its event once it arrives. Two requests come from the core itself:
+ * `system.dragOut` (`files`, `text`, `move`) when a `strata.dragOut` node is dragged past the slop,
+ * answered with { effect }; and `node.capture` carries `rect` ({ x, y, width, height }, the keyed
+ * node's on-screen rectangle in framebuffer pixels) for the host to read back.
  */
 #define STRATA_INPUT_PLATFORM_RESULT UINT32_C(12)
 /*

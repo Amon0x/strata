@@ -203,8 +203,17 @@ rectangle_snapping(const strata_rectangle_snap_policy value) {
     constexpr strata_surface_input_capabilities known_input =
         STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD | STRATA_SURFACE_INPUT_TOUCH |
         STRATA_SURFACE_INPUT_IME | STRATA_SURFACE_INPUT_CLIPBOARD | STRATA_SURFACE_INPUT_CONTROLLER;
+    constexpr std::uint32_t known_appearance =
+        STRATA_SYSTEM_APPEARANCE_DARK | STRATA_SYSTEM_APPEARANCE_ACCENT;
+    // A caller built before the system appearance fields provides none: a light theme, no accent.
+    const std::uint32_t appearance =
+        strata::abi_detail::provides(value, offsetof(strata_surface_environment, system_accent) +
+                                                sizeof(strata_color))
+            ? value.system_appearance
+            : 0U;
     if (!has_struct(&value) || value.generation == 0U || value.reserved != 0U ||
-        value.reduced_motion > 1U || (value.input_capabilities & ~known_input) != 0U) {
+        value.reduced_motion > 1U || (value.input_capabilities & ~known_input) != 0U ||
+        (appearance & ~known_appearance) != 0U) {
         throw std::invalid_argument("surface environment header, flags, or generation is invalid");
     }
     const bool has_pointer = (value.input_capabilities & STRATA_SURFACE_INPUT_POINTER) != 0U;
@@ -240,6 +249,12 @@ rectangle_snapping(const strata_rectangle_snap_policy value) {
             (value.input_capabilities & STRATA_SURFACE_INPUT_CONTROLLER) != 0U,
         },
     };
+    result.system_dark = (appearance & STRATA_SYSTEM_APPEARANCE_DARK) != 0U;
+    if ((appearance & STRATA_SYSTEM_APPEARANCE_ACCENT) != 0U) {
+        result.system_accent =
+            strata::runtime::ColorValue{value.system_accent.red, value.system_accent.green,
+                                        value.system_accent.blue, value.system_accent.alpha};
+    }
     result.validate();
     return result;
 }
@@ -682,7 +697,7 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
         return invalid_argument();
     // Fields newer than the caller's layout (such as `extensions`) read as absent.
     const std::optional<strata_surface_config> copied_config =
-        strata::abi_detail::read_struct(provided_config);
+        strata::abi_detail::read_surface_config(provided_config);
     const strata_surface_config* const config =
         copied_config.has_value() ? &*copied_config : nullptr;
     if (config == nullptr || out_surface == nullptr || !valid_view(config->id, false) ||
@@ -847,7 +862,12 @@ strata_result strata_surface_adopt_environment(strata_surface* const surface,
     }
     constexpr AbiCall call{"Environment adoption", "STRATA.SURFACE.INVALID_ENVIRONMENT"};
     return surface_call(surface, call, [&] {
-        *out_adopted = surface->core.adopt_environment(environment(*value)) ? 1U : 0U;
+        // Fields newer than the caller's environment read as zero.
+        const std::optional<strata_surface_environment> provided =
+            strata::abi_detail::read_struct(value);
+        if (!provided.has_value())
+            throw std::invalid_argument("surface environment header is invalid");
+        *out_adopted = surface->core.adopt_environment(environment(*provided)) ? 1U : 0U;
         return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }

@@ -129,7 +129,8 @@ void append_unique(std::vector<std::string>& values, const std::string_view valu
 struct ApplicationHost::Impl final {
     Impl(HWND window, std::filesystem::path resource_root, ApplicationConfig config,
          const ApplicationOptions options)
-        : window(window), config(std::move(config)), services(window, std::move(resource_root)),
+        : window(window), config(std::move(config)), resource_root(resource_root),
+          services(window, std::move(resource_root)),
           platform(
               window, [this](const std::string_view id) { return services.bytes(id); },
               [this](const std::string_view id) { return services.path(id).wstring(); }),
@@ -180,6 +181,7 @@ struct ApplicationHost::Impl final {
         result.input_capabilities = STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD |
                                     STRATA_SURFACE_INPUT_IME | STRATA_SURFACE_INPUT_CLIPBOARD;
         result.reduced_motion = config.reduced_motion ? 1U : 0U;
+        platform.appearance().apply(result);
         return result;
     }
 
@@ -403,6 +405,16 @@ struct ApplicationHost::Impl final {
                 strata_surface_cancel_interactions(session->surface().native_handle()));
         }
         renderer.set_transparent(platform.transparent());
+        // The user changed the system's theme or accent: env follows.
+        if (platform.take_appearance_changed() && session->has_surface()) {
+            ++environment_generation;
+            static_cast<void>(session->adopt_environment(environment()));
+        }
+        // A node capture reads this frame's pixels once it is presented.
+        if (platform.wants_frame()) {
+            platform_capture = true;
+            renderer.capture_next_frame();
+        }
     }
 
     void frame() {
@@ -415,6 +427,13 @@ struct ApplicationHost::Impl final {
         const host::RenderPacket& packet = *framed.packet;
         renderer.render(packet);
         frame_available = true;
+        if (platform_capture) {
+            platform_capture = false;
+            if (const std::optional<FrameCapture> captured = renderer.take_capture();
+                captured.has_value()) {
+                platform.frame_presented(captured->width, captured->height, captured->rgba);
+            }
+        }
         // Backdrop probes read back without waiting on the GPU, so these describe an earlier frame.
         const std::vector<strata_backdrop_sample> backdrop =
             renderer.take_backdrop_samples("default");
@@ -442,6 +461,7 @@ struct ApplicationHost::Impl final {
 
     HWND window = nullptr;
     ApplicationConfig config;
+    std::filesystem::path resource_root;
     HostServices services;
     PlatformServices platform;
     Renderer renderer;
@@ -458,6 +478,8 @@ struct ApplicationHost::Impl final {
     std::uint32_t framebuffer_height = 1U;
     double scale = 1.0;
     bool frame_available = false;
+    /** A node capture waits for the frame being drawn. */
+    bool platform_capture = false;
     win32::WindowInputState input;
 };
 
@@ -623,6 +645,25 @@ std::optional<std::uint32_t> ApplicationHost::pointer_cursor() const noexcept {
 
 void ApplicationHost::frame() {
     impl_->frame();
+}
+
+std::vector<WindowRequest> ApplicationHost::take_window_requests() {
+    return impl_->platform.take_window_requests();
+}
+
+void ApplicationHost::answer_window_request(const WindowRequest& request, std::string json) {
+    impl_->platform.answer(request.client, request.request, std::move(json));
+}
+
+std::unique_ptr<ApplicationHost> ApplicationHost::open_window(HWND window,
+                                                              const WindowRequest& request,
+                                                              const ApplicationOptions options) {
+    ApplicationConfig config = impl_->config;
+    config.root_name = request.root;
+    config.root_role = SurfaceRole::overlay;
+    config.surface_id = impl_->config.surface_id + "/" + request.id;
+    return std::make_unique<ApplicationHost>(window, impl_->resource_root, std::move(config),
+                                             options);
 }
 void ApplicationHost::close() {
     impl_->close();

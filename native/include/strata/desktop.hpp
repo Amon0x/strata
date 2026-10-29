@@ -19,6 +19,29 @@ namespace strata::desktop {
 enum class SurfaceRole { screen, overlay };
 enum class ImageSampling : std::uint32_t { nearest = 0U, linear = 1U };
 
+/**
+ * A window a document asked to open (`window.open`) or to close by its id (`window.close` with
+ * an `id`). Windows are the embedder's to make: it opens one with ApplicationHost::open_window and
+ * answers the request with answer_window_request.
+ */
+struct WindowRequest final {
+    enum class Kind { open, close };
+    Kind kind = Kind::open;
+    /** The session that asked, and its request number, for the answer. */
+    std::string client;
+    std::uint64_t request = 0U;
+    /** The window's id: unique among the application's windows; "main" is the first. */
+    std::string id;
+    /** The `overlay` of the asking module the new window runs as its root. */
+    std::string root;
+    std::string title;
+    /** Client size and outer position in device-independent pixels, where given. */
+    std::optional<double> width;
+    std::optional<double> height;
+    std::optional<double> x;
+    std::optional<double> y;
+};
+
 struct FontResource final {
     std::string id;
     /** The bundled face; used wherever no `system` candidate is installed. */
@@ -128,6 +151,16 @@ class ApplicationHost final {
 
     /** Synchronizes host bindings, frames the Surface, submits D3D11 work, and presents. */
     void frame();
+    /** The windows the document asked to open or close since the last call. */
+    [[nodiscard]] std::vector<WindowRequest> take_window_requests();
+    /** Answers a window request with `json` (its `then` receives it), at the next frame. */
+    void answer_window_request(const WindowRequest& request, std::string json);
+    /**
+     * A host for `window`, running `request.root` of this application's module as its own Surface
+     * with this application's configuration. Register its actions and snapshots, then activate it.
+     */
+    [[nodiscard]] std::unique_ptr<ApplicationHost>
+    open_window(HWND window, const WindowRequest& request, ApplicationOptions options = {});
     /** Performs the packet consumption barrier and releases all runtime ownership. */
     void close();
 

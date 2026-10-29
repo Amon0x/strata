@@ -1459,6 +1459,10 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
             pressed->second.gesture = GestureClaimState::cancelled;
         }
     }
+    // A press on a `strata.dragOut` node that moved past the slop leaves the window: the host
+    // carries it from here, and cancels the press once its drag loop ends.
+    if (drag_out_press_.has_value() && start_drag_out(event))
+        return result;
 
     const auto finish_capture = [this, &event] {
         const auto captured = pressed_pointer_targets_.find(event.pointer_id);
@@ -1477,6 +1481,12 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
         hover_route(hover_target);
         track_pointer(event, result);
         dismiss_transient_popups(target, result);
+        // Window gestures begin with the press, whatever takes it after: a title bar is often
+        // no control at all, and a drag out may start on one.
+        if (event.button == 0) {
+            start_window_drag(event, hover_target);
+            arm_drag_out(event, hover_target);
+        }
         if (target == nullptr) {
             if (!route_scrollbar_pointer(event, result, scrollbar_hit_target)) {
                 apply_pointer_focus_default(event, hover_target, nullptr, result);
@@ -1531,8 +1541,6 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
                                         : target;
     hover_route(hover_target);
     track_pointer(event, result);
-    if (event.type == PointerEventType::press && event.button == 0)
-        start_window_drag(event, hover_target);
     InputDispatchState dispatch = route_pointer_event(dispatch_target, hover_target, event, result);
     pressed = pressed_pointer_targets_.find(event.pointer_id);
     const bool gesture_claimed = pressed != pressed_pointer_targets_.end() &&

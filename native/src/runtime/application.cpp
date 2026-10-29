@@ -474,6 +474,22 @@ ActionDispatchOutcome ApplicationContext::dispatch(
                 arguments.emplace_back("value", event.value);
             }
         }
+        // `fromEvent` appends what the event brings, or its `field`: a tray menu's choice to a log.
+        if (id == "state.listAppend") {
+            const Value* from_event = action.payload.field("fromEvent");
+            std::erase_if(arguments,
+                          [](const auto& argument) { return argument.first == "fromEvent"; });
+            if (from_event != nullptr && from_event->boolean() != nullptr &&
+                *from_event->boolean()) {
+                std::erase_if(arguments,
+                              [](const auto& argument) { return argument.first == "value"; });
+                const Value* field = action.payload.field("field");
+                const Value* picked = field != nullptr && field->string() != nullptr
+                                          ? event.value.field(*field->string())
+                                          : &event.value;
+                arguments.emplace_back("value", picked != nullptr ? *picked : Value{});
+            }
+        }
         const StateSnapshot before = state_.snapshot();
         // A state that takes any kind is held to its declared schema instead.
         const StateMutationResult result = StateMutation{

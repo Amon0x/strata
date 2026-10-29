@@ -6,7 +6,9 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
+#include <strata/desktop.hpp>
 #include <strata/strata.h>
 
 #include "renderer.hpp"
@@ -88,6 +90,15 @@ public:
     /** The pointer shape the interactive layer asks for; nullopt when no layer is live. */
     [[nodiscard]] std::optional<std::uint32_t> pointer_cursor() noexcept;
     void frame();
+    /** The windows the documents asked to open or close since the last call. */
+    [[nodiscard]] std::vector<WindowRequest> take_window_requests();
+    /** Answers a window request with `json`, at the next frame. */
+    void answer_window_request(const WindowRequest& request, std::string json);
+    /**
+     * The host of another window of this application: it shares this one's model and runs
+     * `request.root`, an overlay of the showcase module, with the platform services of its own.
+     */
+    [[nodiscard]] std::unique_ptr<Host> open_window(HWND window, const WindowRequest& request);
 
     [[nodiscard]] double scale() const noexcept;
     [[nodiscard]] const DesktopFrameSample& last_frame_sample() const noexcept;
@@ -107,6 +118,7 @@ public:
 
 private:
     struct Impl;
+    explicit Host(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;
 };
 

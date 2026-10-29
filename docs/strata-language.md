@@ -667,6 +667,12 @@ Panel(behaviors: [{ id: "strata.channel", options: { channel: "chat" },
                     action: action("state.setFromEvent", name: "lastMessage") }])
 ```
 
+`match` narrows a listener to what has the given fields: `options: { channel: "tray", match: { id:
+"quit" } }` hears only the tray menu's Quit. A node attaches a behavior once, so listeners for
+different matches sit on different nodes (a wrapper component around the content works well).
+`state.listAppend` with `fromEvent: true` appends what the event brings, or its `field`, so a
+listener can keep a log: `action("state.listAppend", name: "log", fromEvent: true, field: "id")`.
+
 Two behaviors take the rest. `strata.fileDrop` hears files dragged in from the shell: its action
 receives `{ over, dropped, files }` as files arrive over the node, leave it, and are dropped on it.
 `strata.windowDrag` makes a node a title bar: a press on it (not on a control inside it) moves the
@@ -678,6 +684,101 @@ Panel(style: TitleBar, behaviors: [{ id: "strata.windowDrag" }]) { Text(text: "M
 
 A host provides these through the `strata.platform` effect (see `strata.h`); the Windows desktop
 host provides them all.
+
+### The window, the tray and other windows
+
+`window.set` changes the window; only the fields it is given change, and `then` receives the
+window's state, `{ fullscreen, alwaysOnTop, x, y, width, height, maximized, minimized, visible,
+opacity }` (with no fields it only reports it):
+
+- `fullscreen`: borderless over the whole monitor the window is on; `false` puts it back where it
+  was, maximized or not.
+- `alwaysOnTop`, `title`, `resizable`.
+- `width`, `height` (the client area) and `x`, `y` (the window's top-left on the screen), in
+  device-independent pixels (1/96 inch, the logical units of a window that is not scaled to fit);
+  `center: true` centres it on its monitor's work area. A fullscreen window leaves fullscreen to
+  take a new size or place and goes back to it.
+- `minWidth`, `minHeight`: the smallest client area the user can drag it to; a smaller window grows.
+- `opacity` (0 to 1): the whole window, faded by the system's compositor.
+
+A platform action that declares `fromEvent` takes that field from its event, so a slider can drive
+the window directly: `Slider(onChange: action("window.set", fromEvent: "opacity"))`. `media.set`
+takes it too (`fromEvent: "volume"`).
+
+`window.hideToTray` hides the window and its taskbar button until its tray icon is clicked or
+`window.show` runs; `window.show` also brings a minimized or covered window forward. `system.tray`
+(`tooltip`, `icon`: a PNG, JPEG or other raster resource, `items`, `visible`) shows the app's tray
+icon with a right-click menu of `items`, each `{ id, label, checked?, enabled?, separator? }`;
+choosing one says `{ id }` on the `"tray"` channel to the session that set the menu. `visible:
+false` removes the icon (a notification or a window hidden to the tray keeps it). The icon is the
+one `system.notify` uses.
+
+```strata
+Button(label: "Tray", onClick: action("system.tray", tooltip: "My app", items: [
+  { id: "show", label: "Show" }, { separator: true }, { id: "quit", label: "Quit" }]))
+Panel(behaviors: [{ id: "strata.channel", options: { channel: "tray", match: { id: "quit" } },
+                    action: action("window.close") }])
+```
+
+`window.open` (`id`, `root`, `title`, `width`, `height`, `x`, `y`) opens another window running
+`root`, an `overlay` declared in the same module, as a Surface of its own: its own input, frames,
+size and DPI, and its own dialogs, tray and window actions. It runs on the same host model as the
+window that opened it (the showcase shares its `demo.*` data), and `then` receives `{ id, opened }`;
+asking again for an open id brings that window forward. `window.close` with an `id` closes that
+window (`then` receives `{ id, closed }`); with none it closes the window it runs in. Closing a
+window the application began with ends it, and the windows its documents opened close with it.
+
+```strata
+overlay Inspector { root InspectorPanel() }
+Button(label: "Inspector", onClick: action("window.open", id: "inspector", root: "Inspector",
+                                            title: "Inspector", width: 420, height: 600))
+```
+
+`system.paths` answers where the user's folders are: `{ temp, home, documents, pictures, desktop,
+downloads, appData }`.
+
+### Following the system's look
+
+`env.systemDark` is true while the operating system's app theme is dark, and `env.systemAccent` is
+the user's accent colour (null where the host does not know it, so `env.systemAccent ?? #0078D4FF`
+gives a fallback). Both change as soon as the user changes them, so a document that reads them
+follows along without asking.
+
+```strata
+Panel(style: style(Card, background: env.systemDark ? #15181EFF : #F5F6F8FF,
+                         border: { width: 2, color: env.systemAccent ?? #0078D4FF }))
+```
+
+A host reports them in the Surface environment (`system_appearance`, `system_accent` in
+`strata.h`; hosts built before they existed read as a light theme with no accent).
+
+### Dragging out and capturing
+
+`strata.dragOut` (`options: { files, text, move }`) lets the user drag a node's files (`files`: a
+list of paths) and text out of the window into other applications: a primary-button drag past the
+drag slop starts the system's drag, which carries the files as a file drop (Explorer copies them,
+a chat attaches them) and the text as text. Its action receives `{ effect }` once they are dropped:
+`"copy"`, `"move"` (only with `move: true`, when the target moved the files), or `"none"` when the
+drag was cancelled.
+
+```strata
+Panel(style: FileCard, behaviors: [{ id: "strata.dragOut", options: { files: [report.path] },
+                                     action: action("state.setFromEvent", name: "dropped",
+                                                    field: "effect") }]) { Text(text: report.name) }
+```
+
+`node.capture` (`key`, `path`, `clipboard`, `image`, `scale`) captures exactly what the keyed node
+shows on screen: its rectangle as drawn (turned, scaled, cut by the scroll views around it, and
+covered by whatever is above it) at the framebuffer's resolution, from the next presented frame.
+`path` writes a PNG, `clipboard: true` copies it, `image` publishes it as a runtime image an
+`Image` can show, and `scale` resizes it; asked for none of these, it is written to a new PNG in the
+temporary folder. `then` receives `{ ok, width, height, path, image, copied, error }`.
+
+```strata
+Button(label: "Save a picture", onClick: then(
+  action("node.capture", key: "chart", path: folders.pictures + "\\chart.png", image: "capture:chart"),
+  action("state.setFromEvent", name: "captured")))
+```
 
 ### Following the pointer
 

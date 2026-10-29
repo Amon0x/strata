@@ -304,7 +304,8 @@ void add_builtin_actions(BuiltinCatalog& catalog) {
                                    .required = true},
                  DeclaredParameter{.name = "muted", .type = declared_type_reference("boolean")},
                  DeclaredParameter{.name = "volume", .type = declared_type_reference("number")},
-                 DeclaredParameter{.name = "loop", .type = declared_type_reference("boolean")}},
+                 DeclaredParameter{.name = "loop", .type = declared_type_reference("boolean")},
+                 DeclaredParameter{.name = "fromEvent", .type = declared_type_reference("string")}},
             .dispatch_policy = "framework",
             .payload_contract = "strata.action-payload/media.set@1",
             .summary = "Mute, set the volume of, or loop a video while it plays"},
@@ -343,6 +344,20 @@ void add_builtin_actions(BuiltinCatalog& catalog) {
                        .dispatch_policy = "framework",
                        .payload_contract = "strata.action-payload/notification.raise@1",
                        .summary = "Raise a passive notification"},
+        DeclaredAction{
+            .id = "node.capture",
+            .parameters =
+                {DeclaredParameter{
+                     .name = "key", .type = declared_type_reference("key"), .required = true},
+                 DeclaredParameter{.name = "path", .type = declared_type_reference("string")},
+                 DeclaredParameter{.name = "clipboard", .type = declared_type_reference("boolean")},
+                 DeclaredParameter{.name = "scale", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "image", .type = declared_type_reference("string")}},
+            .dispatch_policy = "framework",
+            .payload_contract = "strata.action-payload/node.capture@1",
+            .summary = "Capture what a keyed node shows on screen to a PNG file, the clipboard or "
+                       "a runtime image; "
+                       "then() receives ok, width, height and path"},
         DeclaredAction{
             .id = "overlay.hide",
             .parameters = {DeclaredParameter{.name = "name",
@@ -406,21 +421,22 @@ void add_builtin_actions(BuiltinCatalog& catalog) {
                        .dispatch_policy = "framework",
                        .payload_contract = "strata.action-payload/state.adjust@1",
                        .summary = "Adjust a declarative retained-state slot"},
-        DeclaredAction{.id = "state.listAppend",
-                       .parameters = {DeclaredParameter{.name = "name",
-                                                        .type = declared_type_reference("string"),
-                                                        .required = true},
-                                      DeclaredParameter{.name = "value",
-                                                        .type = declared_type_reference("any"),
-                                                        .required = true,
-                                                        .nullable = true},
-                                      DeclaredParameter{.name = "undoLabel",
-                                                        .type = declared_type_reference("string")},
-                                      DeclaredParameter{.name = "undoCoalesce",
-                                                        .type = declared_type_reference("string")}},
-                       .dispatch_policy = "framework",
-                       .payload_contract = "strata.action-payload/state.listAppend@1",
-                       .summary = "Append to declarative list state"},
+        DeclaredAction{
+            .id = "state.listAppend",
+            .parameters =
+                {DeclaredParameter{
+                     .name = "name", .type = declared_type_reference("string"), .required = true},
+                 DeclaredParameter{.name = "value",
+                                   .type = declared_type_reference("any"),
+                                   .nullable = true},
+                 DeclaredParameter{.name = "fromEvent", .type = declared_type_reference("boolean")},
+                 DeclaredParameter{.name = "field", .type = declared_type_reference("string")},
+                 DeclaredParameter{.name = "undoLabel", .type = declared_type_reference("string")},
+                 DeclaredParameter{.name = "undoCoalesce",
+                                   .type = declared_type_reference("string")}},
+            .dispatch_policy = "framework",
+            .payload_contract = "strata.action-payload/state.listAppend@1",
+            .summary = "Append to declarative list state"},
         DeclaredAction{.id = "state.listClear",
                        .parameters = {DeclaredParameter{.name = "name",
                                                         .type = declared_type_reference("string"),
@@ -596,16 +612,81 @@ void add_builtin_actions(BuiltinCatalog& catalog) {
             .dispatch_policy = "framework",
             .payload_contract = "strata.action-payload/system.saveFile@1",
             .summary = "Show the system's save dialog; then() receives the chosen path"},
+        DeclaredAction{
+            .id = "system.paths",
+            .parameters = {},
+            .dispatch_policy = "framework",
+            .payload_contract = "strata.action-payload/system.paths@1",
+            .summary = "Ask where the user's folders are; then() receives temp, home, documents, "
+                       "pictures, desktop, downloads and appData"},
+        DeclaredAction{
+            .id = "system.tray",
+            .parameters =
+                {DeclaredParameter{.name = "tooltip", .type = declared_type_reference("string")},
+                 DeclaredParameter{.name = "icon", .type = declared_type_reference("string")},
+                 DeclaredParameter{.name = "items", .type = declared_type_reference("any")},
+                 DeclaredParameter{.name = "visible", .type = declared_type_reference("boolean")}},
+            .dispatch_policy = "framework",
+            .payload_contract = "strata.action-payload/system.tray@1",
+            .summary = "Show the app's tray icon with a right-click menu; a chosen item is said on "
+                       "the \"tray\" "
+                       "channel"},
         DeclaredAction{.id = "window.close",
-                       .parameters = {},
+                       .parameters = {DeclaredParameter{.name = "id",
+                                                        .type = declared_type_reference("string")}},
                        .dispatch_policy = "framework",
                        .payload_contract = "strata.action-payload/window.close@1",
-                       .summary = "Close the window"},
+                       .summary = "Close this window, or the window window.open opened as id"},
+        DeclaredAction{.id = "window.hideToTray",
+                       .parameters = {},
+                       .dispatch_policy = "framework",
+                       .payload_contract = "strata.action-payload/window.hideToTray@1",
+                       .summary = "Hide the window, taskbar button too, until its tray icon is "
+                                  "clicked or window.show"},
         DeclaredAction{.id = "window.minimize",
                        .parameters = {},
                        .dispatch_policy = "framework",
                        .payload_contract = "strata.action-payload/window.minimize@1",
                        .summary = "Minimize the window"},
+        DeclaredAction{
+            .id = "window.open",
+            .parameters =
+                {DeclaredParameter{.name = "id",
+                                   .type = declared_type_reference("string"),
+                                   .required = true},
+                 DeclaredParameter{
+                     .name = "root", .type = declared_type_reference("string"), .required = true},
+                 DeclaredParameter{.name = "title", .type = declared_type_reference("string")},
+                 DeclaredParameter{.name = "width", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "height", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "x", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "y", .type = declared_type_reference("number")}},
+            .dispatch_policy = "framework",
+            .payload_contract = "strata.action-payload/window.open@1",
+            .summary = "Open another window running an overlay of this module as its own surface"},
+        DeclaredAction{
+            .id = "window.set",
+            .parameters =
+                {DeclaredParameter{.name = "fullscreen",
+                                   .type = declared_type_reference("boolean")},
+                 DeclaredParameter{.name = "alwaysOnTop",
+                                   .type = declared_type_reference("boolean")},
+                 DeclaredParameter{.name = "width", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "height", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "x", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "y", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "center", .type = declared_type_reference("boolean")},
+                 DeclaredParameter{.name = "minWidth", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "minHeight", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "opacity", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "title", .type = declared_type_reference("string")},
+                 DeclaredParameter{.name = "resizable", .type = declared_type_reference("boolean")},
+                 DeclaredParameter{.name = "fromEvent", .type = declared_type_reference("string")}},
+            .dispatch_policy = "framework",
+            .payload_contract = "strata.action-payload/window.set@1",
+            .summary =
+                "Change the window: fullscreen, always on top, size, place, opacity, title; then() "
+                "receives its state"},
         DeclaredAction{
             .id = "window.setChrome",
             .parameters =
@@ -616,6 +697,13 @@ void add_builtin_actions(BuiltinCatalog& catalog) {
             .payload_contract = "strata.action-payload/window.setChrome@1",
             .summary = "Draw the title bar yourself (custom) or let the system (system), over a "
                        "mica, acrylic, tabbed or no backdrop"},
+        DeclaredAction{
+            .id = "window.show",
+            .parameters = {},
+            .dispatch_policy = "framework",
+            .payload_contract = "strata.action-payload/window.show@1",
+            .summary =
+                "Show and bring forward a window hidden to the tray, minimized or behind others"},
         DeclaredAction{.id = "window.toggleMaximize",
                        .parameters = {},
                        .dispatch_policy = "framework",

@@ -8,6 +8,8 @@
 #include <cstring>
 #include <deque>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -27,12 +29,14 @@
 #include <mfmediaengine.h>
 #include <oleidl.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <shobjidl.h>
 #include <wincodec.h>
 #include <windowsx.h>
 #include <wrl/client.h>
 
 #include "data/json.hpp"
+#include "window_control.hpp"
 
 namespace strata::desktop {
 namespace {
@@ -171,6 +175,127 @@ struct Pixels final {
     std::vector<std::uint8_t> result(data, data + stat.cbSize.QuadPart);
     GlobalUnlock(memory);
     return result;
+}
+
+[[nodiscard]] std::optional<double> number_field(const JsonValue& payload,
+                                                 const std::string_view name) {
+    const JsonValue* const value = payload.find(name);
+    if (value == nullptr)
+        return std::nullopt;
+    if (value->number() != nullptr && std::isfinite(*value->number()))
+        return *value->number();
+    if (value->integer() != nullptr)
+        return static_cast<double>(*value->integer());
+    return std::nullopt;
+}
+
+/** `pixels` resampled to `width` x `height`. */
+[[nodiscard]] Pixels scaled(const Pixels& pixels, const std::uint32_t width,
+                            const std::uint32_t height) {
+    if (width == pixels.width && height == pixels.height)
+        return pixels;
+    if (width == 0U || height == 0U || static_cast<std::uint64_t>(width) * height > 64'000'000U)
+        throw std::runtime_error("the scaled image is empty or too large");
+    const ComPtr<IWICImagingFactory> factory = imaging_factory();
+    ComPtr<IWICBitmap> source;
+    ComPtr<IWICBitmapScaler> scaler;
+    if (FAILED(factory->CreateBitmapFromMemory(pixels.width, pixels.height,
+                                               GUID_WICPixelFormat32bppRGBA, pixels.width * 4U,
+                                               static_cast<UINT>(pixels.rgba.size()),
+                                               const_cast<BYTE*>(pixels.rgba.data()), &source)) ||
+        FAILED(factory->CreateBitmapScaler(&scaler)) ||
+        FAILED(scaler->Initialize(source.Get(), width, height,
+                                  WICBitmapInterpolationModeHighQualityCubic))) {
+        throw std::runtime_error("the image could not be scaled");
+    }
+    Pixels result{width, height, std::vector<std::uint8_t>(std::size_t{width} * height * 4U)};
+    if (FAILED(scaler->CopyPixels(nullptr, width * 4U, static_cast<UINT>(result.rgba.size()),
+                                  result.rgba.data()))) {
+        throw std::runtime_error("the scaled image could not be read");
+    }
+    return result;
+}
+
+/** An icon of `pixels` at `size` x `size`, for the tray; the caller destroys it. */
+[[nodiscard]] HICON make_icon(const Pixels& pixels, const std::uint32_t size) {
+    const Pixels fitted = scaled(pixels, size, size);
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = static_cast<LONG>(size);
+    info.bmiHeader.biHeight = -static_cast<LONG>(size);
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    const HBITMAP color = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0U);
+    if (color == nullptr || bits == nullptr)
+        throw std::runtime_error("the tray icon bitmap could not be made");
+    auto* const target = static_cast<std::uint8_t*>(bits);
+    for (std::size_t index = 0U; index + 3U < fitted.rgba.size(); index += 4U) {
+        target[index] = fitted.rgba[index + 2U];
+        target[index + 1U] = fitted.rgba[index + 1U];
+        target[index + 2U] = fitted.rgba[index];
+        target[index + 3U] = fitted.rgba[index + 3U];
+    }
+    const HBITMAP mask =
+        CreateBitmap(static_cast<int>(size), static_cast<int>(size), 1U, 1U, nullptr);
+    ICONINFO parts{TRUE, 0U, 0U, mask, color};
+    const HICON icon = CreateIconIndirect(&parts);
+    DeleteObject(mask);
+    DeleteObject(color);
+    if (icon == nullptr)
+        throw std::runtime_error("the tray icon could not be made");
+    return icon;
+}
+
+/** A known folder's path, or nothing where the system has none. */
+[[nodiscard]] std::string known_folder(REFKNOWNFOLDERID folder) {
+    PWSTR path = nullptr;
+    std::string result;
+    if (SUCCEEDED(SHGetKnownFolderPath(folder, KF_FLAG_DEFAULT, nullptr, &path)))
+        result = utf8(path);
+    CoTaskMemFree(path);
+    return result;
+}
+
+[[nodiscard]] std::filesystem::path temporary_directory() {
+    std::wstring path(MAX_PATH + 1U, L'\0');
+    const DWORD size = GetTempPathW(static_cast<DWORD>(path.size()), path.data());
+    path.resize(size <= path.size() ? size : 0U);
+    while (!path.empty() && (path.back() == L'\\' || path.back() == L'/'))
+        path.pop_back();
+    return path.empty() ? std::filesystem::temp_directory_path() : std::filesystem::path(path);
+}
+
+/** The look the user chose: the app theme, and the accent colour Windows paints with. */
+[[nodiscard]] SystemAppearance read_appearance() {
+    SystemAppearance result;
+    DWORD value = 0U;
+    DWORD size = sizeof(value);
+    if (RegGetValueW(
+            HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+            L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS) {
+        result.dark = value == 0U;
+    }
+    size = sizeof(value);
+    // AccentColor is 0xAABBGGRR; without it, the colorization colour (0xAARRGGBB) is the accent.
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", L"AccentColor",
+                     RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS) {
+        result.accent = strata_color{static_cast<std::uint8_t>(value & 0xFFU),
+                                     static_cast<std::uint8_t>((value >> 8U) & 0xFFU),
+                                     static_cast<std::uint8_t>((value >> 16U) & 0xFFU), 255U};
+    } else if (BOOL opaque = FALSE; SUCCEEDED(DwmGetColorizationColor(&value, &opaque))) {
+        result.accent = strata_color{static_cast<std::uint8_t>((value >> 16U) & 0xFFU),
+                                     static_cast<std::uint8_t>((value >> 8U) & 0xFFU),
+                                     static_cast<std::uint8_t>(value & 0xFFU), 255U};
+    }
+    return result;
+}
+
+/** Whether the primary mouse button (the left, unless swapped) is down now. */
+[[nodiscard]] bool primary_button_down() noexcept {
+    const int button = GetSystemMetrics(SM_SWAPBUTTON) != 0 ? VK_RBUTTON : VK_LBUTTON;
+    return (GetAsyncKeyState(button) & 0x8000) != 0;
 }
 
 /** A movable global holding `bytes`, for the clipboard. */
@@ -348,12 +473,22 @@ struct PlatformServices::Impl final {
         PlatformImage frame;
     };
 
+    /** An item of the tray icon's menu. */
+    struct TrayItem final {
+        std::string id;
+        std::string label;
+        bool checked = false;
+        bool enabled = true;
+        bool separator = false;
+    };
+
     Impl(HWND window, ResourceReader read_resource, ResourcePath resource_path)
         : window(window), read_resource(std::move(read_resource)),
-          resource_path(std::move(resource_path)) {
+          resource_path(std::move(resource_path)), control(window) {
         if (window == nullptr)
             throw std::invalid_argument("platform services require a window");
         ole = SUCCEEDED(OleInitialize(nullptr));
+        system_appearance = read_appearance();
     }
 
     ~Impl() {
@@ -366,13 +501,7 @@ struct PlatformServices::Impl final {
             RevokeDragDrop(window);
             drop_target->Release();
         }
-        if (tray) {
-            NOTIFYICONDATAW icon{};
-            icon.cbSize = sizeof(icon);
-            icon.hWnd = window;
-            icon.uID = tray_icon_id;
-            Shell_NotifyIconW(NIM_DELETE, &icon);
-        }
+        remove_tray();
         if (ole)
             OleUninitialize();
     }
@@ -528,13 +657,158 @@ struct PlatformServices::Impl final {
         copy_text(icon.szTip, title.empty() ? std::wstring(L"Strata") : title);
         tray = Shell_NotifyIconW(NIM_ADD, &icon) != FALSE;
         icon.uVersion = NOTIFYICON_VERSION_4;
-        Shell_NotifyIconW(NIM_SETVERSION, &icon);
+        tray_version_4 = Shell_NotifyIconW(NIM_SETVERSION, &icon) != FALSE;
+    }
+
+    void remove_tray() noexcept {
+        if (tray) {
+            NOTIFYICONDATAW icon{};
+            icon.cbSize = sizeof(icon);
+            icon.hWnd = window;
+            icon.uID = tray_icon_id;
+            Shell_NotifyIconW(NIM_DELETE, &icon);
+        }
+        tray = false;
+        tray_menu = false;
+        tray_notified = false;
+        tray_for_hiding = false;
+        tray_items.clear();
+        if (tray_icon != nullptr)
+            DestroyIcon(tray_icon);
+        tray_icon = nullptr;
+    }
+
+    /** `system.tray`: the icon, its tooltip and its menu, or no icon at all. */
+    [[nodiscard]] JsonValue::Object set_tray(const Request& request) {
+        if (!flag_field(request.payload, "visible", true)) {
+            // A notification or a hidden window still needs the icon; only the menu goes.
+            tray_menu = false;
+            tray_items.clear();
+            if (!tray_notified && !control.hidden())
+                remove_tray();
+            return {{"visible", JsonValue(tray)}};
+        }
+        ensure_tray();
+        if (!tray)
+            return {{"error", JsonValue("the tray icon could not be added")},
+                    {"visible", JsonValue(false)}};
+        tray_menu = true;
+        tray_client = request.client;
+        tray_items.clear();
+        if (const JsonValue* items = request.payload.find("items");
+            items != nullptr && items->array() != nullptr) {
+            for (const JsonValue& entry : *items->array()) {
+                if (entry.object() == nullptr)
+                    continue;
+                TrayItem item;
+                item.id = text_field(entry, "id");
+                item.label = text_field(entry, "label", item.id);
+                item.checked = flag_field(entry, "checked", false);
+                item.enabled = flag_field(entry, "enabled", true);
+                item.separator = flag_field(entry, "separator", false);
+                if (item.separator || !item.label.empty())
+                    tray_items.push_back(std::move(item));
+            }
+        }
+        NOTIFYICONDATAW icon{};
+        icon.cbSize = sizeof(icon);
+        icon.hWnd = window;
+        icon.uID = tray_icon_id;
+        icon.uFlags = NIF_TIP | NIF_SHOWTIP;
+        std::wstring tooltip = wide(text_field(request.payload, "tooltip"));
+        if (tooltip.empty()) {
+            tooltip.resize(256U);
+            tooltip.resize(static_cast<std::size_t>(GetWindowTextW(window, tooltip.data(), 256)));
+        }
+        copy_text(icon.szTip, tooltip.empty() ? std::wstring(L"Strata") : tooltip);
+        std::string failure;
+        HICON made = nullptr;
+        if (const std::string source = text_field(request.payload, "icon"); !source.empty()) {
+            try {
+                const UINT dpi = GetDpiForWindow(window);
+                made = make_icon(decode(read_resource(source)),
+                                 static_cast<std::uint32_t>(
+                                     GetSystemMetricsForDpi(SM_CXSMICON, dpi == 0U ? 96U : dpi)));
+                icon.uFlags |= NIF_ICON;
+                icon.hIcon = made;
+            } catch (const std::exception& error) {
+                failure = error.what();
+            }
+        }
+        Shell_NotifyIconW(NIM_MODIFY, &icon);
+        if (made != nullptr) {
+            if (tray_icon != nullptr)
+                DestroyIcon(tray_icon);
+            tray_icon = made;
+        }
+        JsonValue::Object result{{"items", JsonValue(static_cast<std::int64_t>(tray_items.size()))},
+                                 {"visible", JsonValue(true)}};
+        if (!failure.empty())
+            result.emplace_back("error", JsonValue("the tray icon image: " + failure));
+        return result;
+    }
+
+    /** The tray icon's menu, at `anchor`; a chosen item is said on the "tray" channel. */
+    void show_tray_menu(const POINT anchor) {
+        if (!tray_menu || tray_items.empty())
+            return;
+        const HMENU menu = CreatePopupMenu();
+        if (menu == nullptr)
+            return;
+        for (std::size_t index = 0U; index < tray_items.size(); ++index) {
+            const TrayItem& item = tray_items[index];
+            if (item.separator) {
+                AppendMenuW(menu, MF_SEPARATOR, 0U, nullptr);
+                continue;
+            }
+            const UINT flags = MF_STRING | (item.checked ? MF_CHECKED : MF_UNCHECKED) |
+                               (item.enabled ? MF_ENABLED : MF_GRAYED);
+            AppendMenuW(menu, flags, index + 1U, wide(item.label).c_str());
+        }
+        // The menu closes when the user clicks elsewhere only if the window is foreground.
+        SetForegroundWindow(window);
+        const UINT alignment =
+            GetSystemMetrics(SM_MENUDROPALIGNMENT) != 0 ? TPM_RIGHTALIGN : TPM_LEFTALIGN;
+        const auto chosen = static_cast<std::size_t>(TrackPopupMenuEx(
+            menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | alignment,
+            anchor.x, anchor.y, window, nullptr));
+        PostMessageW(window, WM_NULL, 0, 0);
+        DestroyMenu(menu);
+        if (chosen == 0U || chosen > tray_items.size())
+            return;
+        const std::string said = data::encode_canonical_json(
+            JsonValue(JsonValue::Object{{"id", JsonValue(tray_items[chosen - 1U].id)}}));
+        const std::scoped_lock lock(mutex);
+        answered.push_back(
+            PlatformAnswer{tray_client, 0U, said, std::nullopt, std::string("tray")});
+    }
+
+    /** Shows the window again; an icon made only to bring it back goes with it. */
+    void show_window() {
+        control.show();
+        if (tray_for_hiding && !tray_menu && !tray_notified)
+            remove_tray();
+        tray_for_hiding = false;
+    }
+
+    [[nodiscard]] JsonValue::Object hide_to_tray() {
+        if (!tray) {
+            ensure_tray();
+            tray_for_hiding = tray;
+        }
+        // Without an icon to click, a hidden window could never come back.
+        if (!tray)
+            return {{"error", JsonValue("the tray icon could not be added")},
+                    {"hidden", JsonValue(false)}};
+        control.hide();
+        return {{"hidden", JsonValue(true)}};
     }
 
     [[nodiscard]] bool notify(const Request& request) {
         ensure_tray();
         if (!tray)
             return false;
+        tray_notified = true;
         NOTIFYICONDATAW icon{};
         icon.cbSize = sizeof(icon);
         icon.hWnd = window;
@@ -589,6 +863,14 @@ struct PlatformServices::Impl final {
             const std::vector<std::uint8_t> bytes = read_resource(id);
             pixels = decode(bytes);
         }
+        const bool copied = put_on_clipboard(pixels);
+        return {{"copied", JsonValue(copied)},
+                {"height", JsonValue(static_cast<std::int64_t>(pixels.height))},
+                {"width", JsonValue(static_cast<std::int64_t>(pixels.width))}};
+    }
+
+    /** Puts `pixels` on the clipboard as a DIB and a PNG. */
+    [[nodiscard]] bool put_on_clipboard(const Pixels& pixels) {
         const std::vector<std::uint8_t> png = encode_png(pixels);
         // CF_DIB for everything, bottom-up BGRA; PNG beside it keeps the alpha for apps that read
         // it.
@@ -627,9 +909,226 @@ struct PlatformServices::Impl final {
             }
             CloseClipboard();
         }
+        return copied;
+    }
+
+    // ---- node captures ----
+
+    /** A capture's answer: every field, always, so a document can keep it whole in state. */
+    [[nodiscard]] static JsonValue::Object captured(const bool ok, std::string error,
+                                                    const std::uint32_t width,
+                                                    const std::uint32_t height, std::string path,
+                                                    std::string image, const bool copied) {
         return {{"copied", JsonValue(copied)},
-                {"height", JsonValue(static_cast<std::int64_t>(pixels.height))},
-                {"width", JsonValue(static_cast<std::int64_t>(pixels.width))}};
+                {"error", JsonValue(std::move(error))},
+                {"height", JsonValue(static_cast<std::int64_t>(height))},
+                {"image", JsonValue(std::move(image))},
+                {"ok", JsonValue(ok)},
+                {"path", JsonValue(std::move(path))},
+                {"width", JsonValue(static_cast<std::int64_t>(width))}};
+    }
+
+    /** Cuts a `node.capture`'s rectangle out of the frame and writes it where it asked. */
+    [[nodiscard]] PlatformAnswer capture(const Request& request, const std::uint32_t width,
+                                         const std::uint32_t height,
+                                         const std::span<const std::uint8_t> rgba) {
+        const JsonValue* const area = request.payload.find("rect");
+        if (area == nullptr || area->object() == nullptr)
+            return answer(request, captured(false, "no node with that key is on screen", 0U, 0U, {},
+                                            {}, false));
+        const auto edge = [area](const std::string_view name) {
+            return std::max<std::int64_t>(
+                0, static_cast<std::int64_t>(std::lround(number_field(*area, name).value_or(0.0))));
+        };
+        const std::int64_t left = std::min<std::int64_t>(edge("x"), width);
+        const std::int64_t top = std::min<std::int64_t>(edge("y"), height);
+        const std::int64_t right = std::min<std::int64_t>(left + edge("width"), width);
+        const std::int64_t bottom = std::min<std::int64_t>(top + edge("height"), height);
+        if (right <= left || bottom <= top || rgba.size() < std::size_t{width} * height * 4U)
+            return answer(request,
+                          captured(false, "the node is outside the window", 0U, 0U, {}, {}, false));
+        Pixels pixels{
+            static_cast<std::uint32_t>(right - left), static_cast<std::uint32_t>(bottom - top), {}};
+        pixels.rgba.resize(std::size_t{pixels.width} * pixels.height * 4U);
+        for (std::uint32_t row = 0U; row < pixels.height; ++row) {
+            const std::size_t from =
+                (static_cast<std::size_t>(top + row) * width + static_cast<std::size_t>(left)) * 4U;
+            std::memcpy(pixels.rgba.data() + std::size_t{row} * pixels.width * 4U,
+                        rgba.data() + from, std::size_t{pixels.width} * 4U);
+        }
+        if (const std::optional<double> factor = number_field(request.payload, "scale");
+            factor.has_value() && *factor > 0.0 && *factor != 1.0) {
+            pixels =
+                scaled(pixels,
+                       std::max<std::uint32_t>(
+                           1U, static_cast<std::uint32_t>(std::lround(pixels.width * *factor))),
+                       std::max<std::uint32_t>(
+                           1U, static_cast<std::uint32_t>(std::lround(pixels.height * *factor))));
+        }
+        std::string path = text_field(request.payload, "path");
+        const bool clipboard = flag_field(request.payload, "clipboard", false);
+        const std::string image = text_field(request.payload, "image");
+        // Asked for nothing else, it goes to a file of its own.
+        std::filesystem::path file;
+        if (!path.empty()) {
+            file = std::filesystem::path(wide(path));
+        } else if (!clipboard && image.empty()) {
+            file = temporary_directory() / L"Strata" /
+                   (L"capture-" + std::to_wstring(++capture_count) + L".png");
+        }
+        if (!file.empty()) {
+            file.make_preferred();
+            if (file.has_parent_path())
+                std::filesystem::create_directories(file.parent_path());
+            const std::vector<std::uint8_t> png = encode_png(pixels);
+            std::ofstream output(file, std::ios::binary | std::ios::trunc);
+            output.write(reinterpret_cast<const char*>(png.data()),
+                         static_cast<std::streamsize>(png.size()));
+            if (!output)
+                throw std::runtime_error("the capture could not be written to " +
+                                         utf8(file.wstring()));
+            path = utf8(file.wstring());
+        }
+        const bool copied = clipboard && put_on_clipboard(pixels);
+        PlatformAnswer result =
+            answer(request, captured(true, {}, pixels.width, pixels.height, path, image, copied));
+        if (!image.empty())
+            result.image =
+                PlatformImage{image, pixels.width, pixels.height, std::move(pixels.rgba)};
+        return result;
+    }
+
+    void frame_presented(const std::uint32_t width, const std::uint32_t height,
+                         const std::span<const std::uint8_t> rgba) {
+        std::vector<Request> due;
+        due.swap(captures);
+        std::vector<PlatformAnswer> finished;
+        for (const Request& request : due) {
+            try {
+                finished.push_back(capture(request, width, height, rgba));
+            } catch (const std::exception& error) {
+                finished.push_back(
+                    answer(request, captured(false, error.what(), 0U, 0U, {}, {}, false)));
+            }
+        }
+        const std::scoped_lock lock(mutex);
+        for (PlatformAnswer& done : finished)
+            answered.push_back(std::move(done));
+    }
+
+    // ---- dragging out ----
+
+    /**
+     * `system.dragOut`: the shell's drag loop carrying files (CF_HDROP) and text
+     * (CF_UNICODETEXT) to wherever the user drops them; it runs until the button is released.
+     */
+    [[nodiscard]] JsonValue::Object drag_out(const Request& request) {
+        // The press may have ended before this frame came round: then there is nothing to drag.
+        if (!primary_button_down())
+            return {{"effect", JsonValue("none")}};
+        std::vector<std::wstring> files;
+        if (const JsonValue* listed = request.payload.find("files");
+            listed != nullptr && listed->array() != nullptr) {
+            for (const JsonValue& entry : *listed->array()) {
+                if (entry.string() == nullptr)
+                    continue;
+                std::filesystem::path file(wide(*entry.string()));
+                file.make_preferred();
+                if (GetFileAttributesW(file.c_str()) != INVALID_FILE_ATTRIBUTES)
+                    files.push_back(file.wstring());
+            }
+        }
+        const std::wstring text = wide(text_field(request.payload, "text"));
+        if (files.empty() && text.empty())
+            return {{"effect", JsonValue("none")},
+                    {"error", JsonValue("none of the files to drag exist")}};
+        ComPtr<IDataObject> data;
+        if (FAILED(SHCreateDataObject(nullptr, 0U, nullptr, nullptr, IID_PPV_ARGS(&data))))
+            throw std::runtime_error("the drag data could not be made");
+        const auto put = [&data](const CLIPFORMAT format, const HGLOBAL memory) {
+            if (memory == nullptr)
+                return;
+            FORMATETC described{format, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+            STGMEDIUM medium{};
+            medium.tymed = TYMED_HGLOBAL;
+            medium.hGlobal = memory;
+            if (FAILED(data->SetData(&described, &medium, TRUE)))
+                GlobalFree(memory);
+        };
+        if (!files.empty()) {
+            // DROPFILES, then each path and its terminator, then one more terminator.
+            std::vector<wchar_t> list;
+            for (const std::wstring& file : files) {
+                list.insert(list.end(), file.begin(), file.end());
+                list.push_back(L'\0');
+            }
+            list.push_back(L'\0');
+            std::vector<std::uint8_t> drop(sizeof(DROPFILES) + list.size() * sizeof(wchar_t));
+            DROPFILES header{};
+            header.pFiles = sizeof(DROPFILES);
+            header.fWide = TRUE;
+            std::memcpy(drop.data(), &header, sizeof(header));
+            std::memcpy(drop.data() + sizeof(header), list.data(), list.size() * sizeof(wchar_t));
+            put(CF_HDROP, global_copy(drop.data(), drop.size()));
+        }
+        if (!text.empty())
+            put(CF_UNICODETEXT, global_copy(text.c_str(), (text.size() + 1U) * sizeof(wchar_t)));
+        const DWORD allowed =
+            DROPEFFECT_COPY | (flag_field(request.payload, "move", false) ? DROPEFFECT_MOVE : 0U);
+        DWORD effect = DROPEFFECT_NONE;
+        const HRESULT dropped = SHDoDragDrop(window, data.Get(), nullptr, allowed, &effect);
+        // The drag loop took the release of the press that began it.
+        window_moved = true;
+        if (dropped != DRAGDROP_S_DROP)
+            return {{"effect", JsonValue("none")}};
+        // A target that moved the files itself reports what it did here, not in `effect`.
+        FORMATETC logical{
+            static_cast<CLIPFORMAT>(RegisterClipboardFormatW(L"Logical Performed DropEffect")),
+            nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        STGMEDIUM performed{};
+        if (SUCCEEDED(data->GetData(&logical, &performed))) {
+            if (const auto* const value = static_cast<const DWORD*>(GlobalLock(performed.hGlobal));
+                value != nullptr) {
+                effect = *value;
+                GlobalUnlock(performed.hGlobal);
+            }
+            ReleaseStgMedium(&performed);
+        }
+        const char* const name = (effect & DROPEFFECT_MOVE) != 0U   ? "move"
+                                 : (effect & DROPEFFECT_COPY) != 0U ? "copy"
+                                 : (effect & DROPEFFECT_LINK) != 0U ? "copy"
+                                                                    : "none";
+        return {{"effect", JsonValue(name)}};
+    }
+
+    // ---- folders ----
+
+    [[nodiscard]] static JsonValue::Object paths() {
+        return {{"appData", JsonValue(known_folder(FOLDERID_RoamingAppData))},
+                {"desktop", JsonValue(known_folder(FOLDERID_Desktop))},
+                {"documents", JsonValue(known_folder(FOLDERID_Documents))},
+                {"downloads", JsonValue(known_folder(FOLDERID_Downloads))},
+                {"home", JsonValue(known_folder(FOLDERID_Profile))},
+                {"pictures", JsonValue(known_folder(FOLDERID_Pictures))},
+                {"temp", JsonValue(utf8(temporary_directory().wstring()))}};
+    }
+
+    // ---- windows ----
+
+    /** `window.open`, and `window.close` naming another window: the embedder's to carry out. */
+    void request_window(const Request& request, const WindowRequest::Kind kind) {
+        WindowRequest window_request;
+        window_request.kind = kind;
+        window_request.client = request.client;
+        window_request.request = request.number;
+        window_request.id = text_field(request.payload, "id");
+        window_request.root = text_field(request.payload, "root");
+        window_request.title = text_field(request.payload, "title");
+        window_request.width = number_field(request.payload, "width");
+        window_request.height = number_field(request.payload, "height");
+        window_request.x = number_field(request.payload, "x");
+        window_request.y = number_field(request.payload, "y");
+        window_requests.push_back(std::move(window_request));
     }
 
     [[nodiscard]] std::optional<Pixels> clipboard_image() {
@@ -919,7 +1418,35 @@ struct PlatformServices::Impl final {
         } else if (kind == "window.toggleMaximize") {
             ShowWindow(window, IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE);
         } else if (kind == "window.close") {
-            PostMessageW(window, WM_CLOSE, 0, 0);
+            if (text_field(request.payload, "id").empty())
+                PostMessageW(window, WM_CLOSE, 0, 0);
+            else
+                request_window(request, WindowRequest::Kind::close);
+        } else if (kind == "window.open") {
+            if (text_field(request.payload, "id").empty() ||
+                text_field(request.payload, "root").empty()) {
+                answers.push_back(answer(
+                    request, {{"error", JsonValue("window.open needs an id and a root overlay")},
+                              {"opened", JsonValue(false)}}));
+                return;
+            }
+            request_window(request, WindowRequest::Kind::open);
+        } else if (kind == "window.set") {
+            answers.push_back(answer(request, control.set(request.payload)));
+        } else if (kind == "window.show") {
+            show_window();
+            answers.push_back(answer(request, control.state()));
+        } else if (kind == "window.hideToTray") {
+            answers.push_back(answer(request, hide_to_tray()));
+        } else if (kind == "system.tray") {
+            answers.push_back(answer(request, set_tray(request)));
+        } else if (kind == "system.dragOut") {
+            answers.push_back(answer(request, drag_out(request)));
+        } else if (kind == "system.paths") {
+            answers.push_back(answer(request, paths()));
+        } else if (kind == "node.capture") {
+            // The next frame's pixels hold it; the host hands them over once presented.
+            captures.push_back(request);
         } else if (kind == "window.drag") {
             // The system's own move loop: snapping, shaking and dragging off a maximized window.
             POINT cursor{};
@@ -1012,12 +1539,34 @@ struct PlatformServices::Impl final {
             const UINT event = LOWORD(long_value);
             if (event == WM_LBUTTONUP || event == NIN_SELECT || event == NIN_KEYSELECT ||
                 event == NIN_BALLOONUSERCLICK) {
-                ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
-                SetForegroundWindow(window);
+                show_window();
+            } else if (event == WM_CONTEXTMENU || (!tray_version_4 && event == WM_RBUTTONUP)) {
+                // Version 4 anchors the menu where the icon was invoked, keyboard or mouse.
+                POINT anchor{GET_X_LPARAM(word), GET_Y_LPARAM(word)};
+                if (!tray_version_4)
+                    GetCursorPos(&anchor);
+                show_tray_menu(anchor);
             }
             return 0;
         }
-        if (!custom_title)
+        // The user changed the app theme or the accent colour: documents that follow them follow.
+        if ((message == WM_SETTINGCHANGE && long_value != 0 &&
+             std::wstring_view(reinterpret_cast<const wchar_t*>(long_value)) ==
+                 L"ImmersiveColorSet") ||
+            message == WM_DWMCOLORIZATIONCOLORCHANGED || message == WM_THEMECHANGED) {
+            if (SystemAppearance next = read_appearance(); !(next == system_appearance)) {
+                system_appearance = next;
+                appearance_changed = true;
+            }
+            return std::nullopt;
+        }
+        if (const std::optional<std::intptr_t> handled =
+                control.window_message(message, word, long_value);
+            handled.has_value()) {
+            return handled;
+        }
+        // Fullscreen has no chrome, custom or not.
+        if (!custom_title || control.fullscreen())
             return std::nullopt;
         if (message == WM_NCCALCSIZE && word == TRUE) {
             // The title bar is the document's: the client reaches the top edge, while the sides
@@ -1063,6 +1612,22 @@ struct PlatformServices::Impl final {
     bool window_moved = false;
     std::uint64_t pasted_count = 0U;
     std::map<std::string, Pixels, std::less<>> pasted;
+    WindowControl control;
+    /** The tray icon's menu and the session that set it, which hears what is chosen. */
+    std::vector<TrayItem> tray_items;
+    std::string tray_client;
+    HICON tray_icon = nullptr;
+    bool tray_version_4 = false;
+    /** Why the tray icon is there: its menu, a notification, a window hidden to it. */
+    bool tray_menu = false;
+    bool tray_notified = false;
+    bool tray_for_hiding = false;
+    std::vector<WindowRequest> window_requests;
+    /** `node.capture` requests waiting for the next presented frame. */
+    std::vector<Request> captures;
+    std::uint64_t capture_count = 0U;
+    SystemAppearance system_appearance;
+    bool appearance_changed = false;
 };
 
 PlatformServices::PlatformServices(HWND window, ResourceReader read_resource,
@@ -1111,6 +1676,33 @@ std::string PlatformServices::event_json(const PlatformAnswer& event) {
         {"channel", JsonValue(event.channel.value_or(std::string{}))},
         {"data", std::move(data)},
     }));
+}
+
+void PlatformServices::answer(std::string client, const std::uint64_t request, std::string json) {
+    const std::scoped_lock lock(impl_->mutex);
+    impl_->answered.push_back(
+        PlatformAnswer{std::move(client), request, std::move(json), std::nullopt, std::nullopt});
+}
+
+std::vector<WindowRequest> PlatformServices::take_window_requests() {
+    return std::exchange(impl_->window_requests, {});
+}
+
+const SystemAppearance& PlatformServices::appearance() const noexcept {
+    return impl_->system_appearance;
+}
+
+bool PlatformServices::take_appearance_changed() noexcept {
+    return std::exchange(impl_->appearance_changed, false);
+}
+
+bool PlatformServices::wants_frame() const noexcept {
+    return !impl_->captures.empty();
+}
+
+void PlatformServices::frame_presented(const std::uint32_t width, const std::uint32_t height,
+                                       const std::span<const std::uint8_t> rgba) {
+    impl_->frame_presented(width, height, rgba);
 }
 
 bool PlatformServices::take_window_moved() noexcept {

@@ -337,6 +337,28 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::map,
                                                          .label = "strata.fileDrop options",
                                                          .value = declared_type_reference("any")})},
+        DeclaredNamedType{
+            .id = "strataDragOutOptions",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "strata.dragOut options",
+                .fields = {DeclaredTypeField{.name = "files",
+                                             .type = declared_type_reference("dragOutFilesList"),
+                                             .required = false,
+                                             .nullable = false},
+                           DeclaredTypeField{.name = "move",
+                                             .type = declared_type_reference("boolean"),
+                                             .required = false,
+                                             .nullable = false},
+                           DeclaredTypeField{.name = "text",
+                                             .type = declared_type_reference("string"),
+                                             .required = false,
+                                             .nullable = false}},
+                .value = declared_type_reference("any")})},
+        DeclaredNamedType{
+            .id = "dragOutFilesList",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::list, .element = declared_type_reference("string")})},
         DeclaredNamedType{.id = "strataWindowDragOptions",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::map,
@@ -1017,6 +1039,7 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                                           declared_type_reference("strataBackdropBehavior"),
                                           declared_type_reference("strataChannelBehavior"),
                                           declared_type_reference("strataDisabledBehavior"),
+                                          declared_type_reference("strataDragOutBehavior"),
                                           declared_type_reference("strataDragSourceBehavior"),
                                           declared_type_reference("strataDropTargetBehavior"),
                                           declared_type_reference("strataFileDropBehavior"),
@@ -1245,6 +1268,33 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::string_literal,
                                                          .literal = "strata.fileDrop"})},
+        DeclaredNamedType{
+            .id = "strataDragOutBehavior",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "strata.dragOut behavior",
+                .fields =
+                    {DeclaredTypeField{.name = "action",
+                                       .type = declared_type_reference("action"),
+                                       .required = false,
+                                       .nullable = true},
+                     DeclaredTypeField{.name = "enabled",
+                                       .type = declared_type_reference("boolean"),
+                                       .required = false,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "id",
+                                       .type = declared_type_reference("literalStrataDragOut"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "options",
+                                       .type = declared_type_reference("strataDragOutOptions"),
+                                       .required = false,
+                                       .nullable = false}},
+                .value = declared_type_reference("any")})},
+        DeclaredNamedType{.id = "literalStrataDragOut",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::string_literal,
+                                                         .literal = "strata.dragOut"})},
         DeclaredNamedType{
             .id = "strataWindowDragBehavior",
             .definition = declared_type(DeclaredType{

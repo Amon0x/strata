@@ -37,6 +37,9 @@ inline constexpr std::size_t oldest_struct_size<strata_widget_extension> =
 template <>
 inline constexpr std::size_t oldest_struct_size<strata_behavior_extension> =
     STRATA_BEHAVIOR_EXTENSION_VERSION_1_SIZE;
+template <>
+inline constexpr std::size_t oldest_struct_size<strata_surface_environment> =
+    STRATA_SURFACE_ENVIRONMENT_VERSION_1_SIZE;
 
 /** True when `value` carries at least the oldest accepted prefix of `T`. */
 template <typename T> [[nodiscard]] bool has_struct(const T* const value) noexcept {
@@ -86,6 +89,41 @@ template <typename T>
     const std::size_t size = std::min(stride, sizeof(T));
     std::memcpy(&result, element, size);
     result.struct_size = size;
+    return result;
+}
+
+/**
+ * Copies a caller's surface configuration, of any layout. Its environment is embedded rather than
+ * pointed to, so a caller built against an older, shorter environment placed every later field
+ * that much earlier: the environment is read at the size it declares (newer environment fields
+ * read as zero), and the rest of the configuration from where that caller's layout put it.
+ */
+[[nodiscard]] inline std::optional<strata_surface_config>
+read_surface_config(const strata_surface_config* const value) noexcept {
+    constexpr std::size_t environment_offset = offsetof(strata_surface_config, environment);
+    constexpr std::size_t environment_size = sizeof(strata_surface_environment);
+    if (value == nullptr || value->struct_size < environment_offset + sizeof(std::size_t))
+        return std::nullopt;
+    const auto* const bytes = reinterpret_cast<const std::byte*>(value);
+    std::size_t declared = 0U;
+    std::memcpy(&declared, bytes + environment_offset, sizeof(declared));
+    if (declared >= environment_size)
+        return read_struct(value);
+    const std::size_t caller_tail = environment_offset + declared;
+    if (declared < oldest_struct_size<strata_surface_environment> ||
+        value->struct_size < caller_tail ||
+        value->struct_size + (environment_size - declared) <
+            oldest_struct_size<strata_surface_config>) {
+        return std::nullopt;
+    }
+    strata_surface_config result{};
+    auto* const target = reinterpret_cast<std::byte*>(&result);
+    std::memcpy(target, bytes, caller_tail);
+    const std::size_t tail =
+        std::min(value->struct_size - caller_tail,
+                 sizeof(strata_surface_config) - environment_offset - environment_size);
+    std::memcpy(target + environment_offset + environment_size, bytes + caller_tail, tail);
+    result.struct_size = environment_offset + environment_size + tail;
     return result;
 }
 

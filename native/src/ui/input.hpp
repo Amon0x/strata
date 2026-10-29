@@ -674,6 +674,15 @@ class InputRouter final {
     execute_platform_action(const runtime::ActionEvent& event, const runtime::Action& action);
     /** `strata.windowDrag`: a primary press on such a node (not on a control) moves the window. */
     void start_window_drag(const PointerInputEvent& event, const RetainedNode* target);
+    /** `strata.dragOut`: a primary press on such a node may become a drag out of the window. */
+    void arm_drag_out(const PointerInputEvent& event, const RetainedNode* target);
+    /**
+     * Once the armed press moves past the drag slop, asks the host to carry the node's files and
+     * text out of the window (`system.dragOut`); true when it did, and the press is the host's.
+     */
+    [[nodiscard]] bool start_drag_out(const PointerInputEvent& event);
+    /** `node.capture`: the keyed node's on-screen rectangle, in framebuffer pixels. */
+    [[nodiscard]] std::optional<Rect> capture_rectangle(std::string_view key) const;
     /** Routes the pending/captured pointer through the drag gesture state machine. */
     [[nodiscard]] bool route_pointer_drag(const PointerInputEvent& event,
                                           InputOperationResult& result);
@@ -910,6 +919,15 @@ class InputRouter final {
     /** The `strata.fileDrop` node files are being dragged over. */
     std::optional<std::uint64_t> file_drop_target_;
     std::int64_t last_window_drag_press_nanos_ = 0;
+    /** A primary press on a `strata.dragOut` node, until it moves far enough or is released. */
+    struct DragOutPress final {
+        std::int32_t pointer_id = 0;
+        std::uint64_t node_identity = 0U;
+        Point position;
+    };
+    std::optional<DragOutPress> drag_out_press_;
+    /** The `strata.dragOut` node each drag the host carries out began on, by request number. */
+    std::map<std::uint64_t, std::uint64_t> pending_drag_outs_;
     void run_due_delays(InputOperationResult& result);
     /** One authored timer's schedule: its interval, when it fires next, and whether it is done. */
     struct TimerSchedule final {

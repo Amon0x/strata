@@ -5,6 +5,11 @@ overlay MainShowcase {
   root Showcase()
 }
 
+// The DESKTOP page opens it as a window of its own (window.open).
+overlay SecondWindow {
+  root SecondWindowRoot()
+}
+
 overlay PushedShowcase {
   root PushedScreen()
 }

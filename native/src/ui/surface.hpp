@@ -65,6 +65,10 @@ struct SurfaceEnvironment final {
     SurfaceDensity density = SurfaceDensity::comfortable;
     bool reduced_motion = false;
     SurfaceInputCapabilities input;
+    /** The operating system's app theme is dark (env.systemDark). */
+    bool system_dark = false;
+    /** The user's accent colour (env.systemAccent), when the host knows it. */
+    std::optional<runtime::ColorValue> system_accent;
 
     void validate() const;
     [[nodiscard]] LayoutEnvironment layout_environment(std::int64_t frame_time_nanos) const;

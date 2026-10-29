@@ -260,14 +260,21 @@ struct Host::Impl final {
         [[nodiscard]] strata::host::Bindings& bindings() { return session->bindings(); }
     };
 
+    /**
+     * The window's host. Another window of the same application (window.open) shares its model
+     * and runs only `root`, an overlay of the showcase module, as the session `window.<id>`.
+     */
     Impl(HWND window, std::filesystem::path resource_root, std::string instance_label,
-         const HostOptions options)
-        : window(window), services(window, std::move(resource_root)),
+         const HostOptions options, std::shared_ptr<ShowcaseModel> model = nullptr,
+         std::string window_id = {}, const std::string_view root = {})
+        : window(window), resource_root(resource_root), services(window, std::move(resource_root)),
           platform(
               window, [this](const std::string_view id) { return services.bytes(id); },
               [this](const std::string_view id) { return services.path(id).wstring(); }),
           renderer(window, options.vsync), instance_label(std::move(instance_label)),
-          showcase_model(this->instance_label) {
+          shared_model(model != nullptr ? std::move(model)
+                                        : std::make_shared<ShowcaseModel>(this->instance_label)),
+          showcase_model(*shared_model), window_id(std::move(window_id)), vsync(options.vsync) {
         if (this->instance_label.empty()) {
             throw std::invalid_argument("desktop instance label must not be empty");
         }
@@ -300,6 +307,29 @@ struct Host::Impl final {
                     std::chrono::steady_clock::now() - started
                 ).count()
             );
+        }
+        if (!root.empty()) {
+            create_demo_surface(showcase, "window." + this->window_id, root);
+            showcase_enabled = true;
+        } else {
+            write_desktop_note();
+        }
+    }
+
+    /**
+     * The file the DESKTOP page's card drags out to other applications: a real file, written to
+     * <temp>/Strata at every start (the page finds the folder with system.paths).
+     */
+    static void write_desktop_note() noexcept {
+        try {
+            const std::filesystem::path folder = std::filesystem::temp_directory_path() / "Strata";
+            std::filesystem::create_directories(folder);
+            std::ofstream note(folder / "Strata note.txt", std::ios::binary | std::ios::trunc);
+            note << "This file came out of a Strata window.\r\n\r\n"
+                    "The DESKTOP page's card carries it with strata.dragOut: drop it on Explorer, "
+                    "a chat or a mail to copy it there.\r\n";
+        } catch (...) {
+            // Without the file the card has nothing to carry; the page says so when dropped.
         }
     }
 
@@ -557,7 +587,7 @@ struct Host::Impl final {
     }
 
     [[nodiscard]] strata_surface_environment environment() const noexcept {
-        return strata_surface_environment{
+        strata_surface_environment result{
             sizeof(strata_surface_environment),
             environment_generation,
             static_cast<std::int64_t>(framebuffer_width),
@@ -578,6 +608,8 @@ struct Host::Impl final {
             0U,
             0U,
         };
+        platform.appearance().apply(result);
+        return result;
     }
 
     static void profile(void* const user_data, const strata_profiler_snapshot* const snapshot) {
@@ -1704,6 +1736,34 @@ struct Host::Impl final {
             }
         }
         renderer.set_transparent(platform.transparent());
+        // The user changed the system's theme or accent: every layer's env follows.
+        if (platform.take_appearance_changed()) {
+            ++environment_generation;
+            const strata_surface_environment next = environment();
+            for (Layer* const layer : layers()) {
+                if (layer->live())
+                    static_cast<void>(layer->session->adopt_environment(next));
+            }
+        }
+        // A node capture reads this frame's pixels once it is presented.
+        if (platform.wants_frame()) {
+            platform_capture = true;
+            renderer.capture_next_frame();
+        }
+    }
+
+    /** Hands the frame just presented to the node captures waiting for it. */
+    void deliver_platform_capture() {
+        if (!platform_capture)
+            return;
+        platform_capture = false;
+        std::optional<FrameCapture> captured = renderer.take_capture();
+        if (!captured.has_value())
+            return;
+        platform.frame_presented(captured->width, captured->height, captured->rgba);
+        // A capture the host asked for itself (a performance scenario) is the same frame.
+        if (host_capture)
+            held_capture = std::move(captured);
     }
 
     void frame() {
@@ -1784,6 +1844,7 @@ struct Host::Impl final {
         }
         const auto present_started = std::chrono::steady_clock::now();
         const bool presented = renderer.end_frame();
+        deliver_platform_capture();
         const std::int64_t present_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - present_started
         ).count();
@@ -1831,11 +1892,21 @@ struct Host::Impl final {
     }
 
     HWND window = nullptr;
+    std::filesystem::path resource_root;
     HostServices services;
     PlatformServices platform;
     Renderer renderer;
     std::string instance_label;
-    ShowcaseModel showcase_model;
+    /** Shared with the other windows this one opened, or that opened it. */
+    std::shared_ptr<ShowcaseModel> shared_model;
+    ShowcaseModel& showcase_model;
+    /** Empty for the first window; else the id window.open gave this one. */
+    std::string window_id;
+    bool vsync = true;
+    /** A node capture waits for this frame; a capture the host asked for may share it. */
+    bool platform_capture = false;
+    bool host_capture = false;
+    std::optional<FrameCapture> held_capture;
     desktop::DurableWriter durable_writer{&report_durable_failure};
     std::string durable_read_buffer;
     Layer showcase;
@@ -1917,7 +1988,24 @@ Host::Host(
     : impl_(std::make_unique<Impl>(
           window, std::move(resource_root), std::move(instance_label), options
       )) {}
+Host::Host(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {}
+
 Host::~Host() = default;
+
+std::vector<WindowRequest> Host::take_window_requests() {
+    return impl_->platform.take_window_requests();
+}
+
+void Host::answer_window_request(const WindowRequest& request, std::string json) {
+    impl_->platform.answer(request.client, request.request, std::move(json));
+}
+
+std::unique_ptr<Host> Host::open_window(HWND window, const WindowRequest& request) {
+    return std::unique_ptr<Host>(new Host(std::make_unique<Impl>(
+        window, impl_->resource_root, impl_->instance_label,
+        HostOptions{.vsync = impl_->vsync, .performance_hud = false, .profile_sampling = false},
+        impl_->shared_model, request.id, request.root)));
+}
 
 void Host::resize(
     const std::uint32_t framebuffer_width,
@@ -2055,10 +2143,14 @@ const DesktopFrameSample& Host::last_frame_sample() const noexcept {
 }
 
 void Host::capture_next_frame() noexcept {
+    impl_->host_capture = true;
     impl_->renderer.capture_next_frame();
 }
 
 std::optional<FrameCapture> Host::take_capture() {
+    impl_->host_capture = false;
+    if (impl_->held_capture.has_value())
+        return std::exchange(impl_->held_capture, std::nullopt);
     return impl_->renderer.take_capture();
 }
 

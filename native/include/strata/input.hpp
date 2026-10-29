@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -334,6 +335,10 @@ struct SurfaceEnvironment final {
     strata_surface_input_capabilities input_capabilities =
         STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD;
     bool reduced_motion = false;
+    /** The operating system's app theme is dark (env.systemDark). */
+    bool system_dark = false;
+    /** The user's accent colour (env.systemAccent), when the host knows it. */
+    std::optional<strata_color> system_accent;
 
     [[nodiscard]] strata_surface_environment native() const noexcept;
 };
@@ -380,6 +385,9 @@ inline strata_surface_environment SurfaceEnvironment::native() const noexcept {
         input_capabilities,
         reduced_motion ? 1U : 0U,
         0U,
+        (system_dark ? STRATA_SYSTEM_APPEARANCE_DARK : 0U) |
+            (system_accent.has_value() ? STRATA_SYSTEM_APPEARANCE_ACCENT : 0U),
+        system_accent.value_or(strata_color{}),
     };
 }
 

@@ -1855,6 +1855,62 @@ void test_struct_size_versioning(const std::filesystem::path& resource_root) {
               truncated_surface == nullptr,
           "a Surface configuration shorter than its oldest layout was accepted");
 
+    // A caller built before the environment grew embeds the shorter environment, and every later
+    // field of its configuration sits that much earlier: its extensions must still be found.
+    constexpr std::size_t environment_v1 = STRATA_SURFACE_ENVIRONMENT_VERSION_1_SIZE;
+    constexpr std::size_t environment_at = offsetof(strata_surface_config, environment);
+    constexpr std::size_t growth = sizeof(strata_surface_environment) - environment_v1;
+    strata_surface_config legacy_source = config;
+    legacy_source.id = view("fragment.legacy-environment");
+    legacy_source.environment.struct_size = environment_v1;
+    std::vector<std::byte> legacy(sizeof(strata_surface_config) - growth);
+    std::memcpy(legacy.data(), &legacy_source, environment_at + environment_v1);
+    std::memcpy(legacy.data() + environment_at + environment_v1,
+                reinterpret_cast<const std::byte*>(&legacy_source) + environment_at +
+                    sizeof(strata_surface_environment),
+                sizeof(strata_surface_config) - environment_at -
+                    sizeof(strata_surface_environment));
+    const std::size_t legacy_size = legacy.size();
+    std::memcpy(legacy.data(), &legacy_size, sizeof(legacy_size));
+    const std::uint64_t presentations_before = first_presentations;
+    strata_surface* legacy_surface = nullptr;
+    check(strata_runtime_create_surface(
+              fixture.runtime, reinterpret_cast<const strata_surface_config*>(legacy.data()),
+              &legacy_surface)
+                      .status == STRATA_STATUS_OK &&
+              legacy_surface != nullptr,
+          "a Surface configuration with an older, shorter environment was rejected");
+    check(strata_surface_frame(legacy_surface, fixture.clock.now + 2, &info).status ==
+                  STRATA_STATUS_OK &&
+              first_presentations != presentations_before,
+          "the fields after an older environment were not read from where its layout put them");
+
+    // Adoption takes either environment layout; a newer one rejects appearance flags it lacks.
+    strata_surface_environment older = environment;
+    older.struct_size = environment_v1;
+    older.generation = 2U;
+    older.system_appearance = 0xFFFFFFFFU;
+    std::uint32_t adopted = 0U;
+    check(strata_surface_adopt_environment(legacy_surface, &older, &adopted).status ==
+                  STRATA_STATUS_OK &&
+              adopted == 1U,
+          "an older environment layout was not adopted, or its trailing bytes were read");
+    strata_surface_environment appearance = environment;
+    appearance.generation = 3U;
+    appearance.system_appearance = STRATA_SYSTEM_APPEARANCE_DARK | STRATA_SYSTEM_APPEARANCE_ACCENT;
+    appearance.system_accent = strata_color{0x68U, 0x00U, 0x81U, 0xFFU};
+    check(strata_surface_adopt_environment(legacy_surface, &appearance, &adopted).status ==
+                  STRATA_STATUS_OK &&
+              adopted == 1U,
+          "an environment with the system's appearance was not adopted");
+    appearance.generation = 4U;
+    appearance.system_appearance = 1U << 7U;
+    check(strata_surface_adopt_environment(legacy_surface, &appearance, &adopted).status !=
+              STRATA_STATUS_OK,
+          "an environment with an unknown appearance flag was adopted");
+    check(strata_surface_abandon(legacy_surface).status == STRATA_STATUS_OK,
+          "legacy-environment Surface abandonment failed");
+
     // A newer caller's larger output struct keeps the bytes this library does not know.
     struct NewerMemoryInfo final {
         strata_runtime_memory_info info;

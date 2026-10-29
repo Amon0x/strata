@@ -434,6 +434,8 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredBehavior{.id = "strata.scale", .options = declared_type_reference("scaleOptions")},
         DeclaredBehavior{.id = "strata.split-handle",
                          .options = declared_type_reference("splitHandleOptions")},
+        DeclaredBehavior{.id = "strata.dragOut",
+                         .options = declared_type_reference("strataDragOutOptions")},
         DeclaredBehavior{.id = "strata.windowDrag",
                          .options = declared_type_reference("strataWindowDragOptions")},
     };

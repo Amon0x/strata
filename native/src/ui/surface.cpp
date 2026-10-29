@@ -385,6 +385,10 @@ void append_input(InputOperationResult& target, InputOperationResult source) {
         {"controlHeight", runtime::Value(compact ? 28.0 : 38.0)},
         {"contentPadding", runtime::Value(compact ? 6.0 : 10.0)},
         {"itemGap", runtime::Value(compact ? 4.0 : 8.0)},
+        {"systemDark", runtime::Value(environment.system_dark)},
+        {"systemAccent", environment.system_accent.has_value()
+                             ? runtime::Value(*environment.system_accent)
+                             : runtime::Value{}},
     });
 }
 

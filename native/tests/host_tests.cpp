@@ -856,6 +856,180 @@ void portable_session_runs_the_application_lifecycle() {
           "an ordered Session close abandoned its Surface");
 }
 
+/** What a document asked the host for through the `strata.platform` effect, in order. */
+struct PlatformRequests final {
+    std::vector<std::string> payloads;
+
+    static strata_status emit(void* const user_data, const strata_string_view effect,
+                              const strata_string_view payload) noexcept {
+        auto& self = *static_cast<PlatformRequests*>(user_data);
+        if (std::string_view(effect.data, effect.size) != "strata.platform")
+            return STRATA_STATUS_SERVICE_UNAVAILABLE;
+        self.payloads.emplace_back(payload.data, payload.size);
+        return STRATA_STATUS_OK;
+    }
+};
+
+/**
+ * A drag out starts past the slop and hears its drop, a node capture carries the node's on-screen
+ * rectangle in framebuffer pixels, a channel listener hears only what it matches, and env follows
+ * the system's appearance.
+ */
+void platform_requests_carry_gestures_rectangles_and_the_system_look() {
+    PlatformRequests requests;
+    strata::host::SessionOptions options;
+    options.application_id = "host-tests.platform";
+    options.stable_identity_seed = 11U;
+    options.read_text = [](const std::string_view id) -> std::string {
+        if (id != "platform/main.strata")
+            throw strata::host::ResourceNotFound("no module " + std::string(id));
+        return R"(overlay Main { root Probe() }
+component Probe() {
+  state effect = "";
+  state log: List<string> = [];
+  state matched = 0;
+  state opacity = 1;
+  Panel(key: "root", style: style(kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 }),
+        behaviors: [{ id: "strata.channel", options: { channel: "tray" },
+                      action: action("state.listAppend", name: "log", fromEvent: true, field: "id") }]) {
+    Panel(key: "card", style: style(width: 100, height: 40),
+          behaviors: [{ id: "strata.dragOut", options: { files: ["C:/notes/a.txt"], text: "hello" },
+                        action: action("state.setFromEvent", name: "effect", field: "effect") }])
+    Panel(key: "listener", style: style(width: 10, height: 10),
+          behaviors: [{ id: "strata.channel", options: { channel: "tray", match: { id: "show" } },
+                        action: action("state.adjust", name: "matched", amount: 1) }])
+    Button(key: "capture", label: "capture", onClick: action("node.capture", key: "card", path: "x.png"))
+    Slider(key: "fade", min: 0, max: 1, value: opacity, layout: { width: 200 },
+           onChange: action("window.set", fromEvent: "opacity"))
+    Text(key: "status", text: format("[{0}|{1}|{2}|{3}|{4}]", effect, join(log, ","), matched,
+                                     env.systemDark, env.systemAccent ?? "none"))
+  }
+})";
+    };
+    strata::host::SessionAdapters adapters;
+    adapters.effects =
+        strata_effect_adapter{sizeof(strata_effect_adapter), &requests, &PlatformRequests::emit};
+    strata::host::Session session(std::move(options), adapters);
+    check(session.activate_source("platform/main.strata", 1U).status == STRATA_ACTIVATION_ACTIVATED,
+          "the platform probe module did not activate");
+    strata::host::SessionSurface surface;
+    surface.root_name = "Main";
+    surface.environment.struct_size = sizeof(surface.environment);
+    surface.environment.generation = 1U;
+    surface.environment.framebuffer_width = 640;
+    surface.environment.framebuffer_height = 400;
+    surface.environment.logical_width = 320.0;
+    surface.environment.logical_height = 200.0;
+    surface.environment.scale = 2.0;
+    surface.environment.point_snapping = STRATA_POINT_SNAP_NEAREST;
+    surface.environment.rectangle_snapping = STRATA_RECTANGLE_SNAP_OUTWARD;
+    surface.environment.density = STRATA_SURFACE_DENSITY_COMFORTABLE;
+    surface.environment.pointer_precision = STRATA_POINTER_PRECISION_FINE;
+    surface.environment.input_capabilities = STRATA_SURFACE_INPUT_POINTER;
+    surface.environment.system_appearance =
+        STRATA_SYSTEM_APPEARANCE_DARK | STRATA_SYSTEM_APPEARANCE_ACCENT;
+    surface.environment.system_accent = strata_color{0x68U, 0x00U, 0x81U, 0xFFU};
+    session.create_surface(surface);
+    std::int64_t time = 1'000'000;
+    const auto frame = [&session, &time] {
+        time += 16'000'000;
+        static_cast<void>(session.frame(time));
+    };
+    const auto input = [&session, &time](const strata_input_event_kind kind, const double x,
+                                         const double y, const std::string_view text = {},
+                                         const std::uint64_t request = 0U) {
+        strata_input_event event{};
+        event.struct_size = sizeof(event);
+        event.version = STRATA_INPUT_EVENT_VERSION_2;
+        event.kind = kind;
+        event.x = x;
+        event.y = y;
+        event.key_action = STRATA_KEY_PRESS;
+        event.selection_start = request;
+        event.text = strata_string_view{text.data(), text.size()};
+        event.timestamp_nanoseconds = time;
+        session.enqueue(std::span<const strata_input_event>(&event, 1U));
+    };
+    const auto status = [&session] {
+        const std::string json = session.surface().frame_json();
+        const std::size_t start = json.find("\"[");
+        const std::size_t end = json.find("]\"", start);
+        return start == std::string::npos || end == std::string::npos
+                   ? std::string{}
+                   : json.substr(start + 2U, end - start - 2U);
+    };
+    const auto request = [&requests] {
+        return requests.payloads.empty() ? strata::host::Value{}
+                                         : strata::host::Value::parse(requests.payloads.back());
+    };
+    const auto text = [](const strata::host::Value& value, const std::string_view field) {
+        const strata::host::Value* found = value.find(field);
+        return found != nullptr && found->string() != nullptr ? *found->string() : std::string{};
+    };
+    const auto whole = [](const strata::host::Value& value, const std::string_view field) {
+        const strata::host::Value* found = value.find(field);
+        return found != nullptr && found->integer() != nullptr ? *found->integer()
+                                                               : std::int64_t{-1};
+    };
+    frame();
+    check(status() == "||0|true|#680081ff",
+          "env did not show the system's dark theme and accent: " + status());
+
+    // A press that has not moved past the slop is not a drag; past it, the host carries it out.
+    input(STRATA_INPUT_POINTER_MOVE, 20.0, 20.0);
+    input(STRATA_INPUT_POINTER_PRESS, 20.0, 20.0);
+    input(STRATA_INPUT_POINTER_MOVE, 21.0, 21.0);
+    frame();
+    check(requests.payloads.empty(), "a press inside the drag slop started a drag out");
+    input(STRATA_INPUT_POINTER_MOVE, 40.0, 30.0);
+    frame();
+    const strata::host::Value drag = request();
+    const strata::host::Value* files = drag.find("files");
+    check(requests.payloads.size() == 1U && text(drag, "kind") == "system.dragOut" &&
+              files != nullptr && files->array() != nullptr && files->array()->size() == 1U &&
+              text(drag, "text") == "hello",
+          "a drag past the slop did not ask the host to carry the node's files and text out");
+    input(STRATA_INPUT_POINTER_RELEASE, 40.0, 30.0);
+    input(STRATA_INPUT_PLATFORM_RESULT, 0.0, 0.0, R"({"effect":"copy"})",
+          static_cast<std::uint64_t>(whole(drag, "request")));
+    frame();
+    check(status().starts_with("copy|"), "the drag out's node did not hear how it was dropped");
+
+    // The capture's rectangle is the card's, at the framebuffer's two pixels per logical unit.
+    requests.payloads.clear();
+    // The button follows the 40-unit card and the 10-unit listener down the column.
+    constexpr double button_y = 60.0;
+    input(STRATA_INPUT_POINTER_MOVE, 10.0, button_y);
+    input(STRATA_INPUT_POINTER_PRESS, 10.0, button_y);
+    input(STRATA_INPUT_POINTER_RELEASE, 10.0, button_y);
+    frame();
+    const strata::host::Value capture = request();
+    const strata::host::Value* rectangle = capture.find("rect");
+    check(
+        requests.payloads.size() == 1U && text(capture, "kind") == "node.capture" &&
+            rectangle != nullptr && whole(*rectangle, "x") == 0 && whole(*rectangle, "y") == 0 &&
+            whole(*rectangle, "width") == 200 && whole(*rectangle, "height") == 80,
+        "a node capture did not carry the node's framebuffer rectangle: " +
+            (requests.payloads.empty() ? std::string("nothing asked") : requests.payloads.back()));
+
+    // Only the listener whose match fits hears it; the log hears everything.
+    input(STRATA_INPUT_PLATFORM_EVENT, 0.0, 0.0, R"({"channel":"tray","data":{"id":"hide"}})");
+    input(STRATA_INPUT_PLATFORM_EVENT, 0.0, 0.0, R"({"channel":"tray","data":{"id":"show"}})");
+    frame();
+    check(status().starts_with("copy|hide,show|1|"),
+          "a channel's match or a list append from the event misbehaved: " + status());
+
+    // The system's look changes: env follows at the next environment.
+    strata_surface_environment light = surface.environment;
+    light.generation = 2U;
+    light.system_appearance = 0U;
+    check(session.adopt_environment(light), "a Session did not adopt the system's new look");
+    frame();
+    check(status().ends_with("|false|none"),
+          "env did not follow the system's light theme without an accent: " + status());
+    session.close([](const strata::host::RenderPacket&) {});
+}
+
 } // namespace
 
 int strata_test_host() {
@@ -874,6 +1048,7 @@ int strata_test_host() {
         resource_root_maps_failures_and_confines_links();
         system_font_search_tolerates_unicode_names();
         portable_session_runs_the_application_lifecycle();
+        platform_requests_carry_gestures_rectangles_and_the_system_look();
 #if defined(_WIN32)
         durable_writer_isolates_and_retries_failures();
 #endif
