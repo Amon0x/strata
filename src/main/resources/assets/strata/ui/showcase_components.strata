@@ -1282,6 +1282,8 @@ component PageViewport(selectedPage: string, chrome: Binding<string>) {
       Scroll(key: "targets.page.scroll.interact", persistenceKey: "showcase.page.scroll.interact", vertical: true, horizontal: false, style: PageScroll) { InteractPage() }
     } else if selectedPage == "DRAW" {
       Scroll(key: "targets.page.scroll.draw", persistenceKey: "showcase.page.scroll.draw", vertical: true, horizontal: false, style: PageScroll) { DrawPage() }
+    } else if selectedPage == "MEDIA" {
+      Scroll(key: "targets.page.scroll.media", persistenceKey: "showcase.page.scroll.media", vertical: true, horizontal: false, style: PageScroll) { MediaPage() }
     } else if selectedPage == "SYSTEM" {
       Scroll(key: "targets.page.scroll.system", persistenceKey: "showcase.page.scroll.system", vertical: true, horizontal: false, style: PageScroll) { SystemPage(chrome: chrome) }
     } else if selectedPage == "SHELL" {
@@ -1316,7 +1318,8 @@ component ShowcaseHeader(selectedPage: Binding<string>, chrome: Binding<string>)
         { id: "INSPECT", label: "INSPECT" },
         { id: "DATA", label: "DATA" },
         { id: "SHELL", label: "SHELL" },
-        { id: "SYSTEM", label: "SYSTEM" }
+        { id: "SYSTEM", label: "SYSTEM" },
+        { id: "MEDIA", label: "MEDIA" }
       ],
       selectedId: selectedPage,
       layout: { width: { weight: 1 }, height: 34 },
@@ -1666,6 +1669,96 @@ style PastedFrame {
   radius: 12;
   background: #0D121BFF;
   border: { width: 1, color: #2A3342FF };
+}
+
+style MediaTile {
+  kind: "COLUMN";
+  width: "content";
+  height: "content";
+  padding: 12;
+  gap: 8;
+  radius: 14;
+  background: #0E131DFF;
+  border: { width: 1, color: #263042FF };
+}
+
+style VideoFrame {
+  kind: "COLUMN";
+  width: 640;
+  height: 360;
+  radius: 16;
+  clip: true;
+  background: #05070BFF;
+}
+
+component MediaPage() {
+  state video = { image: "", width: 0, height: 0, duration: 0, position: 0, paused: false, ended: false };
+  state progress = { image: "", width: 0, height: 0, duration: 0, position: 0, paused: false, ended: false };
+  state muted = false;
+  Panel(
+    style: PageColumn,
+    // Where the video is, four times a second while one plays.
+    timers: [
+      { id: "media.position", every: 250ms, running: video.image != "", action: then(action("media.status", image: "video:clip"), action("state.setFromEvent", name: "progress")) }
+    ]
+  ) {
+    Card(title: "ANIMATED IMAGES: GIF, APNG AND WEBP PLAY ON THEIR OWN") {
+      Panel(style: style(ActionRow, gap: 14)) {
+        Panel(style: MediaTile) {
+          Image(image: "demo:media/orbit", layout: { width: 240, height: 240 })
+          Text(text: "GIF, 48 frames", style: CardNote)
+        }
+        Panel(style: MediaTile) {
+          Image(image: "demo:media/rings", layout: { width: 220, height: 220 })
+          Text(text: "APNG with alpha", style: CardNote)
+        }
+        Panel(style: MediaTile) {
+          Image(image: "demo:media/plasma", layout: { width: 320, height: 180 })
+          Text(text: "Animated WebP", style: CardNote)
+        }
+        Panel(style: style(MediaTile, clip: true, clipShape: "circle", padding: 0)) {
+          Image(image: "demo:media/orbit", layout: { width: 160, height: 160 })
+        }
+      }
+    }
+    Card(title: "PHOTOS: JPEG") {
+      Panel(style: style(VideoFrame, width: { weight: 1 }, height: 300)) {
+        Image(image: "demo:media/sunset", layout: { width: { weight: 1 }, height: 300 }, fit: "COVER")
+      }
+    }
+    Card(title: "VIDEO WITH SOUND") {
+      Panel(style: ActionRow) {
+        Button(key: "media.play", label: "Play the clip", onClick: then(
+          action("media.play", source: "assets/strata/media/mandelbrot.mp4", image: "video:clip", loop: true, volume: 0.5, muted: muted),
+          action("state.setFromEvent", name: "video")))
+        Toggle(key: "media.muted", label: "Muted", checked: muted, onChange: action("state.setFromEvent", name: "muted"))
+        Button(key: "media.pause", label: "Pause", enabled: video.image != "", onClick: action("media.pause", image: "video:clip"))
+        Button(key: "media.resume", label: "Resume", enabled: video.image != "", onClick: action("media.resume", image: "video:clip"))
+        Button(key: "media.back", label: "Back 3 s", enabled: video.image != "", onClick: action("media.seek", image: "video:clip", seconds: progress.position - 3))
+        Button(key: "media.restart", label: "Restart", enabled: video.image != "", onClick: action("media.seek", image: "video:clip", seconds: 0))
+        Button(key: "media.stop", label: "Stop", enabled: video.image != "", onClick: sequence(
+          action("media.stop", image: "video:clip"),
+          action("state.set", name: "video", value: { image: "", width: 0, height: 0, duration: 0, position: 0, paused: false, ended: false })))
+        Button(key: "media.open", label: "Open a video…", onClick: then(
+          action("system.openFile", title: "Play a video", filters: [{ name: "Videos", patterns: "*.mp4;*.mov;*.mkv;*.webm;*.avi;*.wmv" }]),
+          then(action("media.play", image: "video:clip", loop: true, volume: 0.5, muted: muted), action("state.setFromEvent", name: "video"))))
+      }
+      Panel(
+        style: VideoFrame,
+        behaviors: [{ id: "strata.fileDrop", action: then(action("media.play", image: "video:clip", loop: true, volume: 0.5, muted: muted), action("state.setFromEvent", name: "video")) }]
+      ) {
+        if video.image != "" {
+          Image(image: "video:clip", layout: { width: 640, height: 360 }, fit: "CONTAIN")
+        } else {
+          Panel(style: style(PageColumn, padding: 24)) {
+            Text(text: "Play the clip, open a video, or drop one here.", style: style(WorldText, pixelSize: 18))
+          }
+        }
+      }
+      Progress(value: video.duration > 0 ? progress.position / video.duration : 0, layout: { width: 640, height: 6 })
+      Text(text: video.image == "" ? "Nothing playing." : format("{0} x {1}, {2} of {3} s{4}", video.width, video.height, round(progress.position * 10) / 10, round(video.duration * 10) / 10, progress.paused ? ", paused" : ""), style: CardNote)
+    }
+  }
 }
 
 component SystemPage(chrome: Binding<string>) {
@@ -2505,6 +2598,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "Particles drift and bounce behind the menu, joined by lines that fade as they part. Move the pointer over it: nearby particles reach for it and lean toward it, under the buttons too. The GPU draws all of it every frame; the CPU only reports where the pointer is.", wrapMode: "WORD")
   } else if selectedPage == "DRAW" {
     Text(text: "The three canvases move every frame. A timer advances the data every 2.2 s while Auto is on, and Shuffle data steps it at once; either morphs the charts, gauge, sunburst and blob over the standard motion policy; the sunburst's slices meet with no seam. The loops turn and breathe without blurring an edge. Reduced motion snaps the data and stops the loops.", wrapMode: "WORD")
+  } else if selectedPage == "MEDIA" {
+    Text(text: "The GIF, APNG and WebP play by themselves, each frame for as long as its file says, looping as the file asks. The photo is a progressive JPEG. Play runs a ten-second H.264 clip with its sound through Media Foundation into a runtime image, so any Image can show it, clipped, rounded or turned; pause, resume, skip and restart it, or open or drop your own video.", wrapMode: "WORD")
   } else if selectedPage == "SYSTEM" {
     Text(text: "Drag files from Explorer onto the drop box: it lights up as they arrive and lists them when dropped. Open files, pick a folder or save: the dialogs are Windows' own, and their answers land in state. Send a notification from the tray icon; open a folder or link in its default app. Mica, Acrylic and Tabbed turn the header into the title bar (drag to move, double-click to maximize, buttons at its right) over the system backdrop. Paste an image from the clipboard and copy it back.", wrapMode: "WORD")
   } else if selectedPage == "SHELL" {

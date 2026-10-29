@@ -23,6 +23,10 @@ namespace {
 MotionRuntime::MotionRuntime() : implementation_(std::make_unique<Impl>()) {}
 MotionRuntime::~MotionRuntime() = default;
 
+void MotionRuntime::set_images(const resource::SvgImageRegistry* const images) noexcept {
+    implementation_->catalog.set_images(images);
+}
+
 void MotionRuntime::bind(const std::shared_ptr<const runtime::RuntimeUnit>& unit) {
     if (implementation_->unit == unit)
         return;

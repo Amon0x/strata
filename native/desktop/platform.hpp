@@ -7,6 +7,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <strata/strata.h>
@@ -46,10 +47,12 @@ struct PlatformAnswer final {
 class PlatformServices final {
   public:
     using ResourceReader = std::function<std::vector<std::uint8_t>(std::string_view)>;
+    /** A resource id's file, for media the system reads itself. */
+    using ResourcePath = std::function<std::wstring(std::string_view)>;
     /** Files over the window: an input kind (FILE_DRAG, ...), client pixels, paths one per line. */
     using FileSink = std::function<void(std::uint32_t kind, double x, double y, std::string paths)>;
 
-    PlatformServices(HWND window, ResourceReader read_resource);
+    PlatformServices(HWND window, ResourceReader read_resource, ResourcePath resource_path = {});
     ~PlatformServices();
 
     PlatformServices(const PlatformServices&) = delete;
@@ -59,6 +62,8 @@ class PlatformServices final {
     [[nodiscard]] strata_effect_adapter effect_adapter(std::string client);
     /** Runs the requests queued since the last call and returns their answers. */
     [[nodiscard]] std::vector<PlatformAnswer> pump();
+    /** Each playing video's newest frame since the last call, for the session that plays it. */
+    [[nodiscard]] std::vector<std::pair<std::string, PlatformImage>> video_frames();
     /** Whether a window drag ran since the last call: the press it began with never released. */
     [[nodiscard]] bool take_window_moved() noexcept;
     /** Accepts files dragged in from the shell, reporting them to `sink`. */

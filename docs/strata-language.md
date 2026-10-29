@@ -605,6 +605,31 @@ Text(text: "Headline", style: style(Title, font: "system:bahnschrift.ttf", fontW
                                     fontVariation: "wdth 80"))
 ```
 
+### Animated images and video
+
+An `Image` showing an animated GIF, APNG or WebP plays it: each frame shows for as long as the file
+says (a GIF frame under 20 ms for 100 ms, as browsers do), and it loops as many times as the file
+asks. Every frame is decoded once, when the Surface is created; an animation whose frames would
+take more than 256 MB stays on its first frame. JPEG, PNG, GIF and WebP images all bind the same
+way, told apart by their bytes.
+
+Video plays into a runtime image, so any `Image` (clipped, rounded, turned) can show it.
+`media.play` (`source`: a resource path, an absolute path or a URL; `image`: the runtime image id
+to play into; `loop`, `muted`, `volume`) starts it with its sound, and `then` receives
+`{ image, width, height, duration, position, paused, ended }` once the video is open.
+`media.pause`, `media.resume`, `media.seek` (`seconds`), `media.status` and `media.stop` take the
+same `image`. With no `source`, `media.play` plays what its event brings: the path a dialog chose,
+the first file of a drop.
+
+```strata
+Button(label: "Play", onClick: then(
+  action("media.play", source: "assets/app/intro.mp4", image: "video:intro", loop: true),
+  action("state.setFromEvent", name: "intro")))
+Image(image: "video:intro", layout: { width: 640, height: 360 }, fit: "CONTAIN")
+```
+
+The Windows desktop host plays video through Media Foundation, in any format Windows can decode.
+
 ### Talking to the operating system
 
 A document reaches the operating system through actions. `system.openFile` (`title`, `filters`,

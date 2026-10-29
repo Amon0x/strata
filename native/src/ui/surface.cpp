@@ -1799,6 +1799,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     // Build: re-describe when the description is stale, then bring input onto the tree.
     advance_scroll_animations(frame_time_nanos);
     settle_scroll_snaps(frame_time_nanos);
+    motion_.set_images(svg_images_.get());
     motion_.bind(application_.active_unit());
     {
         frame_phases_.push_back(FramePhase::build);

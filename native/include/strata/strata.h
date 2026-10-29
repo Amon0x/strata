@@ -1751,7 +1751,8 @@ typedef uint32_t strata_input_event_kind;
 #define STRATA_INPUT_FILE_DRAG_LEAVE UINT32_C(11)
 /*
  * A host's answer to a platform request: `selection_start` is the request number and `text` its
- * result as JSON. Platform requests (system.openFile, system.notify, window.minimize, ...) reach
+ * result as JSON. Platform requests (system.openFile, system.notify, window.minimize, media.play,
+ * ...) reach
  * the host as the effect `strata.platform`, whose payload JSON carries `request` (that number),
  * `kind` (the action id) and the action's own fields; a `then(request, next)` action runs `next`
  * with the answer as its event once it arrives.

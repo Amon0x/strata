@@ -681,7 +681,10 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             d3dcompiler
             dwmapi
             imm32
+            mfplat
+            mfuuid
             ole32
+            oleaut32
             shell32
             user32
             windowscodecs

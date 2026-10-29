@@ -1,6 +1,8 @@
 #include "platform.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -19,6 +21,9 @@
 #define NOMINMAX
 #include <Windows.h>
 #include <dwmapi.h>
+#include <dxgiformat.h>
+#include <mfapi.h>
+#include <mfmediaengine.h>
 #include <oleidl.h>
 #include <shellapi.h>
 #include <shobjidl.h>
@@ -275,6 +280,48 @@ class DropTarget final : public IDropTarget {
     ULONG references_ = 1U;
 };
 
+/** What a media engine says, kept until the frame loop reads it (it calls from its own threads). */
+class MediaEvents final : public IMFMediaEngineNotify {
+  public:
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** out) override {
+        if (out == nullptr)
+            return E_POINTER;
+        if (id == IID_IUnknown || id == __uuidof(IMFMediaEngineNotify)) {
+            *out = static_cast<IMFMediaEngineNotify*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override {
+        return ++references_;
+    }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG left = --references_;
+        if (left == 0U)
+            delete this;
+        return left;
+    }
+    HRESULT STDMETHODCALLTYPE EventNotify(DWORD event, DWORD_PTR, DWORD) override {
+        if (event == MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA)
+            loaded = true;
+        else if (event == MF_MEDIA_ENGINE_EVENT_ERROR)
+            failed = true;
+        return S_OK;
+    }
+
+    std::atomic<bool> loaded = false;
+    std::atomic<bool> failed = false;
+
+  private:
+    std::atomic<ULONG> references_ = 1U;
+};
+
+/** Videos are drawn no larger than this, scaled down to fit: frames cross to the GPU each tick. */
+constexpr UINT maximum_video_width = 1280U;
+constexpr UINT maximum_video_height = 720U;
+
 } // namespace
 
 struct PlatformServices::Impl final {
@@ -289,14 +336,35 @@ struct PlatformServices::Impl final {
         JsonValue payload;
     };
 
-    Impl(HWND window, ResourceReader read_resource)
-        : window(window), read_resource(std::move(read_resource)) {
+    /** One video playing into a runtime image. */
+    struct Video final {
+        std::string client;
+        std::string image;
+        ComPtr<IMFMediaEngine> engine;
+        MediaEvents* events = nullptr;
+        ComPtr<IWICBitmap> target;
+        UINT width = 0U;
+        UINT height = 0U;
+        /** The play request, answered once the video's size and length are known. */
+        std::optional<Request> waiting;
+        bool fresh = false;
+        PlatformImage frame;
+    };
+
+    Impl(HWND window, ResourceReader read_resource, ResourcePath resource_path)
+        : window(window), read_resource(std::move(read_resource)),
+          resource_path(std::move(resource_path)) {
         if (window == nullptr)
             throw std::invalid_argument("platform services require a window");
         ole = SUCCEEDED(OleInitialize(nullptr));
     }
 
     ~Impl() {
+        for (auto& [id, video] : videos)
+            release(video);
+        videos.clear();
+        if (media_started)
+            MFShutdown();
         if (drop_target != nullptr) {
             RevokeDragDrop(window);
             drop_target->Release();
@@ -626,6 +694,183 @@ struct PlatformServices::Impl final {
         return result;
     }
 
+    // ---- video ----
+
+    static void release(Video& video) {
+        if (video.engine != nullptr)
+            video.engine->Shutdown();
+        video.engine.Reset();
+        if (video.events != nullptr)
+            video.events->Release();
+        video.events = nullptr;
+    }
+
+    [[nodiscard]] Video* video(const Request& request) {
+        const auto found = videos.find(text_field(request.payload, "image"));
+        return found != videos.end() ? &found->second : nullptr;
+    }
+
+    /** Starts a video; its answer waits until it knows its size (see video_frames). */
+    void play(const Request& request) {
+        if (!media_started) {
+            if (FAILED(MFStartup(MF_VERSION)))
+                throw std::runtime_error("Media Foundation is unavailable");
+            media_started = true;
+        }
+        const std::string image = text_field(request.payload, "image");
+        if (image.empty())
+            throw std::runtime_error("media.play needs an image to play into");
+        if (const auto found = videos.find(image); found != videos.end()) {
+            release(found->second);
+            videos.erase(found);
+        }
+        // A link or an absolute path opens as it is; anything else is a resource id.
+        // The source named, or what the action's event brings: a dialog's path, a drop's file.
+        std::string source = text_field(request.payload, "source");
+        if (const JsonValue* event = request.payload.find("event");
+            source.empty() && event != nullptr) {
+            if (event->string() != nullptr) {
+                source = *event->string();
+            } else if (const JsonValue* path = event->find("path");
+                       path != nullptr && path->string() != nullptr) {
+                source = *path->string();
+            } else if (const JsonValue* files = event->find("files");
+                       files != nullptr && files->array() != nullptr && !files->array()->empty() &&
+                       files->array()->front().string() != nullptr) {
+                source = *files->array()->front().string();
+            }
+        }
+        if (source.empty())
+            throw std::runtime_error("media.play has no source");
+        std::wstring url = wide(source);
+        const bool absolute = source.find("://") != std::string::npos ||
+                              (source.size() > 2U && source[1] == ':') ||
+                              source.starts_with("\\\\");
+        if (!absolute && resource_path)
+            url = resource_path(source);
+        ComPtr<IMFMediaEngineClassFactory> factory;
+        ComPtr<IMFAttributes> attributes;
+        if (FAILED(CoCreateInstance(CLSID_MFMediaEngineClassFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                    IID_PPV_ARGS(&factory))) ||
+            FAILED(MFCreateAttributes(&attributes, 2U))) {
+            throw std::runtime_error("the media engine is unavailable");
+        }
+        Video playing;
+        playing.client = request.client;
+        playing.image = image;
+        playing.events = new MediaEvents();
+        attributes->SetUnknown(MF_MEDIA_ENGINE_CALLBACK, playing.events);
+        // Frame-server mode: no window of its own, frames handed over on request.
+        attributes->SetUINT32(MF_MEDIA_ENGINE_VIDEO_OUTPUT_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM);
+        if (FAILED(factory->CreateInstance(0U, attributes.Get(), &playing.engine))) {
+            release(playing);
+            throw std::runtime_error("the media engine could not start");
+        }
+        BSTR location = SysAllocString(url.c_str());
+        const HRESULT opened = playing.engine->SetSource(location);
+        SysFreeString(location);
+        if (FAILED(opened)) {
+            release(playing);
+            throw std::runtime_error("the video could not be opened");
+        }
+        playing.engine->SetLoop(flag_field(request.payload, "loop", true) ? TRUE : FALSE);
+        playing.engine->SetMuted(flag_field(request.payload, "muted", false) ? TRUE : FALSE);
+        if (const JsonValue* volume = request.payload.find("volume");
+            volume != nullptr && volume->number() != nullptr) {
+            playing.engine->SetVolume(std::clamp(*volume->number(), 0.0, 1.0));
+        } else if (volume != nullptr && volume->integer() != nullptr) {
+            playing.engine->SetVolume(
+                std::clamp(static_cast<double>(*volume->integer()), 0.0, 1.0));
+        }
+        playing.engine->Play();
+        playing.waiting = request;
+        videos.insert_or_assign(image, std::move(playing));
+    }
+
+    [[nodiscard]] JsonValue::Object status(const Video& video) const {
+        const double duration = video.engine->GetDuration();
+        return {{"duration", JsonValue(std::isfinite(duration) ? duration : 0.0)},
+                {"ended", JsonValue(video.engine->IsEnded() != FALSE)},
+                {"height", JsonValue(static_cast<std::int64_t>(video.height))},
+                {"image", JsonValue(video.image)},
+                {"paused", JsonValue(video.engine->IsPaused() != FALSE)},
+                {"position", JsonValue(video.engine->GetCurrentTime())},
+                {"width", JsonValue(static_cast<std::int64_t>(video.width))}};
+    }
+
+    /** Answers videos that have loaded, and copies out each one's newest frame. */
+    void tick_videos(std::vector<PlatformAnswer>& answers) {
+        for (auto entry = videos.begin(); entry != videos.end();) {
+            Video& video = entry->second;
+            if (video.events->failed) {
+                if (video.waiting.has_value())
+                    answers.push_back(answer(*video.waiting,
+                                             {{"error", JsonValue("the video could not be played")},
+                                              {"image", JsonValue(video.image)}}));
+                release(video);
+                entry = videos.erase(entry);
+                continue;
+            }
+            if (video.target == nullptr && video.events->loaded) {
+                DWORD native_width = 0U;
+                DWORD native_height = 0U;
+                video.engine->GetNativeVideoSize(&native_width, &native_height);
+                if (native_width != 0U && native_height != 0U) {
+                    const double fit =
+                        std::min({1.0, static_cast<double>(maximum_video_width) / native_width,
+                                  static_cast<double>(maximum_video_height) / native_height});
+                    video.width = std::max(1U, static_cast<UINT>(native_width * fit));
+                    video.height = std::max(1U, static_cast<UINT>(native_height * fit));
+                    imaging_factory()->CreateBitmap(video.width, video.height,
+                                                    GUID_WICPixelFormat32bppBGRA,
+                                                    WICBitmapCacheOnLoad, &video.target);
+                }
+                if (video.waiting.has_value()) {
+                    answers.push_back(answer(*video.waiting, status(video)));
+                    video.waiting.reset();
+                }
+            }
+            LONGLONG presentation = 0;
+            if (video.target != nullptr && video.engine->OnVideoStreamTick(&presentation) == S_OK) {
+                const MFVideoNormalizedRect whole{0.0F, 0.0F, 1.0F, 1.0F};
+                const RECT into{0, 0, static_cast<LONG>(video.width),
+                                static_cast<LONG>(video.height)};
+                const MFARGB border{0U, 0U, 0U, 255U};
+                if (SUCCEEDED(video.engine->TransferVideoFrame(video.target.Get(), &whole, &into,
+                                                               &border))) {
+                    ComPtr<IWICBitmapLock> lock;
+                    const WICRect area{0, 0, static_cast<INT>(video.width),
+                                       static_cast<INT>(video.height)};
+                    if (SUCCEEDED(video.target->Lock(&area, WICBitmapLockRead, &lock))) {
+                        UINT stride = 0U;
+                        UINT size = 0U;
+                        BYTE* pixels = nullptr;
+                        lock->GetStride(&stride);
+                        lock->GetDataPointer(&size, &pixels);
+                        video.frame.id = video.image;
+                        video.frame.width = video.width;
+                        video.frame.height = video.height;
+                        video.frame.rgba.resize(static_cast<std::size_t>(video.width) *
+                                                video.height * 4U);
+                        for (UINT y = 0U; y < video.height; ++y) {
+                            const BYTE* source = pixels + static_cast<std::size_t>(y) * stride;
+                            std::uint8_t* target = video.frame.rgba.data() +
+                                                   static_cast<std::size_t>(y) * video.width * 4U;
+                            for (UINT x = 0U; x < video.width; ++x) {
+                                target[x * 4U] = source[x * 4U + 2U];
+                                target[x * 4U + 1U] = source[x * 4U + 1U];
+                                target[x * 4U + 2U] = source[x * 4U];
+                                target[x * 4U + 3U] = 255U;
+                            }
+                        }
+                        video.fresh = true;
+                    }
+                }
+            }
+            ++entry;
+        }
+    }
+
     // ---- the queue ----
 
     [[nodiscard]] std::vector<PlatformAnswer> pump() {
@@ -643,6 +888,7 @@ struct PlatformServices::Impl final {
                     answer(request, {{"error", JsonValue(std::string(error.what()))}}));
             }
         }
+        tick_videos(answers);
         return answers;
     }
 
@@ -670,6 +916,38 @@ struct PlatformServices::Impl final {
             ReleaseCapture();
             SendMessageW(window, WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(cursor.x, cursor.y));
             window_moved = true;
+        } else if (kind == "media.play") {
+            play(request);
+        } else if (kind.starts_with("media.")) {
+            Video* const playing = video(request);
+            if (playing == nullptr) {
+                answers.push_back(
+                    answer(request, {{"error", JsonValue("no video plays into that image")},
+                                     {"image", JsonValue(text_field(request.payload, "image"))}}));
+                return;
+            }
+            if (kind == "media.pause") {
+                playing->engine->Pause();
+            } else if (kind == "media.resume") {
+                playing->engine->Play();
+            } else if (kind == "media.seek") {
+                const JsonValue* seconds = request.payload.find("seconds");
+                if (seconds == nullptr)
+                    seconds = request.payload.find("event");
+                const double to = seconds == nullptr             ? 0.0
+                                  : seconds->number() != nullptr ? *seconds->number()
+                                  : seconds->integer() != nullptr
+                                      ? static_cast<double>(*seconds->integer())
+                                      : 0.0;
+                playing->engine->SetCurrentTime(std::max(0.0, to));
+            } else if (kind == "media.stop") {
+                const std::string image = playing->image;
+                release(*playing);
+                videos.erase(image);
+                answers.push_back(answer(request, {{"stopped", JsonValue(true)}}));
+                return;
+            }
+            answers.push_back(answer(request, status(*playing)));
         } else if (kind == "window.setChrome") {
             answers.push_back(answer(request, set_chrome(request)));
         } else if (kind == "clipboard.copyImage") {
@@ -739,6 +1017,9 @@ struct PlatformServices::Impl final {
 
     HWND window = nullptr;
     ResourceReader read_resource;
+    ResourcePath resource_path;
+    bool media_started = false;
+    std::map<std::string, Video, std::less<>> videos;
     bool ole = false;
     std::mutex mutex;
     std::deque<Request> requests;
@@ -752,8 +1033,20 @@ struct PlatformServices::Impl final {
     std::map<std::string, Pixels, std::less<>> pasted;
 };
 
-PlatformServices::PlatformServices(HWND window, ResourceReader read_resource)
-    : impl_(std::make_unique<Impl>(window, std::move(read_resource))) {}
+PlatformServices::PlatformServices(HWND window, ResourceReader read_resource,
+                                   ResourcePath resource_path)
+    : impl_(std::make_unique<Impl>(window, std::move(read_resource), std::move(resource_path))) {}
+
+std::vector<std::pair<std::string, PlatformImage>> PlatformServices::video_frames() {
+    std::vector<std::pair<std::string, PlatformImage>> frames;
+    for (auto& [id, video] : impl_->videos) {
+        if (!video.fresh)
+            continue;
+        video.fresh = false;
+        frames.emplace_back(video.client, video.frame);
+    }
+    return frames;
+}
 
 PlatformServices::~PlatformServices() = default;
 

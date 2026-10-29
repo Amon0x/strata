@@ -663,11 +663,12 @@ class InputRouter final {
     /** Files dragged in, routed to `strata.fileDrop`, or a host's answer to a platform request. */
     [[nodiscard]] InputOperationResult platform(PlatformInputEvent event);
     /**
-     * system.*, window.* and image clipboard actions: sent to the host as the `strata.platform`
-     * effect with a fresh request number; nothing when `id` is none of them.
+     * system.*, window.*, media.* and image clipboard actions: sent to the host as the
+     * `strata.platform` effect with a fresh request number and the event that ran them (`event`:
+     * the answer a `then` waited for, the files of a drop); nothing for any other action.
      */
     [[nodiscard]] std::optional<runtime::ActionDispatchOutcome>
-    execute_platform_action(const runtime::Action& action);
+    execute_platform_action(const runtime::ActionEvent& event, const runtime::Action& action);
     /** `strata.windowDrag`: a primary press on such a node (not on a control) moves the window. */
     void start_window_drag(const PointerInputEvent& event, const RetainedNode* target);
     /** Routes the pending/captured pointer through the drag gesture state machine. */

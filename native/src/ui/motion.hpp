@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string_view>
+
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -12,6 +14,9 @@
 #include "ui/tree.hpp"
 
 namespace strata::runtime { class RuntimeUnit; }
+namespace strata::resource {
+class SvgImageRegistry;
+}
 
 namespace strata::ui {
 
@@ -74,70 +79,58 @@ struct MotionMoveOrigin final {
  * Surface-owned typed motion graph. Portable declarations are compiled once per active unit;
  * retained players are keyed by node identity and channel id, making retargeting interruptible.
  */
+/** The timeline an animated Image plays on; its progress picks the frame. */
+inline constexpr std::string_view image_playback_timeline = "strata.image.playback";
+
 class MotionRuntime final {
 public:
-    MotionRuntime();
-    ~MotionRuntime();
-    MotionRuntime(const MotionRuntime&) = delete;
-    MotionRuntime& operator=(const MotionRuntime&) = delete;
+  /** The Surface's images: an Image showing an animated one plays it. */
+  void set_images(const resource::SvgImageRegistry* images) noexcept;
+  MotionRuntime();
+  ~MotionRuntime();
+  MotionRuntime(const MotionRuntime&) = delete;
+  MotionRuntime& operator=(const MotionRuntime&) = delete;
 
-    /** Binds the immutable declaration catalog before reconciliation asks lifecycle questions. */
-    void bind(const std::shared_ptr<const runtime::RuntimeUnit>& unit);
-    void set_supplemental(std::map<std::string, CompiledMotion, std::less<>> motions);
-    /** True when this removal boundary has its own executable exit attachment. */
-    [[nodiscard]] bool should_retain_for_exit(const RetainedNode& node);
-    /** True after every exit attachment in an EXITING subtree reached its terminal sample. */
-    [[nodiscard]] bool exit_finished(const RetainedNode& node);
-    /**
-     * Restarts every retained ENTER player (`enter`, and the entry half of `transition`) from the
-     * next temporal frame, as on insertion. Authored delay and loop stagger apply again; other
-     * channels, computed layout and retained state are untouched. Returns the replayed nodes.
-     */
-    std::size_t replay_entrances();
-    [[nodiscard]] std::vector<MotionMoveOrigin> capture_move_origins(
-        const RetainedTree& tree,
-        const LayoutResult& layout
-    );
-    /** Applies FLIP-style move tracks from the previous and newly arranged retained bounds. */
-    void apply_move_transitions(
-        RetainedTree& tree,
-        const std::vector<MotionMoveOrigin>& origins,
-        const LayoutResult& after,
-        std::int64_t frame_time_nanos,
-        bool reduced_motion
-    );
+  /** Binds the immutable declaration catalog before reconciliation asks lifecycle questions. */
+  void bind(const std::shared_ptr<const runtime::RuntimeUnit>& unit);
+  void set_supplemental(std::map<std::string, CompiledMotion, std::less<>> motions);
+  /** True when this removal boundary has its own executable exit attachment. */
+  [[nodiscard]] bool should_retain_for_exit(const RetainedNode& node);
+  /** True after every exit attachment in an EXITING subtree reached its terminal sample. */
+  [[nodiscard]] bool exit_finished(const RetainedNode& node);
+  /**
+   * Restarts every retained ENTER player (`enter`, and the entry half of `transition`) from the
+   * next temporal frame, as on insertion. Authored delay and loop stagger apply again; other
+   * channels, computed layout and retained state are untouched. Returns the replayed nodes.
+   */
+  std::size_t replay_entrances();
+  [[nodiscard]] std::vector<MotionMoveOrigin> capture_move_origins(const RetainedTree& tree,
+                                                                   const LayoutResult& layout);
+  /** Applies FLIP-style move tracks from the previous and newly arranged retained bounds. */
+  void apply_move_transitions(RetainedTree& tree, const std::vector<MotionMoveOrigin>& origins,
+                              const LayoutResult& after, std::int64_t frame_time_nanos,
+                              bool reduced_motion);
 
-    [[nodiscard]] MotionFrameCounters advance(
-        RetainedTree& tree,
-        const std::shared_ptr<const runtime::RuntimeUnit>& unit,
-        const InputRouter& input,
-        std::int64_t frame_time_nanos,
-        bool reduced_motion
-    );
-    /**
-     * Initializes or retargets only nodes whose retained dirty generation was not sampled yet.
-     * Existing active clocks are not advanced; the supplied timestamp is the current frame sample.
-     */
-    [[nodiscard]] MotionFrameCounters discover(
-        RetainedTree& tree,
-        const std::shared_ptr<const runtime::RuntimeUnit>& unit,
-        const InputRouter& input,
-        std::int64_t frame_time_nanos,
-        bool reduced_motion
-    );
-    [[nodiscard]] const MotionComputedValues* computed_values(
-        std::uint64_t identity
-    ) const noexcept;
-    [[nodiscard]] const std::vector<MotionInspectionChannel>* inspection_channels(
-        std::uint64_t identity
-    ) const noexcept;
-    [[nodiscard]] const NormalizedMotionSample* disclosure_sample(
-        std::uint64_t identity
-    ) const noexcept;
-    [[nodiscard]] std::size_t active_count() const noexcept;
-    /** True while any of the node's players is still running (its computed values may change). */
-    [[nodiscard]] bool running(std::uint64_t identity) const noexcept;
-    void clear() noexcept;
+  [[nodiscard]] MotionFrameCounters advance(RetainedTree& tree,
+                                            const std::shared_ptr<const runtime::RuntimeUnit>& unit,
+                                            const InputRouter& input, std::int64_t frame_time_nanos,
+                                            bool reduced_motion);
+  /**
+   * Initializes or retargets only nodes whose retained dirty generation was not sampled yet.
+   * Existing active clocks are not advanced; the supplied timestamp is the current frame sample.
+   */
+  [[nodiscard]] MotionFrameCounters
+  discover(RetainedTree& tree, const std::shared_ptr<const runtime::RuntimeUnit>& unit,
+           const InputRouter& input, std::int64_t frame_time_nanos, bool reduced_motion);
+  [[nodiscard]] const MotionComputedValues* computed_values(std::uint64_t identity) const noexcept;
+  [[nodiscard]] const std::vector<MotionInspectionChannel>*
+  inspection_channels(std::uint64_t identity) const noexcept;
+  [[nodiscard]] const NormalizedMotionSample*
+  disclosure_sample(std::uint64_t identity) const noexcept;
+  [[nodiscard]] std::size_t active_count() const noexcept;
+  /** True while any of the node's players is still running (its computed values may change). */
+  [[nodiscard]] bool running(std::uint64_t identity) const noexcept;
+  void clear() noexcept;
 
 private:
     [[nodiscard]] MotionFrameCounters evaluate(

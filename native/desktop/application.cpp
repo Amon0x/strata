@@ -130,7 +130,9 @@ struct ApplicationHost::Impl final {
     Impl(HWND window, std::filesystem::path resource_root, ApplicationConfig config,
          const ApplicationOptions options)
         : window(window), config(std::move(config)), services(window, std::move(resource_root)),
-          platform(window, [this](const std::string_view id) { return services.bytes(id); }),
+          platform(
+              window, [this](const std::string_view id) { return services.bytes(id); },
+              [this](const std::string_view id) { return services.path(id).wstring(); }),
           renderer(window, options.vsync, options.asynchronous_shader_compilation) {
         try {
             initialize();
@@ -384,6 +386,9 @@ struct ApplicationHost::Impl final {
             event.selection_start = answer.request;
             enqueue(event, answer.json);
         }
+        // Videos show their newest frame through the runtime image they play into.
+        for (auto& [client, frame] : platform.video_frames())
+            session->runtime().publish_image(frame.id, frame.width, frame.height, frame.rgba);
         // The system's move loop swallowed the release of the press that began it.
         if (platform.take_window_moved()) {
             pending_pointer_move.reset();

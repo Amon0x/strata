@@ -263,6 +263,10 @@ std::vector<std::uint8_t> HostServices::bytes(const std::string_view id) const {
     return impl_->bytes(id);
 }
 
+std::filesystem::path HostServices::path(const std::string_view id) const {
+    return impl_->resources.root() / host::utf8_path(id);
+}
+
 bool HostServices::write_clipboard(const std::string_view text) noexcept {
     return Impl::clipboard_write(impl_.get(), strata::view(text)) == STRATA_STATUS_OK;
 }

@@ -32,14 +32,15 @@ constexpr std::string_view platform_effect_id = "strata.platform";
 }
 
 [[nodiscard]] bool platform_action(const std::string_view id) noexcept {
-    return id.starts_with("system.") || id.starts_with("window.") || id == "clipboard.copyImage" ||
-           id == "clipboard.readImage";
+    return id.starts_with("system.") || id.starts_with("window.") || id.starts_with("media.") ||
+           id == "clipboard.copyImage" || id == "clipboard.readImage";
 }
 
 } // namespace
 
 std::optional<runtime::ActionDispatchOutcome>
-InputRouter::execute_platform_action(const runtime::Action& action) {
+InputRouter::execute_platform_action(const runtime::ActionEvent& event,
+                                     const runtime::Action& action) {
     const std::string& id = action.id();
     if (!platform_action(id))
         return std::nullopt;
@@ -50,9 +51,13 @@ InputRouter::execute_platform_action(const runtime::Action& action) {
     };
     if (const runtime::ValueObject* fields = action.payload.object()) {
         for (const auto& [name, value] : fields->fields) {
-            if (name != "kind" && name != "request")
+            if (name != "kind" && name != "request" && name != "event")
                 payload.emplace_back(name, runtime::value_to_json(value));
         }
+        // What ran it: a `then` answer, a drop's files, a slider's value. Requests may fall back on
+        // it.
+        if (event.value.kind() != runtime::ValueKind::null_value)
+            payload.emplace_back("event", runtime::value_to_json(event.value));
     }
     const std::uint32_t status = host_services_->emit_effect(
         platform_effect_id, data::encode_canonical_json(data::JsonValue(std::move(payload))));

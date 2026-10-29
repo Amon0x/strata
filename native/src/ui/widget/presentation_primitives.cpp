@@ -4,7 +4,9 @@
 #include <array>
 #include <stdexcept>
 
+#include "resource/svg_image.hpp"
 #include "ui/input.hpp"
+#include "ui/motion.hpp"
 #include "ui/status.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
@@ -182,9 +184,20 @@ void button_content(WidgetRenderScope& scope) {
  * bounds, then CONTAIN. `alignX`/`alignY` place what does not fill. An image of unknown size fills.
  */
 void image_content(WidgetRenderScope& scope) {
-    const std::string* image = widget_image_value(scope.property("image"));
-    if (image == nullptr)
+    const std::string* named = widget_image_value(scope.property("image"));
+    if (named == nullptr)
         return;
+    // An animated image shows the frame its playback has reached.
+    std::string frame;
+    const std::string* image = named;
+    if (const resource::ImageAnimation* animation = scope.image_animation(*named);
+        animation != nullptr) {
+        const double progress = scope.motion_progress(image_playback_timeline, 0.0);
+        const double span = static_cast<double>(animation->duration_nanos()) *
+                            (animation->loop_count == 0U ? 1.0 : animation->loop_count);
+        frame = animation->frame_texture(*named, static_cast<std::int64_t>(progress * span));
+        image = &frame;
+    }
     const RenderColor tint = widget_color(scope.property("tint"), untinted);
     TextureRegion source = widget_texture_region(scope.property("source"));
     const Rect bounds = scope.layout().bounds;
@@ -431,7 +444,12 @@ void register_primitive_widget_presenters(WidgetRegistry& registry) {
     add(registry, "Button", &button_content, nullptr, &command_tooltip_overlay, true, {},
         &command_tooltip_shown);
     add(registry, "Menu", &button_content, nullptr, &menu_overlay, true);
-    add(registry, "Image", &image_content);
+    // An animated image shows the frame its playback timeline has reached.
+    {
+        WidgetPresentPhase image{&image_content, nullptr, nullptr, nullptr, false};
+        image.depends_on_motion_progress = true;
+        registry.register_present_phase("Image", std::move(image));
+    }
     add(registry, "Draw", &draw_content);
     WidgetPresentPhase status;
     status.content = &status_content;

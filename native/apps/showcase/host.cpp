@@ -263,7 +263,9 @@ struct Host::Impl final {
     Impl(HWND window, std::filesystem::path resource_root, std::string instance_label,
          const HostOptions options)
         : window(window), services(window, std::move(resource_root)),
-          platform(window, [this](const std::string_view id) { return services.bytes(id); }),
+          platform(
+              window, [this](const std::string_view id) { return services.bytes(id); },
+              [this](const std::string_view id) { return services.path(id).wstring(); }),
           renderer(window, options.vsync), instance_label(std::move(instance_label)),
           showcase_model(this->instance_label) {
         if (this->instance_label.empty()) {
@@ -803,14 +805,16 @@ struct Host::Impl final {
         );
         bind_showcase_model(layer);
         activate(
-            layer,
-            "assets/strata/ui/demo_surface.strata",
-            root_name,
+            layer, "assets/strata/ui/demo_surface.strata", root_name,
             {
                 {"strata:ui/icons/chevron-down", "assets/strata/images/ui/icons/chevron-down.svg"},
                 {"strata:ui/icons/chevron-up", "assets/strata/images/ui/icons/chevron-up.svg"},
-            }
-        );
+                // The MEDIA page: animated GIF, APNG and WebP, and a JPEG photo.
+                {"demo:media/orbit", "assets/strata/media/orbit.gif"},
+                {"demo:media/rings", "assets/strata/media/rings.png"},
+                {"demo:media/plasma", "assets/strata/media/plasma.webp"},
+                {"demo:media/sunset", "assets/strata/media/sunset.jpg"},
+            });
     }
 
     void create_showcase() {
@@ -1662,6 +1666,13 @@ struct Host::Impl final {
                 event.text = strata::view(answer.json);
                 event.timestamp_nanoseconds = now();
                 layer->session->enqueue(std::span<const strata_input_event>(&event, 1U));
+            }
+        }
+        // Videos show their newest frame through the runtime image they play into.
+        for (auto& [client, frame] : platform.video_frames()) {
+            for (Layer* const layer : layers()) {
+                if (layer->live() && layer->id == client)
+                    layer->runtime().publish_image(frame.id, frame.width, frame.height, frame.rgba);
             }
         }
         // The system's move loop swallowed the release of the press that began it.

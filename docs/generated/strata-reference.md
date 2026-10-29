@@ -2692,6 +2692,59 @@ Replace with a registered screen Payload: `strata.action-payload/layer.replace@1
 | `name` | string | true | false | — |
 | `transition` | animation | false | true | — |
 
+### `media.pause`
+
+Pause the video playing into an image Payload: `strata.action-payload/media.pause@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `image` | string | true | false | — |
+
+### `media.play`
+
+Play a video file or URL, with its sound, into a runtime image; then() receives its size and duration Payload: `strata.action-payload/media.play@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `source` | string | false | false | — |
+| `image` | string | true | false | — |
+| `loop` | boolean | false | false | — |
+| `muted` | boolean | false | false | — |
+| `volume` | number | false | false | — |
+
+### `media.resume`
+
+Resume a paused video Payload: `strata.action-payload/media.resume@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `image` | string | true | false | — |
+
+### `media.seek`
+
+Move a video to a time Payload: `strata.action-payload/media.seek@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `image` | string | true | false | — |
+| `seconds` | number | false | false | — |
+
+### `media.status`
+
+Ask where a video is; then() receives position, duration, paused and ended Payload: `strata.action-payload/media.status@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `image` | string | true | false | — |
+
+### `media.stop`
+
+Stop a video and release it Payload: `strata.action-payload/media.stop@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `image` | string | true | false | — |
+
 ### `modal-dismiss`
 
 Observe the built-in modal-dismiss interaction Payload: `no payload`. Dispatch: `optional`.

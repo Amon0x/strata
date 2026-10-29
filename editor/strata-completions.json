@@ -488,6 +488,142 @@
       "summary": "Replace with a registered screen"
     },
     {
+      "dispatchPolicy": "framework",
+      "id": "media.pause",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "image",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/media.pause@1",
+      "summary": "Pause the video playing into an image"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "media.play",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "source",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "image",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "loop",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "muted",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "volume",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "payloadContract": "strata.action-payload/media.play@1",
+      "summary": "Play a video file or URL, with its sound, into a runtime image; then() receives its size and duration"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "media.resume",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "image",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/media.resume@1",
+      "summary": "Resume a paused video"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "media.seek",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "image",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "seconds",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "payloadContract": "strata.action-payload/media.seek@1",
+      "summary": "Move a video to a time"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "media.status",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "image",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/media.status@1",
+      "summary": "Ask where a video is; then() receives position, duration, paused and ended"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "media.stop",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "image",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/media.stop@1",
+      "summary": "Stop a video and release it"
+    },
+    {
       "dispatchPolicy": "optional",
       "id": "modal-dismiss",
       "parameters": [],

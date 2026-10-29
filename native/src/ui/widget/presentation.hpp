@@ -12,6 +12,7 @@
 
 namespace strata::resource {
 class SvgImageRegistry;
+struct ImageAnimation;
 }
 
 namespace strata::ui {
@@ -111,6 +112,9 @@ class WidgetRenderScope final {
     [[nodiscard]] double alpha() const noexcept;
     [[nodiscard]] Rect root_bounds() const noexcept;
     [[nodiscard]] double motion_progress(std::string_view id, double fallback = 0.0) const noexcept;
+    /** How the image animates, or nothing for a still or unknown one. */
+    [[nodiscard]] const resource::ImageAnimation*
+    image_animation(std::string_view image) const noexcept;
 
     [[nodiscard]] const runtime::Value* property(std::string_view name) const noexcept;
     [[nodiscard]] const runtime::Value* style(std::string_view name) const noexcept;

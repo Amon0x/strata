@@ -6,6 +6,7 @@
 #include <map>
 #include <string_view>
 
+#include "ui/motion.hpp"
 #include "ui/path.hpp"
 
 namespace strata::ui::motion_detail {
@@ -391,6 +392,29 @@ NodeMotionConfig node_motion_config(const RetainedNode& node, MotionCatalog& cat
                     boolean("running", true),
                     boolean("loop", false),
                     boolean("affectsLayout", false),
+                },
+            });
+        }
+    }
+
+    // A node showing an animated image plays it on its own timeline, the length of one play (or
+    // of all of them); its presenter picks the frame from the timeline's progress.
+    if (catalog.images() != nullptr) {
+        const runtime::Value* image = node_property(node, "image");
+        const std::string* id = image == nullptr            ? nullptr
+                                : image->image() != nullptr ? &image->image()->id
+                                                            : text(image);
+        const resource::ImageAnimation* animation =
+            id != nullptr ? catalog.images()->animation(*id) : nullptr;
+        if (animation != nullptr && animation->duration_nanos() > 0) {
+            const std::int64_t play = animation->duration_nanos();
+            result.motion_timelines.push_back(MotionTimelineBinding{
+                std::string(image_playback_timeline),
+                MotionTimelineSpec{
+                    animation->loop_count == 0U ? play : play * animation->loop_count,
+                    true,
+                    animation->loop_count == 0U,
+                    false,
                 },
             });
         }

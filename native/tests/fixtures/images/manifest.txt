@@ -21,3 +21,4 @@ webp_lossy_alpha.webp webp_lossy_alpha.webp.expected.png 30 21 1 1 0
 webp_anim_lossless.webp webp_anim_lossless.webp.expected.png 28 20 0 0 70,90,110
 webp_anim_lossy.webp webp_anim_lossy.webp.expected.png 28 20 2 1 100,100,200
 webp_anim_handmade.webp webp_anim_handmade.webp.expected.png 24 18 4 1 60,80,90,100
+jpeg_progressive_smooth.jpg jpeg_progressive_smooth.jpg.expected.png 192 112 1 1 0

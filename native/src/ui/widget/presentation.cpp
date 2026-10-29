@@ -529,6 +529,11 @@ Rect WidgetRenderScope::root_bounds() const noexcept {
     const LayoutRecord* root = layout_result_.find(layout_result_.root_identity);
     return root != nullptr ? root->bounds : layout_.bounds;
 }
+const resource::ImageAnimation*
+WidgetRenderScope::image_animation(const std::string_view image) const noexcept {
+    return svg_images_ != nullptr ? svg_images_->animation(image) : nullptr;
+}
+
 double WidgetRenderScope::motion_progress(const std::string_view id,
                                           const double fallback) const noexcept {
     if (motion_ == nullptr)
