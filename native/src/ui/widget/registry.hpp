@@ -252,6 +252,12 @@ struct WidgetPresentPhase final {
 
 struct WidgetFramePhase final {
     WidgetFrameHook advance = nullptr;
+    /**
+     * Run `advance` once whenever the node's description may have changed (and when it attaches),
+     * without waiting for input to request a frame: a widget that plays on its own (an animation)
+     * starts, stops and follows its properties from its hook alone.
+     */
+    bool follows_description = false;
 };
 
 struct WidgetLifecycle final {
@@ -297,6 +303,9 @@ class WidgetRegistry final {
     void register_command_phase(std::string type, WidgetCommandPhase phase);
     void register_persistence_phase(std::string type, WidgetPersistencePhase phase);
     void register_present_phase(std::string type, WidgetPresentPhase phase);
+    void register_frame_phase(std::string type, WidgetFramePhase phase);
+    /** Types whose frame phase follows their description, sorted. */
+    [[nodiscard]] std::vector<std::string_view> frame_watch_types() const;
     /** Types with a text edit mode, sorted; input preparation walks them every frame. */
     [[nodiscard]] std::span<const std::string_view> text_editable_types() const noexcept;
     /** Types whose nodes declare commands. */

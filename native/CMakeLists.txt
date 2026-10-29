@@ -1273,6 +1273,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         strata_core_tests
         tests/core_test_runner.cpp
         tests/svg_tests.cpp
+        tests/lottie_tests.cpp
         tests/core_tests.cpp
         tests/data_tests.cpp
         tests/compiler_tests.cpp
@@ -1345,6 +1346,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         COMMAND strata_core_tests render_packet ${STRATA_RESOURCE_ROOT}
     )
     add_test(NAME strata.png_decode COMMAND strata_core_tests png_decode)
+    add_test(NAME strata.lottie COMMAND strata_core_tests lottie ${STRATA_RESOURCE_ROOT})
     add_test(
         NAME strata.image_decode
         COMMAND strata_core_tests image_decode ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/images
@@ -1366,6 +1368,13 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         strata_target_defaults(strata_drawing_tests)
         add_test(NAME strata.render.drawing
                  COMMAND strata_drawing_tests ${CMAKE_CURRENT_BINARY_DIR}/drawing-tests)
+
+        # Lottie frames and playback, measured from the framebuffer of every backend.
+        add_executable(strata_lottie_render_tests tests/lottie_render_tests.cpp)
+        target_link_libraries(strata_lottie_render_tests PRIVATE strata_headless_host)
+        strata_target_defaults(strata_lottie_render_tests)
+        add_test(NAME strata.render.lottie
+                 COMMAND strata_lottie_render_tests ${CMAKE_CURRENT_BINARY_DIR}/lottie-tests)
 
         # Replays recorded and scripted packet streams through every backend this build has.
         add_executable(strata_render_differential_tests tests/render_differential_tests.cpp)

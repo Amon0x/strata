@@ -634,6 +634,57 @@ Image(image: "video:intro", layout: { width: 640, height: 360 }, fit: "CONTAIN")
 
 The Windows desktop host plays video through Media Foundation, in any format Windows can decode.
 
+### Lottie
+
+`Lottie` plays an After Effects animation exported as Lottie (Bodymovin) JSON. `source` is its
+resource id; it is loaded through the host's resource loader the first time any widget names it and
+parsed once, and each frame is evaluated from the parsed keyframes and drawn as vector paths, sharp
+at any size and scale.
+
+```strata
+Lottie(source: "assets/app/success.json", loop: false, onComplete: action("state.set", name: "done", value: true))
+Lottie(source: "assets/app/spinner.json", speed: 1.5, fit: "COVER", layout: { width: 48, height: 48 })
+Lottie(source: "assets/app/toggle.json", segment: on ? [0, 30] : [30, 60], loop: false)
+Lottie(source: "assets/app/reveal.json", playing: playing, progress: playing ? null : scrub)
+```
+
+- `loop` (default `true`) plays the segment over and over; otherwise playback stops on its last
+  frame and `onComplete` runs, its event carrying that frame.
+- `autoplay` (default `true`) starts playback; `playing` (when given) plays or pauses it instead,
+  and pausing keeps the playhead where it is. Playing again after the end starts over.
+- `speed` (default `1`) scales the composition's frame rate; a negative speed plays backwards.
+- `progress` (0-1, nullable) shows that point of the segment and holds the playhead there, so a
+  `Slider` bound to it scrubs; playback continues from it when `progress` is `null` again.
+- `segment: [first, last]` plays only those composition frames (`last` exclusive, as a layer's out
+  point is); `first > last` plays them backwards. Changing the segment or `source` starts over.
+- `fit` (`CONTAIN` by default, `COVER`, `FILL`, `NONE`, `SCALE_DOWN`) and `alignX`/`alignY` place
+  the composition in the content box, as `Image` places an image; it is clipped to that box.
+
+Playback runs on the widget's own clock, frame by frame, at the display's rate; reduced motion
+holds the current frame.
+
+Supported: the composition's size, rate and in/out points; shape, solid, null and precomposition
+layers with parenting, in/out points, start time, stretch and time remapping; transforms (anchor,
+position, also with separate x and y, scale, rotation, opacity, skew and skew axis, auto-orient);
+hold, linear and bezier keyframes with per-dimension easing, spatial bezier paths for positions
+(moving evenly along their arc) and keyframed paths. Shapes: groups with their own transforms,
+rectangles (rounded), ellipses, stars and polygons (with roundness), paths; fills and strokes
+(colour, opacity, fill rule, width, caps, joins, miter limit, dashes with offset); linear and
+radial gradient fills and strokes with colour and opacity stops; trim paths (start, end, offset,
+simultaneous or individual); repeaters (copies, offset, transform, start and end opacity, above
+or below); round corners; merge paths (merge, add, subtract, intersect, exclude). Masks: add,
+subtract, intersect, lighten, darken and difference, inverted, with opacity and expansion. Track
+mattes: alpha, alpha inverted, luma and luma inverted, by the layer above or by `tp`, the matte's
+own masks and opacity included; a precomposition is clipped to its box.
+
+Masks and mattes are resolved as geometry: the masked content and its mask or matte shapes are
+intersected into regions of equal coverage, each drawn as a filled path, so their edges are as
+exact as any other path's. A matte's shapes count by their colour and alpha; a gradient in a matte
+counts by its mean. Mask feather, layer blend modes, layer effects, text and image layers,
+expressions and 3D are not played: those layers and properties are left out. Layer opacity fades
+each of the layer's paints (overlapping paints in one layer show through each other), as most
+Lottie players do.
+
 ### Talking to the operating system
 
 A document reaches the operating system through actions. `system.openFile` (`title`, `filters`,

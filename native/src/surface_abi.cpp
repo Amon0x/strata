@@ -462,8 +462,15 @@ image_resources(const ResourceLoader& resources,
     std::map<std::string, strata::resource::ImageDimensions, std::less<>> rasters;
     for (const strata::resource::EncodedTextureResource& texture : result.textures)
         rasters.insert_or_assign(texture.logical_id, texture.dimensions);
+    // Lottie animations are named by resource id where they are used, so they load through the
+    // same adapter on first use rather than being declared up front.
+    auto lottie = std::make_shared<const strata::resource::LottieLibrary>(
+        [resources](const std::string_view id) {
+            return resources.load(strata_string_view{id.data(), id.size()});
+        });
     result.svg_images = std::make_shared<const strata::resource::SvgImageRegistry>(
-        std::move(vectors), std::move(rasters), runtime_images, std::move(result.animations));
+        std::move(vectors), std::move(rasters), runtime_images, std::move(result.animations),
+        std::move(lottie));
     return result;
 }
 

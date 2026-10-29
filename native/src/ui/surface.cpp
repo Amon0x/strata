@@ -1771,6 +1771,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         frame_phases_.push_back(FramePhase::post_layout);
         tree_.consume_layout_dirty();
         input_.publish_motion(motion_);
+        input_.publish_images(svg_images_.get());
         input_.publish_layout(layout_engine_.result());
         const auto input_started = std::chrono::steady_clock::now();
         const std::size_t dirty_before = tree_.dirty_count();

@@ -165,6 +165,10 @@ NotificationService& WidgetInputScope::notifications() noexcept {
     return router_.notifications_;
 }
 
+const resource::SvgImageRegistry* WidgetInputScope::images() const noexcept {
+    return router_.images();
+}
+
 void WidgetInputScope::synchronize_modal_focus() {
     router_.sync_modal_focus(result_);
 }

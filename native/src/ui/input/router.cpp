@@ -832,6 +832,56 @@ bool InputRouter::request_widget_frame(const RetainedNode& node, const WidgetFra
     return true;
 }
 
+void InputRouter::publish_images(const resource::SvgImageRegistry* const images) noexcept {
+    images_ = images;
+}
+
+const std::vector<std::string_view>& InputRouter::watched_frame_types() const {
+    if (watched_types_revision_ != widgets_.revision()) {
+        watched_types_ = widgets_.frame_watch_types();
+        watched_types_revision_ = widgets_.revision();
+    }
+    return watched_types_;
+}
+
+bool InputRouter::watched_frames_pending() const {
+    if (tree_ == nullptr ||
+        (watched_frame_tree_ == tree_ && watched_frame_generation_ == tree_->generation())) {
+        return false;
+    }
+    // Only a tree holding a watched widget needs the frame that offers it one.
+    return std::ranges::any_of(watched_frame_types(), [this](const std::string_view type) {
+        const std::vector<RetainedNode*>* nodes = tree_->find_type(type);
+        return nodes != nullptr && !nodes->empty();
+    });
+}
+
+void InputRouter::request_watched_widget_frames() {
+    if (tree_ == nullptr || layout_ == nullptr || !watched_frames_pending())
+        return;
+    const std::vector<std::string_view>& types = watched_frame_types();
+    // A node not laid out yet (attached this frame) cannot run its hook: the generation is offered
+    // again next frame, when it can.
+    bool offered = true;
+    for (RetainedNode* const node : tree_->nodes_of_types(types)) {
+        if (node->lifecycle() != RetainedLifecycle::attached || !node_participates(*node))
+            continue;
+        if (layout_->find(node->identity()) == nullptr) {
+            offered = false;
+            continue;
+        }
+        static_cast<void>(request_widget_frame(*node, WidgetFrameCost::paint));
+    }
+    // A node laid out a frame later is offered then; one never laid out (hidden in a collapsed
+    // branch) is not waited for long, so it cannot keep frames coming.
+    constexpr std::size_t maximum_retries = 4U;
+    if (offered || ++watched_frame_retries_ > maximum_retries) {
+        watched_frame_tree_ = tree_;
+        watched_frame_generation_ = tree_->generation();
+        watched_frame_retries_ = 0U;
+    }
+}
+
 void InputRouter::cancel_widget_frame(const std::uint64_t identity) noexcept {
     if (advancing_widget_frame_identity_ == identity) {
         if (const auto request = requested_widget_frames_.find(identity);

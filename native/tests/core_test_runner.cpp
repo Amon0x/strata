@@ -2,6 +2,7 @@
 #include <string_view>
 
 int strata_test_svg(int argument_count, const char* const* const arguments);
+int strata_test_lottie(int argument_count, const char* const* const arguments);
 int strata_test_core();
 int strata_test_data();
 int strata_test_compiler();
@@ -35,6 +36,8 @@ int main(const int argument_count, const char* const* const arguments) {
 
     if (suite == "svg")
         return strata_test_svg(suite_argument_count, suite_arguments);
+    if (suite == "lottie")
+        return strata_test_lottie(suite_argument_count, suite_arguments);
     if (suite == "core")
         return strata_test_core();
     if (suite == "data")

@@ -12,6 +12,7 @@
 #include <strata/svg.hpp>
 
 #include "resource/image.hpp"
+#include "resource/lottie.hpp"
 #include "resource/runtime_images.hpp"
 
 namespace strata::resource {
@@ -58,7 +59,8 @@ public:
     explicit SvgImageRegistry(std::vector<SvgImageResource> images,
                               std::map<std::string, ImageDimensions, std::less<>> rasters = {},
                               const RuntimeImageStore* runtime_images = nullptr,
-                              std::map<std::string, ImageAnimation, std::less<>> animations = {});
+                              std::map<std::string, ImageAnimation, std::less<>> animations = {},
+                              std::shared_ptr<const LottieLibrary> lottie = nullptr);
     /** How the image animates, or nothing for a still one. */
     [[nodiscard]] const ImageAnimation* animation(std::string_view logical_id) const noexcept;
 
@@ -66,12 +68,18 @@ public:
     [[nodiscard]] std::size_t size() const noexcept;
     /** The image's natural size in its own units, or nothing for an unknown id. */
     [[nodiscard]] std::optional<ImageDimensions> dimensions(std::string_view logical_id) const;
+    /** The surface's Lottie animations, loaded by resource id on first use; null without a loader.
+     */
+    [[nodiscard]] const LottieLibrary* lottie() const noexcept {
+        return lottie_.get();
+    }
 
 private:
     std::map<std::string, svg::Document, std::less<>> images_;
     std::map<std::string, ImageDimensions, std::less<>> rasters_;
     const RuntimeImageStore* runtime_images_ = nullptr;
     std::map<std::string, ImageAnimation, std::less<>> animations_;
+    std::shared_ptr<const LottieLibrary> lottie_;
 };
 
 } // namespace strata::resource

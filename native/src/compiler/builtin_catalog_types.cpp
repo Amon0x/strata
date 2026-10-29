@@ -1473,6 +1473,12 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                                                      .minimum_items = std::size_t{4U},
                                                      .maximum_items = std::size_t{4U}})},
         DeclaredNamedType{
+            .id = "frameSegment",
+            .definition = declared_type(DeclaredType{.kind = DeclaredTypeKind::list,
+                                                     .element = declared_type_reference("number"),
+                                                     .minimum_items = std::size_t{2U},
+                                                     .maximum_items = std::size_t{2U}})},
+        DeclaredNamedType{
             .id = "rectSizeList",
             .definition = declared_type(DeclaredType{.kind = DeclaredTypeKind::list,
                                                      .element = declared_type_reference("number"),

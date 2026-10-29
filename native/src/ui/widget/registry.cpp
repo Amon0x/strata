@@ -4,11 +4,12 @@
 #include "ui/widget/color_picker_model.hpp"
 #include "ui/widget/date_picker_model.hpp"
 #include "ui/widget/description.hpp"
-#include "ui/widget/markdown_model.hpp"
-#include "ui/widget/range_slider_model.hpp"
 #include "ui/widget/input.hpp"
 #include "ui/widget/inspection.hpp"
+#include "ui/widget/lottie_model.hpp"
+#include "ui/widget/markdown_model.hpp"
 #include "ui/widget/presentation.hpp"
+#include "ui/widget/range_slider_model.hpp"
 #include "ui/widget/semantics.hpp"
 
 #include <algorithm>
@@ -85,6 +86,7 @@ WidgetRegistry::WidgetRegistry() {
     register_date_picker_widget(*this);
     register_range_slider_widget(*this);
     register_color_picker_widget(*this);
+    register_lottie_widget(*this);
 
     const WidgetPersistencePhase scroll{{"strata.scroll.offset"}, &persisted_widget_value};
     for (const std::string_view type : {
@@ -204,6 +206,21 @@ void WidgetRegistry::register_persistence_phase(
 void WidgetRegistry::register_present_phase(std::string type, WidgetPresentPhase phase) {
     lifecycle(std::move(type)).present = std::move(phase);
     refresh_trait_types();
+}
+
+void WidgetRegistry::register_frame_phase(std::string type, WidgetFramePhase phase) {
+    lifecycle(std::move(type)).frame = std::move(phase);
+    refresh_trait_types();
+}
+
+std::vector<std::string_view> WidgetRegistry::frame_watch_types() const {
+    std::vector<std::string_view> result;
+    for (const auto& [type, lifecycle] : lifecycles_) {
+        if (lifecycle.frame.advance != nullptr && lifecycle.frame.follows_description)
+            result.push_back(type);
+    }
+    std::ranges::sort(result);
+    return result;
 }
 
 WidgetRegistry::WidgetRegistry(const WidgetRegistry& other) : lifecycles_(other.lifecycles_) {

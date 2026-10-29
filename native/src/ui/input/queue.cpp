@@ -348,9 +348,9 @@ bool InputRouter::requires_frame_advance() const noexcept {
     );
     return pending_command_tooltip || tooltip_disclosures_need_frame() ||
            !pressed_pointer_targets_.empty() || !drag_sessions_.empty() ||
-           scrollbar_drag_.has_value() || pending_focus_.has_value() ||
-           !pending_reveals_.empty() || !pending_diagnostics_.empty() ||
-           !requested_widget_frames_.empty() || !pending_delays_.empty() || timers_waiting_;
+           scrollbar_drag_.has_value() || pending_focus_.has_value() || !pending_reveals_.empty() ||
+           !pending_diagnostics_.empty() || !requested_widget_frames_.empty() ||
+           !pending_delays_.empty() || timers_waiting_ || watched_frames_pending();
 }
 
 InputOperationResult InputRouter::enqueue(std::vector<SurfaceInputEvent> events) {

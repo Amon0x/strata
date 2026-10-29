@@ -11271,6 +11271,340 @@
       "capabilities": [],
       "events": [
         {
+          "callbackParameter": "onComplete",
+          "description": "Emitted when a play that does not loop reaches the end of its segment; carries the frame it stopped on.",
+          "name": "completion"
+        }
+      ],
+      "name": "Lottie",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "source",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "key",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "loop",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "autoplay",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "playing",
+          "nullable": true,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "speed",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "progress",
+          "nullable": true,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "segment",
+          "nullable": true,
+          "required": false,
+          "type": "list of number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "CONTAIN",
+            "COVER",
+            "FILL",
+            "NONE",
+            "SCALE_DOWN"
+          ],
+          "name": "fit",
+          "nullable": false,
+          "required": false,
+          "type": "\"CONTAIN\" | \"COVER\" | \"FILL\" | \"NONE\" | \"SCALE_DOWN\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "CENTER",
+            "END",
+            "START"
+          ],
+          "name": "alignX",
+          "nullable": false,
+          "required": false,
+          "type": "\"CENTER\" | \"END\" | \"START\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "CENTER",
+            "END",
+            "START"
+          ],
+          "name": "alignY",
+          "nullable": false,
+          "required": false,
+          "type": "\"CENTER\" | \"END\" | \"START\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "layout",
+          "nullable": false,
+          "required": false,
+          "type": "layout"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "compact",
+            "danger",
+            "default",
+            "primary",
+            "rail",
+            "secondary",
+            "subtle"
+          ],
+          "name": "variant",
+          "nullable": false,
+          "required": false,
+          "type": "\"compact\" | \"danger\" | \"default\" | \"primary\" | \"rail\" | \"secondary\" | \"subtle\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "style",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "visualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "effect",
+          "nullable": false,
+          "required": false,
+          "type": "effect"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "material",
+          "nullable": false,
+          "required": false,
+          "type": "material"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "transition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "enter",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "exit",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "move",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "motions",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateChanges",
+          "nullable": true,
+          "required": false,
+          "type": "{ policy?: string, properties: list of string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateContentSize",
+          "nullable": true,
+          "required": false,
+          "type": "{ clip?: boolean, height?: boolean, policy?: string, width?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "disclosure",
+          "nullable": true,
+          "required": false,
+          "type": "{ collapsedExtent?: number, expanded?: boolean, policy?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentKey",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentTransition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "OUT_IN",
+            "TOGETHER"
+          ],
+          "name": "contentTransitionMode",
+          "nullable": false,
+          "required": false,
+          "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "stagger",
+          "nullable": false,
+          "required": false,
+          "type": "duration"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "semantics",
+          "nullable": false,
+          "required": false,
+          "type": "{ checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: \"ASSERTIVE\" | \"OFF\" | \"POLITE\", role?: \"ALERT\" | \"APPLICATION\" | \"BUTTON\" | \"CHECKBOX\" | \"COLUMN_HEADER\" | \"COMBO_BOX\" | \"DIALOG\" | \"FIELD\" | \"FORM\" | \"GRID\" | \"GRID_CELL\" | \"GROUP\" | \"IMAGE\" | \"LINK\" | \"LIST\" | \"LIST_ITEM\" | \"MENU\" | \"MENU_ITEM\" | \"PROGRESS_BAR\" | \"RADIO\" | \"RADIO_GROUP\" | \"ROW\" | \"SEPARATOR\" | \"SLIDER\" | \"STATUS\" | \"SWITCH\" | \"TAB\" | \"TABLE\" | \"TAB_LIST\" | \"TEXT\" | \"TEXT_FIELD\" | \"TREE\" | \"TREE_ITEM\", selected?: boolean, valueText?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textVisualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animation",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onComplete",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "behaviors",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: \"LEFT\" | \"MIDDLE\" | \"RIGHT\", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of (\"ALT\" | \"CONTROL\" | \"SHIFT\" | \"SUPER\"), policy?: \"KEYBOARD_ONLY\" | \"POINTER_AND_KEYBOARD\" | \"POINTER_ONLY\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { files?: list of string, move?: boolean, text?: string } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), insertionAxis?: \"HORIZONTAL\" | \"VERTICAL\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: \"none\" | \"parent\", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: \"HORIZONTAL\" | \"VERTICAL\", payloadType: string } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any })"
+        }
+      ],
+      "retainedState": [
+        {
+          "description": "Playback position within the segment, and whether it is playing or complete.",
+          "name": "playhead"
+        }
+      ]
+    },
+    {
+      "allowsChildren": false,
+      "bindings": [],
+      "capabilities": [],
+      "events": [
+        {
           "callbackParameter": "onLink",
           "description": "Carries the followed link's destination.",
           "name": "link activate"

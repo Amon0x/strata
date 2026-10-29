@@ -26,6 +26,10 @@
 #include "ui/tree.hpp"
 #include "ui/widget/subtarget.hpp"
 
+namespace strata::resource {
+class SvgImageRegistry;
+}
+
 namespace strata::ui {
 
 class CommandIndex;
@@ -370,6 +374,11 @@ class InputRouter final {
     void publish_commands(CommandIndex& commands) noexcept;
     void publish_frame_time(std::int64_t frame_time_nanos);
     void publish_reduced_motion(bool reduced_motion) noexcept;
+    /** The surface's images, for widgets whose frame hooks play a resource. */
+    void publish_images(const resource::SvgImageRegistry* images) noexcept;
+    [[nodiscard]] const resource::SvgImageRegistry* images() const noexcept {
+        return images_;
+    }
     /** Schedules one widget-owned frame callback; the callback must explicitly request another. */
     [[nodiscard]] bool request_widget_frame(const RetainedNode& node, WidgetFrameCost cost);
     void cancel_widget_frame(std::uint64_t identity) noexcept;
@@ -960,6 +969,22 @@ class InputRouter final {
     std::map<std::uint64_t, RequestedWidgetFrame> requested_widget_frames_;
     std::map<std::uint64_t, std::int64_t> widget_frame_times_;
     std::optional<std::uint64_t> advancing_widget_frame_identity_;
+    /**
+     * Widgets that follow their description (WidgetFramePhase::follows_description) are offered a
+     * frame whenever the tree's generation moves on; this is the generation last offered to all.
+     */
+    const RetainedTree* watched_frame_tree_ = nullptr;
+    std::optional<std::uint64_t> watched_frame_generation_;
+    /** Frames a generation waited for a watched node to be laid out; it waits a few at most. */
+    std::size_t watched_frame_retries_ = 0U;
+    /** The registry's types that follow their description, as of `watched_types_revision_`. */
+    mutable std::vector<std::string_view> watched_types_;
+    mutable std::optional<std::uint64_t> watched_types_revision_;
+    [[nodiscard]] const std::vector<std::string_view>& watched_frame_types() const;
+    /** Whether the tree moved on since its watched widgets were last offered a frame. */
+    [[nodiscard]] bool watched_frames_pending() const;
+    void request_watched_widget_frames();
+    const resource::SvgImageRegistry* images_ = nullptr;
     bool reduced_motion_ = false;
     std::optional<std::uint64_t> last_text_click_;
     Point last_text_click_position_;

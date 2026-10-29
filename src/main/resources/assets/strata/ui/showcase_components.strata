@@ -1286,6 +1286,8 @@ component PageViewport(selectedPage: string, chrome: Binding<string>) {
       Scroll(key: "targets.page.scroll.media", persistenceKey: "showcase.page.scroll.media", vertical: true, horizontal: false, style: PageScroll) { MediaPage() }
     } else if selectedPage == "NET" {
       Scroll(key: "targets.page.scroll.net", persistenceKey: "showcase.page.scroll.net", vertical: true, horizontal: false, style: PageScroll) { NetPage() }
+    } else if selectedPage == "LOTTIE" {
+      Scroll(key: "targets.page.scroll.lottie", persistenceKey: "showcase.page.scroll.lottie", vertical: true, horizontal: false, style: PageScroll) { LottiePage() }
     } else if selectedPage == "SYSTEM" {
       Scroll(key: "targets.page.scroll.system", persistenceKey: "showcase.page.scroll.system", vertical: true, horizontal: false, style: PageScroll) { SystemPage(chrome: chrome) }
     } else if selectedPage == "DESKTOP" {
@@ -1325,7 +1327,8 @@ component ShowcaseHeader(selectedPage: Binding<string>, chrome: Binding<string>)
         { id: "SYSTEM", label: "SYSTEM" },
         { id: "MEDIA", label: "MEDIA" },
         { id: "DESKTOP", label: "DESKTOP" },
-        { id: "NET", label: "NET" }
+        { id: "NET", label: "NET" },
+        { id: "LOTTIE", label: "LOTTIE" }
       ],
       selectedId: selectedPage,
       layout: { width: { weight: 1 }, height: 34 },
@@ -1695,6 +1698,99 @@ style VideoFrame {
   radius: 16;
   clip: true;
   background: #05070BFF;
+}
+
+style LottieTile {
+  kind: "COLUMN";
+  width: "content";
+  height: "content";
+  padding: 12;
+  gap: 8;
+  radius: 14;
+  alignItems: "CENTER";
+  background: #0E131DFF;
+  border: { width: 1, color: #263042FF };
+}
+
+component LottieSample(source: string, note: string, sampleKey: string) {
+  Panel(style: LottieTile) {
+    Lottie(key: sampleKey, source: source, layout: { width: 160, height: 160 })
+    Text(text: note, style: CardNote)
+  }
+}
+
+component LottiePage() {
+  state playing = true;
+  state scrub = 0.5;
+  state speed = "1";
+  state switchedOn = false;
+  state flips = 0;
+  state completions = 0;
+  Panel(style: PageColumn) {
+    Card(title: "LOTTIE: AFTER EFFECTS ANIMATIONS, DRAWN AS VECTORS EVERY FRAME") {
+      Panel(style: style(ActionRow, gap: 14)) {
+        LottieSample(source: "assets/strata/lottie/spinner.json", note: "Trim paths, gradient stroke", sampleKey: "lottie.spinner")
+        LottieSample(source: "assets/strata/lottie/success.json", note: "Overshoot, parenting, draw-on", sampleKey: "lottie.success")
+        LottieSample(source: "assets/strata/lottie/like.json", note: "Repeater burst", sampleKey: "lottie.like")
+        LottieSample(source: "assets/strata/lottie/badge.json", note: "Polystar, dashes, merged paths", sampleKey: "lottie.badge")
+        LottieSample(source: "assets/strata/lottie/reveal.json", note: "Masks and track mattes", sampleKey: "lottie.reveal")
+      }
+    }
+    Card(title: "PLAYBACK: PAUSE, SCRUB, SPEED") {
+      Panel(style: style(ActionRow, gap: 18, alignItems: "CENTER")) {
+        Panel(style: LottieTile) {
+          Lottie(
+            key: "lottie.player",
+            source: "assets/strata/lottie/reveal.json",
+            playing: playing,
+            progress: playing ? null : scrub,
+            speed: speed == "0.25" ? 0.25 : (speed == "0.5" ? 0.5 : (speed == "2" ? 2 : (speed == "-1" ? -1 : 1))),
+            layout: { width: 260, height: 260 }
+          )
+        }
+        Panel(style: style(PageColumn, width: 360, gap: 10)) {
+          Panel(style: ActionRow) {
+            Button(key: "lottie.play", label: playing ? "Pause" : "Play", onClick: action("state.toggle", name: "playing"))
+            Text(text: playing ? "Playing" : format("Paused at {0}%", round(scrub * 100)), style: CardNote)
+          }
+          Slider(key: "lottie.scrub", min: 0, max: 1, step: 0.005, bind: scrub, enabled: !playing, layout: { width: 340 })
+          Select(
+            key: "lottie.speed",
+            options: [
+              { id: "0.25", label: "Speed 0.25x" },
+              { id: "0.5", label: "Speed 0.5x" },
+              { id: "1", label: "Speed 1x" },
+              { id: "2", label: "Speed 2x" },
+              { id: "-1", label: "Backwards 1x" }
+            ],
+            bind: speed
+          )
+        }
+      }
+    }
+    Card(title: "SEGMENTS: PLAY A PART ONCE") {
+      Panel(style: style(ActionRow, gap: 18, alignItems: "CENTER")) {
+        Panel(style: LottieTile) {
+          // Until the first flip it rests on the end of the off segment; each flip plays one.
+          Lottie(
+            key: "lottie.toggle",
+            source: "assets/strata/lottie/toggle.json",
+            segment: switchedOn ? [0, 30] : [30, 60],
+            progress: flips == 0 ? 1 : null,
+            loop: false,
+            onComplete: action("state.adjust", name: "completions", amount: 1),
+            layout: { width: 240, height: 140 }
+          )
+        }
+        Panel(style: style(PageColumn, width: 360, gap: 10)) {
+          Button(key: "lottie.flip", label: switchedOn ? "Switch off" : "Switch on", onClick: sequence(
+            action("state.toggle", name: "switchedOn"),
+            action("state.adjust", name: "flips", amount: 1)))
+          Text(text: format("Segment {0}, completed {1} times", switchedOn ? "0-30 (on)" : "30-60 (off)", completions), style: CardNote)
+        }
+      }
+    }
+  }
 }
 
 component MediaPage() {
@@ -3070,6 +3166,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "The GIF, APNG and WebP play by themselves, each frame for as long as its file says, looping as the file asks. The photo is a progressive JPEG. Play runs a ten-second H.264 clip with its sound through Media Foundation into a runtime image, so any Image can show it, clipped, rounded or turned; pause, resume, skip and restart it, or open or drop your own video.", wrapMode: "WORD")
   } else if selectedPage == "NET" {
     Text(text: "Run python tools/net/demo_server.py first. Fetch GETs a JSON list over HTTP (WinHTTP, on a worker: the frame never waits) and shows it; POST echo sends JSON and shows what came back. Connect opens a WebSocket: Send and Send JSON reach the server, which echoes to everyone connected and says the time every ten seconds; /bye makes it close. Write, Append, Read and List work in a temp folder; Watch reports every change there as it happens, and Trash note moves the note to the recycle bin. Click plays a short sound each press, overlapping when fast; Chime, and a music loop you can pause, speed up and mute.", wrapMode: "WORD")
+  } else if selectedPage == "LOTTIE" {
+    Text(text: "Six After Effects animations, written as Lottie JSON, play on their own: trim paths on a gradient stroke, a bouncy overshoot, a repeater burst, a morphing path, masks (add, subtract, expansion), alpha and luma track mattes inside a time-remapped precomposition, round corners, dashes and merged paths. Each frame is drawn as vector paths, crisp at any size. Pause shows the frame the slider names: drag it to scrub, and Play carries on from there. Speed plays it slower, faster or backwards. Switch plays the toggle's on or off segment once and counts each completion.", wrapMode: "WORD")
   } else if selectedPage == "SYSTEM" {
     Text(text: "Drag files from Explorer onto the drop box: it lights up as they arrive and lists them when dropped. Open files, pick a folder or save: the dialogs are Windows' own, and their answers land in state. Send a notification from the tray icon; open a folder or link in its default app. Mica, Acrylic and Tabbed turn the header into the title bar (drag to move, double-click to maximize, buttons at its right) over the system backdrop. Paste an image from the clipboard and copy it back.", wrapMode: "WORD")
   } else if selectedPage == "DESKTOP" {

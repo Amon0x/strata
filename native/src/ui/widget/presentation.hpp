@@ -112,6 +112,8 @@ class WidgetRenderScope final {
     [[nodiscard]] double alpha() const noexcept;
     [[nodiscard]] Rect root_bounds() const noexcept;
     [[nodiscard]] double motion_progress(std::string_view id, double fallback = 0.0) const noexcept;
+    /** The surface's images (and its Lottie library), when it has any. */
+    [[nodiscard]] const resource::SvgImageRegistry* images() const noexcept;
     /** How the image animates, or nothing for a still or unknown one. */
     [[nodiscard]] const resource::ImageAnimation*
     image_animation(std::string_view image) const noexcept;

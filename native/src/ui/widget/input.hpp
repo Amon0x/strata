@@ -61,6 +61,8 @@ class WidgetInputScope final {
     [[nodiscard]] double scale() const noexcept;
     [[nodiscard]] const CommandIndex* command_index() const noexcept;
     [[nodiscard]] NotificationService& notifications() noexcept;
+    /** The surface's images (and its Lottie library), when it has any. */
+    [[nodiscard]] const resource::SvgImageRegistry* images() const noexcept;
     void synchronize_modal_focus();
     [[nodiscard]] const runtime::Value* property(std::string_view name) const noexcept;
     [[nodiscard]] const runtime::Value* retained(std::string_view name) const noexcept;

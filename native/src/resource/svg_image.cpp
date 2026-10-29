@@ -33,9 +33,10 @@ std::string ImageAnimation::frame_texture(const std::string_view id,
 SvgImageRegistry::SvgImageRegistry(std::vector<SvgImageResource> images,
                                    std::map<std::string, ImageDimensions, std::less<>> rasters,
                                    const RuntimeImageStore* const runtime_images,
-                                   std::map<std::string, ImageAnimation, std::less<>> animations)
+                                   std::map<std::string, ImageAnimation, std::less<>> animations,
+                                   std::shared_ptr<const LottieLibrary> lottie)
     : rasters_(std::move(rasters)), runtime_images_(runtime_images),
-      animations_(std::move(animations)) {
+      animations_(std::move(animations)), lottie_(std::move(lottie)) {
     for (SvgImageResource& image : images) {
         if (image.logical_id.empty()) {
             throw std::invalid_argument("SVG image requires a non-empty logical id");

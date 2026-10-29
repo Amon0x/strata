@@ -378,6 +378,7 @@ InputOperationResult InputRouter::advance_frame() {
         static_cast<void>(pointer_id);
         static_cast<void>(auto_scroll_drag(session, result));
     }
+    request_watched_widget_frames();
     advance_widget_frames(result);
     run_due_delays(result);
     run_timers(result);
