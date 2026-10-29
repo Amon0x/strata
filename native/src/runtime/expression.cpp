@@ -1,6 +1,7 @@
 #include "runtime/expression.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <iomanip>
@@ -73,6 +74,111 @@ constexpr std::size_t maximum_derived_items = 100'000U;
         counted += width == 4U ? 2U : 1U;
     }
     return index;
+}
+
+/** A proleptic Gregorian civil date from days since 1970-01-01 (Howard Hinnant's algorithm). */
+struct CivilDate final {
+    std::int64_t year = 1970;
+    unsigned month = 1U;
+    unsigned day = 1U;
+};
+
+[[nodiscard]] CivilDate civil_from_days(std::int64_t days) noexcept {
+    days += 719468;
+    const std::int64_t era = (days >= 0 ? days : days - 146096) / 146097;
+    const auto day_of_era = static_cast<unsigned>(days - era * 146097);
+    const unsigned year_of_era =
+        (day_of_era - day_of_era / 1460U + day_of_era / 36524U - day_of_era / 146096U) / 365U;
+    const unsigned day_of_year = day_of_era - (365U * year_of_era + year_of_era / 4U -
+                                               year_of_era / 100U);
+    const unsigned month_index = (5U * day_of_year + 2U) / 153U;
+    const unsigned day = day_of_year - (153U * month_index + 2U) / 5U + 1U;
+    const unsigned month = month_index < 10U ? month_index + 3U : month_index - 9U;
+    return CivilDate{static_cast<std::int64_t>(year_of_era) + era * 400 + (month <= 2U ? 1 : 0),
+                     month, day};
+}
+
+/**
+ * Formats a UTC millisecond timestamp, shifted by an offset, with a pattern: yyyy yy, MMMM MMM MM M,
+ * dd d, EEEE EEE, HH H, hh h, mm m, ss s, SSS and a. Text in single quotes is literal ('' is a
+ * quote); any other character is copied. Names are English.
+ */
+[[nodiscard]] std::string format_date(const double milliseconds, const std::string_view pattern,
+                                      const double offset_minutes) {
+    static constexpr std::array<std::string_view, 12U> months{
+        "January", "February", "March",     "April",   "May",      "June",
+        "July",    "August",   "September", "October", "November", "December"};
+    static constexpr std::array<std::string_view, 7U> weekdays{
+        "Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"};
+    // Bounded to years -9999..9999 so every field stays a sensible width.
+    constexpr double limit = 253402300799999.0;
+    const double clamped = std::clamp(
+        std::floor(milliseconds + (std::isfinite(offset_minutes) ? offset_minutes : 0.0) * 60000.0),
+        -limit, limit);
+    const auto total = static_cast<std::int64_t>(clamped);
+    const std::int64_t day_milliseconds = 86'400'000;
+    std::int64_t days = total / day_milliseconds;
+    std::int64_t within = total % day_milliseconds;
+    if (within < 0) {
+        within += day_milliseconds;
+        --days;
+    }
+    const CivilDate date = civil_from_days(days);
+    const auto hour = static_cast<int>(within / 3'600'000);
+    const auto minute = static_cast<int>(within / 60'000 % 60);
+    const auto second = static_cast<int>(within / 1000 % 60);
+    const auto millisecond = static_cast<int>(within % 1000);
+    const auto weekday = static_cast<std::size_t>(((days % 7) + 7) % 7);
+    const auto padded = [](const std::int64_t value, const std::size_t width) {
+        std::string digits = std::to_string(value < 0 ? -value : value);
+        if (digits.size() < width)
+            digits.insert(0U, width - digits.size(), '0');
+        return value < 0 ? "-" + digits : digits;
+    };
+    std::string result;
+    for (std::size_t index = 0U; index < pattern.size();) {
+        const char token = pattern[index];
+        if (token == '\'') {
+            const std::size_t close = pattern.find('\'', index + 1U);
+            if (close == index + 1U) {
+                result.push_back('\'');
+                index += 2U;
+                continue;
+            }
+            const std::size_t end = close == std::string_view::npos ? pattern.size() : close;
+            result.append(pattern.substr(index + 1U, end - index - 1U));
+            index = end == pattern.size() ? end : end + 1U;
+            continue;
+        }
+        std::size_t run = 1U;
+        while (index + run < pattern.size() && pattern[index + run] == token)
+            ++run;
+        index += run;
+        switch (token) {
+        case 'y':
+            result += run == 2U ? padded(((date.year % 100) + 100) % 100, 2U)
+                                : padded(date.year, run);
+            break;
+        case 'M':
+            result += run >= 4U   ? std::string(months[date.month - 1U])
+                      : run == 3U ? std::string(months[date.month - 1U].substr(0U, 3U))
+                                  : padded(date.month, run);
+            break;
+        case 'd': result += padded(date.day, run); break;
+        case 'E':
+            result += run >= 4U ? std::string(weekdays[weekday])
+                                : std::string(weekdays[weekday].substr(0U, 3U));
+            break;
+        case 'H': result += padded(hour, run); break;
+        case 'h': result += padded(hour % 12 == 0 ? 12 : hour % 12, run); break;
+        case 'm': result += padded(minute, run); break;
+        case 's': result += padded(second, run); break;
+        case 'S': result += padded(millisecond, 3U).substr(0U, std::min<std::size_t>(run, 3U)); break;
+        case 'a': result += hour < 12 ? "AM" : "PM"; break;
+        default: result.append(run, token); break;
+        }
+    }
+    return result;
 }
 
 /** A `slice` bound: a negative value counts back from `size`; the result is clamped to it. */
@@ -163,6 +269,8 @@ struct Names final {
     Symbol base = Symbol::intern("base");
     Symbol exponent = Symbol::intern("exponent");
     Symbol after = Symbol::intern("after");
+    Symbol pattern = Symbol::intern("pattern");
+    Symbol utc_offset_minutes = Symbol::intern("utcOffsetMinutes");
     Symbol action = Symbol::intern("action");
     Symbol prefix = Symbol::intern("prefix");
     Symbol suffix = Symbol::intern("suffix");
@@ -1749,6 +1857,14 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         const double result = std::pow(base.number() != nullptr ? *base.number() : 0.0,
                                        exponent.number() != nullptr ? *exponent.number() : 1.0);
         return ExpressionValue(Value(std::isfinite(result) ? result : 0.0));
+    }
+    case HelperKind::format_date: {
+        const Value value = argument_value(program, node, scope, known.value, 0U, reads);
+        const Value pattern = argument_value(program, node, scope, known.pattern, 1U, reads);
+        const Value offset = argument_value(program, node, scope, known.utc_offset_minutes, 2U, reads);
+        return ExpressionValue(Value(format_date(
+            value.number() != nullptr ? *value.number() : 0.0, display_string(pattern),
+            offset.number() != nullptr ? *offset.number() : 0.0)));
     }
     case HelperKind::delay: {
         const Value after = argument_value(program, node, scope, known.after, 0U, reads);

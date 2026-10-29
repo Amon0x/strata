@@ -310,7 +310,8 @@ struct MaterializedImages final {
 [[nodiscard]] MaterializedImages
 image_resources(const ResourceLoader& resources,
                 const std::span<const strata_surface_image_binding> bindings,
-                const std::string_view host_resource_namespace) {
+                const std::string_view host_resource_namespace,
+                const strata::resource::RuntimeImageStore* const runtime_images) {
     if (host_resource_namespace.empty()) {
         throw std::invalid_argument("Surface host resource namespace must not be empty");
     }
@@ -363,8 +364,11 @@ image_resources(const ResourceLoader& resources,
                 "' exceeds the supported UI geometry budget: " + error.what());
         }
     }
-    result.svg_images =
-        std::make_shared<const strata::resource::SvgImageRegistry>(std::move(vectors));
+    std::map<std::string, strata::resource::ImageDimensions, std::less<>> rasters;
+    for (const strata::resource::EncodedTextureResource& texture : result.textures)
+        rasters.insert_or_assign(texture.logical_id, texture.dimensions);
+    result.svg_images = std::make_shared<const strata::resource::SvgImageRegistry>(
+        std::move(vectors), std::move(rasters), runtime_images);
     return result;
 }
 
@@ -608,7 +612,8 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
             std::shared_ptr<const strata::ui::TextEngine> owned_text_engine =
                 text_engine(resources, owned_fonts);
             MaterializedImages owned_images =
-                image_resources(resources, owned_image_bindings, owned_resource_namespace);
+                image_resources(resources, owned_image_bindings, owned_resource_namespace,
+                                &runtime->core.images());
             strata_surface* const created = std::construct_at(
                 static_cast<strata_surface*>(storage), allocator, runtime, std::move(id),
                 root_role(config->root_role), std::move(root_name),

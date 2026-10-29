@@ -25,6 +25,7 @@
 #include "ui/semantics.hpp"
 #include "ui/status.hpp"
 #include "font/opentype.hpp"
+#include "resource/svg_image.hpp"
 #include "ui/surface.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
@@ -2951,6 +2952,9 @@ overlay Helpers {
     Text(key: "helpers.find", text: find(names, n -> startsWith(n, "g")))
     Text(key: "helpers.math", text: formatNumber(sqrt(16) + pow(2, 10), 0))
     Text(key: "helpers.list", text: join(slice(range(0, 10, 3), 1, 3), ","))
+    Text(key: "helpers.date", text: formatDate(1709287205123, "EEE, d MMM yyyy 'at' HH:mm:ss.SSS"))
+    Text(key: "helpers.date.offset", text: formatDate(1709287205123, "yyyy-MM-dd h:mm a", -480))
+    Text(key: "helpers.date.early", text: formatDate(-86400000, "EEEE yyyy-MM-dd"))
   }
 }
 )";
@@ -2978,6 +2982,12 @@ overlay Helpers {
     check(text("helpers.find") == "grace", "find did not return the first matching item");
     check(text("helpers.math") == "1028", "sqrt or pow computed the wrong value");
     check(text("helpers.list") == "3,6", "range with a step or list slice was wrong");
+    check(text("helpers.date") == "Fri, 1 Mar 2024 at 10:00:05.123",
+          "formatDate did not format a UTC timestamp");
+    check(text("helpers.date.offset") == "2024-03-01 2:00 AM",
+          "formatDate did not apply its UTC offset or 12-hour clock");
+    check(text("helpers.date.early") == "Wednesday 1969-12-31",
+          "formatDate did not format a timestamp before 1970");
 }
 
 void test_rotation_draws_and_hits_the_turned_shape(const std::filesystem::path& resources) {
@@ -3130,6 +3140,58 @@ overlay Snapping {
           "a settled scroll snap kept animating");
 }
 
+void test_image_fit_keeps_the_aspect_ratio() {
+    const std::string source = R"(
+overlay Pictures {
+  root Panel(key: "fit.root", layout: { kind: "COLUMN", width: 100, height: 300 }) {
+    Image(key: "fit.contain", image: "photo", fit: "CONTAIN", layout: { width: 100, height: 100 })
+    Image(key: "fit.cover", image: "photo", fit: "COVER", alignX: "START", layout: { width: 100, height: 100 })
+    Image(key: "fit.none", image: "photo", fit: "NONE", alignY: "END", layout: { width: 100, height: 100 })
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("image-fit", bundle);
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"Pictures.strata", source}, no_imports,
+                                    0U)
+              .activated(),
+          "image fit fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 100;
+    environment.framebuffer_height = 300;
+    environment.logical_width = 100.0;
+    environment.logical_height = 300.0;
+    // A 200x100 photo: twice as wide as it is tall.
+    auto images = std::make_shared<const resource::SvgImageRegistry>(
+        std::vector<resource::SvgImageResource>{},
+        std::map<std::string, resource::ImageDimensions, std::less<>>{
+            {"photo", resource::ImageDimensions{200U, 100U}}});
+    ui::Surface surface("image-fit", application, runtime::LayerRole::overlay, "Pictures",
+                        environment, {}, ui::WidgetRegistry{}, ui::BehaviorRegistry{}, nullptr,
+                        ui::Theme{}, {}, images);
+    static_cast<void>(surface.frame(1'000'000));
+    std::vector<ui::ImageRenderCommand> drawn;
+    for (const ui::RenderCommand& command : surface.render_commands().commands()) {
+        if (const auto* image = std::get_if<ui::ImageRenderCommand>(&command))
+            drawn.push_back(*image);
+    }
+    check(drawn.size() == 3U, "image fit fixture did not draw its three images");
+    check(drawn[0].bounds == ui::Rect{0.0, 25.0, 100.0, 50.0} &&
+              drawn[0].source == ui::TextureRegion{},
+          "CONTAIN did not letterbox the whole image at its aspect ratio");
+    check(drawn[1].bounds == ui::Rect{0.0, 100.0, 100.0, 100.0} &&
+              drawn[1].source == ui::TextureRegion{0.0, 0.0, 0.5, 1.0},
+          "COVER aligned to START did not fill by cropping the image's right half");
+    check(drawn[2].bounds == ui::Rect{0.0, 200.0, 100.0, 100.0} &&
+              drawn[2].source == ui::TextureRegion{0.25, 0.0, 0.5, 1.0},
+          "NONE did not draw the image at its natural size, centred and cropped");
+}
+
 void test_palette_projection_is_cached_across_frames(const std::filesystem::path& resources) {
     std::string commands;
     for (int index = 0; index < 40; ++index) {
@@ -3278,6 +3340,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_rotation_draws_and_hits_the_turned_shape(resources);
         test_delayed_and_clipboard_actions(resources);
         test_scroll_snaps_to_the_nearest_child(resources);
+        test_image_fit_keeps_the_aspect_ratio();
         test_palette_projection_is_cached_across_frames(resources);
         test_environment_set_rebuilds_once(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";

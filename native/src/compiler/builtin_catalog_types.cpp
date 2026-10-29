@@ -1845,6 +1845,12 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                 .kind = DeclaredTypeKind::enumeration,
                 .label = "text decoration",
                 .values = {"LINE_THROUGH", "NONE", "UNDERLINE", "UNDERLINE_LINE_THROUGH"}})},
+        DeclaredNamedType{
+            .id = "imageFit",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::enumeration,
+                .label = "image fit",
+                .values = {"CONTAIN", "COVER", "FILL", "NONE", "SCALE_DOWN"}})},
         DeclaredNamedType{.id = "scrollSnap",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,

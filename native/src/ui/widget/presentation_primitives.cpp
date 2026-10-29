@@ -167,13 +167,71 @@ void button_content(WidgetRenderScope& scope) {
         WidgetTextAlignment::center);
 }
 
+/** Where along an axis `alignment` puts content: START, CENTER (the default) or END. */
+[[nodiscard]] double fit_alignment(const runtime::Value* value) noexcept {
+    const std::string* name = widget_string_value(value);
+    if (name == nullptr)
+        return 0.5;
+    return *name == "START" ? 0.0 : *name == "END" ? 1.0 : 0.5;
+}
+
+/**
+ * The image's `fit` against its bounds. FILL stretches it; CONTAIN shows all of it at its aspect
+ * ratio; COVER fills the bounds at its aspect ratio by cropping the source; NONE draws it at its
+ * natural size, cropped where it overflows; SCALE_DOWN is NONE until the image is larger than its
+ * bounds, then CONTAIN. `alignX`/`alignY` place what does not fill. An image of unknown size fills.
+ */
 void image_content(WidgetRenderScope& scope) {
     const std::string* image = widget_image_value(scope.property("image"));
     if (image == nullptr)
         return;
-    scope.image(scope.layout().bounds, *image,
-                widget_color(scope.property("tint"), untinted),
-                widget_texture_region(scope.property("source")));
+    const RenderColor tint = widget_color(scope.property("tint"), untinted);
+    TextureRegion source = widget_texture_region(scope.property("source"));
+    const Rect bounds = scope.layout().bounds;
+    const std::string* fit_name = widget_string_value(scope.property("fit"));
+    const std::optional<Size> natural = scope.image_size(*image);
+    if (fit_name == nullptr || *fit_name == "FILL" || !natural.has_value() || bounds.empty()) {
+        scope.image(bounds, *image, tint, source);
+        return;
+    }
+    // The region of the image actually shown, in the image's own units.
+    const Size shown{natural->width * source.width, natural->height * source.height};
+    if (shown.width <= 0.0 || shown.height <= 0.0)
+        return;
+    const double align_x = fit_alignment(scope.property("alignX"));
+    const double align_y = fit_alignment(scope.property("alignY"));
+    const double contain = std::min(bounds.width / shown.width, bounds.height / shown.height);
+    const double cover = std::max(bounds.width / shown.width, bounds.height / shown.height);
+    double scale = 1.0;
+    if (*fit_name == "CONTAIN")
+        scale = contain;
+    else if (*fit_name == "COVER")
+        scale = cover;
+    else if (*fit_name == "SCALE_DOWN")
+        scale = std::min(1.0, contain);
+    const Size drawn{shown.width * scale, shown.height * scale};
+    Rect target{
+        bounds.x + (bounds.width - drawn.width) * align_x,
+        bounds.y + (bounds.height - drawn.height) * align_y,
+        drawn.width,
+        drawn.height,
+    };
+    // Crop what overflows by narrowing the source rather than clipping: no clip command needed.
+    const auto crop = [&](double& start, double& extent, const double bound_start,
+                          const double bound_extent, double& uv, double& uv_extent) {
+        if (extent <= bound_extent)
+            return;
+        const double hidden_before = bound_start - start;
+        const double fraction_before = hidden_before / extent;
+        const double fraction_kept = bound_extent / extent;
+        uv += uv_extent * fraction_before;
+        uv_extent *= fraction_kept;
+        start = bound_start;
+        extent = bound_extent;
+    };
+    crop(target.x, target.width, bounds.x, bounds.width, source.u, source.width);
+    crop(target.y, target.height, bounds.y, bounds.height, source.v, source.height);
+    scope.image(target, *image, tint, source);
 }
 
 /**

@@ -617,6 +617,15 @@ void WidgetRenderScope::shape(const Rect bounds, PathShape value) {
     output_.emplace_back(PathRenderCommand{bounds, std::move(value)});
 }
 
+std::optional<Size> WidgetRenderScope::image_size(const std::string_view image) const {
+    if (svg_images_ == nullptr)
+        return std::nullopt;
+    const std::optional<resource::ImageDimensions> dimensions = svg_images_->dimensions(image);
+    if (!dimensions.has_value() || dimensions->width == 0U || dimensions->height == 0U)
+        return std::nullopt;
+    return Size{static_cast<double>(dimensions->width), static_cast<double>(dimensions->height)};
+}
+
 void WidgetRenderScope::image(const Rect bounds, std::string image, RenderColor tint,
                               const TextureRegion source) {
     if (svg_images_ != nullptr) {

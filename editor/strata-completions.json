@@ -1848,6 +1848,39 @@
       "capabilities": [
         "FORMATTING"
       ],
+      "name": "formatDate",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "pattern",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "utcOffsetMinutes",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "returnType": "string"
+    },
+    {
+      "capabilities": [
+        "FORMATTING"
+      ],
       "name": "formatNumber",
       "parameters": [
         {
@@ -7467,6 +7500,44 @@
           "nullable": false,
           "required": false,
           "type": "color"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "CONTAIN",
+            "COVER",
+            "FILL",
+            "NONE",
+            "SCALE_DOWN"
+          ],
+          "name": "fit",
+          "nullable": false,
+          "required": false,
+          "type": "\"CONTAIN\" | \"COVER\" | \"FILL\" | \"NONE\" | \"SCALE_DOWN\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "CENTER",
+            "END",
+            "START"
+          ],
+          "name": "alignX",
+          "nullable": false,
+          "required": false,
+          "type": "\"CENTER\" | \"END\" | \"START\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "CENTER",
+            "END",
+            "START"
+          ],
+          "name": "alignY",
+          "nullable": false,
+          "required": false,
+          "type": "\"CENTER\" | \"END\" | \"START\""
         },
         {
           "aliases": [],

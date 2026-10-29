@@ -355,6 +355,19 @@ stops scrolling: about 120 ms after the last wheel step or drag, and not while a
 eases to the nearest child's start, centre or end. Its snap points are its children, or the
 children of its one content box, so a carousel or a picker needs no extra structure.
 
+### Image fit
+
+`Image(fit:)` places an image of known size in its bounds: `FILL` (the default) stretches it;
+`CONTAIN` shows all of it at its aspect ratio; `COVER` fills the bounds at its aspect ratio and
+crops what overflows; `NONE` draws it at its natural size; `SCALE_DOWN` is `NONE` until the image is
+larger than its bounds, then `CONTAIN`. `alignX` and `alignY` (`START`, `CENTER`, `END`) place what
+does not fill and choose which part a crop keeps. The natural size comes from the SVG or PNG the
+host bound, or from a runtime image the host published.
+
+```strata
+Image(image: user.avatar, fit: "COVER", style: style(width: 40, height: 40, radius: 20, clip: true))
+```
+
 ### Pointer cursor
 
 `cursor` sets the pointer shape over a node and its descendants: `DEFAULT`, `POINTER`, `TEXT`,
@@ -753,6 +766,12 @@ List helpers `first`, `last`, `reverse`, `find(source, predicate)` and `sum(sour
 take a list or derived view; `first`, `last` and `find` give one item typed as the source's items,
 or null. `range(start, end, step?)` lists the numbers from `start` up to but not including `end`,
 at most 10000 of them. `sqrt` and `pow(base, exponent)` complete the numeric helpers.
+
+`formatDate(value, pattern, utcOffsetMinutes?)` formats a timestamp in milliseconds since
+1970-01-01 UTC, shifted by an optional offset (the host knows the user's zone; pass it in).
+Patterns use `yyyy`/`yy`, `MMMM`/`MMM`/`MM`/`M`, `dd`/`d`, `EEEE`/`EEE`, `HH`/`H`, `hh`/`h`,
+`mm`, `ss`, `SSS` and `a`; quoted text is literal: `formatDate(sent, "EEE d MMM 'at' HH:mm")`. Names
+are English.
 
 Collection helpers accept bounded pure lambdas such as `item -> item.enabled`. View helpers are
 `filter`, `map`, `sortBy`, `distinctBy`, `groupBy`, `flatten`, `takeWhile`, `window`, and `page`;

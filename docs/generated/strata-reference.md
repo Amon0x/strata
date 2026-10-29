@@ -617,6 +617,9 @@ Children: `false` · Capabilities: —
 | `key` | key | false | false | — |
 | `source` | { height?: number, u?: number, v?: number, width?: number } | false | false | — |
 | `tint` | color | false | false | — |
+| `fit` | "CONTAIN" \| "COVER" \| "FILL" \| "NONE" \| "SCALE_DOWN" | false | false | — |
+| `alignX` | "CENTER" \| "END" \| "START" | false | false | — |
+| `alignY` | "CENTER" \| "END" \| "START" | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
 | `style` | style | false | false | — |
@@ -2755,6 +2758,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `flatten` | collection of any | COLLECTION |
 | `floor` | number | NUMERIC |
 | `format` | string | FORMATTING |
+| `formatDate` | string | FORMATTING |
 | `formatNumber` | string | FORMATTING |
 | `groupBy` | collection of any | COLLECTION |
 | `isEmpty` | boolean | COLLECTION |

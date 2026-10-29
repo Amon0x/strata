@@ -78,6 +78,8 @@ class WidgetRenderScope final {
     [[nodiscard]] const InputRouter& input() const noexcept;
     [[nodiscard]] const CommandIndex& command_index() const noexcept;
     [[nodiscard]] const TextEngine* text_engine() const noexcept;
+    /** An image's natural size, when the surface knows the image. */
+    [[nodiscard]] std::optional<Size> image_size(std::string_view image) const;
     [[nodiscard]] const MotionComputedValues* motion_values() const noexcept;
     [[nodiscard]] const WidgetVisualStyle& visual() const noexcept;
     /**
