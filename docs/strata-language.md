@@ -420,6 +420,101 @@ Calendar(selection: "RANGE", onRangeChange: action("state.setFromEvent", name: "
          monthNames: locale.months, weekdayNames: locale.weekdayInitials)
 ```
 
+### Date picker
+
+`DatePicker` is a field that opens a `Calendar` dropdown. It takes the same `value`/`bind`,
+`defaultValue`, `min`, `max`, `today`, `firstDayOfWeek`, `monthNames` and `weekdayNames`, and
+`onChange` carries the picked `"YYYY-MM-DD"`. The field shows the day like "Mar 15, 2024", or in
+`format` when given (the `formatDate` pattern language), and `placeholder` while nothing is picked.
+A click, or Enter, Space or Down, opens it; inside it, the Calendar's keys move and Enter picks.
+Picking a day, Escape or a press outside closes it.
+
+```strata
+DatePicker(bind: due, today: env.today, min: env.today, format: "EEE d MMM yyyy")
+```
+
+### Range slider
+
+`RangeSlider` picks a span between `min` and `max` with two thumbs: `start` and `end` control it,
+`defaultStart` and `defaultEnd` start an uncontrolled one, and `onChange` carries `{ start, end }`.
+`step` snaps both, and `minGap` keeps them that far apart. A press takes the nearer thumb and drags
+it; the arrow keys step the keyboard's thumb (Page Up and Page Down by ten steps, Home and End to
+the limits), and Tab moves from the start thumb to the end one before focus leaves (Shift+Tab
+back). `showValue` floats each thumb's value above it while hovered or focused, with
+`valueSuffix`.
+
+```strata
+RangeSlider(min: 0, max: 500, step: 10, minGap: 20, defaultStart: 100, defaultEnd: 400,
+            showValue: true, valueSuffix: "$",
+            onChange: action("state.setFromEvent", name: "price"))
+```
+
+### Color picker
+
+`ColorPicker` picks a color from a saturation and value square and a hue strip, with an opacity
+strip when `showAlpha` is set. `value`/`bind` and `onChange` exchange the color, `defaultValue`
+starts an uncontrolled one, and `swatches` adds preset colors below it. Its hex value shows next to
+a preview. Dragging adjusts whichever part the press landed in; Left and Right change saturation,
+Up and Down value (by 1%, or 10% with Shift), and Page Up and Page Down turn the hue.
+
+```strata
+ColorPicker(bind: accent, showAlpha: true, swatches: [#EF4444, #22C55E, #3B82F6])
+```
+
+### Charts
+
+`Chart` plots `series` (each `{ name, values, color? }`, a value per category, `null` for a gap)
+against `labels`, or a single `values` list. `kind` is `LINE` (the default), `AREA`, `BAR`,
+`SCATTER`, `PIE` or `DONUT`; a pie or donut slices the first series by `labels`. `stacked` stacks
+bars and areas. The value axis picks round ticks for its height (`min` and `max` override its
+range), labels them with `valueSuffix` and `decimals`, and draws gridlines unless `showGrid` is
+false; category labels thin out rather than collide. `showPoints` marks each line point. Series
+colors come from the theme palette's `chart1` to `chart8` unless a series names its own.
+
+The legend (shown for more than one series, and for pies, unless `showLegend` says otherwise) hides
+and shows a series, or a slice, when clicked. Hovering a category draws a crosshair and a tooltip of
+each series' value; hovering a slice lifts it out, and a donut names it in its middle. Clicking, or
+Enter after the arrow keys, selects a category or slice: `onSelect` carries
+`{ index, label, value, values }`.
+
+```strata
+Chart(kind: "BAR", labels: ["Q1", "Q2", "Q3", "Q4"], stacked: true,
+      series: [{ name: "Online", values: [42, 55, 61, 70] },
+               { name: "Retail", values: [30, 28, 35, 33] }],
+      onSelect: action("state.setFromEvent", name: "quarter"))
+Chart(kind: "DONUT", labels: ["Chrome", "Safari", "Other"], values: [64, 19, 17], valueSuffix: "%")
+```
+
+### Markdown
+
+`Markdown` renders `text` as rich content: headings, paragraphs (a line ending in two spaces or a
+backslash breaks), `**bold**`, `*italic*`, `` `code` ``, `~~strikethrough~~`, links (`[text](url)`,
+`<url>` and bare `https://` addresses), bulleted, numbered and task lists (nested by indentation),
+quotes, fenced and indented code blocks, tables and rules. It takes its text style (font, size,
+color) from its own style, uses `codeFont` (the bundled mono face by default) for code, and themes'
+link color for links. Following a link runs `onLink` with its destination.
+
+```strata
+Markdown(text: release.notes, style: { pixelSize: 14 },
+         onLink: action("state.setFromEvent", name: "followedLink"))
+```
+
+The links are ordinary `RichText` link spans. Any span can carry an `href`: the action its `action`
+names receives the `href` as its event value.
+
+### Drawers and sheets
+
+`Modal(side: ...)` opens its content from an edge instead of the centre: `LEFT` or `RIGHT` for a
+drawer, `TOP` or `BOTTOM` for a sheet. The content spans that edge (full height for a drawer, full
+width for a sheet) unless it sets that size, and slides in from the edge as it fades in, unless it
+names its own `transition`, `enter` or `exit`.
+
+```strata
+Modal(open: menuOpen, side: "LEFT", onDismiss: action("state.set", name: "menuOpen", value: false)) {
+  Panel(layout: { kind: "COLUMN", width: 280, padding: 16 }) { NavigationLinks() }
+}
+```
+
 ### Pointer cursor
 
 `cursor` sets the pointer shape over a node and its descendants: `DEFAULT`, `POINTER`, `TEXT`,

@@ -32,6 +32,27 @@ pointer_geometry_generations_match(const DirtyGenerationSnapshot& left,
            left.editor == right.editor;
 }
 
+/** Whether `point` is inside a subtarget's polygon, as presented; a target without one is. */
+[[nodiscard]] bool inside_subtarget_shape(const WidgetSubtarget& target, const Point point,
+                                          const MotionTransform& transform) noexcept {
+    if (target.shape.size() < 3U)
+        return true;
+    bool inside = false;
+    Point previous = transform_presentation_point(target.shape.back(), transform);
+    for (const Point vertex : target.shape) {
+        const Point current = transform_presentation_point(vertex, transform);
+        // Even-odd crossing count along a ray toward +x.
+        if ((current.y > point.y) != (previous.y > point.y) &&
+            point.x < (previous.x - current.x) * (point.y - current.y) /
+                              (previous.y - current.y) +
+                          current.x) {
+            inside = !inside;
+        }
+        previous = current;
+    }
+    return inside;
+}
+
 [[nodiscard]] bool contains(const Rect& bounds, const Point point) noexcept {
     return point.x >= bounds.x && point.y >= bounds.y && point.x <= bounds.right() &&
            point.y <= bounds.bottom();
@@ -1000,6 +1021,13 @@ bool InputRouter::subtarget_hovered(const std::uint64_t identity,
            hovered_subtarget_->second == id;
 }
 
+std::optional<std::string_view>
+InputRouter::hovered_subtarget(const std::uint64_t identity) const noexcept {
+    if (!hovered_subtarget_.has_value() || hovered_subtarget_->first != identity)
+        return std::nullopt;
+    return std::string_view(hovered_subtarget_->second);
+}
+
 bool InputRouter::subtarget_active(const std::uint64_t identity,
                                    const std::string_view id) const noexcept {
     return active_subtarget_.has_value() && active_subtarget_->first == identity &&
@@ -1014,7 +1042,7 @@ InputRouter::hit_subtarget(const Point position, const RetainedNode* const ordin
     for (const WidgetSubtarget& target : detached_subtargets_) {
         if ((!target.presentation_clip.has_value() ||
              contains(*target.presentation_clip, position)) &&
-            contains(target.bounds, position)) {
+            contains(target.bounds, position) && inside_subtarget_shape(target, position, {})) {
             return target;
         }
     }
@@ -1045,7 +1073,9 @@ InputRouter::hit_subtarget(const Point position, const RetainedNode* const ordin
                                     ? transform_presentation_bounds(candidate->bounds,
                                                                     owner->transform)
                                     : candidate->bounds;
-            if (!contains(bounds, position))
+            if (!contains(bounds, position) ||
+                !inside_subtarget_shape(*candidate, position,
+                                        owner != nullptr ? owner->transform : MotionTransform{}))
                 continue;
             // A modal backdrop cannot outrank a control inside that modal, regardless of zIndex.
             if (candidate->kind == WidgetSubtargetKind::scrim && ordinary_target != current)

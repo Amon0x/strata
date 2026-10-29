@@ -10,6 +10,9 @@
 
 namespace strata::ui {
 
+class RetainedNode;
+class WidgetRenderScope;
+
 /** A proleptic Gregorian day, as Calendar exchanges it: "YYYY-MM-DD". */
 struct CalendarDate final {
     std::int32_t year = 1970;
@@ -79,5 +82,18 @@ struct CalendarState final {
 
 [[nodiscard]] CalendarState calendar_state(const RetainedNode& node);
 [[nodiscard]] CalendarProjection calendar_projection(const CalendarState& state, Rect bounds);
+
+/**
+ * Where a key moves the keyboard day: arrows by a day or a week, Page Up and Page Down by a month
+ * (a year with Shift), Home and End to the week's ends. Nothing for any other key.
+ */
+[[nodiscard]] std::optional<CalendarDate> calendar_key_target(const CalendarState& state,
+                                                              std::string_view key, bool shift);
+
+/**
+ * Draws a month into `bounds` with its month buttons and day cells as interaction targets
+ * ("previous", "next", "day:YYYY-MM-DD"); Calendar and DatePicker's dropdown share it.
+ */
+void present_calendar_month(WidgetRenderScope& scope, const CalendarState& state, Rect bounds);
 
 } // namespace strata::ui

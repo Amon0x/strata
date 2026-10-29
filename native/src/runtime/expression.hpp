@@ -559,4 +559,14 @@ class ExpressionRuntime final {
     std::unordered_map<std::string, std::shared_ptr<const Program>> standalone_programs_;
 };
 
+/**
+ * What the `formatDate` helper produces: a UTC millisecond timestamp shifted by an offset, in a
+ * pattern of yyyy yy, MMMM MMM MM M, dd d, EEEE EEE, HH H, hh h, mm m, ss s, SSS and a, with
+ * names from the lists given (English when they are not twelve and seven long).
+ */
+[[nodiscard]] std::string format_date_pattern(double milliseconds, std::string_view pattern,
+                                              double offset_minutes,
+                                              const std::vector<std::string>& month_names,
+                                              const std::vector<std::string>& weekday_names);
+
 } // namespace strata::runtime

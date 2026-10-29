@@ -179,6 +179,56 @@ Children: `false` · Capabilities: —
 
 Retained state entries: 3 · Binding shorthands: 1
 
+### `Chart`
+
+Children: `false` · Capabilities: —
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `series` | list of { color?: color, name?: string, values: list of number } | false | false | — |
+| `key` | key | false | false | — |
+| `kind` | "AREA" \| "BAR" \| "DONUT" \| "LINE" \| "PIE" \| "SCATTER" | false | false | — |
+| `labels` | list of any | false | false | — |
+| `values` | list of number | false | false | — |
+| `stacked` | boolean | false | false | — |
+| `min` | number | false | true | — |
+| `max` | number | false | true | — |
+| `showLegend` | boolean | false | false | — |
+| `showGrid` | boolean | false | false | — |
+| `showPoints` | boolean | false | false | — |
+| `valueSuffix` | string | false | false | — |
+| `decimals` | number | false | false | — |
+| `layout` | layout | false | false | — |
+| `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
+| `style` | style | false | false | — |
+| `visualStyle` | style | false | false | — |
+| `effect` | effect | false | false | — |
+| `material` | material | false | false | — |
+| `transition` | animation | false | false | — |
+| `enter` | animation | false | false | — |
+| `exit` | animation | false | false | — |
+| `move` | animation | false | false | — |
+| `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
+| `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
+| `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
+| `contentKey` | key | false | false | — |
+| `contentTransition` | animation | false | false | — |
+| `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `stagger` | duration | false | false | — |
+| `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
+| `textStyle` | style | false | false | — |
+| `textVisualStyle` | style | false | false | — |
+| `onSelect` | action | false | false | — |
+| `animation` | animation | false | false | — |
+| `behaviors` | list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: "LEFT" \| "MIDDLE" \| "RIGHT", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of ("ALT" \| "CONTROL" \| "SHIFT" \| "SUPER"), policy?: "KEYBOARD_ONLY" \| "POINTER_AND_KEYBOARD" \| "POINTER_ONLY" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), insertionAxis?: "HORIZONTAL" \| "VERTICAL" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: "none" \| "parent", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: "HORIZONTAL" \| "VERTICAL", payloadType: string } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } }) | false | false | — |
+
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `point select` | `onSelect` | unspecified | Carries { index, label, value, values }: the category's (or slice's) position and label, its first shown value, and each shown series' value. |
+
+Retained state entries: 2 · Binding shorthands: 0
+
 ### `Checkbox`
 
 Children: `false` · Capabilities: —
@@ -267,6 +317,50 @@ Children: `false` · Capabilities: —
 | `values change` | `onChange` | unspecified | Carries the complete token list. |
 
 Retained state entries: 1 · Binding shorthands: 1
+
+### `ColorPicker`
+
+Children: `false` · Capabilities: —
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `value` | color | false | true | — |
+| `key` | key | false | false | — |
+| `defaultValue` | color | false | false | — |
+| `showAlpha` | boolean | false | false | — |
+| `swatches` | list of color | false | false | — |
+| `enabled` | boolean | false | false | — |
+| `layout` | layout | false | false | — |
+| `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
+| `style` | style | false | false | — |
+| `visualStyle` | style | false | false | — |
+| `effect` | effect | false | false | — |
+| `material` | material | false | false | — |
+| `transition` | animation | false | false | — |
+| `enter` | animation | false | false | — |
+| `exit` | animation | false | false | — |
+| `move` | animation | false | false | — |
+| `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
+| `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
+| `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
+| `contentKey` | key | false | false | — |
+| `contentTransition` | animation | false | false | — |
+| `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `stagger` | duration | false | false | — |
+| `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
+| `textStyle` | style | false | false | — |
+| `textVisualStyle` | style | false | false | — |
+| `onChange` | action | false | false | — |
+| `bind` | any | false | false | — |
+| `animation` | animation | false | false | — |
+| `behaviors` | list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: "LEFT" \| "MIDDLE" \| "RIGHT", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of ("ALT" \| "CONTROL" \| "SHIFT" \| "SUPER"), policy?: "KEYBOARD_ONLY" \| "POINTER_AND_KEYBOARD" \| "POINTER_ONLY" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), insertionAxis?: "HORIZONTAL" \| "VERTICAL" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: "none" \| "parent", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: "HORIZONTAL" \| "VERTICAL", payloadType: string } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } }) | false | false | — |
+
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `color change` | `onChange` | unspecified | Carries the picked color. |
+
+Retained state entries: 2 · Binding shorthands: 1
 
 ### `ComboBox`
 
@@ -454,6 +548,56 @@ Children: `true` · Capabilities: —
 | `item selection` | `onSelect` | unspecified | Carries the selected context-menu item id. |
 
 Retained state entries: 1 · Binding shorthands: 0
+
+### `DatePicker`
+
+Children: `false` · Capabilities: —
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `value` | string | false | true | — |
+| `key` | key | false | false | — |
+| `defaultValue` | string | false | true | — |
+| `min` | string | false | true | — |
+| `max` | string | false | true | — |
+| `today` | string | false | true | — |
+| `firstDayOfWeek` | number | false | false | — |
+| `monthNames` | list of string | false | false | — |
+| `weekdayNames` | list of string | false | false | — |
+| `placeholder` | string | false | false | — |
+| `format` | string | false | false | — |
+| `enabled` | boolean | false | false | — |
+| `layout` | layout | false | false | — |
+| `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
+| `style` | style | false | false | — |
+| `visualStyle` | style | false | false | — |
+| `effect` | effect | false | false | — |
+| `material` | material | false | false | — |
+| `transition` | animation | false | false | — |
+| `enter` | animation | false | false | — |
+| `exit` | animation | false | false | — |
+| `move` | animation | false | false | — |
+| `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
+| `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
+| `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
+| `contentKey` | key | false | false | — |
+| `contentTransition` | animation | false | false | — |
+| `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `stagger` | duration | false | false | — |
+| `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
+| `textStyle` | style | false | false | — |
+| `textVisualStyle` | style | false | false | — |
+| `onChange` | action | false | false | — |
+| `bind` | any | false | false | — |
+| `animation` | animation | false | false | — |
+| `behaviors` | list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: "LEFT" \| "MIDDLE" \| "RIGHT", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of ("ALT" \| "CONTROL" \| "SHIFT" \| "SUPER"), policy?: "KEYBOARD_ONLY" \| "POINTER_AND_KEYBOARD" \| "POINTER_ONLY" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), insertionAxis?: "HORIZONTAL" \| "VERTICAL" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: "none" \| "parent", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: "HORIZONTAL" \| "VERTICAL", payloadType: string } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } }) | false | false | — |
+
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `date change` | `onChange` | unspecified | Carries the picked day as "YYYY-MM-DD". |
+
+Retained state entries: 2 · Binding shorthands: 1
 
 ### `Draw`
 
@@ -793,6 +937,46 @@ Children: `true` · Capabilities: —
 
 Retained state entries: 1 · Binding shorthands: 1
 
+### `Markdown`
+
+Children: `false` · Capabilities: —
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `text` | string | true | false | — |
+| `key` | key | false | false | — |
+| `codeFont` | string | false | false | — |
+| `layout` | layout | false | false | — |
+| `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
+| `style` | style | false | false | — |
+| `visualStyle` | style | false | false | — |
+| `effect` | effect | false | false | — |
+| `material` | material | false | false | — |
+| `transition` | animation | false | false | — |
+| `enter` | animation | false | false | — |
+| `exit` | animation | false | false | — |
+| `move` | animation | false | false | — |
+| `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
+| `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
+| `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
+| `contentKey` | key | false | false | — |
+| `contentTransition` | animation | false | false | — |
+| `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `stagger` | duration | false | false | — |
+| `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
+| `textStyle` | style | false | false | — |
+| `textVisualStyle` | style | false | false | — |
+| `onLink` | action | false | false | — |
+| `animation` | animation | false | false | — |
+| `behaviors` | list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: "LEFT" \| "MIDDLE" \| "RIGHT", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of ("ALT" \| "CONTROL" \| "SHIFT" \| "SUPER"), policy?: "KEYBOARD_ONLY" \| "POINTER_AND_KEYBOARD" \| "POINTER_ONLY" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), insertionAxis?: "HORIZONTAL" \| "VERTICAL" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: "none" \| "parent", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: "HORIZONTAL" \| "VERTICAL", payloadType: string } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } }) | false | false | — |
+
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `link activate` | `onLink` | unspecified | Carries the followed link's destination. |
+
+Retained state entries: 0 · Binding shorthands: 0
+
 ### `Menu`
 
 Children: `false` · Capabilities: —
@@ -885,6 +1069,7 @@ Children: `true` · Capabilities: —
 | `key` | key | false | false | — |
 | `open` | boolean | false | false | — |
 | `dismissible` | boolean | false | false | — |
+| `side` | "BOTTOM" \| "CENTER" \| "LEFT" \| "RIGHT" \| "TOP" | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
 | `style` | style | false | false | — |
@@ -1118,6 +1303,55 @@ Children: `false` · Capabilities: —
 
 Retained state entries: 1 · Binding shorthands: 1
 
+### `RangeSlider`
+
+Children: `false` · Capabilities: —
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `key` | key | false | false | — |
+| `start` | number | false | true | — |
+| `end` | number | false | true | — |
+| `defaultStart` | number | false | false | — |
+| `defaultEnd` | number | false | false | — |
+| `min` | number | false | false | — |
+| `max` | number | false | false | — |
+| `step` | number | false | false | — |
+| `minGap` | number | false | false | — |
+| `showValue` | boolean | false | false | — |
+| `valueSuffix` | string | false | false | — |
+| `enabled` | boolean | false | false | — |
+| `layout` | layout | false | false | — |
+| `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
+| `style` | style | false | false | — |
+| `visualStyle` | style | false | false | — |
+| `effect` | effect | false | false | — |
+| `material` | material | false | false | — |
+| `transition` | animation | false | false | — |
+| `enter` | animation | false | false | — |
+| `exit` | animation | false | false | — |
+| `move` | animation | false | false | — |
+| `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
+| `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
+| `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
+| `contentKey` | key | false | false | — |
+| `contentTransition` | animation | false | false | — |
+| `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `stagger` | duration | false | false | — |
+| `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
+| `textStyle` | style | false | false | — |
+| `textVisualStyle` | style | false | false | — |
+| `onChange` | action | false | false | — |
+| `animation` | animation | false | false | — |
+| `behaviors` | list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: "LEFT" \| "MIDDLE" \| "RIGHT", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of ("ALT" \| "CONTROL" \| "SHIFT" \| "SUPER"), policy?: "KEYBOARD_ONLY" \| "POINTER_AND_KEYBOARD" \| "POINTER_ONLY" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), insertionAxis?: "HORIZONTAL" \| "VERTICAL" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: "none" \| "parent", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: "HORIZONTAL" \| "VERTICAL", payloadType: string } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } }) | false | false | — |
+
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `range change` | `onChange` | unspecified | Carries { start, end }. |
+
+Retained state entries: 3 · Binding shorthands: 0
+
 ### `Repeater`
 
 Children: `true` · Capabilities: effective-scroll
@@ -1168,7 +1402,7 @@ Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
-| `spans` | list of { action?: action, color?: color, style?: style, text: string } | true | false | — |
+| `spans` | list of { action?: action, color?: color, href?: string, style?: style, text: string } | true | false | — |
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
@@ -2179,6 +2413,41 @@ Observe the built-in Select interaction Payload: `no payload`. Dispatch: `option
 ### `Slider`
 
 Observe the built-in Slider interaction Payload: `no payload`. Dispatch: `optional`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+
+### `Markdown`
+
+Observe a link followed in the built-in Markdown widget Payload: `no payload`. Dispatch: `optional`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+
+### `DatePicker`
+
+Observe the built-in DatePicker interaction Payload: `no payload`. Dispatch: `optional`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+
+### `RangeSlider`
+
+Observe the built-in RangeSlider interaction Payload: `no payload`. Dispatch: `optional`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+
+### `ColorPicker`
+
+Observe the built-in ColorPicker interaction Payload: `no payload`. Dispatch: `optional`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+
+### `Chart`
+
+Observe the built-in Chart interaction Payload: `no payload`. Dispatch: `optional`.
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|

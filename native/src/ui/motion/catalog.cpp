@@ -298,9 +298,48 @@ void MotionCatalog::set_supplemental(
     timed_.clear();
 }
 
+namespace {
+
+/**
+ * Timelines built-in widgets attach to what they generate, never named by authors: a drawer's
+ * panel slides in from its edge as it fades in, and back out as it leaves.
+ */
+[[nodiscard]] const std::map<std::string, CompiledMotion, std::less<>>& builtin_motions() {
+    static const std::map<std::string, CompiledMotion, std::less<>> motions = [] {
+        std::map<std::string, CompiledMotion, std::less<>> result;
+        constexpr double travel = 56.0;
+        const auto drawer = [&result](const std::string& name, const MotionProperty axis,
+                                      const double from) {
+            CompiledMotion motion;
+            motion.name = name;
+            motion.trigger = MotionTrigger::enter;
+            motion.timing.duration_nanos = 240'000'000;
+            motion.timing.easing = MotionEasing::cubic_bezier(0.2, 0.0, 0.0, 1.0);
+            motion.tracks.push_back(MotionTrack{
+                axis, {MotionKeyframe{0.0, from, std::nullopt}, MotionKeyframe{1.0, 0.0, std::nullopt}}});
+            motion.tracks.push_back(MotionTrack{
+                MotionProperty::opacity,
+                {MotionKeyframe{0.0, 0.0, std::nullopt}, MotionKeyframe{1.0, 1.0, std::nullopt}}});
+            result.emplace(name, std::move(motion));
+        };
+        drawer("strata.drawer.left", MotionProperty::translate_x, -travel);
+        drawer("strata.drawer.right", MotionProperty::translate_x, travel);
+        drawer("strata.drawer.top", MotionProperty::translate_y, -travel);
+        drawer("strata.drawer.bottom", MotionProperty::translate_y, travel);
+        return result;
+    }();
+    return motions;
+}
+
+} // namespace
+
 const CompiledMotion* MotionCatalog::find(const std::string_view name) {
     if (const auto supplemental = supplemental_.find(name); supplemental != supplemental_.end()) {
         return &supplemental->second;
+    }
+    if (name.starts_with("strata.")) {
+        if (const auto builtin = builtin_motions().find(name); builtin != builtin_motions().end())
+            return &builtin->second;
     }
     if (unit_ == nullptr) return nullptr;
     if (const auto found = compiled_.find(name); found != compiled_.end()) return &found->second;

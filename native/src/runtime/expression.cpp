@@ -2336,4 +2336,11 @@ void ExpressionRuntime::report(RuntimeDiagnostic diagnostic) {
     diagnostics_.push_back(std::move(diagnostic));
 }
 
+std::string format_date_pattern(const double milliseconds, const std::string_view pattern,
+                                const double offset_minutes,
+                                const std::vector<std::string>& month_names,
+                                const std::vector<std::string>& weekday_names) {
+    return format_date(milliseconds, pattern, offset_minutes, month_names, weekday_names);
+}
+
 } // namespace strata::runtime

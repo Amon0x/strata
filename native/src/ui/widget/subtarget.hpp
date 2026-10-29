@@ -89,6 +89,8 @@ struct RichTextLink final {
     std::size_t utf16_start = 0U;
     std::size_t utf16_end = 0U;
     std::shared_ptr<const runtime::ActionValue> action;
+    /** The span's `href`, carried to its action as the event value (null when it has none). */
+    runtime::Value href{};
 };
 
 /** Link spans and canonical UTF-8/UTF-16 ranges shared by input and virtual hit geometry. */
@@ -117,6 +119,11 @@ struct WidgetSubtarget final {
     std::optional<std::uint64_t> presentation_identity = std::nullopt;
     /** Presented ancestor clip resolved for an authored detached target. */
     std::optional<Rect> presentation_clip = std::nullopt;
+    /**
+     * A polygon, in the same space as `bounds` and inside them, for a region that is not a
+     * rectangle (a chart's pie slice): the target is hit only inside it. Empty means the bounds.
+     */
+    std::vector<Point> shape{};
 };
 
 /**

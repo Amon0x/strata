@@ -86,6 +86,41 @@
     },
     {
       "dispatchPolicy": "optional",
+      "id": "Markdown",
+      "parameters": [],
+      "payloadContract": "no payload",
+      "summary": "Observe a link followed in the built-in Markdown widget"
+    },
+    {
+      "dispatchPolicy": "optional",
+      "id": "DatePicker",
+      "parameters": [],
+      "payloadContract": "no payload",
+      "summary": "Observe the built-in DatePicker interaction"
+    },
+    {
+      "dispatchPolicy": "optional",
+      "id": "RangeSlider",
+      "parameters": [],
+      "payloadContract": "no payload",
+      "summary": "Observe the built-in RangeSlider interaction"
+    },
+    {
+      "dispatchPolicy": "optional",
+      "id": "ColorPicker",
+      "parameters": [],
+      "payloadContract": "no payload",
+      "summary": "Observe the built-in ColorPicker interaction"
+    },
+    {
+      "dispatchPolicy": "optional",
+      "id": "Chart",
+      "parameters": [],
+      "payloadContract": "no payload",
+      "summary": "Observe the built-in Chart interaction"
+    },
+    {
+      "dispatchPolicy": "optional",
       "id": "Calendar",
       "parameters": [],
       "payloadContract": "no payload",
@@ -4750,6 +4785,345 @@
     },
     {
       "allowsChildren": false,
+      "bindings": [],
+      "capabilities": [],
+      "events": [
+        {
+          "callbackParameter": "onSelect",
+          "description": "Carries { index, label, value, values }: the category's (or slice's) position and label, its first shown value, and each shown series' value.",
+          "name": "point select"
+        }
+      ],
+      "name": "Chart",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "series",
+          "nullable": false,
+          "required": false,
+          "type": "list of { color?: color, name?: string, values: list of number }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "key",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "AREA",
+            "BAR",
+            "DONUT",
+            "LINE",
+            "PIE",
+            "SCATTER"
+          ],
+          "name": "kind",
+          "nullable": false,
+          "required": false,
+          "type": "\"AREA\" | \"BAR\" | \"DONUT\" | \"LINE\" | \"PIE\" | \"SCATTER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "labels",
+          "nullable": false,
+          "required": false,
+          "type": "list of any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "values",
+          "nullable": false,
+          "required": false,
+          "type": "list of number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "stacked",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "min",
+          "nullable": true,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "max",
+          "nullable": true,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "showLegend",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "showGrid",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "showPoints",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "valueSuffix",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "decimals",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "layout",
+          "nullable": false,
+          "required": false,
+          "type": "layout"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "compact",
+            "danger",
+            "default",
+            "primary",
+            "rail",
+            "secondary",
+            "subtle"
+          ],
+          "name": "variant",
+          "nullable": false,
+          "required": false,
+          "type": "\"compact\" | \"danger\" | \"default\" | \"primary\" | \"rail\" | \"secondary\" | \"subtle\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "style",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "visualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "effect",
+          "nullable": false,
+          "required": false,
+          "type": "effect"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "material",
+          "nullable": false,
+          "required": false,
+          "type": "material"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "transition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "enter",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "exit",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "move",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "motions",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateChanges",
+          "nullable": true,
+          "required": false,
+          "type": "{ policy?: string, properties: list of string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateContentSize",
+          "nullable": true,
+          "required": false,
+          "type": "{ clip?: boolean, height?: boolean, policy?: string, width?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "disclosure",
+          "nullable": true,
+          "required": false,
+          "type": "{ collapsedExtent?: number, expanded?: boolean, policy?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentKey",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentTransition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "OUT_IN",
+            "TOGETHER"
+          ],
+          "name": "contentTransitionMode",
+          "nullable": false,
+          "required": false,
+          "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "stagger",
+          "nullable": false,
+          "required": false,
+          "type": "duration"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "semantics",
+          "nullable": false,
+          "required": false,
+          "type": "{ checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: \"ASSERTIVE\" | \"OFF\" | \"POLITE\", role?: \"ALERT\" | \"APPLICATION\" | \"BUTTON\" | \"CHECKBOX\" | \"COLUMN_HEADER\" | \"COMBO_BOX\" | \"DIALOG\" | \"FIELD\" | \"FORM\" | \"GRID\" | \"GRID_CELL\" | \"GROUP\" | \"IMAGE\" | \"LINK\" | \"LIST\" | \"LIST_ITEM\" | \"MENU\" | \"MENU_ITEM\" | \"PROGRESS_BAR\" | \"RADIO\" | \"RADIO_GROUP\" | \"ROW\" | \"SEPARATOR\" | \"SLIDER\" | \"STATUS\" | \"SWITCH\" | \"TAB\" | \"TABLE\" | \"TAB_LIST\" | \"TEXT\" | \"TEXT_FIELD\" | \"TREE\" | \"TREE_ITEM\", selected?: boolean, valueText?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textVisualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onSelect",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animation",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "behaviors",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: \"LEFT\" | \"MIDDLE\" | \"RIGHT\", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of (\"ALT\" | \"CONTROL\" | \"SHIFT\" | \"SUPER\"), policy?: \"KEYBOARD_ONLY\" | \"POINTER_AND_KEYBOARD\" | \"POINTER_ONLY\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), insertionAxis?: \"HORIZONTAL\" | \"VERTICAL\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: \"none\" | \"parent\", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: \"HORIZONTAL\" | \"VERTICAL\", payloadType: string } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } })"
+        }
+      ],
+      "retainedState": [
+        {
+          "description": "The category or slice last selected or reached by keyboard.",
+          "name": "cursor"
+        },
+        {
+          "description": "Series (or pie slices) hidden from the legend.",
+          "name": "hidden"
+        }
+      ]
+    },
+    {
+      "allowsChildren": false,
       "bindings": [
         {
           "eventParameter": "onChange",
@@ -5325,6 +5699,296 @@
         {
           "description": "Uncontrolled token list, draft text, and active token.",
           "name": "values"
+        }
+      ]
+    },
+    {
+      "allowsChildren": false,
+      "bindings": [
+        {
+          "eventParameter": "onChange",
+          "shorthandParameter": "bind",
+          "valueParameter": "value"
+        }
+      ],
+      "capabilities": [],
+      "events": [
+        {
+          "callbackParameter": "onChange",
+          "description": "Carries the picked color.",
+          "name": "color change"
+        }
+      ],
+      "name": "ColorPicker",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": true,
+          "required": false,
+          "type": "color"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "key",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "defaultValue",
+          "nullable": false,
+          "required": false,
+          "type": "color"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "showAlpha",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "swatches",
+          "nullable": false,
+          "required": false,
+          "type": "list of color"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "enabled",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "layout",
+          "nullable": false,
+          "required": false,
+          "type": "layout"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "compact",
+            "danger",
+            "default",
+            "primary",
+            "rail",
+            "secondary",
+            "subtle"
+          ],
+          "name": "variant",
+          "nullable": false,
+          "required": false,
+          "type": "\"compact\" | \"danger\" | \"default\" | \"primary\" | \"rail\" | \"secondary\" | \"subtle\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "style",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "visualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "effect",
+          "nullable": false,
+          "required": false,
+          "type": "effect"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "material",
+          "nullable": false,
+          "required": false,
+          "type": "material"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "transition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "enter",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "exit",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "move",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "motions",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateChanges",
+          "nullable": true,
+          "required": false,
+          "type": "{ policy?: string, properties: list of string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateContentSize",
+          "nullable": true,
+          "required": false,
+          "type": "{ clip?: boolean, height?: boolean, policy?: string, width?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "disclosure",
+          "nullable": true,
+          "required": false,
+          "type": "{ collapsedExtent?: number, expanded?: boolean, policy?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentKey",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentTransition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "OUT_IN",
+            "TOGETHER"
+          ],
+          "name": "contentTransitionMode",
+          "nullable": false,
+          "required": false,
+          "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "stagger",
+          "nullable": false,
+          "required": false,
+          "type": "duration"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "semantics",
+          "nullable": false,
+          "required": false,
+          "type": "{ checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: \"ASSERTIVE\" | \"OFF\" | \"POLITE\", role?: \"ALERT\" | \"APPLICATION\" | \"BUTTON\" | \"CHECKBOX\" | \"COLUMN_HEADER\" | \"COMBO_BOX\" | \"DIALOG\" | \"FIELD\" | \"FORM\" | \"GRID\" | \"GRID_CELL\" | \"GROUP\" | \"IMAGE\" | \"LINK\" | \"LIST\" | \"LIST_ITEM\" | \"MENU\" | \"MENU_ITEM\" | \"PROGRESS_BAR\" | \"RADIO\" | \"RADIO_GROUP\" | \"ROW\" | \"SEPARATOR\" | \"SLIDER\" | \"STATUS\" | \"SWITCH\" | \"TAB\" | \"TABLE\" | \"TAB_LIST\" | \"TEXT\" | \"TEXT_FIELD\" | \"TREE\" | \"TREE_ITEM\", selected?: boolean, valueText?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textVisualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onChange",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "bind",
+          "nullable": false,
+          "required": false,
+          "type": "any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animation",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "behaviors",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: \"LEFT\" | \"MIDDLE\" | \"RIGHT\", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of (\"ALT\" | \"CONTROL\" | \"SHIFT\" | \"SUPER\"), policy?: \"KEYBOARD_ONLY\" | \"POINTER_AND_KEYBOARD\" | \"POINTER_ONLY\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), insertionAxis?: \"HORIZONTAL\" | \"VERTICAL\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: \"none\" | \"parent\", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: \"HORIZONTAL\" | \"VERTICAL\", payloadType: string } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } })"
+        }
+      ],
+      "retainedState": [
+        {
+          "description": "Uncontrolled color initialized by `defaultValue`.",
+          "name": "value"
+        },
+        {
+          "description": "The hue kept while the color is grey.",
+          "name": "hue"
         }
       ]
     },
@@ -6540,6 +7204,344 @@
         {
           "description": "Open state, active menu path, and pointer anchor.",
           "name": "popup"
+        }
+      ]
+    },
+    {
+      "allowsChildren": false,
+      "bindings": [
+        {
+          "eventParameter": "onChange",
+          "shorthandParameter": "bind",
+          "valueParameter": "value"
+        }
+      ],
+      "capabilities": [],
+      "events": [
+        {
+          "callbackParameter": "onChange",
+          "description": "Carries the picked day as \"YYYY-MM-DD\".",
+          "name": "date change"
+        }
+      ],
+      "name": "DatePicker",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "key",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "defaultValue",
+          "nullable": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "min",
+          "nullable": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "max",
+          "nullable": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "today",
+          "nullable": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "firstDayOfWeek",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "monthNames",
+          "nullable": false,
+          "required": false,
+          "type": "list of string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "weekdayNames",
+          "nullable": false,
+          "required": false,
+          "type": "list of string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "placeholder",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "format",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "enabled",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "layout",
+          "nullable": false,
+          "required": false,
+          "type": "layout"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "compact",
+            "danger",
+            "default",
+            "primary",
+            "rail",
+            "secondary",
+            "subtle"
+          ],
+          "name": "variant",
+          "nullable": false,
+          "required": false,
+          "type": "\"compact\" | \"danger\" | \"default\" | \"primary\" | \"rail\" | \"secondary\" | \"subtle\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "style",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "visualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "effect",
+          "nullable": false,
+          "required": false,
+          "type": "effect"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "material",
+          "nullable": false,
+          "required": false,
+          "type": "material"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "transition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "enter",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "exit",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "move",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "motions",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateChanges",
+          "nullable": true,
+          "required": false,
+          "type": "{ policy?: string, properties: list of string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateContentSize",
+          "nullable": true,
+          "required": false,
+          "type": "{ clip?: boolean, height?: boolean, policy?: string, width?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "disclosure",
+          "nullable": true,
+          "required": false,
+          "type": "{ collapsedExtent?: number, expanded?: boolean, policy?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentKey",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentTransition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "OUT_IN",
+            "TOGETHER"
+          ],
+          "name": "contentTransitionMode",
+          "nullable": false,
+          "required": false,
+          "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "stagger",
+          "nullable": false,
+          "required": false,
+          "type": "duration"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "semantics",
+          "nullable": false,
+          "required": false,
+          "type": "{ checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: \"ASSERTIVE\" | \"OFF\" | \"POLITE\", role?: \"ALERT\" | \"APPLICATION\" | \"BUTTON\" | \"CHECKBOX\" | \"COLUMN_HEADER\" | \"COMBO_BOX\" | \"DIALOG\" | \"FIELD\" | \"FORM\" | \"GRID\" | \"GRID_CELL\" | \"GROUP\" | \"IMAGE\" | \"LINK\" | \"LIST\" | \"LIST_ITEM\" | \"MENU\" | \"MENU_ITEM\" | \"PROGRESS_BAR\" | \"RADIO\" | \"RADIO_GROUP\" | \"ROW\" | \"SEPARATOR\" | \"SLIDER\" | \"STATUS\" | \"SWITCH\" | \"TAB\" | \"TABLE\" | \"TAB_LIST\" | \"TEXT\" | \"TEXT_FIELD\" | \"TREE\" | \"TREE_ITEM\", selected?: boolean, valueText?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textVisualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onChange",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "bind",
+          "nullable": false,
+          "required": false,
+          "type": "any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animation",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "behaviors",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: \"LEFT\" | \"MIDDLE\" | \"RIGHT\", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of (\"ALT\" | \"CONTROL\" | \"SHIFT\" | \"SUPER\"), policy?: \"KEYBOARD_ONLY\" | \"POINTER_AND_KEYBOARD\" | \"POINTER_ONLY\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), insertionAxis?: \"HORIZONTAL\" | \"VERTICAL\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: \"none\" | \"parent\", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: \"HORIZONTAL\" | \"VERTICAL\", payloadType: string } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } })"
+        }
+      ],
+      "retainedState": [
+        {
+          "description": "Uncontrolled picked day initialized by `defaultValue`.",
+          "name": "value"
+        },
+        {
+          "description": "Whether the calendar dropdown is open.",
+          "name": "expanded"
         }
       ]
     },
@@ -8784,6 +9786,249 @@
       "capabilities": [],
       "events": [
         {
+          "callbackParameter": "onLink",
+          "description": "Carries the followed link's destination.",
+          "name": "link activate"
+        }
+      ],
+      "name": "Markdown",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "text",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "key",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "codeFont",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "layout",
+          "nullable": false,
+          "required": false,
+          "type": "layout"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "compact",
+            "danger",
+            "default",
+            "primary",
+            "rail",
+            "secondary",
+            "subtle"
+          ],
+          "name": "variant",
+          "nullable": false,
+          "required": false,
+          "type": "\"compact\" | \"danger\" | \"default\" | \"primary\" | \"rail\" | \"secondary\" | \"subtle\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "style",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "visualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "effect",
+          "nullable": false,
+          "required": false,
+          "type": "effect"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "material",
+          "nullable": false,
+          "required": false,
+          "type": "material"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "transition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "enter",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "exit",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "move",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "motions",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateChanges",
+          "nullable": true,
+          "required": false,
+          "type": "{ policy?: string, properties: list of string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateContentSize",
+          "nullable": true,
+          "required": false,
+          "type": "{ clip?: boolean, height?: boolean, policy?: string, width?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "disclosure",
+          "nullable": true,
+          "required": false,
+          "type": "{ collapsedExtent?: number, expanded?: boolean, policy?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentKey",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentTransition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "OUT_IN",
+            "TOGETHER"
+          ],
+          "name": "contentTransitionMode",
+          "nullable": false,
+          "required": false,
+          "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "stagger",
+          "nullable": false,
+          "required": false,
+          "type": "duration"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "semantics",
+          "nullable": false,
+          "required": false,
+          "type": "{ checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: \"ASSERTIVE\" | \"OFF\" | \"POLITE\", role?: \"ALERT\" | \"APPLICATION\" | \"BUTTON\" | \"CHECKBOX\" | \"COLUMN_HEADER\" | \"COMBO_BOX\" | \"DIALOG\" | \"FIELD\" | \"FORM\" | \"GRID\" | \"GRID_CELL\" | \"GROUP\" | \"IMAGE\" | \"LINK\" | \"LIST\" | \"LIST_ITEM\" | \"MENU\" | \"MENU_ITEM\" | \"PROGRESS_BAR\" | \"RADIO\" | \"RADIO_GROUP\" | \"ROW\" | \"SEPARATOR\" | \"SLIDER\" | \"STATUS\" | \"SWITCH\" | \"TAB\" | \"TABLE\" | \"TAB_LIST\" | \"TEXT\" | \"TEXT_FIELD\" | \"TREE\" | \"TREE_ITEM\", selected?: boolean, valueText?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textVisualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onLink",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animation",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "behaviors",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: \"LEFT\" | \"MIDDLE\" | \"RIGHT\", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of (\"ALT\" | \"CONTROL\" | \"SHIFT\" | \"SUPER\"), policy?: \"KEYBOARD_ONLY\" | \"POINTER_AND_KEYBOARD\" | \"POINTER_ONLY\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), insertionAxis?: \"HORIZONTAL\" | \"VERTICAL\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: \"none\" | \"parent\", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: \"HORIZONTAL\" | \"VERTICAL\", payloadType: string } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } })"
+        }
+      ],
+      "retainedState": []
+    },
+    {
+      "allowsChildren": false,
+      "bindings": [],
+      "capabilities": [],
+      "events": [
+        {
           "callbackParameter": "onSelect",
           "description": "Carries the selected menu item id.",
           "name": "item selection"
@@ -9366,6 +10611,20 @@
           "nullable": false,
           "required": false,
           "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "BOTTOM",
+            "CENTER",
+            "LEFT",
+            "RIGHT",
+            "TOP"
+          ],
+          "name": "side",
+          "nullable": false,
+          "required": false,
+          "type": "\"BOTTOM\" | \"CENTER\" | \"LEFT\" | \"RIGHT\" | \"TOP\""
         },
         {
           "aliases": [],
@@ -10896,6 +12155,334 @@
       ]
     },
     {
+      "allowsChildren": false,
+      "bindings": [],
+      "capabilities": [],
+      "events": [
+        {
+          "callbackParameter": "onChange",
+          "description": "Carries { start, end }.",
+          "name": "range change"
+        }
+      ],
+      "name": "RangeSlider",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "key",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "start",
+          "nullable": true,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "end",
+          "nullable": true,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "defaultStart",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "defaultEnd",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "min",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "max",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "step",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "minGap",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "showValue",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "valueSuffix",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "enabled",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "layout",
+          "nullable": false,
+          "required": false,
+          "type": "layout"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "compact",
+            "danger",
+            "default",
+            "primary",
+            "rail",
+            "secondary",
+            "subtle"
+          ],
+          "name": "variant",
+          "nullable": false,
+          "required": false,
+          "type": "\"compact\" | \"danger\" | \"default\" | \"primary\" | \"rail\" | \"secondary\" | \"subtle\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "style",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "visualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "effect",
+          "nullable": false,
+          "required": false,
+          "type": "effect"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "material",
+          "nullable": false,
+          "required": false,
+          "type": "material"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "transition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "enter",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "exit",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "move",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "motions",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateChanges",
+          "nullable": true,
+          "required": false,
+          "type": "{ policy?: string, properties: list of string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateContentSize",
+          "nullable": true,
+          "required": false,
+          "type": "{ clip?: boolean, height?: boolean, policy?: string, width?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "disclosure",
+          "nullable": true,
+          "required": false,
+          "type": "{ collapsedExtent?: number, expanded?: boolean, policy?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentKey",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentTransition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "OUT_IN",
+            "TOGETHER"
+          ],
+          "name": "contentTransitionMode",
+          "nullable": false,
+          "required": false,
+          "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "stagger",
+          "nullable": false,
+          "required": false,
+          "type": "duration"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "semantics",
+          "nullable": false,
+          "required": false,
+          "type": "{ checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: \"ASSERTIVE\" | \"OFF\" | \"POLITE\", role?: \"ALERT\" | \"APPLICATION\" | \"BUTTON\" | \"CHECKBOX\" | \"COLUMN_HEADER\" | \"COMBO_BOX\" | \"DIALOG\" | \"FIELD\" | \"FORM\" | \"GRID\" | \"GRID_CELL\" | \"GROUP\" | \"IMAGE\" | \"LINK\" | \"LIST\" | \"LIST_ITEM\" | \"MENU\" | \"MENU_ITEM\" | \"PROGRESS_BAR\" | \"RADIO\" | \"RADIO_GROUP\" | \"ROW\" | \"SEPARATOR\" | \"SLIDER\" | \"STATUS\" | \"SWITCH\" | \"TAB\" | \"TABLE\" | \"TAB_LIST\" | \"TEXT\" | \"TEXT_FIELD\" | \"TREE\" | \"TREE_ITEM\", selected?: boolean, valueText?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textVisualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onChange",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animation",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "behaviors",
+          "nullable": false,
+          "required": false,
+          "type": "list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: \"LEFT\" | \"MIDDLE\" | \"RIGHT\", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of (\"ALT\" | \"CONTROL\" | \"SHIFT\" | \"SUPER\"), policy?: \"KEYBOARD_ONLY\" | \"POINTER_AND_KEYBOARD\" | \"POINTER_ONLY\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of (\"COPY\" | \"LINK\" | \"MOVE\"), insertionAxis?: \"HORIZONTAL\" | \"VERTICAL\" } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: \"none\" | \"parent\", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: \"HORIZONTAL\" | \"VERTICAL\", payloadType: string } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } | { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } })"
+        }
+      ],
+      "retainedState": [
+        {
+          "description": "Uncontrolled start initialized by `defaultStart`.",
+          "name": "start"
+        },
+        {
+          "description": "Uncontrolled end initialized by `defaultEnd`.",
+          "name": "end"
+        },
+        {
+          "description": "The thumb the keyboard moves.",
+          "name": "thumb"
+        }
+      ]
+    },
+    {
       "allowsChildren": true,
       "bindings": [],
       "capabilities": [
@@ -11198,7 +12785,7 @@
           "name": "spans",
           "nullable": false,
           "required": true,
-          "type": "list of { action?: action, color?: color, style?: style, text: string }"
+          "type": "list of { action?: action, color?: color, href?: string, style?: style, text: string }"
         },
         {
           "aliases": [],

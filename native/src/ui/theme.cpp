@@ -1329,6 +1329,15 @@ namespace {
 // Dark defaults are the colors presentation drew before it named them, so the default theme
 // renders exactly as it did; light defaults keep each one legible on a light surface.
 constexpr ThemePaletteToken palette_tokens[] = {
+    {"chart1", {96U, 165U, 250U, 255U}, {37U, 99U, 235U, 255U}},
+    {"chart2", {251U, 146U, 60U, 255U}, {234U, 88U, 12U, 255U}},
+    {"chart3", {74U, 222U, 128U, 255U}, {22U, 163U, 74U, 255U}},
+    {"chart4", {244U, 114U, 182U, 255U}, {219U, 39U, 119U, 255U}},
+    {"chart5", {167U, 139U, 250U, 255U}, {124U, 58U, 237U, 255U}},
+    {"chart6", {250U, 204U, 21U, 255U}, {202U, 138U, 4U, 255U}},
+    {"chart7", {45U, 212U, 191U, 255U}, {13U, 148U, 136U, 255U}},
+    {"chart8", {248U, 113U, 113U, 255U}, {220U, 38U, 38U, 255U}},
+    {"chartGrid", {255U, 255U, 255U, 24U}, {0U, 0U, 0U, 24U}},
     {"compositionSelection", {255U, 255U, 255U, 72U}, {0U, 0U, 0U, 40U}},
     {"compositionUnderline", {255U, 255U, 255U, 160U}, {0U, 0U, 0U, 160U}},
     {"disabledForeground", {160U, 168U, 178U, 255U}, {116U, 122U, 132U, 255U}},

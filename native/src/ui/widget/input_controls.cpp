@@ -187,24 +187,14 @@ bool calendar_click(WidgetInputScope& scope) {
 bool calendar_key(WidgetInputScope& scope) {
     const CalendarState state = calendar_state(scope.node());
     const std::string_view key = scope.key();
-    const std::int64_t day = state.cursor.days();
-    const std::int64_t into_week =
-        static_cast<std::int64_t>((state.cursor.weekday() + 7U - state.first_weekday) % 7U);
-    std::optional<CalendarDate> next;
-    if (key == "left") next = CalendarDate::from_days(day - 1);
-    else if (key == "right") next = CalendarDate::from_days(day + 1);
-    else if (key == "up") next = CalendarDate::from_days(day - 7);
-    else if (key == "down") next = CalendarDate::from_days(day + 7);
-    else if (key == "home") next = CalendarDate::from_days(day - into_week);
-    else if (key == "end") next = CalendarDate::from_days(day + 6 - into_week);
-    else if (key == "pageup") next = state.cursor.add_months(scope.modifiers().shift ? -12 : -1);
-    else if (key == "pagedown") next = state.cursor.add_months(scope.modifiers().shift ? 12 : 1);
-    else if (key == "enter" || key == "space") {
+    if (key == "enter" || key == "space") {
         calendar_pick(scope, state, state.cursor);
         return true;
-    } else {
-        return false;
     }
+    const std::optional<CalendarDate> next =
+        calendar_key_target(state, key, scope.modifiers().shift);
+    if (!next.has_value())
+        return false;
     calendar_move(scope, *next);
     return true;
 }

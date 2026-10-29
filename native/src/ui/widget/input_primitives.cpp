@@ -33,7 +33,8 @@ bool rich_text_click(WidgetInputScope& scope) {
     }
     scope.set_retained("$activeLink", runtime::Value(static_cast<double>(selected)),
                        DirtyReason::input);
-    scope.dispatch_action(links[selected].action, "rich-text-link-activated");
+    scope.dispatch_action(links[selected].action, "rich-text-link-activated",
+                          links[selected].href);
     return true;
 }
 
@@ -51,7 +52,8 @@ bool rich_text_key(WidgetInputScope& scope) {
     } else if (scope.key() == "right" || scope.key() == "down") {
         selected = (selected + 1U) % links.size();
     } else if (scope.key() == "enter" || scope.key() == "space") {
-        scope.dispatch_action(links[selected].action, "rich-text-link-activated");
+        scope.dispatch_action(links[selected].action, "rich-text-link-activated",
+                          links[selected].href);
         return true;
     } else {
         return false;

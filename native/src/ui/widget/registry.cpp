@@ -1,6 +1,11 @@
 #include "ui/widget/registry.hpp"
 
+#include "ui/widget/chart_model.hpp"
+#include "ui/widget/color_picker_model.hpp"
+#include "ui/widget/date_picker_model.hpp"
 #include "ui/widget/description.hpp"
+#include "ui/widget/markdown_model.hpp"
+#include "ui/widget/range_slider_model.hpp"
 #include "ui/widget/input.hpp"
 #include "ui/widget/inspection.hpp"
 #include "ui/widget/presentation.hpp"
@@ -75,6 +80,11 @@ WidgetRegistry::WidgetRegistry() {
     register_collection_widget_semantics(*this);
     register_builtin_widget_presenters(*this);
     register_builtin_widget_subtargets(*this);
+    register_chart_widget(*this);
+    register_markdown_widget(*this);
+    register_date_picker_widget(*this);
+    register_range_slider_widget(*this);
+    register_color_picker_widget(*this);
 
     const WidgetPersistencePhase scroll{{"strata.scroll.offset"}, &persisted_widget_value};
     for (const std::string_view type : {
@@ -108,6 +118,7 @@ void register_builtin_widget_presenters(WidgetRegistry& registry) {
     register_control_widget_presenters(registry);
     register_shell_widget_presenters(registry);
     register_collection_widget_presenters(registry);
+    register_chart_widget_presenter(registry);
 }
 
 const WidgetLifecycle* WidgetRegistry::find(const std::string_view type) const noexcept {

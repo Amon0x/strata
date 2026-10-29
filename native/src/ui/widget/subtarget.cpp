@@ -40,6 +40,7 @@ std::vector<RichTextLink> rich_text_links(const RetainedNode& node) {
             ? (**span.object()).field("action") : nullptr;
         if (action != nullptr && action->action() != nullptr && *action->action() != nullptr &&
             (*action->action())->action != nullptr) {
+            const runtime::ExpressionValue* href = (**span.object()).field("href");
             result.push_back(RichTextLink{
                 index,
                 byte_offset,
@@ -47,6 +48,7 @@ std::vector<RichTextLink> rich_text_links(const RetainedNode& node) {
                 utf16_offset,
                 utf16_end,
                 *action->action(),
+                href != nullptr && href->value() != nullptr ? *href->value() : runtime::Value{},
             });
         }
         byte_offset = byte_end;

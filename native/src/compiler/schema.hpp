@@ -30,7 +30,8 @@ inline constexpr std::array<std::string_view, 3U> theme_number_tokens{
  * The presentation colours every theme resolves, set or defaulted, in ui::theme_palette_tokens()
  * order; a theme test keeps the lists in step.
  */
-inline constexpr std::array<std::string_view, 22U> theme_palette_tokens{
+inline constexpr std::array<std::string_view, 31U> theme_palette_tokens{
+    "chart1", "chart2", "chart3", "chart4", "chart5", "chart6", "chart7", "chart8", "chartGrid",
     "compositionSelection", "compositionUnderline", "disabledForeground", "insertionIndicator",
     "link", "marqueeFill", "marqueeStroke", "matchHighlight", "paletteSurface", "popupSurface",
     "severityError", "severityInfo", "severitySuccess", "severityWarning", "shadow",

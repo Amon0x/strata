@@ -1,5 +1,7 @@
 #include "ui/widget/description.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -145,6 +147,54 @@ void modal_defaults(WidgetLayoutDefaultsScope& scope) {
     scope.set("kind", runtime::Value("OVERLAY"));
     scope.set("width", widget_fill());
     scope.set("zIndex", runtime::Value(10'000.0));
+    // Content sits centred, or against the edge a drawer or sheet opens from. An overlay
+    // justifies its children vertically and aligns them horizontally.
+    const std::string side = scope.string("side", "CENTER");
+    scope.set("justifyContent", runtime::Value(side == "BOTTOM" ? "END"
+                                               : side == "CENTER" ? "CENTER"
+                                                                  : "START"));
+    scope.set("alignItems", runtime::Value(side == "RIGHT"    ? "END"
+                                           : side == "CENTER" ? "CENTER"
+                                                              : "START"));
+}
+
+/** Whether a description's own layout or style already sets `name`. */
+[[nodiscard]] bool authors_layout(const DescriptionNode& node, const std::string_view name) {
+    for (const std::string_view container : {"layout", "$layout", "style"}) {
+        const auto found = node.properties.find(container);
+        const runtime::Value* value = found != node.properties.end() ? found->second.value() : nullptr;
+        if (value != nullptr && value->object() != nullptr && value->field(name) != nullptr)
+            return true;
+    }
+    return false;
+}
+
+/**
+ * A drawer or sheet: each child spans the edge it opens from and, unless it says how it moves,
+ * slides in from that edge and back out.
+ */
+void modal_side_children(WidgetDescriptionScope& scope, const std::string& side) {
+    std::string lower = side;
+    std::ranges::transform(lower, lower.begin(), [](const unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    const bool horizontal = side == "LEFT" || side == "RIGHT";
+    for (std::shared_ptr<const DescriptionNode>& child : scope.description().children) {
+        if (child == nullptr)
+            continue;
+        std::shared_ptr<const DescriptionNode> result = child;
+        const std::string_view span = horizontal ? "height" : "width";
+        if (!authors_layout(*result, span))
+            result = scope.with_layout(result, std::string(span), widget_fill());
+        if (!result->properties.contains("transition") && !result->properties.contains("enter") &&
+            !result->properties.contains("exit")) {
+            auto moving = std::make_shared<DescriptionNode>(*result);
+            moving->properties.insert_or_assign(
+                "transition", runtime::ExpressionValue(runtime::Value("strata.drawer." + lower)));
+            result = std::move(moving);
+        }
+        child = std::move(result);
+    }
 }
 
 void modal_expand(WidgetDescriptionScope& scope) {
@@ -156,6 +206,10 @@ void modal_expand(WidgetDescriptionScope& scope) {
         scope.description().properties.erase("onDismiss");
         scope.description().children.clear();
         return;
+    }
+    if (const std::string side = scope.string("side", "CENTER");
+        side == "LEFT" || side == "RIGHT" || side == "TOP" || side == "BOTTOM") {
+        modal_side_children(scope, side);
     }
     if (!scope.boolean("dismissible", true) || scope.description().properties.contains("onDismiss")) {
         return;

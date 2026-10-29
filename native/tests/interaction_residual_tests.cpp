@@ -17,6 +17,10 @@
 #include "resource/resource.hpp"
 #include "runtime/application.hpp"
 #include "runtime/expression.hpp"
+#include "ui/widget/color_picker_model.hpp"
+#include "ui/widget/date_picker_model.hpp"
+#include "ui/widget/markdown_model.hpp"
+#include "ui/widget/range_slider_model.hpp"
 #include "ui/behavior/registry.hpp"
 #include "ui/command.hpp"
 #include "ui/input.hpp"
@@ -3382,6 +3386,345 @@ overlay Nested {
     check(shadow, "a theme token inside a shadow list did not resolve to the theme's colour");
 }
 
+void test_chart_inspects_selects_and_hides_series(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Sales {
+  state picked = { label: "", index: -1 };
+  root Panel(key: "sales.root", layout: { kind: "COLUMN", width: 480, height: 600 }) {
+    Chart(key: "sales.line", labels: ["Jan", "Feb", "Mar", "Apr"],
+          series: [{ name: "Revenue", values: [10, 20, 15, 30] },
+                   { name: "Costs", values: [5, null, 8, 12] }],
+          onSelect: action("state.setFromEvent", name: "picked"))
+    Chart(key: "sales.pie", kind: "PIE", labels: ["Big", "Small"], values: [75, 25],
+          onSelect: action("state.setFromEvent", name: "picked"))
+    Text(key: "sales.picked", text: picked.label ?? "")
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("charts", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Sales", 480.0, 600.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const ui::RetainedNode* line = surface->tree().find_key("sales.line");
+    const ui::RetainedNode* pie = surface->tree().find_key("sales.pie");
+    check(line != nullptr && pie != nullptr, "chart fixture is missing a Chart");
+    const auto picked = [&] {
+        const ui::RetainedNode* node = surface->tree().find_key("sales.picked");
+        const auto found = node->description().properties.find("text");
+        return found->second.value() != nullptr && found->second.value()->string() != nullptr
+                   ? *found->second.value()->string()
+                   : std::string{};
+    };
+    const auto press = [&](const ui::Point at) {
+        std::vector<ui::SurfaceInputEvent> events;
+        events.emplace_back(ui::PointerInputEvent{at, ui::PointerEventType::press, 4, 0});
+        events.emplace_back(ui::PointerInputEvent{at, ui::PointerEventType::release, 4, 0});
+        static_cast<void>(surface->input().enqueue(std::move(events)));
+        static_cast<void>(surface->frame(now += 16'000'000));
+        static_cast<void>(surface->frame(now += 16'000'000));
+    };
+    const auto target = [&](const ui::RetainedNode& owner, const std::string_view id) {
+        for (const ui::WidgetSubtarget& candidate : surface->input().subtargets(owner.identity())) {
+            if (candidate.id == id)
+                return candidate;
+        }
+        check(false, "chart fixture is missing a subtarget");
+        return ui::WidgetSubtarget{};
+    };
+
+    const std::vector<ui::WidgetSubtarget> shown = surface->input().subtargets(line->identity());
+    check(shown.size() == 6U && shown[2].id == "point:2" && shown[2].label == "Mar" &&
+              shown[5].id == "legend:1",
+          "a line Chart did not project its four categories and two legend entries");
+    press(center(target(*line, "point:2").bounds));
+    check(picked() == "Mar", "clicking a category did not select it through onSelect");
+
+    std::vector<ui::SurfaceInputEvent> keys;
+    keys.emplace_back(ui::KeyInputEvent{"right"});
+    keys.emplace_back(ui::KeyInputEvent{"enter"});
+    static_cast<void>(surface->input().enqueue(std::move(keys)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(picked() == "Apr", "Right then Enter did not select the next category");
+
+    press(center(target(*line, "legend:1").bounds));
+    check(target(*line, "legend:1").label == "Show Costs",
+          "clicking a legend entry did not hide its series");
+    press(center(target(*line, "legend:1").bounds));
+    check(target(*line, "legend:1").label == "Hide Costs",
+          "clicking a hidden series' legend entry did not show it again");
+
+    // The small slice is the top-left quarter: its box's corner lies outside the circle.
+    const ui::WidgetSubtarget small = target(*pie, "slice:1");
+    check(small.shape.size() > 3U, "a pie slice did not project its outline");
+    press(ui::Point{small.bounds.x + 2.0, small.bounds.y + 2.0});
+    check(picked() == "Apr", "a click outside a slice's outline selected it");
+    press(ui::Point{small.bounds.x + small.bounds.width * 0.6,
+                    small.bounds.y + small.bounds.height * 0.6});
+    check(picked() == "Small", "a click inside a slice did not select it");
+}
+
+void test_markdown_expands_blocks_and_follows_links(const std::filesystem::path& resources) {
+    const std::vector<ui::MarkdownBlock> blocks = ui::parse_markdown(
+        "# Title\n\nSome **bold** and *em* `code` ~~gone~~ [site](https://a.dev \"t\").\n\n"
+        "- one\n  - nested\n- [x] done\n\n3. three\n4. four\n\n> quoted\n\n```\nx = 1\n```\n\n"
+        "| a | b |\n|---|---|\n| 1 | 2 |\n\n---\n");
+    check(blocks.size() == 8U && blocks[0].kind == ui::MarkdownBlockKind::heading &&
+              blocks[0].level == 1 && blocks[2].kind == ui::MarkdownBlockKind::list &&
+              blocks[3].ordered && blocks[3].start == 3 &&
+              blocks[4].kind == ui::MarkdownBlockKind::quote &&
+              blocks[5].code == "x = 1" && blocks[6].rows.size() == 2U &&
+              blocks[7].kind == ui::MarkdownBlockKind::rule,
+          "Markdown did not parse its block structure");
+    const std::vector<ui::MarkdownSpan>& spans = blocks[1].spans;
+    const auto styled = [&spans](const std::string_view text) {
+        const auto found = std::ranges::find(spans, text, &ui::MarkdownSpan::text);
+        return found != spans.end() ? &*found : nullptr;
+    };
+    check(styled("bold") != nullptr && styled("bold")->strong && styled("em")->emphasis &&
+              styled("code")->code && styled("gone")->strike &&
+              styled("site")->href == "https://a.dev",
+          "Markdown did not parse its inline emphasis, code, strikethrough and links");
+    check(blocks[2].items.size() == 2U && blocks[2].items[0].blocks.size() == 2U &&
+              blocks[2].items[1].checked == std::optional<bool>(true),
+          "Markdown did not nest a list or read a task item");
+
+    const std::string source = R"(
+overlay Notes {
+  state followed = "";
+  root Panel(key: "notes.root", layout: { kind: "COLUMN", width: 480, height: 300 }) {
+    Markdown(key: "notes.text", text: "Read [the docs](https://strata.dev/docs) first.",
+             onLink: action("state.setFromEvent", name: "followed"))
+    Text(key: "notes.followed", text: followed)
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("markdown", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Notes", 480.0, 300.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const ui::RetainedNode* paragraph = surface->tree().find_key("notes.text.0");
+    check(paragraph != nullptr && paragraph->description().type == "RichText",
+          "Markdown did not expand its paragraph into RichText");
+    const std::vector<ui::WidgetSubtarget> links = surface->input().subtargets(paragraph->identity());
+    check(links.size() == 1U && links[0].kind == ui::WidgetSubtargetKind::link,
+          "a Markdown link did not project one link target");
+    std::vector<ui::SurfaceInputEvent> events;
+    events.emplace_back(ui::PointerInputEvent{center(links[0].bounds), ui::PointerEventType::press, 4, 0});
+    events.emplace_back(
+        ui::PointerInputEvent{center(links[0].bounds), ui::PointerEventType::release, 4, 0});
+    static_cast<void>(surface->input().enqueue(std::move(events)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    const ui::RetainedNode* followed = surface->tree().find_key("notes.followed");
+    const auto found = followed->description().properties.find("text");
+    check(found->second.value() != nullptr && found->second.value()->string() != nullptr &&
+              *found->second.value()->string() == "https://strata.dev/docs",
+          "following a Markdown link did not carry its destination to onLink");
+}
+
+void test_modal_sides_open_drawers_and_sheets(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Drawers {
+  root Panel(key: "drawers.root", layout: { kind: "OVERLAY", width: 800, height: 500 }) {
+    Modal(key: "drawers.left", side: "RIGHT") {
+      Panel(key: "drawers.panel", layout: { kind: "COLUMN", width: 240 })
+    }
+    Modal(key: "drawers.sheet", side: "BOTTOM") {
+      Panel(key: "drawers.sheetPanel", layout: { kind: "COLUMN", height: 120 })
+    }
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("drawers", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Drawers", 800.0, 500.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    static_cast<void>(surface->frame(now += 1'000'000'000));
+    const auto bounds = [&](const std::string_view key) {
+        const ui::LayoutRecord* record =
+            surface->layout().find(surface->tree().find_key(key)->identity());
+        check(record != nullptr, "drawer fixture node has no layout");
+        return record->bounds;
+    };
+    const ui::Rect drawer = bounds("drawers.panel");
+    check(drawer.x == 560.0 && drawer.y == 0.0 && drawer.width == 240.0 && drawer.height == 500.0,
+          "a RIGHT Modal did not hold its content full height against the right edge");
+    const ui::Rect sheet = bounds("drawers.sheetPanel");
+    check(sheet.x == 0.0 && sheet.y == 380.0 && sheet.width == 800.0 && sheet.height == 120.0,
+          "a BOTTOM Modal did not hold its content full width against the bottom edge");
+    const auto transition = surface->tree().find_key("drawers.panel")->description().properties.find(
+        "transition");
+    check(transition != surface->tree().find_key("drawers.panel")->description().properties.end() &&
+              transition->second.value() != nullptr &&
+              transition->second.value()->string() != nullptr &&
+              *transition->second.value()->string() == "strata.drawer.right",
+          "a drawer's content did not slide from its edge by default");
+}
+
+void test_date_picker_opens_picks_and_closes(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Due {
+  state due = "2024-03-15";
+  root Panel(key: "due.root", layout: { kind: "COLUMN", width: 480, height: 480 }) {
+    DatePicker(key: "due.picker", bind: due, max: "2024-03-28", format: "d MMMM yyyy")
+    Text(key: "due.picked", text: due)
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("date-picker", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Due", 480.0, 480.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const ui::RetainedNode* picker = surface->tree().find_key("due.picker");
+    check(picker != nullptr, "date picker fixture is missing its DatePicker");
+    const auto targets = [&] { return surface->input().subtargets(picker->identity()); };
+    const auto press = [&](const ui::Point at) {
+        std::vector<ui::SurfaceInputEvent> events;
+        events.emplace_back(ui::PointerInputEvent{at, ui::PointerEventType::press, 4, 0});
+        events.emplace_back(ui::PointerInputEvent{at, ui::PointerEventType::release, 4, 0});
+        static_cast<void>(surface->input().enqueue(std::move(events)));
+        static_cast<void>(surface->frame(now += 16'000'000));
+        static_cast<void>(surface->frame(now += 16'000'000));
+    };
+    const auto find = [&](const std::string_view id) -> std::optional<ui::WidgetSubtarget> {
+        for (const ui::WidgetSubtarget& target : targets()) {
+            if (target.id == id)
+                return target;
+        }
+        return std::nullopt;
+    };
+    const auto picked = [&] {
+        const auto found = surface->tree().find_key("due.picked")->description().properties.find("text");
+        return *found->second.value()->string();
+    };
+    check(targets().size() == 1U, "a closed DatePicker projected more than its field");
+    press(center(find("$control")->bounds));
+    check(find("day:2024-03-20").has_value() && find("day:2024-03-20")->detached,
+          "clicking a DatePicker did not open its month dropdown");
+    check(!find("day:2024-03-30")->enabled, "a day after max was offered in the dropdown");
+    press(center(find("day:2024-03-20")->bounds));
+    check(picked() == "2024-03-20", "picking a day did not update the bound date");
+    check(targets().size() == 1U, "picking a day did not close the dropdown");
+    std::vector<ui::SurfaceInputEvent> keys;
+    keys.emplace_back(ui::KeyInputEvent{"enter"});
+    keys.emplace_back(ui::KeyInputEvent{"right"});
+    keys.emplace_back(ui::KeyInputEvent{"enter"});
+    static_cast<void>(surface->input().enqueue(std::move(keys)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(picked() == "2024-03-21", "Enter, Right, Enter did not pick the next day");
+    const auto text = ui::date_picker_text(*picker, ui::calendar_state(*picker));
+    check(text == std::optional<std::string>("21 March 2024"),
+          "a DatePicker did not show its day in its format");
+}
+
+void test_range_slider_drags_the_nearer_thumb(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Prices {
+  state range = { start: 20, end: 80 };
+  root Panel(key: "prices.root", layout: { kind: "COLUMN", width: 300, height: 120 }) {
+    RangeSlider(key: "prices.slider", min: 0, max: 100, step: 5, minGap: 10,
+                defaultStart: 20, defaultEnd: 80, layout: { width: 220, height: 28 },
+                onChange: action("state.setFromEvent", name: "range"))
+    Text(key: "prices.shown", text: format("{0}-{1}", range.start, range.end))
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("range-slider", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Prices", 300.0, 120.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const ui::RetainedNode* slider = surface->tree().find_key("prices.slider");
+    check(slider != nullptr, "range slider fixture is missing its RangeSlider");
+    const ui::Rect track = ui::range_slider_track(surface->layout().find(slider->identity())->bounds);
+    const auto at = [&](const double value) {
+        return ui::Point{track.x + track.width * value / 100.0, track.y + track.height * 0.5};
+    };
+    const auto state = [&] { return ui::range_slider_state(*slider); };
+    std::vector<ui::SurfaceInputEvent> drag;
+    drag.emplace_back(ui::PointerInputEvent{at(70.0), ui::PointerEventType::press, 4, 0});
+    drag.emplace_back(ui::PointerInputEvent{at(50.0), ui::PointerEventType::move, 4, 0});
+    drag.emplace_back(ui::PointerInputEvent{at(10.0), ui::PointerEventType::move, 4, 0});
+    drag.emplace_back(ui::PointerInputEvent{at(10.0), ui::PointerEventType::release, 4, 0});
+    static_cast<void>(surface->input().enqueue(std::move(drag)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(state().start == 20.0 && state().end == 30.0,
+          "dragging the end thumb did not stop the minimum gap above the start");
+    check(surface->input().focused(slider->identity()), "pressing a RangeSlider did not focus it");
+    std::vector<ui::SurfaceInputEvent> keys;
+    keys.emplace_back(ui::KeyInputEvent{"right"});
+    keys.emplace_back(ui::KeyInputEvent{"tab", ui::KeyModifiers{true, false, false, false}});
+    keys.emplace_back(ui::KeyInputEvent{"left"});
+    static_cast<void>(surface->input().enqueue(std::move(keys)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(state().start == 15.0 && state().end == 35.0,
+          "the keys did not move the end thumb, then the start thumb after Shift+Tab (" +
+              std::to_string(state().start) + ".." + std::to_string(state().end) + ")");
+    const auto shown = surface->tree().find_key("prices.shown")->description().properties.find("text");
+    check(*shown->second.value()->string() == "15-35",
+          "the RangeSlider's onChange did not carry { start, end }");
+}
+
+void test_color_picker_picks_by_field_strip_swatch_and_keys(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Colors {
+  state accent = #FF0000;
+  root Panel(key: "colors.root", layout: { kind: "COLUMN", width: 300, height: 320 }) {
+    ColorPicker(key: "colors.picker", bind: accent, swatches: [#00FF00, #0000FF])
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("color-picker", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Colors", 300.0, 320.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const ui::RetainedNode* picker = surface->tree().find_key("colors.picker");
+    check(picker != nullptr, "color picker fixture is missing its ColorPicker");
+    const auto state = [&] { return ui::color_picker_state(*picker); };
+    const ui::ColorPickerProjection projection = ui::color_picker_projection(
+        state(), surface->layout().find(picker->identity())->bounds);
+    const auto press = [&](const ui::Point at) {
+        std::vector<ui::SurfaceInputEvent> events;
+        events.emplace_back(ui::PointerInputEvent{at, ui::PointerEventType::press, 4, 0});
+        events.emplace_back(ui::PointerInputEvent{at, ui::PointerEventType::release, 4, 0});
+        static_cast<void>(surface->input().enqueue(std::move(events)));
+        static_cast<void>(surface->frame(now += 16'000'000));
+        static_cast<void>(surface->frame(now += 16'000'000));
+    };
+    check(state().hex() == "#FF0000" && state().hsv.saturation == 1.0,
+          "a ColorPicker did not start from its bound color");
+    // Halfway along the field's top edge: half-saturated, full value, still red.
+    press(ui::Point{projection.field.x + projection.field.width * 0.5, projection.field.y});
+    check(state().hex() == "#FF8080", "a field press did not set saturation and value");
+    press(ui::Point{projection.hue.x + projection.hue.width / 3.0,
+                    projection.hue.y + projection.hue.height * 0.5});
+    check(state().hex() == "#80FF80", "a hue strip press did not turn the hue to green");
+    press(center(projection.swatches[1]));
+    check(state().hex() == "#0000FF", "a swatch press did not pick its color");
+    std::vector<ui::SurfaceInputEvent> keys;
+    keys.emplace_back(ui::KeyInputEvent{"down", ui::KeyModifiers{true, false, false, false}});
+    keys.emplace_back(ui::KeyInputEvent{"left", ui::KeyModifiers{true, false, false, false}});
+    static_cast<void>(surface->input().enqueue(std::move(keys)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(state().hex() == "#1717E6", "Shift+Down and Shift+Left did not step value and saturation");
+}
+
 void test_palette_projection_is_cached_across_frames(const std::filesystem::path& resources) {
     std::string commands;
     for (int index = 0; index < 40; ++index) {
@@ -3532,6 +3875,12 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_scroll_snaps_to_the_nearest_child(resources);
         test_image_fit_keeps_the_aspect_ratio();
         test_calendar_picks_days_by_pointer_and_keyboard(resources);
+        test_chart_inspects_selects_and_hides_series(resources);
+        test_markdown_expands_blocks_and_follows_links(resources);
+        test_modal_sides_open_drawers_and_sheets(resources);
+        test_date_picker_opens_picks_and_closes(resources);
+        test_range_slider_drags_the_nearer_thumb(resources);
+        test_color_picker_picks_by_field_strip_swatch_and_keys(resources);
         test_calendar_ranges_and_localized_names(resources);
         test_theme_tokens_resolve_inside_nested_values(resources);
         test_palette_projection_is_cached_across_frames(resources);

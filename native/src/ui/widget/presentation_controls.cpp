@@ -472,61 +472,11 @@ void tabs_content(WidgetRenderScope& scope) {
  */
 void calendar_content(WidgetRenderScope& scope) {
     const CalendarState state = calendar_state(scope.node());
-    const CalendarProjection projection = calendar_projection(state, scope.layout().bounds);
     if (scope.visual().background.has_value()) {
         scope.rounded_rect(scope.layout().bounds, *scope.visual().background,
                            scope.visual().border);
     }
-    const RenderColor ink = scope.visual().foreground;
-    const RenderColor muted = scope.palette("disabledForeground");
-    const auto centred = [&scope](const std::string& value, const Rect bounds,
-                                  const RenderColor color) {
-        if (scope.text_engine() == nullptr)
-            return;
-        const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), value);
-        scope.text(value, Point{bounds.x, bounds.y + (bounds.height - shaped.metrics.height) * 0.5},
-                   color, bounds.width, WidgetTextAlignment::center);
-    };
-    centred(state.month_name(projection.month.month) + " " + std::to_string(projection.month.year),
-            projection.header, ink);
-    scope.interaction(projection.previous, "previous");
-    scope.interaction(projection.next, "next");
-    centred("<", projection.previous, ink);
-    centred(">", projection.next, ink);
-    for (const auto& [weekday, bounds] : projection.weekdays)
-        centred(state.weekday_name(weekday), bounds, muted);
-    for (const CalendarCell& cell : projection.cells) {
-        const double side = std::max(0.0, std::min(cell.bounds.width, cell.bounds.height) - 4.0);
-        const Rect mark{cell.bounds.x + (cell.bounds.width - side) * 0.5,
-                        cell.bounds.y + (cell.bounds.height - side) * 0.5, side, side};
-        const bool endpoint =
-            state.range && ((state.range_start.has_value() && *state.range_start == cell.date) ||
-                            (state.range_end.has_value() && *state.range_end == cell.date));
-        const bool selected =
-            endpoint || (!state.range && state.selected.has_value() && *state.selected == cell.date);
-        if (state.range && state.in_range(cell.date) && state.range_end.has_value()) {
-            // The band runs edge to edge through the range so consecutive days join up.
-            const Paint band = scope.visual().fill;
-            RenderColor tint = band.representative();
-            tint.alpha = static_cast<std::uint8_t>(tint.alpha / 3U);
-            scope.solid_rect(Rect{cell.bounds.x, mark.y, cell.bounds.width, mark.height}, tint);
-        }
-        if (selected)
-            scope.rounded_rect(mark, scope.visual().fill, std::nullopt, side * 0.5);
-        else if (state.today.has_value() && *state.today == cell.date)
-            scope.border(mark, RenderBorder{1.0, scope.visual().fill.representative(), true},
-                         side * 0.5);
-        if (cell.enabled)
-            scope.interaction(cell.bounds, "day:" + cell.date.text());
-        if (scope.focus_visible() && cell.date == state.cursor) {
-            scope.border(mark, scope.visual().focus_ring.value_or(RenderBorder{2.0, ink, true}),
-                         side * 0.5);
-        }
-        const RenderColor color = selected ? scope.palette("tokenActive")
-                                  : cell.in_month && cell.enabled ? ink
-                                                                  : muted;
-        centred(std::to_string(cell.date.day), cell.bounds, color);
-    }
+    present_calendar_month(scope, state, scope.layout().bounds);
 }
 
 void select_content(WidgetRenderScope& scope) {

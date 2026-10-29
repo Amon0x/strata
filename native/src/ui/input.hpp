@@ -450,6 +450,9 @@ class InputRouter final {
     [[nodiscard]] std::vector<WidgetSubtarget> project_subtargets(const RetainedNode& node) const;
     [[nodiscard]] bool subtarget_hovered(std::uint64_t identity,
                                          std::string_view id) const noexcept;
+    /** The id of the node's subtarget under the pointer, if one of its subtargets is. */
+    [[nodiscard]] std::optional<std::string_view>
+    hovered_subtarget(std::uint64_t identity) const noexcept;
     [[nodiscard]] bool subtarget_active(std::uint64_t identity, std::string_view id) const noexcept;
     [[nodiscard]] std::optional<DragPreviewPresentation>
     drag_preview(std::uint64_t identity) const noexcept;
