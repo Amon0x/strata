@@ -424,6 +424,13 @@
     },
     {
       "dispatchPolicy": "framework",
+      "id": "clock.now",
+      "parameters": [],
+      "payloadContract": "strata.action-payload/clock.now@1",
+      "summary": "Read the wall clock; then() receives { now, utcOffsetMinutes }"
+    },
+    {
+      "dispatchPolicy": "framework",
       "id": "command.execute",
       "parameters": [
         {
@@ -3035,6 +3042,39 @@
     },
     {
       "capabilities": [
+        "FORMATTING"
+      ],
+      "name": "timeAgo",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "now",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "style",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "returnType": "string"
+    },
+    {
+      "capabilities": [
         "ACTION"
       ],
       "name": "then",
@@ -3267,10 +3307,132 @@
         {
           "aliases": [],
           "enumValues": [],
-          "name": "precision",
+          "name": "decimals",
           "nullable": false,
           "required": false,
           "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "grouping",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "compact",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "currency",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "percent",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "signDisplay",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "groupSeparator",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "decimalSeparator",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "returnType": "string"
+    },
+    {
+      "capabilities": [
+        "FORMATTING"
+      ],
+      "name": "formatBytes",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "decimals",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "binary",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "decimalSeparator",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "returnType": "string"
+    },
+    {
+      "capabilities": [
+        "FORMATTING"
+      ],
+      "name": "formatDuration",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "style",
+          "nullable": false,
+          "required": false,
+          "type": "string"
         }
       ],
       "returnType": "string"

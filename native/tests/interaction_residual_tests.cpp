@@ -14,13 +14,12 @@
 
 #include "compiler/module.hpp"
 #include "data/json.hpp"
+#include "font/opentype.hpp"
 #include "resource/resource.hpp"
+#include "resource/svg_image.hpp"
 #include "runtime/application.hpp"
 #include "runtime/expression.hpp"
-#include "ui/widget/color_picker_model.hpp"
-#include "ui/widget/date_picker_model.hpp"
-#include "ui/widget/markdown_model.hpp"
-#include "ui/widget/range_slider_model.hpp"
+#include "runtime/formatting.hpp"
 #include "ui/behavior/registry.hpp"
 #include "ui/command.hpp"
 #include "ui/input.hpp"
@@ -28,14 +27,16 @@
 #include "ui/notification.hpp"
 #include "ui/semantics.hpp"
 #include "ui/status.hpp"
-#include "font/opentype.hpp"
-#include "resource/svg_image.hpp"
 #include "ui/surface.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
 #include "ui/tree.hpp"
 #include "ui/widget/choice_model.hpp"
+#include "ui/widget/color_picker_model.hpp"
+#include "ui/widget/date_picker_model.hpp"
 #include "ui/widget/editor_geometry.hpp"
+#include "ui/widget/markdown_model.hpp"
+#include "ui/widget/range_slider_model.hpp"
 #include "ui/widget/registry.hpp"
 #include "ui/widget/shell_model.hpp"
 #include "ui/widget/subtarget.hpp"
@@ -3242,6 +3243,131 @@ overlay Helpers {
           "formatDate did not format a timestamp before 1970");
 }
 
+void test_number_bytes_duration_and_relative_time_formats(const std::filesystem::path& resources) {
+    const auto number = [](const double value, const auto& configure) {
+        runtime::NumberFormat format;
+        configure(format);
+        return runtime::format_number(value, format);
+    };
+    const auto plain = [](runtime::NumberFormat&) {};
+    check(number(1234.5, plain) == "1234.50", "formatNumber's default changed from two decimals");
+    check(number(1234567.891, [](auto& f) { f.grouping = true; }) == "1,234,567.89",
+          "formatNumber did not group thousands");
+    check(number(1234.5, [](auto& f) { f.currency = "USD"; }) == "$1,234.50",
+          "formatNumber did not write US dollars");
+    check(number(-1234.5, [](auto& f) { f.currency = "USD"; }) == "-$1,234.50",
+          "formatNumber did not put the sign before the currency symbol");
+    check(number(1234.5, [](auto& f) { f.currency = "JPY"; }) == "\xC2\xA5"
+                                                                 "1,235",
+          "formatNumber did not use the yen's zero minor digits");
+    check(number(1234.5, [](auto& f) { f.currency = "CHF"; }) == "CHF 1,234.50",
+          "formatNumber did not write a currency without a symbol as its code");
+    check(number(1234.5,
+                 [](auto& f) {
+                     f.currency = "EUR";
+                     f.group_separator = ".";
+                     f.decimal_separator = ",";
+                 }) == "\xE2\x82\xAC"
+                       "1.234,50",
+          "formatNumber did not use the authored separators");
+    check(number(1234.0, [](auto& f) { f.compact = true; }) == "1.2K" &&
+              number(3400000.0, [](auto& f) { f.compact = true; }) == "3.4M" &&
+              number(12500.0, [](auto& f) { f.compact = true; }) == "13K" &&
+              number(999950.0, [](auto& f) { f.compact = true; }) == "1M" &&
+              number(2.0e12, [](auto& f) { f.compact = true; }) == "2T" &&
+              number(950.0, [](auto& f) { f.compact = true; }) == "950",
+          "formatNumber's compact form did not scale by thousands");
+    check(number(1500.0,
+                 [](auto& f) {
+                     f.compact = true;
+                     f.decimals = 2;
+                 }) == "1.50K",
+          "formatNumber's compact form ignored authored decimals");
+    check(number(0.256, [](auto& f) { f.percent = true; }) == "26%" && number(0.256,
+                                                                              [](auto& f) {
+                                                                                  f.percent = true;
+                                                                                  f.decimals = 1;
+                                                                              }) == "25.6%",
+          "formatNumber did not write a percentage");
+    check(number(5.0, [](auto& f) { f.sign_display = "always"; }) == "+5.00" &&
+              number(0.0, [](auto& f) { f.sign_display = "exceptZero"; }) == "0.00" &&
+              number(-0.001, plain) == "0.00" &&
+              number(-5.0, [](auto& f) { f.sign_display = "never"; }) == "5.00",
+          "formatNumber did not follow its sign display");
+    check(runtime::format_bytes(512.0, std::nullopt, false) == "512 B" &&
+              runtime::format_bytes(1500000.0, std::nullopt, false) == "1.5 MB" &&
+              runtime::format_bytes(2000.0, std::nullopt, false) == "2 KB" &&
+              runtime::format_bytes(1536.0, std::nullopt, true) == "1.5 KiB" &&
+              runtime::format_bytes(999960.0, std::nullopt, false) == "1 MB" &&
+              runtime::format_bytes(3.25e9, 2, false) == "3.25 GB",
+          "formatBytes did not pick the largest unit");
+    constexpr double minute = 60'000.0;
+    constexpr double day = 86'400'000.0;
+    const double now = 1'700'000'000'000.0;
+    check(runtime::time_ago(now - 3000.0, now, false) == "just now" &&
+              runtime::time_ago(now - 42'000.0, now, false) == "42 seconds ago" &&
+              runtime::time_ago(now - minute, now, false) == "1 minute ago" &&
+              runtime::time_ago(now - 3.5 * minute, now, false) == "3 minutes ago" &&
+              runtime::time_ago(now + 2.0 * day, now, false) == "in 2 days" &&
+              runtime::time_ago(now - 9.0 * day, now, false) == "1 week ago" &&
+              runtime::time_ago(now - 45.0 * day, now, false) == "1 month ago" &&
+              runtime::time_ago(now - 800.0 * day, now, false) == "2 years ago" &&
+              runtime::time_ago(now - 3.0 * 3'600'000.0, now, true) == "3h ago" &&
+              runtime::time_ago(now + 2.0 * day, now, true) == "in 2d",
+          "timeAgo did not describe the distance in its largest whole unit");
+    check(runtime::format_duration(3'909'000.0, "clock") == "1:05:09" &&
+              runtime::format_duration(309'000.0, "clock") == "5:09" &&
+              runtime::format_duration(3'909'000.0, "short") == "1h 5m" &&
+              runtime::format_duration(309'000.0, "short") == "5m 9s" &&
+              runtime::format_duration(350.0, "short") == "350ms" &&
+              runtime::format_duration(3'661'000.0, "long") == "1 hour 1 minute" &&
+              runtime::format_duration(-65'000.0, "clock") == "-1:05",
+          "formatDuration did not write its style");
+
+    // The same formats reached through the language, positionally and by name.
+    const std::string source = R"(
+overlay Formats {
+  state now = 1700000000000;
+  state wall = 0;
+  root Panel(key: "formats.root", layout: { kind: "COLUMN", width: 300, height: 300 }) {
+    Text(key: "formats.money", text: formatNumber(1234.5, currency: "USD"))
+    Text(key: "formats.compact", text: formatNumber(3400000, compact: true))
+    Text(key: "formats.grouped", text: formatNumber(1234567, 0, true))
+    Text(key: "formats.percent", text: formatNumber(0.5, percent: true, signDisplay: "always"))
+    Text(key: "formats.bytes", text: formatBytes(1500000))
+    Text(key: "formats.ago", text: timeAgo(now - 180000, now))
+    Text(key: "formats.duration", text: formatDuration(3909000) + " " + formatDuration(3909000, "short"))
+    Panel(key: "formats.clock", timers: [{ id: "clock", every: 1ms, action: then(action("clock.now"), action("state.setFromEvent", name: "wall", field: "now")) }])
+    Text(key: "formats.wall", text: wall > 1600000000000 ? "read" : "unread")
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("formats", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Formats", 300.0, 300.0);
+    static_cast<void>(surface->frame(1'000'000));
+    const auto text = [&](const std::string_view key) {
+        const ui::RetainedNode* node = surface->tree().find_key(key);
+        check(node != nullptr, "format fixture is missing a text node");
+        const auto found = node->description().properties.find("text");
+        const runtime::Value* value =
+            found != node->description().properties.end() ? found->second.value() : nullptr;
+        return value != nullptr && value->string() != nullptr ? *value->string() : std::string{};
+    };
+    check(text("formats.money") == "$1,234.50", "formatNumber's currency was not reachable");
+    check(text("formats.compact") == "3.4M", "formatNumber's compact form was not reachable");
+    check(text("formats.grouped") == "1,234,567", "formatNumber's grouping was not positional");
+    check(text("formats.percent") == "+50%", "formatNumber's percent and sign were not reachable");
+    check(text("formats.bytes") == "1.5 MB", "formatBytes was not reachable");
+    check(text("formats.ago") == "3 minutes ago", "timeAgo was not reachable");
+    check(text("formats.duration") == "1:05:09 1h 5m", "formatDuration was not reachable");
+    check(text("formats.wall") == "unread", "the wall clock was read before its timer fired");
+    static_cast<void>(surface->frame(3'000'000));
+    static_cast<void>(surface->frame(6'000'000));
+    check(text("formats.wall") == "read", "clock.now did not answer then() with the wall clock");
+}
+
 void test_rotation_draws_and_hits_the_turned_shape(const std::filesystem::path& resources) {
     const std::string source = R"(
 overlay Rotated {
@@ -4195,6 +4321,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_text_decoration_and_named_weight(resources);
         test_per_corner_radius_rounds_each_corner(resources);
         test_text_list_and_math_helpers(resources);
+        test_number_bytes_duration_and_relative_time_formats(resources);
         test_rotation_draws_and_hits_the_turned_shape(resources);
         test_delayed_and_clipboard_actions(resources);
         test_scroll_snaps_to_the_nearest_child(resources);

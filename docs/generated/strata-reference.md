@@ -2752,6 +2752,13 @@ Copy text to the host clipboard Payload: `strata.action-payload/clipboard.copy@1
 |---|---|---:|---:|---|
 | `text` | string | true | false | — |
 
+### `clock.now`
+
+Read the wall clock; then() receives { now, utcOffsetMinutes } Payload: `strata.action-payload/clock.now@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+
 ### `command.execute`
 
 Execute a registered command Payload: `strata.action-payload/command.execute@1`. Dispatch: `framework`.
@@ -3668,6 +3675,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `contains` | boolean | COLLECTION |
 | `count` | number | COLLECTION |
 | `delay` | action | ACTION |
+| `timeAgo` | string | FORMATTING |
 | `then` | action | ACTION |
 | `distinctBy` | collection of any | COLLECTION |
 | `effect` | effect | EFFECT |
@@ -3678,6 +3686,8 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `format` | string | FORMATTING |
 | `formatDate` | string | FORMATTING |
 | `formatNumber` | string | FORMATTING |
+| `formatBytes` | string | FORMATTING |
+| `formatDuration` | string | FORMATTING |
 | `groupBy` | collection of any | COLLECTION |
 | `isEmpty` | boolean | COLLECTION |
 | `join` | string | COLLECTION |

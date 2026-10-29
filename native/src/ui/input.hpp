@@ -938,6 +938,11 @@ class InputRouter final {
     std::uint64_t next_platform_request_ = 0U;
     /** The request the last platform action made, for a `then` to wait on. */
     std::optional<std::uint64_t> last_platform_request_;
+    /**
+     * What the last action answered at once (`clock.now`'s reading), for a `then` to hand its
+     * `next` as the event value without waiting on the host.
+     */
+    std::optional<runtime::Value> last_answer_;
     /** The `strata.fileDrop` node files are being dragged over. */
     std::optional<std::uint64_t> file_drop_target_;
     std::int64_t last_window_drag_press_nanos_ = 0;

@@ -216,6 +216,9 @@ enum class HelperEvaluator : std::uint8_t {
     delay,
     then,
     format_date,
+    format_bytes,
+    time_ago,
+    format_duration,
     /** No evaluator: lowering turns the call into its own IR node, or nothing names a helper. */
     unknown,
 };

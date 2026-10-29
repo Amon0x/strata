@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -68,6 +70,27 @@ std::optional<runtime::ActionDispatchOutcome> InputRouter::execute_surface_actio
                                    ? runtime::ActionDispatchStatus::handled
                                    : runtime::ActionDispatchStatus::failed,
                                std::nullopt);
+    }
+    if (id == "clock.now") {
+        // The wall clock, in UTC milliseconds since 1970 (what formatDate and timeAgo read), and
+        // the local zone's offset from UTC now. Expressions read no clock; this is how one asks.
+        const auto now = std::chrono::system_clock::now();
+        const double milliseconds = static_cast<double>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count());
+        double offset_minutes = 0.0;
+        try {
+            offset_minutes =
+                static_cast<double>(std::chrono::duration_cast<std::chrono::minutes>(
+                                        std::chrono::current_zone()->get_info(now).offset)
+                                        .count());
+        } catch (const std::exception&) {
+            offset_minutes = 0.0;
+        }
+        last_answer_ = runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{
+            {"now", runtime::Value(milliseconds)},
+            {"utcOffsetMinutes", runtime::Value(offset_minutes)},
+        });
+        return surface_outcome(runtime::ActionDispatchStatus::handled);
     }
     if (id == "focus.clear") {
         if (!focused_.has_value()) return surface_outcome(runtime::ActionDispatchStatus::ignored);

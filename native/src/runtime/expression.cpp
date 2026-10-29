@@ -12,6 +12,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include "runtime/formatting.hpp"
+
 namespace strata::runtime {
 namespace {
 
@@ -285,6 +287,17 @@ struct Names final {
     Symbol utc_offset_minutes = Symbol::intern("utcOffsetMinutes");
     Symbol month_names = Symbol::intern("monthNames");
     Symbol weekday_names = Symbol::intern("weekdayNames");
+    Symbol decimals = Symbol::intern("decimals");
+    Symbol grouping = Symbol::intern("grouping");
+    Symbol compact = Symbol::intern("compact");
+    Symbol currency = Symbol::intern("currency");
+    Symbol percent = Symbol::intern("percent");
+    Symbol sign_display = Symbol::intern("signDisplay");
+    Symbol group_separator = Symbol::intern("groupSeparator");
+    Symbol decimal_separator = Symbol::intern("decimalSeparator");
+    Symbol binary = Symbol::intern("binary");
+    Symbol now = Symbol::intern("now");
+    Symbol format_style = Symbol::intern("style");
     Symbol action = Symbol::intern("action");
     Symbol prefix = Symbol::intern("prefix");
     Symbol suffix = Symbol::intern("suffix");
@@ -1636,16 +1649,65 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
     }
     case HelperKind::format_number: {
         const Value value = argument_value(program, node, scope, known.value, 0U, reads);
-        const Value precision_value =
-            argument_value(program, node, scope, known.precision, 1U, reads);
-        const double number = value.number() != nullptr ? *value.number() : 0.0;
-        const int precision = precision_value.number() != nullptr
-                                  ? std::clamp(static_cast<int>(*precision_value.number()), 0, 12)
-                                  : 2;
-        std::ostringstream formatted;
-        formatted.imbue(std::locale::classic());
-        formatted << std::fixed << std::setprecision(precision) << number;
-        return ExpressionValue(Value(formatted.str()));
+        const auto optional_number = [&](const Symbol name, const std::size_t position) {
+            const Value found = argument_value(program, node, scope, name, position, reads);
+            return found.number() != nullptr && std::isfinite(*found.number())
+                       ? std::optional<double>(*found.number())
+                       : std::nullopt;
+        };
+        const auto optional_boolean = [&](const Symbol name, const std::size_t position) {
+            const Value found = argument_value(program, node, scope, name, position, reads);
+            return found.boolean() != nullptr ? std::optional<bool>(*found.boolean())
+                                              : std::nullopt;
+        };
+        const auto text = [&](const Symbol name, const std::size_t position, std::string fallback) {
+            const Value found = argument_value(program, node, scope, name, position, reads);
+            return found.string() != nullptr ? *found.string() : std::move(fallback);
+        };
+        NumberFormat format;
+        if (const std::optional<double> decimals = optional_number(known.decimals, 1U))
+            format.decimals = static_cast<int>(std::clamp(*decimals, 0.0, 12.0));
+        format.grouping = optional_boolean(known.grouping, 2U);
+        format.compact = optional_boolean(known.compact, 3U).value_or(false);
+        format.currency = text(known.currency, 4U, std::string());
+        format.percent = optional_boolean(known.percent, 5U).value_or(false);
+        format.sign_display = text(known.sign_display, 6U, "auto");
+        format.group_separator = text(known.group_separator, 7U, ",");
+        format.decimal_separator = text(known.decimal_separator, 8U, ".");
+        return ExpressionValue(
+            Value(format_number(value.number() != nullptr ? *value.number() : 0.0, format)));
+    }
+    case HelperKind::format_bytes: {
+        const Value value = argument_value(program, node, scope, known.value, 0U, reads);
+        const Value decimals = argument_value(program, node, scope, known.decimals, 1U, reads);
+        const Value binary = argument_value(program, node, scope, known.binary, 2U, reads);
+        const Value separator =
+            argument_value(program, node, scope, known.decimal_separator, 3U, reads);
+        return ExpressionValue(Value(format_bytes(
+            value.number() != nullptr ? *value.number() : 0.0,
+            decimals.number() != nullptr && std::isfinite(*decimals.number())
+                ? std::optional<int>(static_cast<int>(std::clamp(*decimals.number(), 0.0, 12.0)))
+                : std::nullopt,
+            binary.boolean() != nullptr && *binary.boolean(),
+            separator.string() != nullptr ? std::string_view(*separator.string())
+                                          : std::string_view("."))));
+    }
+    case HelperKind::time_ago: {
+        const Value value = argument_value(program, node, scope, known.value, 0U, reads);
+        const Value now = argument_value(program, node, scope, known.now, 1U, reads);
+        const Value style = argument_value(program, node, scope, known.format_style, 2U, reads);
+        return ExpressionValue(
+            Value(time_ago(value.number() != nullptr ? *value.number() : 0.0,
+                           now.number() != nullptr ? *now.number() : 0.0,
+                           style.string() != nullptr && *style.string() == "short")));
+    }
+    case HelperKind::format_duration: {
+        const Value value = argument_value(program, node, scope, known.value, 0U, reads);
+        const Value style = argument_value(program, node, scope, known.format_style, 1U, reads);
+        return ExpressionValue(
+            Value(format_duration(value.number() != nullptr ? *value.number() : 0.0,
+                                  style.string() != nullptr ? std::string_view(*style.string())
+                                                            : std::string_view("clock"))));
     }
     case HelperKind::rgb:
     case HelperKind::rgba: {

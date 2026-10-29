@@ -1554,6 +1554,46 @@ Patterns use `yyyy`/`yy`, `MMMM`/`MMM`/`MM`/`M`, `dd`/`d`, `EEEE`/`EEE`, `HH`/`H
 Names are English unless `monthNames` (twelve) and `weekdayNames` (seven, from Sunday) give others;
 the short forms are their first three characters.
 
+`formatNumber(value, decimals?, grouping?, compact?, currency?, percent?, signDisplay?,
+groupSeparator?, decimalSeparator?)` writes a number; every argument after the value is optional
+and is usually named. Rounding is half away from zero on the number as written (2.5 is 3, 1.005 is
+1.01). With nothing else, it keeps two decimals and no grouping, as it always has.
+
+| Call | Result |
+|---|---|
+| `formatNumber(1234.5)` | `1234.50` |
+| `formatNumber(1234567, 0, true)` | `1,234,567` |
+| `formatNumber(1234.5, currency: "USD")` | `$1,234.50` (a currency groups, and takes its own digits: `¥1,235` for `"JPY"`; a code without a symbol is written first, `CHF 1,234.50`; any other text is the symbol itself) |
+| `formatNumber(3400000, compact: true)` | `3.4M` (K, M, B, T, two significant digits unless `decimals` says otherwise) |
+| `formatNumber(0.256, percent: true)` | `26%` (`decimals: 1` gives `25.6%`) |
+| `formatNumber(5, signDisplay: "always")` | `+5.00` (`"auto"`, `"always"`, `"exceptZero"`, `"negative"`, `"never"`) |
+| `formatNumber(1234.5, currency: "EUR", groupSeparator: ".", decimalSeparator: ",")` | `€1.234,50` |
+
+Strata has no locale object of its own: English is the default, and a host or application that
+knows the user's conventions passes the separators in (from a theme token, application data or
+state), as it passes `monthNames` to `formatDate`.
+
+`formatBytes(value, decimals?, binary?, decimalSeparator?)` writes a byte count in the largest unit
+that keeps it at least one, trailing zeros trimmed: `formatBytes(1500000)` is `1.5 MB`, `512 B`
+stays whole, and `binary: true` counts in 1024s (`1.5 KiB`). `formatDuration(value, style?)` writes
+a span of milliseconds: `"clock"` (the default) gives `1:05:09` (or `5:09` under an hour),
+`"short"` the two largest units that are not zero (`1h 5m`, `5m 9s`, `350ms`) and `"long"` spells
+them out (`1 hour 5 minutes`). `timeAgo(value, now, style?)` says how far a timestamp lies from
+`now` (both in milliseconds since 1970): `just now` within ten seconds, then `42 seconds ago`,
+`3 minutes ago` or `in 2 days` in the largest whole unit up to years; `style: "short"` writes
+`3m ago` and `in 2d`. Expressions read no clock, so `now` comes from state that a timer refreshes
+from the wall clock: the `clock.now` action answers `then()` at once with `{ now, utcOffsetMinutes }`
+(UTC milliseconds since 1970, and the local zone's offset from UTC, which `formatDate` takes), and
+the text follows the state:
+
+```strata
+state now = 0;
+Panel(timers: [{ id: "clock", every: 1s, action: then(action("clock.now"),
+                                                    action("state.setFromEvent", name: "now", field: "now")) }]) {
+  Text(text: "Edited " + timeAgo(document.editedAt, now))
+}
+```
+
 Collection helpers accept bounded pure lambdas such as `item -> item.enabled`. View helpers are
 `filter`, `map`, `sortBy`, `distinctBy`, `groupBy`, `flatten`, `takeWhile`, `window`, and `page`;
 terminal helpers are `count`, `any`, and `all`. A derived view exposes `items`, `total`, `matched`,
@@ -1617,7 +1657,10 @@ Panel(timers: [
 ```
 
 `clipboard.copy(text:)` writes text to the host clipboard (or the surface's local clipboard when the
-host installs none), where a paste reads it.
+host installs none), where a paste reads it. `clock.now` reads the wall clock and answers `then()`
+at once with `{ now, utcOffsetMinutes }`: a timer that runs `then(action("clock.now"),
+action("state.setFromEvent", name: "now", field: "now"))` keeps `now` current for `timeAgo` and
+`formatDate`.
 
 ## Animations and timelines
 

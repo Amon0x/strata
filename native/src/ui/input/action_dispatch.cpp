@@ -488,11 +488,20 @@ runtime::ActionDispatchOutcome InputRouter::execute_composition(
             };
         }
         last_platform_request_.reset();
+        last_answer_.reset();
         const runtime::ActionDispatchOutcome first =
             execute_action(event, *composition.children[0], node, result);
         if (first.status == runtime::ActionDispatchStatus::failed ||
             first.status == runtime::ActionDispatchStatus::unhandled) {
+            last_answer_.reset();
             return first;
+        }
+        // An answer known at once (the clock) is `next`'s event value, as a host's answer is.
+        if (last_answer_.has_value()) {
+            runtime::ActionEvent answered = event;
+            answered.value = std::move(*last_answer_);
+            last_answer_.reset();
+            return execute_action(answered, *composition.children[1], node, result);
         }
         // A platform request answers later; anything else has finished, so `next` runs now.
         if (last_platform_request_.has_value()) {
