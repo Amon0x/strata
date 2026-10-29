@@ -350,6 +350,22 @@ Scroll(layout: { kind: "SCROLL", height: { weight: 1 } }) {
 
 Absolute and sticky children paint and are hit above in-flow siblings with the same `zIndex`.
 
+### Responsive rows and children
+
+A `ROW` with `stackBelow: n` lays its children out as a `COLUMN` while the content width it is
+given is under `n` logical pixels. A child with `hideBelow: n` or `hideAbove: n` leaves layout
+(as `participates: false` would) while its parent's content width is under or over `n`. Both
+resolve during layout against the space actually given, so a sidebar collapsing or a split pane
+resizing reflows them without rebuilding the description:
+
+```strata
+Panel(layout: { kind: "ROW", gap: 12, stackBelow: 520 }) {
+  Avatar(user: user)
+  Panel(layout: { kind: "COLUMN", width: { weight: 1 } }) { Details(user: user) }
+  Panel(layout: { hideBelow: 520 }) { Actions(user: user) }
+}
+```
+
 A `SCROLL` layout's `scrollSnap` (`START`, `CENTER` or `END`) settles it on a child once the user
 stops scrolling: about 120 ms after the last wheel step or drag, and not while a press is held, it
 eases to the nearest child's start, centre or end. Its snap points are its children, or the
@@ -366,6 +382,19 @@ host bound, or from a runtime image the host published.
 
 ```strata
 Image(image: user.avatar, fit: "COVER", style: style(width: 40, height: 40, radius: 20, clip: true))
+```
+
+### Calendar
+
+`Calendar` shows a month and picks a day, exchanged as `"YYYY-MM-DD"` text: `value` (or `bind`) with
+`onChange`, `defaultValue` for an uncontrolled calendar, `min` and `max` to bound what can be
+picked, `today` to ring the current day (the host knows the date; pass it in), and
+`firstDayOfWeek` (0 for Sunday, 1 for Monday, the default). Pointer users pick a day or step months
+with the header buttons; keyboard users move by day with the arrows, by month with Page Up and Page
+Down (a year with Shift), to the week's ends with Home and End, and pick with Enter or Space.
+
+```strata
+Calendar(bind: due, today: env.today, min: env.today)
 ```
 
 ### Pointer cursor

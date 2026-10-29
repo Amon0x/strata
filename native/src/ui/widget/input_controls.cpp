@@ -8,6 +8,7 @@
 #include <string>
 #include <utility>
 
+#include "ui/widget/calendar_model.hpp"
 #include "ui/widget/choice_model.hpp"
 
 namespace strata::ui {
@@ -120,6 +121,71 @@ bool choose(WidgetInputScope& scope) {
     }
     set_choice_cursor(scope, target->index);
     scope.value_changed("onChange", "selection-changed", target->value);
+    return true;
+}
+
+/** Moves a Calendar's keyboard day, bringing its month on screen. */
+void calendar_move(WidgetInputScope& scope, const CalendarDate& to) {
+    scope.set_retained("$cursor", runtime::Value(to.text()), DirtyReason::properties);
+    scope.set_retained("$month", runtime::Value(CalendarDate{to.year, to.month, 1U}.text()),
+                       DirtyReason::properties);
+}
+
+/** Picks a day: uncontrolled Calendars keep it, and onChange carries its "YYYY-MM-DD". */
+void calendar_pick(WidgetInputScope& scope, const CalendarState& state, const CalendarDate& day) {
+    if (!state.allows(day))
+        return;
+    calendar_move(scope, day);
+    const runtime::Value* controlled = scope.property("value");
+    if (controlled == nullptr)
+        scope.set_retained("$value", runtime::Value(day.text()), DirtyReason::properties);
+    scope.value_changed("onChange", "date-changed", runtime::Value(day.text()));
+}
+
+bool calendar_click(WidgetInputScope& scope) {
+    const WidgetSubtarget* target = scope.subtarget();
+    if (target == nullptr || !target->enabled)
+        return false;
+    const CalendarState state = calendar_state(scope.node());
+    if (target->id == "previous" || target->id == "next") {
+        calendar_move(scope, state.cursor.add_months(target->id == "previous" ? -1 : 1));
+        return true;
+    }
+    const std::string* text = target->value.string();
+    const std::optional<CalendarDate> day =
+        text != nullptr ? CalendarDate::parse(*text) : std::nullopt;
+    if (!day.has_value())
+        return false;
+    calendar_pick(scope, state, *day);
+    return true;
+}
+
+/**
+ * Arrow keys move a day or a week, Page Up and Page Down a month (with Shift, a year), Home and End
+ * to the week's start and end; Enter and Space pick the keyboard day.
+ */
+bool calendar_key(WidgetInputScope& scope) {
+    const CalendarState state = calendar_state(scope.node());
+    const std::string_view key = scope.key();
+    const std::int64_t day = state.cursor.days();
+    const std::int64_t into_week =
+        static_cast<std::int64_t>((state.cursor.weekday() + 7U - state.first_weekday) % 7U);
+    std::optional<CalendarDate> next;
+    if (key == "left") next = CalendarDate::from_days(day - 1);
+    else if (key == "right") next = CalendarDate::from_days(day + 1);
+    else if (key == "up") next = CalendarDate::from_days(day - 7);
+    else if (key == "down") next = CalendarDate::from_days(day + 7);
+    else if (key == "home") next = CalendarDate::from_days(day - into_week);
+    else if (key == "end") next = CalendarDate::from_days(day + 6 - into_week);
+    else if (key == "pageup") next = state.cursor.add_months(scope.modifiers().shift ? -12 : -1);
+    else if (key == "pagedown") next = state.cursor.add_months(scope.modifiers().shift ? 12 : 1);
+    else if (key == "enter" || key == "space") {
+        calendar_pick(scope, state, state.cursor);
+        return true;
+    } else {
+        return false;
+    }
+    calendar_move(scope, *next);
     return true;
 }
 
@@ -390,6 +456,7 @@ void register_control_widget_inputs(WidgetRegistry& registry) {
     slider.pointer = &slider_pointer;
     registry.register_input_phase("Slider", std::move(slider));
     add(registry, "Tabs", true, &choose, &choice_key, "onChange", "Tabs");
+    add(registry, "Calendar", true, &calendar_click, &calendar_key, "onChange", "Calendar");
     add(registry, "RadioGroup", true, &choose, &choice_key, "onChange", "RadioGroup");
 
     WidgetInputPhase select;

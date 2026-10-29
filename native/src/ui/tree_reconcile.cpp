@@ -25,7 +25,7 @@ struct SiblingKey final {
                                            const runtime::ExpressionValue* next) noexcept {
     const runtime::Value* current_value = current != nullptr ? current->value() : nullptr;
     const runtime::Value* next_value = next != nullptr ? next->value() : nullptr;
-    static constexpr std::array<std::string_view, 43U> fields{
+    static constexpr std::array<std::string_view, 46U> fields{
         "kind",
         "width",
         "height",
@@ -41,6 +41,9 @@ struct SiblingKey final {
         "placement",
         "position",
         "inset",
+        "stackBelow",
+        "hideBelow",
+        "hideAbove",
         "alignItems",
         "justifyContent",
         "alignContent",

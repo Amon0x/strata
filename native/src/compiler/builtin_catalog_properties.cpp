@@ -30,6 +30,8 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{
             .name = "gridRow", .type = declared_type_reference("number"), .nullable = true},
         DeclaredProperty{.name = "height", .type = declared_type_reference("layoutSizeUnion")},
+        DeclaredProperty{.name = "hideAbove", .type = declared_type_reference("number")},
+        DeclaredProperty{.name = "hideBelow", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "inset", .type = declared_type_reference("spacingUnion")},
         DeclaredProperty{.name = "justifyContent",
                          .type = declared_type_reference("alignContentEnum")},
@@ -56,6 +58,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "portalTarget", .type = declared_type_reference("string")},
         DeclaredProperty{.name = "position", .type = declared_type_reference("layoutPosition")},
         DeclaredProperty{.name = "rowSpan", .type = declared_type_reference("number")},
+        DeclaredProperty{.name = "stackBelow", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "scrollSnap", .type = declared_type_reference("scrollSnap")},
         DeclaredProperty{.name = "width", .type = declared_type_reference("layoutSizeUnion")},
         DeclaredProperty{.name = "wrap", .type = declared_type_reference("boolean")},
@@ -135,6 +138,8 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{
             .name = "gridRow", .type = declared_type_reference("number"), .nullable = true},
         DeclaredProperty{.name = "height", .type = declared_type_reference("layoutSizeUnion")},
+        DeclaredProperty{.name = "hideAbove", .type = declared_type_reference("number")},
+        DeclaredProperty{.name = "hideBelow", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "inset", .type = declared_type_reference("spacingUnion")},
         DeclaredProperty{.name = "hintColor", .type = declared_type_reference("color")},
         DeclaredProperty{
@@ -183,6 +188,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "position", .type = declared_type_reference("layoutPosition")},
         DeclaredProperty{.name = "radius", .type = declared_type_reference("radiusUnion")},
         DeclaredProperty{.name = "rowSpan", .type = declared_type_reference("number")},
+        DeclaredProperty{.name = "stackBelow", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "rotate", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "scale", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "scaleX", .type = declared_type_reference("number")},

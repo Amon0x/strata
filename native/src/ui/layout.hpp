@@ -150,6 +150,11 @@ struct LayoutStyle final {
     std::optional<LayoutPlacement> placement;
     LayoutPosition position = LayoutPosition::flow;
     LayoutInset inset;
+    /** A ROW given less content width than this lays its children out as a COLUMN. */
+    std::optional<double> stack_below;
+    /** The node leaves layout while its parent's content width is below or above these. */
+    std::optional<double> hide_below;
+    std::optional<double> hide_above;
     bool wrap = false;
     bool clip = false;
     int z_index = 0;

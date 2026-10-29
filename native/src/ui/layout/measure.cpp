@@ -153,6 +153,19 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
     Constraints content_constraints = inner;
     content_constraints.max_width = available_content_width;
     content_constraints.max_height = available_content_height;
+    // Responsive layout resolves against the width this node is actually given, so a row stacks
+    // and children drop out without the description being built again.
+    if (measured.style.kind == LayoutKind::row && measured.style.stack_below.has_value() &&
+        std::isfinite(available_content_width) &&
+        available_content_width < *measured.style.stack_below) {
+        measured.style.kind = LayoutKind::column;
+    }
+    const auto hidden_at_width = [available_content_width](const LayoutStyle& style) {
+        if (!std::isfinite(available_content_width))
+            return false;
+        return (style.hide_below.has_value() && available_content_width < *style.hide_below) ||
+               (style.hide_above.has_value() && available_content_width > *style.hide_above);
+    };
     std::vector<const RetainedNode*> retained_children;
     std::vector<const RetainedNode*> anchor_children;
     std::vector<const RetainedNode*> absolute_children;
@@ -163,7 +176,8 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
     for (const auto& child : node.children()) {
         // Participation, positions, portals and anchors are never adjusted at runtime.
         const LayoutStyle& child_style = parsed_layout(*child).style;
-        if (child_style.participates && child->lifecycle() != RetainedLifecycle::exiting) {
+        if (child_style.participates && child->lifecycle() != RetainedLifecycle::exiting &&
+            !hidden_at_width(child_style)) {
             if (child_style.kind == LayoutKind::portal) {
                 portal_children.push_back(child.get());
             } else if (!child_style.anchor_target.empty()) {

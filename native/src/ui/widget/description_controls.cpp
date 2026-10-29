@@ -230,6 +230,12 @@ void progress_expand(WidgetDescriptionScope& scope) {
     );
 }
 
+void calendar_defaults(WidgetLayoutDefaultsScope& scope) {
+    scope.set("width", runtime::Value(280.0));
+    scope.set("height", runtime::Value(300.0));
+    scope.intrinsic(280.0, 300.0);
+}
+
 void tabs_defaults(WidgetLayoutDefaultsScope& scope) {
     scope.set("height", runtime::Value(34.0));
     scope.set("width", widget_fill());
@@ -760,6 +766,7 @@ void register_control_widget_descriptions(WidgetRegistry& registry) {
         "presentationTemplate"
     );
     add(registry, "Tabs", &tabs_defaults);
+    add(registry, "Calendar", &calendar_defaults);
     add(registry, "Select", &select_defaults, &select_expand);
     add(registry, "RadioGroup", &radio_group_defaults, &radio_group_expand, "RadioGroup");
     add(registry, "ComboBox", &combo_box_defaults, &combo_box_expand);

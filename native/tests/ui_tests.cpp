@@ -3132,6 +3132,70 @@ void test_sticky_child_holds_inside_scroll_viewport_and_parent() {
                "the next section's sticky header did not take over the viewport top");
 }
 
+void test_rows_stack_and_children_hide_by_width() {
+    using namespace strata;
+    using namespace strata::ui;
+    const auto box = [](const std::string& key, runtime::Value layout) {
+        return node("Panel", key, {}, layout_properties(std::move(layout)));
+    };
+    const auto tree_at = [&](const double width) {
+        return node(
+            "Panel", "responsive.root",
+            {node("Panel", "responsive.row",
+                  {
+                      box("responsive.a", object({{"height", runtime::Value(20.0)},
+                                                  {"width", runtime::Value(100.0)}})),
+                      box("responsive.b", object({{"height", runtime::Value(20.0)},
+                                                  {"width", runtime::Value(100.0)}})),
+                      box("responsive.wide", object({{"height", runtime::Value(20.0)},
+                                                     {"hideBelow", runtime::Value(500.0)},
+                                                     {"width", runtime::Value(100.0)}})),
+                      box("responsive.narrow", object({{"height", runtime::Value(20.0)},
+                                                       {"hideAbove", runtime::Value(500.0)},
+                                                       {"width", runtime::Value(100.0)}})),
+                  },
+                  layout_properties(object({
+                      {"kind", runtime::Value("ROW")},
+                      {"stackBelow", runtime::Value(400.0)},
+                      {"width", runtime::Value(width)},
+                  })))},
+            layout_properties(object({{"kind", runtime::Value("PANEL")}})));
+    };
+    const LayoutEnvironment environment{
+        0U,    Rect{0.0, 0.0, 800.0, 400.0}, 1.0,
+        {},    PointSnapPolicy::nearest,     RectangleSnapPolicy::outward,
+        false,
+    };
+    RetainedTree wide_tree;
+    static_cast<void>(wide_tree.reconcile(tree_at(600.0)));
+    LayoutEngine wide_layout;
+    const LayoutResult& wide = wide_layout.layout(wide_tree, environment);
+    const auto bounds_in = [](const LayoutResult& result, const RetainedTree& tree,
+                              const std::string& key) -> std::optional<Rect> {
+        // A node left out of layout keeps only an empty record, as a non-participating one does.
+        const LayoutRecord* record = result.find(tree.find_key(key)->identity());
+        return record != nullptr && !record->bounds.empty() ? std::optional<Rect>(record->bounds)
+                                                            : std::nullopt;
+    };
+    check(bounds_in(wide, wide_tree, "responsive.b")->x == 100.0 &&
+              bounds_in(wide, wide_tree, "responsive.b")->y == 0.0,
+          "a row wider than its stack threshold did not stay a row");
+    check(bounds_in(wide, wide_tree, "responsive.wide").has_value() &&
+              !bounds_in(wide, wide_tree, "responsive.narrow").has_value(),
+          "hideBelow and hideAbove did not follow a wide parent");
+
+    RetainedTree narrow_tree;
+    static_cast<void>(narrow_tree.reconcile(tree_at(300.0)));
+    LayoutEngine narrow_layout;
+    const LayoutResult& narrow = narrow_layout.layout(narrow_tree, environment);
+    check(bounds_in(narrow, narrow_tree, "responsive.b")->x == 0.0 &&
+              bounds_in(narrow, narrow_tree, "responsive.b")->y == 20.0,
+          "a row narrower than its stack threshold did not stack as a column");
+    check(!bounds_in(narrow, narrow_tree, "responsive.wide").has_value() &&
+              bounds_in(narrow, narrow_tree, "responsive.narrow").has_value(),
+          "hideBelow and hideAbove did not follow a narrow parent");
+}
+
 void test_nested_scroll_pin_uses_nearest_scroll_offset() {
     using namespace strata;
     using namespace strata::ui;
@@ -8388,6 +8452,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_layer_placement_and_sibling_anchors();
         test_absolute_children_leave_flow_in_any_container();
         test_sticky_child_holds_inside_scroll_viewport_and_parent();
+        test_rows_stack_and_children_hide_by_width();
         test_zero_fill_weight_collapses_without_stealing_space();
         test_layout_motion_preserves_relative_units();
         test_anchored_portal_is_out_of_flow_and_flips();

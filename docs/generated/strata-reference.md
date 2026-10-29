@@ -127,6 +127,51 @@ Children: `false` · Capabilities: —
 
 Retained state entries: 0 · Binding shorthands: 0
 
+### `Calendar`
+
+Children: `false` · Capabilities: —
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `value` | string | false | true | — |
+| `key` | key | false | false | — |
+| `defaultValue` | string | false | true | — |
+| `min` | string | false | true | — |
+| `max` | string | false | true | — |
+| `today` | string | false | true | — |
+| `firstDayOfWeek` | number | false | false | — |
+| `layout` | layout | false | false | — |
+| `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
+| `style` | style | false | false | — |
+| `visualStyle` | style | false | false | — |
+| `effect` | effect | false | false | — |
+| `material` | material | false | false | — |
+| `transition` | animation | false | false | — |
+| `enter` | animation | false | false | — |
+| `exit` | animation | false | false | — |
+| `move` | animation | false | false | — |
+| `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
+| `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
+| `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
+| `contentKey` | key | false | false | — |
+| `contentTransition` | animation | false | false | — |
+| `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `stagger` | duration | false | false | — |
+| `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
+| `textStyle` | style | false | false | — |
+| `textVisualStyle` | style | false | false | — |
+| `onChange` | action | false | false | — |
+| `bind` | any | false | false | — |
+| `animation` | animation | false | false | — |
+| `behaviors` | list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: "LEFT" \| "MIDDLE" \| "RIGHT", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of ("ALT" \| "CONTROL" \| "SHIFT" \| "SUPER"), policy?: "KEYBOARD_ONLY" \| "POINTER_AND_KEYBOARD" \| "POINTER_ONLY" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), insertionAxis?: "HORIZONTAL" \| "VERTICAL" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: "none" \| "parent", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: "HORIZONTAL" \| "VERTICAL", payloadType: string } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } }) | false | false | — |
+
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `date change` | `onChange` | unspecified | Carries the picked day as "YYYY-MM-DD". |
+
+Retained state entries: 3 · Binding shorthands: 1
+
 ### `Checkbox`
 
 Children: `false` · Capabilities: —
@@ -2131,6 +2176,13 @@ Observe the built-in Slider interaction Payload: `no payload`. Dispatch: `option
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
 
+### `Calendar`
+
+Observe the built-in Calendar interaction Payload: `no payload`. Dispatch: `optional`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+
 ### `Tabs`
 
 Observe the built-in Tabs interaction Payload: `no payload`. Dispatch: `optional`.
@@ -2579,6 +2631,8 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `gridColumn` | number |
 | `gridRow` | number |
 | `height` | number \| "auto" \| "content" \| { weight: number } \| { fraction: number } \| { max?: layout size atom, min?: layout size atom, preferred?: layout size atom } |
+| `hideAbove` | number |
+| `hideBelow` | number |
 | `inset` | number \| { all?: number, bottom?: number, horizontal?: number, left?: number, right?: number, top?: number, vertical?: number } |
 | `hintColor` | color |
 | `hoverOverlay` | color |
@@ -2608,6 +2662,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `position` | "ABSOLUTE" \| "FLOW" \| "STICKY" |
 | `radius` | number \| { all?: number, bottom?: number, bottomLeft?: number, bottomRight?: number, left?: number, right?: number, top?: number, topLeft?: number, topRight?: number } |
 | `rowSpan` | number |
+| `stackBelow` | number |
 | `rotate` | number |
 | `scale` | number |
 | `scaleX` | number |
@@ -2661,6 +2716,8 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `gridColumn` | number |
 | `gridRow` | number |
 | `height` | number \| "auto" \| "content" \| { weight: number } \| { fraction: number } \| { max?: layout size atom, min?: layout size atom, preferred?: layout size atom } |
+| `hideAbove` | number |
+| `hideBelow` | number |
 | `inset` | number \| { all?: number, bottom?: number, horizontal?: number, left?: number, right?: number, top?: number, vertical?: number } |
 | `justifyContent` | "CENTER" \| "END" \| "SPACE_AROUND" \| "SPACE_BETWEEN" \| "SPACE_EVENLY" \| "START" |
 | `justifySelf` | "CENTER" \| "END" \| "START" \| "STRETCH" |
@@ -2676,6 +2733,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `portalTarget` | string |
 | `position` | "ABSOLUTE" \| "FLOW" \| "STICKY" |
 | `rowSpan` | number |
+| `stackBelow` | number |
 | `scrollSnap` | "CENTER" \| "END" \| "NONE" \| "START" |
 | `width` | number \| "auto" \| "content" \| { weight: number } \| { fraction: number } \| { max?: layout size atom, min?: layout size atom, preferred?: layout size atom } |
 | `wrap` | boolean |

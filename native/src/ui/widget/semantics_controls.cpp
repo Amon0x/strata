@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "ui/widget/calendar_model.hpp"
 #include "ui/widget/choice_model.hpp"
 
 namespace strata::ui {
@@ -65,6 +66,12 @@ void numeric_range(WidgetSemanticsScope& scope) {
 // publishes no bounds rather than a slider's 0..1.
 void number_field(WidgetSemanticsScope& scope) {
     publish_value_range(scope, JsonValue{}, JsonValue{});
+}
+
+void calendar(WidgetSemanticsScope& scope) {
+    label_or_key(scope);
+    const CalendarState state = calendar_state(scope.node());
+    scope.default_value_text(state.selected.has_value() ? state.selected->text() : std::string{});
 }
 
 void tabs(WidgetSemanticsScope& scope) {
@@ -164,6 +171,7 @@ void add(
 void register_control_widget_semantics(WidgetRegistry& registry) {
     add(registry, "IconButton", "button", &icon_button);
     add(registry, "Checkbox", "checkbox", &label_or_key);
+    add(registry, "Calendar", "group", &calendar);
     add(registry, "Toggle", "switch", &label_or_key);
     add(registry, "Switch", "switch", &label_or_key);
     add(registry, "TextBox", "text_field", &text_field);

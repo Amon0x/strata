@@ -11,6 +11,7 @@
 #include "ui/notification.hpp"
 #include "ui/text_geometry.hpp"
 #include "ui/tree.hpp"
+#include "ui/widget/calendar_model.hpp"
 #include "ui/widget/choice_model.hpp"
 #include "ui/widget/menu_model.hpp"
 #include "ui/widget/registry.hpp"
@@ -212,6 +213,32 @@ Targets tabs(const WidgetSubtargetContext& context) {
             runtime::Value(*id), label != nullptr ? *label : *id, {},
             boolean(entry.field("enabled"), true), false, context.record.z_index,
         });
+    }
+    return result;
+}
+
+/** A Calendar's month buttons and its 42 day cells; a day's value is its "YYYY-MM-DD". */
+Targets calendar(const WidgetSubtargetContext& context) {
+    Targets result;
+    const RetainedNode& node = context.node;
+    const CalendarState state = calendar_state(node);
+    const CalendarProjection projection = calendar_projection(state, context.record.bounds);
+    const int z = context.record.z_index;
+    result.push_back(WidgetSubtarget{node.identity(), "previous", WidgetSubtargetKind::control, 0U,
+                                     projection.previous, runtime::Value("previous"),
+                                     "Previous month", {}, true, false, z});
+    result.push_back(WidgetSubtarget{node.identity(), "next", WidgetSubtargetKind::control, 1U,
+                                     projection.next, runtime::Value("next"), "Next month", {},
+                                     true, false, z});
+    for (std::size_t index = 0U; index < projection.cells.size(); ++index) {
+        const CalendarCell& cell = projection.cells[index];
+        const std::string text = cell.date.text();
+        result.push_back(WidgetSubtarget{
+            node.identity(), "day:" + text, WidgetSubtargetKind::choice, index + 2U, cell.bounds,
+            runtime::Value(text),
+            std::string(calendar_month_name(cell.date.month)) + " " +
+                std::to_string(cell.date.day) + ", " + std::to_string(cell.date.year),
+            {}, cell.enabled, false, z});
     }
     return result;
 }
@@ -814,6 +841,7 @@ Targets within_bounds(const WidgetSubtargetContext& context) {
 void register_builtin_widget_subtargets(WidgetRegistry& registry) {
     registry.register_subtargets("RichText", &within_bounds<&rich_text>);
     registry.register_subtargets("Tabs", &within_bounds<&tabs>);
+    registry.register_subtargets("Calendar", &within_bounds<&calendar>);
     registry.register_subtargets("RadioGroup", &within_bounds<&radio_group>);
     registry.register_subtargets("Select", &within_bounds<&select>, true);
     registry.register_subtargets("Menu", &within_bounds<&menu>, true);

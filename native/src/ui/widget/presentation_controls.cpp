@@ -8,6 +8,7 @@
 #include "ui/motion.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
+#include "ui/widget/calendar_model.hpp"
 #include "ui/widget/choice_model.hpp"
 #include "ui/widget/editor_geometry.hpp"
 #include "ui/widget/icon_geometry.hpp"
@@ -464,6 +465,60 @@ void tabs_content(WidgetRenderScope& scope) {
     scope.focus(scope.layout().bounds);
 }
 
+/**
+ * A month: its name between the month buttons, weekday initials, then six weeks of days. The
+ * selected day fills with the accent, today is ringed, the keyboard day is outlined while focus is
+ * visible, and days outside the month or outside min/max are muted.
+ */
+void calendar_content(WidgetRenderScope& scope) {
+    const CalendarState state = calendar_state(scope.node());
+    const CalendarProjection projection = calendar_projection(state, scope.layout().bounds);
+    if (scope.visual().background.has_value()) {
+        scope.rounded_rect(scope.layout().bounds, *scope.visual().background,
+                           scope.visual().border);
+    }
+    const RenderColor ink = scope.visual().foreground;
+    const RenderColor muted = scope.palette("disabledForeground");
+    const auto centred = [&scope](const std::string& value, const Rect bounds,
+                                  const RenderColor color) {
+        if (scope.text_engine() == nullptr)
+            return;
+        const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), value);
+        scope.text(value, Point{bounds.x, bounds.y + (bounds.height - shaped.metrics.height) * 0.5},
+                   color, bounds.width, WidgetTextAlignment::center);
+    };
+    centred(std::string(calendar_month_name(projection.month.month)) + " " +
+                std::to_string(projection.month.year),
+            projection.header, ink);
+    scope.interaction(projection.previous, "previous");
+    scope.interaction(projection.next, "next");
+    centred("<", projection.previous, ink);
+    centred(">", projection.next, ink);
+    for (const auto& [weekday, bounds] : projection.weekdays)
+        centred(std::string(calendar_weekday_short(weekday)), bounds, muted);
+    for (const CalendarCell& cell : projection.cells) {
+        const double side = std::max(0.0, std::min(cell.bounds.width, cell.bounds.height) - 4.0);
+        const Rect mark{cell.bounds.x + (cell.bounds.width - side) * 0.5,
+                        cell.bounds.y + (cell.bounds.height - side) * 0.5, side, side};
+        const bool selected = state.selected.has_value() && *state.selected == cell.date;
+        if (selected)
+            scope.rounded_rect(mark, scope.visual().fill, std::nullopt, side * 0.5);
+        else if (state.today.has_value() && *state.today == cell.date)
+            scope.border(mark, RenderBorder{1.0, scope.visual().fill.representative(), true},
+                         side * 0.5);
+        if (cell.enabled)
+            scope.interaction(cell.bounds, "day:" + cell.date.text());
+        if (scope.focus_visible() && cell.date == state.cursor) {
+            scope.border(mark, scope.visual().focus_ring.value_or(RenderBorder{2.0, ink, true}),
+                         side * 0.5);
+        }
+        const RenderColor color = selected ? scope.palette("tokenActive")
+                                  : cell.in_month && cell.enabled ? ink
+                                                                  : muted;
+        centred(std::to_string(cell.date.day), cell.bounds, color);
+    }
+}
+
 void select_content(WidgetRenderScope& scope) {
     if (scope.property("triggerTemplate") != nullptr) {
         scope.focus(scope.layout().bounds);
@@ -647,6 +702,7 @@ void register_control_widget_presenters(WidgetRegistry& registry) {
     add(registry, "NumberField", &number_text_content);
     add(registry, "Progress", &progress_content, nullptr, nullptr, false, {}, true);
     add(registry, "Tabs", &tabs_content);
+    add(registry, "Calendar", &calendar_content);
     add(registry, "Select", &select_content, nullptr, &select_overlay, true, {false, true, false});
     add(registry, "RadioGroup", nullptr, &radio_foreground, nullptr, false, {true, false, false});
     add(registry, "ComboBox", nullptr);

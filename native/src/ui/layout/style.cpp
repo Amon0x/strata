@@ -204,6 +204,15 @@ LayoutStyle layout_style(const DescriptionNode& description) {
     else if (position == "STICKY")
         style.position = LayoutPosition::sticky;
     style.inset = layout_inset(field(layout, "inset"));
+    const auto threshold = [layout](const std::string_view name) -> std::optional<double> {
+        const runtime::Value* value = field(layout, name);
+        if (value == nullptr || value->number() == nullptr || !std::isfinite(*value->number()))
+            return std::nullopt;
+        return std::max(0.0, *value->number());
+    };
+    style.stack_below = threshold("stackBelow");
+    style.hide_below = threshold("hideBelow");
+    style.hide_above = threshold("hideAbove");
     style.wrap = boolean(field(layout, "wrap"));
     style.clip = boolean(field(layout, "clip"));
     const runtime::Value* columns = field(layout, "columns");

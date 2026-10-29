@@ -3192,6 +3192,75 @@ overlay Pictures {
           "NONE did not draw the image at its natural size, centred and cropped");
 }
 
+void test_calendar_picks_days_by_pointer_and_keyboard(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Dates {
+  state picked = "2024-03-15";
+  root Panel(key: "dates.root", layout: { kind: "COLUMN", width: 320, height: 360 }) {
+    Calendar(key: "dates.calendar", bind: picked, today: "2024-03-08", max: "2024-04-10",
+             firstDayOfWeek: 1)
+    Text(key: "dates.picked", text: picked)
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("calendar", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Dates", 320.0, 360.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const ui::RetainedNode* calendar = surface->tree().find_key("dates.calendar");
+    check(calendar != nullptr, "calendar fixture is missing its Calendar");
+    const auto targets = [&] { return surface->input().subtargets(calendar->identity()); };
+    std::vector<ui::WidgetSubtarget> shown = targets();
+    check(shown.size() == 44U, "a Calendar did not project its month buttons and 42 days");
+    // March 2024 begins on a Friday; a Monday-first grid starts on 26 February.
+    check(shown[2].id == "day:2024-02-26" && shown[43].id == "day:2024-04-07",
+          "a Monday-first month view did not start on the week's Monday");
+    const auto picked = [&] {
+        const ui::RetainedNode* node = surface->tree().find_key("dates.picked");
+        const auto found = node->description().properties.find("text");
+        return found->second.value() != nullptr && found->second.value()->string() != nullptr
+                   ? *found->second.value()->string()
+                   : std::string{};
+    };
+    const auto click = [&](const std::string_view id) {
+        for (const ui::WidgetSubtarget& target : targets()) {
+            if (target.id != id)
+                continue;
+            std::vector<ui::SurfaceInputEvent> events;
+            events.emplace_back(
+                ui::PointerInputEvent{center(target.bounds), ui::PointerEventType::press, 4, 0});
+            events.emplace_back(
+                ui::PointerInputEvent{center(target.bounds), ui::PointerEventType::release, 4, 0});
+            static_cast<void>(surface->input().enqueue(std::move(events)));
+            static_cast<void>(surface->frame(now += 16'000'000));
+            static_cast<void>(surface->frame(now += 16'000'000));
+            return true;
+        }
+        return false;
+    };
+    check(click("day:2024-03-20") && picked() == "2024-03-20",
+          "clicking a day did not pick it through the bound state");
+    std::vector<ui::SurfaceInputEvent> keys;
+    keys.emplace_back(ui::KeyInputEvent{"right"});
+    keys.emplace_back(ui::KeyInputEvent{"down"});
+    keys.emplace_back(ui::KeyInputEvent{"pagedown"});
+    keys.emplace_back(ui::KeyInputEvent{"enter"});
+    static_cast<void>(surface->input().enqueue(std::move(keys)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(picked() == "2024-04-28" || picked() == "2024-03-20",
+          "keyboard navigation produced an unexpected day");
+    // 28 April is past max, so Enter must not pick it: the selection stays.
+    check(picked() == "2024-03-20", "Enter picked a day outside the Calendar's range");
+    check(targets()[2].id == "day:2024-04-01", "Page Down did not bring the next month on screen");
+    check(click("next") && targets()[2].id == "day:2024-04-29",
+          "the next-month button did not advance the month");
+    check(!click("day:2024-05-20") || picked() == "2024-03-20",
+          "a day after max was picked by a click");
+}
+
 void test_palette_projection_is_cached_across_frames(const std::filesystem::path& resources) {
     std::string commands;
     for (int index = 0; index < 40; ++index) {
@@ -3341,6 +3410,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_delayed_and_clipboard_actions(resources);
         test_scroll_snaps_to_the_nearest_child(resources);
         test_image_fit_keeps_the_aspect_ratio();
+        test_calendar_picks_days_by_pointer_and_keyboard(resources);
         test_palette_projection_is_cached_across_frames(resources);
         test_environment_set_rebuilds_once(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";
