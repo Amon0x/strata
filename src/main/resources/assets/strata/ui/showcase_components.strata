@@ -1284,6 +1284,8 @@ component PageViewport(selectedPage: string, chrome: Binding<string>) {
       Scroll(key: "targets.page.scroll.draw", persistenceKey: "showcase.page.scroll.draw", vertical: true, horizontal: false, style: PageScroll) { DrawPage() }
     } else if selectedPage == "MEDIA" {
       Scroll(key: "targets.page.scroll.media", persistenceKey: "showcase.page.scroll.media", vertical: true, horizontal: false, style: PageScroll) { MediaPage() }
+    } else if selectedPage == "NET" {
+      Scroll(key: "targets.page.scroll.net", persistenceKey: "showcase.page.scroll.net", vertical: true, horizontal: false, style: PageScroll) { NetPage() }
     } else if selectedPage == "SYSTEM" {
       Scroll(key: "targets.page.scroll.system", persistenceKey: "showcase.page.scroll.system", vertical: true, horizontal: false, style: PageScroll) { SystemPage(chrome: chrome) }
     } else if selectedPage == "DESKTOP" {
@@ -1322,7 +1324,8 @@ component ShowcaseHeader(selectedPage: Binding<string>, chrome: Binding<string>)
         { id: "SHELL", label: "SHELL" },
         { id: "SYSTEM", label: "SYSTEM" },
         { id: "MEDIA", label: "MEDIA" },
-        { id: "DESKTOP", label: "DESKTOP" }
+        { id: "DESKTOP", label: "DESKTOP" },
+        { id: "NET", label: "NET" }
       ],
       selectedId: selectedPage,
       layout: { width: { weight: 1 }, height: 34 },
@@ -2127,6 +2130,197 @@ component SecondWindowRoot() {
   }
 }
 
+style NetLog {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: 10;
+  gap: 3;
+  radius: 12;
+  background: #0D121BFF;
+  border: { width: 1, color: #2A3342FF };
+}
+
+style NetLine {
+  pixelSize: 13;
+  color: #CFE0FFFF;
+}
+
+style NetSent {
+  pixelSize: 13;
+  color: #8FE3B0FF;
+}
+
+style NetQuiet {
+  pixelSize: 12;
+  color: #7D8AA0FF;
+}
+
+component NetPage() {
+  state server = "http://127.0.0.1:8765";
+  state fetched = { ok: false, status: 0, statusText: "", error: "" };
+  state people = [];
+  state echoed = { ok: false, status: 0, body: "", error: "" };
+  state note = "Hello from a .strata document";
+  state socketUrl = "ws://127.0.0.1:8765/chat";
+  state socketState = "closed";
+  state draft = "Hi there";
+  state chat = [];
+  state folder = "%TEMP%\\strata-net-demo";
+  state written = { ok: false, path: "", size: 0, error: "" };
+  state readBack = { ok: false, path: "", text: "", size: 0, error: "" };
+  state listed = { ok: false, path: "", entries: [], error: "" };
+  state trashed = { ok: false, path: "", error: "" };
+  state watched = { ok: false, path: "", error: "" };
+  state watchLog = [];
+  state muted = false;
+  state music = { ok: false, id: "", duration: 0, paused: false, error: "" };
+  state clicks = 0;
+  derived connected = socketState == "open" || socketState == "message";
+  derived notePath = format("{0}\\note.txt", folder);
+  Panel(style: PageColumn) {
+    Card(title: "HTTP: A GET SHOWN AS A LIST, A POST ECHOED BACK") {
+      Panel(style: ActionRow) {
+        TextBox(key: "net.server", bind: server, layout: { width: 300 })
+        Button(key: "net.fetch", label: "Fetch", onClick: then(
+          action("http.request", url: format("{0}/people", server), headers: { Accept: "application/json" }, timeout: 5000),
+          sequence(
+            action("state.setFromEvent", name: "fetched"),
+            action("state.setFromEvent", name: "people", field: "json"))))
+        Button(key: "net.echo", label: "POST echo", onClick: then(
+          action("http.request", url: format("{0}/echo", server), method: "POST", body: { note: note, clicks: clicks }, as: "text", timeout: 5000),
+          action("state.setFromEvent", name: "echoed")))
+      }
+      Text(text: (fetched.error ?? "") != "" ? format("GET failed: {0}", fetched.error) : (fetched.status == 0 ? "Start the demo server (python tools/net/demo_server.py), then Fetch." : format("GET {0} {1}: {2} people", fetched.status, fetched.statusText, count(people))), style: CardNote, wrapMode: "WORD")
+      if count(people) > 0 {
+        Panel(style: NetLog) {
+          for person in people {
+            Text(text: format("{0}  ·  {1}, {2}", person.name, person.role, person.year), style: NetLine, maxLines: 1)
+          }
+        }
+      }
+      Text(text: (echoed.error ?? "") != "" ? format("POST failed: {0}", echoed.error) : (echoed.status == 0 ? "POST echo sends { note, clicks } as JSON; the server sends it back." : format("POST {0}, echoed: {1}", echoed.status, echoed.body)), style: CardNote, wrapMode: "WORD")
+    }
+    Card(title: "WEBSOCKET: A CHAT OVER ws://") {
+      Panel(
+        style: ActionRow,
+        // What the socket says arrives on the channel named by its id.
+        behaviors: [{ id: "strata.channel", options: { channel: "net.chat" }, action: sequence(
+          action("state.setFromEvent", name: "socketState", field: "type"),
+          action("state.listAppend", name: "chat", fromEvent: true, limit: 40)) }]
+      ) {
+        TextBox(key: "net.socket.url", bind: socketUrl, layout: { width: 300 })
+        Button(key: "net.socket.open", label: "Connect", onClick: action("socket.open", id: "net.chat", url: socketUrl))
+        Button(key: "net.socket.close", label: "Disconnect", enabled: connected, onClick: action("socket.close", id: "net.chat", reason: "done"))
+      }
+      Panel(style: ActionRow) {
+        TextBox(key: "net.socket.draft", bind: draft, layout: { width: 300 })
+        Button(key: "net.socket.send", label: "Send", enabled: connected && draft != "", onClick: sequence(
+          action("socket.send", id: "net.chat", text: draft),
+          action("state.listAppend", name: "chat", value: { type: "sent", text: draft }, limit: 40),
+          action("state.set", name: "draft", value: "")))
+        Button(key: "net.socket.json", label: "Send JSON", enabled: connected, onClick: sequence(
+          action("socket.send", id: "net.chat", json: { ping: clicks, note: note }),
+          action("state.listAppend", name: "chat", value: { type: "sent", text: format("{ ping: {0} }", clicks) }, limit: 40)))
+        Button(key: "net.socket.clear", label: "Clear", onClick: action("state.listClear", name: "chat"))
+      }
+      Panel(style: NetLog) {
+        if count(chat) == 0 {
+          Text(text: "Connect, then send something: the demo server echoes it to everyone connected, and says the time every ten seconds. Send /bye and the server closes.", style: NetQuiet, wrapMode: "WORD")
+        }
+        for line in chat {
+          Text(
+            text: line.type == "sent" ? format("you  {0}", line.text)
+              : (line.type == "message" ? ((line.json ?? null) != null ? format("{0}  {1}", line.json.from, line.json.text) : line.text)
+              : (line.type == "open" ? "· connected"
+              : (line.type == "closed" ? format("· closed ({0}) {1}", line.code, line.reason) : format("· error: {0}", line.error)))),
+            style: line.type == "sent" ? NetSent : (line.type == "message" ? NetLine : NetQuiet),
+            maxLines: 2, wrapMode: "WORD")
+        }
+      }
+    }
+    Card(title: "FILES: WRITE, READ, LIST AND WATCH A FOLDER") {
+      Panel(
+        style: ActionRow,
+        behaviors: [{ id: "strata.channel", options: { channel: "net.watch" }, action: action("state.listAppend", name: "watchLog", fromEvent: true, limit: 10) }]
+      ) {
+        TextBox(key: "net.file.text", bind: note, layout: { width: 300 })
+        Button(key: "net.file.write", label: "Write", onClick: then(
+          action("file.write", path: notePath, text: note, createDirectories: true),
+          action("state.setFromEvent", name: "written")))
+        Button(key: "net.file.append", label: "Append", onClick: then(
+          action("file.write", path: notePath, text: format("\n{0}", note), append: true, createDirectories: true),
+          action("state.setFromEvent", name: "written")))
+        Button(key: "net.file.read", label: "Read", onClick: then(
+          action("file.read", path: notePath, as: "text"),
+          action("state.setFromEvent", name: "readBack")))
+        Button(key: "net.file.list", label: "List", onClick: then(
+          action("file.list", path: folder),
+          action("state.setFromEvent", name: "listed")))
+        Button(key: "net.file.watch", label: watched.ok ? "Stop watching" : "Watch", onClick: chooseAction(watched.ok,
+          sequence(
+            action("file.unwatch", channel: "net.watch"),
+            action("state.set", name: "watched", value: { ok: false, path: "", error: "" })),
+          then(
+            action("file.watch", path: folder, channel: "net.watch"),
+            action("state.setFromEvent", name: "watched"))))
+        Button(key: "net.file.trash", label: "Trash note", onClick: then(
+          action("file.trash", path: notePath),
+          action("state.setFromEvent", name: "trashed")))
+        Button(key: "net.file.open", label: "Read a file…", onClick: then(
+          action("system.openFile", title: "Read a text file"),
+          then(action("file.read", as: "text"), action("state.setFromEvent", name: "readBack"))))
+      }
+      Text(text: format("Folder {0} (environment variables expand). Write creates it.", folder), style: CardNote, wrapMode: "WORD")
+      Text(text: (written.error ?? "") != "" ? format("Write failed: {0}", written.error) : (written.ok ? format("Wrote {0} bytes to {1}", written.size, written.path) : "Nothing written yet."), style: CardNote, wrapMode: "WORD")
+      if trashed.ok || (trashed.error ?? "") != "" {
+        Text(text: trashed.ok ? format("Moved {0} to the recycle bin: restore it from there.", trashed.path) : format("Trash: {0}", trashed.error), style: CardNote, wrapMode: "WORD")
+      }
+      Panel(style: NetLog) {
+        Text(text: (readBack.error ?? "") != "" ? format("Read failed: {0}", readBack.error) : (readBack.ok ? format("Read {0} bytes of {1}:", readBack.size, readBack.path) : "Read shows the note here."), style: NetQuiet, wrapMode: "WORD")
+        if readBack.ok {
+          Text(text: readBack.text, style: NetLine, maxLines: 6, wrapMode: "WORD")
+        }
+      }
+      Panel(style: NetLog) {
+        Text(text: (listed.error ?? "") != "" ? format("List failed: {0}", listed.error) : (listed.ok ? format("{0} holds {1} entries:", listed.path, count(listed.entries)) : "List shows the folder here."), style: NetQuiet, wrapMode: "WORD")
+        for entry in listed.entries {
+          Text(text: format("{0}{1}  ·  {2} bytes", entry.name, entry.directory ? "\\" : "", entry.size), style: NetLine, maxLines: 1)
+        }
+      }
+      Panel(style: NetLog) {
+        Text(text: watched.ok ? format("Watching {0}: change anything in it, here or in Explorer.", watched.path) : ((watched.error ?? "") != "" ? format("Watch failed: {0}", watched.error) : "Watch reports changes to the folder as they happen."), style: NetQuiet, wrapMode: "WORD")
+        for change in watchLog {
+          Text(text: change.type == "renamed" ? format("renamed  {0}  ←  {1}", change.path, change.oldPath) : format("{0}  {1}", change.type, change.path), style: NetLine, maxLines: 1, overflow: "ELLIPSIS")
+        }
+      }
+    }
+    Card(title: "SOUND: EFFECTS AND MUSIC") {
+      Panel(style: ActionRow) {
+        Toggle(key: "net.audio.muted", label: "Muted", checked: muted, onChange: sequence(
+          action("state.setFromEvent", name: "muted"),
+          action("audio.set", id: "net.music", muted: !muted)))
+        Button(key: "net.audio.click", label: "Click", onClick: sequence(
+          action("audio.play", source: "assets/strata/media/click.wav", volume: 0.9, muted: muted),
+          action("state.adjust", name: "clicks", amount: 1)))
+        Button(key: "net.audio.chime", label: "Chime", onClick: action("audio.play", source: "assets/strata/media/chime.wav", id: "net.chime", volume: 0.6, muted: muted))
+        Button(key: "net.audio.music", label: "Play music", onClick: then(
+          action("audio.play", source: "assets/strata/media/loop.m4a", id: "net.music", loop: true, volume: 0.5, muted: muted),
+          action("state.setFromEvent", name: "music")))
+        Button(key: "net.audio.pause", label: "Pause", enabled: music.ok, onClick: then(action("audio.pause", id: "net.music"), action("state.setFromEvent", name: "music")))
+        Button(key: "net.audio.resume", label: "Resume", enabled: music.ok, onClick: then(action("audio.resume", id: "net.music"), action("state.setFromEvent", name: "music")))
+        Button(key: "net.audio.fast", label: "1.5×", enabled: music.ok, onClick: action("audio.set", id: "net.music", rate: 1.5))
+        Button(key: "net.audio.normal", label: "1×", enabled: music.ok, onClick: action("audio.set", id: "net.music", rate: 1))
+        Button(key: "net.audio.stop", label: "Stop music", enabled: music.ok, onClick: sequence(
+          action("audio.stop", id: "net.music"),
+          action("state.set", name: "music", value: { ok: false, id: "", duration: 0, paused: false, error: "" })))
+      }
+      Text(text: format("Clicks: {0}. Each click is its own sound: click fast and they overlap.", clicks), style: CardNote)
+      Text(text: (music.error ?? "") != "" ? format("Music failed: {0}", music.error) : (music.ok ? format("Music: {0} s loop{1}", round(music.duration * 10) / 10, music.paused ? ", paused" : "") : "Music: stopped."), style: CardNote)
+    }
+  }
+}
+
 component TypePage() {
   state weight = 400;
   state width = 100;
@@ -2874,6 +3068,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "The three canvases move every frame. A timer advances the data every 2.2 s while Auto is on, and Shuffle data steps it at once; either morphs the charts, gauge, sunburst and blob over the standard motion policy; the sunburst's slices meet with no seam. The loops turn and breathe without blurring an edge. Reduced motion snaps the data and stops the loops.", wrapMode: "WORD")
   } else if selectedPage == "MEDIA" {
     Text(text: "The GIF, APNG and WebP play by themselves, each frame for as long as its file says, looping as the file asks. The photo is a progressive JPEG. Play runs a ten-second H.264 clip with its sound through Media Foundation into a runtime image, so any Image can show it, clipped, rounded or turned; pause, resume, skip and restart it, or open or drop your own video.", wrapMode: "WORD")
+  } else if selectedPage == "NET" {
+    Text(text: "Run python tools/net/demo_server.py first. Fetch GETs a JSON list over HTTP (WinHTTP, on a worker: the frame never waits) and shows it; POST echo sends JSON and shows what came back. Connect opens a WebSocket: Send and Send JSON reach the server, which echoes to everyone connected and says the time every ten seconds; /bye makes it close. Write, Append, Read and List work in a temp folder; Watch reports every change there as it happens, and Trash note moves the note to the recycle bin. Click plays a short sound each press, overlapping when fast; Chime, and a music loop you can pause, speed up and mute.", wrapMode: "WORD")
   } else if selectedPage == "SYSTEM" {
     Text(text: "Drag files from Explorer onto the drop box: it lights up as they arrive and lists them when dropped. Open files, pick a folder or save: the dialogs are Windows' own, and their answers land in state. Send a notification from the tray icon; open a folder or link in its default app. Mica, Acrylic and Tabbed turn the header into the title bar (drag to move, double-click to maximize, buttons at its right) over the system backdrop. Paste an image from the clipboard and copy it back.", wrapMode: "WORD")
   } else if selectedPage == "DESKTOP" {

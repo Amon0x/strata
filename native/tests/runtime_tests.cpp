@@ -367,7 +367,7 @@ void test_builtin_catalog_projects_runtime_action_contracts() {
     const strata::compiler::SchemaRegistry schema = strata::compiler::SchemaRegistry::builtins();
     const strata::runtime::RuntimeActionRegistry actions =
         strata::runtime::RuntimeActionRegistry::from_schema(schema);
-    check(actions.contracts().size() == 86U, "built-in action inventory changed");
+    check(actions.contracts().size() == 102U, "built-in action inventory changed");
     const auto button = actions.contract("Button");
     check(button != nullptr &&
               button->dispatch_policy == strata::runtime::ActionDispatchPolicy::optional &&
@@ -1693,17 +1693,22 @@ overlay Main { root Panel(style: Crad) })");
     check(has(state_actions(R"(action("state.listAppend", name: "tags", value: 5))"),
               "STRATA.DSL.SEMANTIC_TYPE_MISMATCH"),
           "appending a number to a List<string> compiled");
+    check(has(state_actions(R"(action("state.listAppend", name: "tags"))"),
+              "STRATA.DSL.SEMANTIC_MISSING_ACTION_ARGUMENT"),
+          "appending neither a value nor the event compiled");
     check(message(state_actions(R"(action("state.recordSet", name: "rec", field: "titel", value: "x"))"),
                   "STRATA.DSL.SEMANTIC_UNKNOWN_FIELD")
               .ends_with("Did you mean 'title'?"),
           "setting an undeclared Record field compiled");
-    for (const std::string_view valid : {
-             R"(action("state.adjust", name: "count", amount: 1))",
-             R"(action("state.toggle", name: "open"))",
-             R"(action("state.set", name: "name", value: "Ada"))",
-             R"(action("state.listAppend", name: "tags", value: "new"))",
-             R"(action("state.recordSet", name: "rec", field: "saved", value: true))",
-         }) {
+    for (
+        const std::string_view valid : {
+            R"(action("state.adjust", name: "count", amount: 1))",
+            R"(action("state.toggle", name: "open"))",
+            R"(action("state.set", name: "name", value: "Ada"))",
+            R"(action("state.listAppend", name: "tags", value: "new"))",
+            R"(action("state.listAppend", name: "tags", fromEvent: true, field: "text", limit: 20))",
+            R"(action("state.recordSet", name: "rec", field: "saved", value: true))",
+        }) {
         const auto found = state_actions(valid);
         check(found.empty(), "a valid state action produced diagnostics: " + std::string(valid) +
                                  " -> " + (found.empty() ? std::string() : found.front().message));

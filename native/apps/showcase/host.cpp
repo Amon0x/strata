@@ -1415,6 +1415,8 @@ struct Host::Impl final {
 
     void close_session(Layer& layer) noexcept {
         if (layer.session == nullptr) return;
+        // Its requests in flight, sockets, watches and sounds go with it.
+        platform.close_client(layer.id);
         try {
             layer.session->close([this](const RenderPacket& terminal) {
                 renderer.consume_resources(terminal);

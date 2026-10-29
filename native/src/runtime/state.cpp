@@ -374,6 +374,18 @@ StateMutationResult StateMutation::apply(StateStore& state) const {
         if (kind == StateMutationKind::list_append) {
             if (value == nullptr) return rejected("state.listAppend requires value");
             values.push_back(*value);
+            // A log keeps its newest items: the oldest leave as new ones arrive.
+            if (const Value* limit = argument(arguments, "limit"); limit != nullptr) {
+                const double* count = limit->number();
+                if (count == nullptr || !std::isfinite(*count) || *count < 1.0) {
+                    return rejected("state.listAppend limit must be a positive count");
+                }
+                const auto keep = static_cast<std::size_t>(std::min(*count, 1.0e9));
+                if (values.size() > keep) {
+                    values.erase(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(
+                                                                      values.size() - keep));
+                }
+            }
         } else if (kind == StateMutationKind::list_insert) {
             const std::optional<std::size_t> index = index_argument(arguments);
             if (value == nullptr || !index.has_value() || *index > values.size()) {

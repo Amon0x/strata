@@ -780,6 +780,80 @@ Button(label: "Save a picture", onClick: then(
   action("state.setFromEvent", name: "captured")))
 ```
 
+### Network, files and sound
+
+`http.request` sends an HTTP or HTTPS request: `url`, `method` (`"GET"` unless given), `headers`
+(an object), `body` (text as it is; an object or list goes as JSON, with its content type set
+unless `headers` names one) and `timeout` (milliseconds, 30 s unless given). Its answer is
+`{ ok, status, statusText, headers, body }`, `ok` meaning a 2xx status and `headers` keyed by
+lower-case name; with `as: "json"`, or a JSON content type when `as` is left out, `json` holds the
+parsed body instead of `body` (`as: "text"` keeps the text). A request that gets no response, or
+whose JSON does not parse, answers `ok: false` with an `error`.
+
+```strata
+Button(label: "Load", onClick: then(
+  action("http.request", url: "https://example.com/api/items", timeout: 5000),
+  sequence(action("state.setFromEvent", name: "response"),
+           action("state.setFromEvent", name: "items", field: "json"))))
+Button(label: "Save", onClick: action("http.request", url: "https://example.com/api/items",
+                                      method: "POST", body: { title: title, done: false }))
+```
+
+`socket.open` (`id`, `url`: `ws://` or `wss://`, `headers`, `protocols`) opens a WebSocket, and
+everything it says arrives on the channel named by its `id`: `{ type: "open", protocol }` once
+connected, `{ type: "message", text, json }` for each message (`json` only when the text parses as
+JSON; a binary message brings `base64` instead), `{ type: "closed", code, reason }` when either
+side closes it, and `{ type: "error", error }`. `socket.send` (`id`, and `text` or `json`; with
+neither, the text its event brings) sends a message, and `socket.close` (`id`, `code`, `reason`)
+closes it. `then` after `socket.open` receives `{ ok, id, protocol }` once it connects, or `error`.
+
+```strata
+Panel(behaviors: [{ id: "strata.channel", options: { channel: "chat" },
+                    action: action("state.listAppend", name: "messages", fromEvent: true, limit: 100) }]) {
+  Button(label: "Connect", onClick: action("socket.open", id: "chat", url: "wss://example.com/chat"))
+  Button(label: "Send", onClick: action("socket.send", id: "chat", json: { text: draft }))
+}
+```
+
+`file.read` (`path`, `as`: `"text"`, `"json"` or `"base64"`) answers `{ ok, path, size, modified }`
+with `text`, `json` or `base64`; `modified` is in milliseconds since 1970, for `formatDate`.
+`file.write` (`path`; `text`, `json` or `base64`; `append`; `createDirectories`) answers
+`{ ok, path, size }`. `file.list` (`path`, `pattern` such as `"*.png"`, `recursive`) answers
+`{ ok, path, entries }`, each entry `{ name, path, directory, size, modified }`, folders first.
+`file.info` (`path`) answers `{ exists, directory, size, modified }`. `file.trash` (`path`) moves a
+file or folder to the recycle bin, where it can be restored; it never deletes for good (the system
+asks first when something is too large for the bin). Each answers `ok: false` with an `error` when
+it fails. `file.watch` (`path`, `channel`, `recursive`) reports changes to a folder, or to one file,
+on `channel` as `{ type, path }`, `type` being `"added"`, `"removed"`, `"changed"` or `"renamed"`
+(which brings `oldPath` too); `file.unwatch` (`channel`) stops it.
+
+A path is absolute, or a resource path such as `assets/app/notes.txt`, and `%VARIABLE%`s in it
+expand (`%TEMP%`, `%APPDATA%`). With no `path`, each takes the one its event brings: the path a
+dialog chose, the first file of a drop.
+
+```strata
+Button(label: "Open…", onClick: then(
+  action("system.openFile", filters: ["Text|*.txt;*.md"]),
+  then(action("file.read", as: "text"), action("state.setFromEvent", name: "opened"))))
+```
+
+`audio.play` (`source`, `id`, `volume`, `loop`, `muted`, `rate`) plays a sound or music file, or a
+URL, in any format Windows can decode; `then` receives `{ ok, id, duration, position, paused,
+ended }` once it is open. A sound without an `id` plays to its end and is gone, so a click can
+sound many times over itself; with an `id`, playing again replaces the sound, and `audio.pause`,
+`audio.resume`, `audio.set` (`volume`, `muted`, `loop`, `rate`, while it plays) and `audio.stop`
+take the same `id`.
+
+```strata
+Button(label: "Tap", onClick: action("audio.play", source: "assets/app/tap.wav"))
+Button(label: "Music", onClick: action("audio.play", source: "assets/app/theme.m4a", id: "music",
+                                       loop: true, volume: 0.4))
+```
+
+All of it runs away from the frame: requests on worker threads, sockets and watches on threads of
+their own. When a session closes, what it started stops with it, and nothing it asked is answered
+afterwards. The Windows desktop host provides it through WinHTTP, the shell and Media Foundation.
+
 ### Following the pointer
 
 The `strata.pointer` behavior tells a node where the pointer is over it. Its action receives an
@@ -1171,7 +1245,9 @@ Button(label: "Saved", onClick: action("state.recordSet", name: "record", field:
 
 `state.set`, `state.setFromEvent`, `state.adjust`, `state.toggle`, and `state.reset` are compiler-
 known actions. Lists additionally support append, insert, remove by value/index, toggle membership,
-and clear; records support checked field updates. List element types and a `Record` initializer's
+and clear; records support checked field updates. `state.listAppend` appends its `value`, or with
+`fromEvent: true` the event that runs it (one of its fields with `field`), and with `limit` keeps
+only that many of the newest items: a log of what a socket or a watched folder says. List element types and a `Record` initializer's
 fixed fields are validated at compile time: a `state.*` action must name a declared state, its value
 must fit that state's type where the state is in scope, and reading or setting a field a record does
 not declare is an error. A name that is not a state, parameter, local value or declared host root is
@@ -1212,7 +1288,9 @@ only the visible range plus overscan. Every record must expose a stable `key` or
 ## Expressions and bindings
 
 Expressions include property/index access, function calls, unary/binary operators, conditional
-`?:`, null fallback `??`, lists, and objects. Bindings resolve in this order: local state,
+`?:`, null fallback `??`, lists, and objects. A property its value does not have reads as null, and
+reports a diagnostic unless it is on the left of `??`: `answer.error ?? ""` asks whether there is
+one. Bindings resolve in this order: local state,
 component parameters, declarations, and registered host roots such as `env.*` or application data.
 
 Common pure helpers cover formatting, case conversion, trimming, number clamp/round/precision,

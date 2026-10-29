@@ -70,8 +70,8 @@ struct SystemAppearance final {
 /**
  * The operating system's services for `.strata` documents on Windows: the `strata.platform`
  * requests sessions send as effects (open and save dialogs, notifications, opening files and
- * links, window controls and chrome, images on the clipboard), and files dragged in from the
- * shell.
+ * links, window controls and chrome, images on the clipboard, video and sound, HTTP requests and
+ * WebSockets, reading, writing and watching files), and files dragged in from the shell.
  *
  * Requests arrive inside a Surface call, so they are only queued there; `pump` runs them after
  * the frame, where a dialog may block, and returns the answers to deliver as
@@ -95,6 +95,12 @@ class PlatformServices final {
     [[nodiscard]] strata_effect_adapter effect_adapter(std::string client);
     /** Runs the requests queued since the last call and returns their answers. */
     [[nodiscard]] std::vector<PlatformAnswer> pump();
+    /**
+     * Forgets a session that has closed: its requests in flight are cancelled and never answered,
+     * and its sockets, watches, sounds and videos stop. A session opened later under the same id
+     * starts afresh.
+     */
+    void close_client(std::string_view client) noexcept;
     /**
      * Says `data_json` on `channel` to `client` (every session when empty), at the next pump.
      * Callable from any thread: sockets and watchers report from their own.

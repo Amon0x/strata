@@ -446,6 +446,8 @@ struct ApplicationHost::Impl final {
         pending_pointer_move.reset();
         if (!session.has_value())
             return;
+        // Its requests in flight, sockets, watches and sounds go with it.
+        platform.close_client(config.application_id);
         session->close([this](const host::RenderPacket& terminal) {
             renderer.consume_resources(terminal);
         });

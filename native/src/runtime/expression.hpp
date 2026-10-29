@@ -546,6 +546,8 @@ class ExpressionRuntime final {
     const RuntimeActionRegistry& actions_;
     std::vector<RuntimeDiagnostic> diagnostics_;
     std::set<std::string, std::less<>> reported_diagnostics_;
+    /** How deep evaluation is inside the left of `??`, where a missing property is just null. */
+    std::size_t probing_ = 0U;
     /** Views per collection expression, one per lexical context, newest last. */
     std::unordered_map<ProgramNodeKey, std::vector<CollectionCacheEntry>, ProgramNodeKeyHash>
         collection_cache_;

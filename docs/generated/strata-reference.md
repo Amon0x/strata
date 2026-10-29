@@ -2584,6 +2584,55 @@ Start a debounced latest-wins asynchronous host query Payload: `strata.action-pa
 | `debounceMillis` | number | false | false | — |
 | `fromEvent` | boolean | false | false | — |
 
+### `audio.pause`
+
+Pause a sound Payload: `strata.action-payload/audio.pause@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `id` | string | true | false | — |
+
+### `audio.play`
+
+Play a sound or music file; then() receives its id and duration once it is open Payload: `strata.action-payload/audio.play@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `source` | string | false | false | — |
+| `id` | string | false | false | — |
+| `volume` | number | false | false | — |
+| `loop` | boolean | false | false | — |
+| `muted` | boolean | false | false | — |
+| `rate` | number | false | false | — |
+
+### `audio.resume`
+
+Resume a paused sound Payload: `strata.action-payload/audio.resume@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `id` | string | true | false | — |
+
+### `audio.set`
+
+Change the volume, muting, looping or speed of a playing sound Payload: `strata.action-payload/audio.set@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `id` | string | true | false | — |
+| `volume` | number | false | false | — |
+| `muted` | boolean | false | false | — |
+| `loop` | boolean | false | false | — |
+| `rate` | number | false | false | — |
+
+### `audio.stop`
+
+Stop a sound and release it Payload: `strata.action-payload/audio.stop@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `id` | string | true | false | — |
+
 ### `clipboard.copyImage`
 
 Copy an image (a resource path or runtime image id) to the system clipboard Payload: `strata.action-payload/clipboard.copyImage@1`. Dispatch: `framework`.
@@ -2628,6 +2677,72 @@ Set declarative environment preferences Payload: `strata.action-payload/environm
 | `safeRight` | number | false | false | — |
 | `safeBottom` | number | false | false | — |
 
+### `file.info`
+
+Ask whether a file or folder exists; then() receives its size and modification time Payload: `strata.action-payload/file.info@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `path` | string | false | false | — |
+
+### `file.list`
+
+List a folder; then() receives its entries Payload: `strata.action-payload/file.list@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `path` | string | false | false | — |
+| `pattern` | string | false | false | — |
+| `recursive` | boolean | false | false | — |
+
+### `file.read`
+
+Read a file as text, JSON or base64; then() receives its contents Payload: `strata.action-payload/file.read@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `path` | string | false | false | — |
+| `as` | string | false | false | — |
+
+### `file.trash`
+
+Move a file or folder to the recycle bin, where it can be restored Payload: `strata.action-payload/file.trash@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `path` | string | false | false | — |
+
+### `file.unwatch`
+
+Stop watching for changes Payload: `strata.action-payload/file.unwatch@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `channel` | string | true | false | — |
+
+### `file.watch`
+
+Report changes to a file or folder as events on a channel Payload: `strata.action-payload/file.watch@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `path` | string | false | false | — |
+| `channel` | string | true | false | — |
+| `recursive` | boolean | false | false | — |
+
+### `file.write`
+
+Write text, JSON or base64 bytes to a file Payload: `strata.action-payload/file.write@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `path` | string | false | false | — |
+| `text` | string | false | false | — |
+| `json` | any | false | true | — |
+| `base64` | string | false | false | — |
+| `append` | boolean | false | false | — |
+| `createDirectories` | boolean | false | false | — |
+
 ### `focus.clear`
 
 Clear surface focus Payload: `strata.action-payload/focus.clear@1`. Dispatch: `framework`.
@@ -2667,6 +2782,19 @@ Validate a keyed form Payload: `strata.action-payload/form.validate@1`. Dispatch
 | `key` | key | true | false | — |
 | `focusFirstInvalid` | boolean | false | false | — |
 | `notify` | boolean | false | false | — |
+
+### `http.request`
+
+Send an HTTP or HTTPS request; then() receives the status, headers and body Payload: `strata.action-payload/http.request@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `url` | string | true | false | — |
+| `method` | string | false | false | — |
+| `headers` | any | false | false | — |
+| `body` | any | false | true | — |
+| `timeout` | number | false | false | — |
+| `as` | string | false | false | — |
 
 ### `layer.pop`
 
@@ -2834,6 +2962,37 @@ Observe the built-in split-change interaction Payload: `no payload`. Dispatch: `
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
 
+### `socket.close`
+
+Close a WebSocket Payload: `strata.action-payload/socket.close@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `id` | string | true | false | — |
+| `code` | number | false | false | — |
+| `reason` | string | false | false | — |
+
+### `socket.open`
+
+Open a WebSocket whose messages and state arrive as events on the channel named by its id Payload: `strata.action-payload/socket.open@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `id` | string | true | false | — |
+| `url` | string | true | false | — |
+| `headers` | any | false | false | — |
+| `protocols` | any | false | false | — |
+
+### `socket.send`
+
+Send text or JSON on an open WebSocket Payload: `strata.action-payload/socket.send@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `id` | string | true | false | — |
+| `text` | string | false | false | — |
+| `json` | any | false | true | — |
+
 ### `state.adjust`
 
 Adjust a declarative retained-state slot Payload: `strata.action-payload/state.adjust@1`. Dispatch: `framework`.
@@ -2847,7 +3006,7 @@ Adjust a declarative retained-state slot Payload: `strata.action-payload/state.a
 
 ### `state.listAppend`
 
-Append to declarative list state Payload: `strata.action-payload/state.listAppend@1`. Dispatch: `framework`.
+Append a value, or the event (one field of it with field), to declarative list state, keeping at most limit of the newest items Payload: `strata.action-payload/state.listAppend@1`. Dispatch: `framework`.
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -2855,6 +3014,7 @@ Append to declarative list state Payload: `strata.action-payload/state.listAppen
 | `value` | any | false | true | — |
 | `fromEvent` | boolean | false | false | — |
 | `field` | string | false | false | — |
+| `limit` | number | false | false | — |
 | `undoLabel` | string | false | false | — |
 | `undoCoalesce` | string | false | false | — |
 

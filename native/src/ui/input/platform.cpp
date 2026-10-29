@@ -40,7 +40,9 @@ constexpr std::string_view platform_effect_id = "strata.platform";
 
 [[nodiscard]] bool platform_action(const std::string_view id) noexcept {
     return id.starts_with("system.") || id.starts_with("window.") || id.starts_with("media.") ||
-           id.starts_with("node.") || id == "clipboard.copyImage" || id == "clipboard.readImage";
+           id.starts_with("node.") || id.starts_with("audio.") || id.starts_with("http.") ||
+           id.starts_with("socket.") || id.starts_with("file.") || id == "clipboard.copyImage" ||
+           id == "clipboard.readImage";
 }
 
 [[nodiscard]] data::JsonValue rectangle_json(const Rect& rectangle) {

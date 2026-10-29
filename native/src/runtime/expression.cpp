@@ -1067,8 +1067,9 @@ ExpressionValue ExpressionRuntime::evaluate_property(const Program& program,
                 reads.host(*read);
                 if (read->value.has_value())
                     return ExpressionValue(std::move(*read->value));
-                report(node, scope, "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
-                       "Host path selected by the expression is not available.");
+                if (probing_ == 0U)
+                    report(node, scope, "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
+                           "Host path selected by the expression is not available.");
                 return ExpressionValue{};
             }
         }
@@ -1120,8 +1121,9 @@ ExpressionValue ExpressionRuntime::evaluate_property(const Program& program,
         if (name == known.rebuilds)
             return ExpressionValue(Value(static_cast<double>(view.rebuilds)));
     }
-    report(node, scope, "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
-           "Property '" + node.text + "' is not available on this value.");
+    if (probing_ == 0U)
+        report(node, scope, "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
+               "Property '" + node.text + "' is not available on this value.");
     return ExpressionValue{};
 }
 
@@ -1176,7 +1178,20 @@ ExpressionValue ExpressionRuntime::evaluate_binary(const Program& program,
                                                    DependencyRecorder& reads) {
     const BinaryOperator operation = node.binary;
     const bool known = node.text.empty();
-    const Value left = require_value(evaluate_node(program, node.first, scope, reads), node, scope);
+    // `value.field ?? fallback` asks whether the field is there: its absence is the answer.
+    const bool probing = known && operation == BinaryOperator::coalesce;
+    if (probing)
+        ++probing_;
+    Value left;
+    try {
+        left = require_value(evaluate_node(program, node.first, scope, reads), node, scope);
+    } catch (...) {
+        if (probing)
+            --probing_;
+        throw;
+    }
+    if (probing)
+        --probing_;
     if (known) {
         if (operation == BinaryOperator::logical_and && !truthy(left))
             return ExpressionValue(Value(false));

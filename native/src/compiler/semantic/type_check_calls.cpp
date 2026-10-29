@@ -144,6 +144,13 @@ void TypeChecker::action_call(const Expression& expression, const CallExpression
                    parameter.name + ": " + parameter.type->diagnostic_name());
         }
     }
+    // An append takes its value as written, or from the event that runs it.
+    if (id != nullptr && *id == "state.listAppend" && !consumed.contains("value") &&
+        !consumed.contains("fromEvent") && !suggested.contains("value")) {
+        report("STRATA.DSL.SEMANTIC_MISSING_ACTION_ARGUMENT",
+               "Action 'state.listAppend' requires argument 'value', or fromEvent: true.",
+               call.target.span, component_path, "value: any");
+    }
     if (id->starts_with("state.")) state_action(*id, expression, call, component_path);
 }
 

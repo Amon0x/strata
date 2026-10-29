@@ -667,6 +667,10 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             desktop/host_services.cpp
             desktop/ime.cpp
             desktop/platform.cpp
+            desktop/platform_audio.cpp
+            desktop/platform_files.cpp
+            desktop/platform_io.cpp
+            desktop/platform_network.cpp
             desktop/renderer.cpp
             desktop/window_control.cpp
     )
@@ -691,6 +695,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             user32
             uuid
             windowscodecs
+            winhttp
     )
     target_include_directories(
         strata_desktop_host
@@ -717,6 +722,30 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         target_link_libraries(strata_window_input_tests PRIVATE imm32 user32)
         strata_target_defaults(strata_window_input_tests)
         add_test(NAME strata.desktop.window_input COMMAND strata_window_input_tests)
+
+        # HTTP against a server of its own on the loopback, files in a folder of its own: the
+        # platform services that need no window.
+        add_executable(
+            strata_platform_io_tests
+            tests/platform_io_tests.cpp
+            desktop/platform_audio.cpp
+            desktop/platform_files.cpp
+            desktop/platform_io.cpp
+            desktop/platform_network.cpp
+        )
+        target_include_directories(
+            strata_platform_io_tests
+            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop ${CMAKE_CURRENT_SOURCE_DIR}/src
+        )
+        target_link_libraries(
+            strata_platform_io_tests
+            PRIVATE Strata::core bcrypt mfplat mfuuid ole32 oleaut32 shell32 winhttp winmm ws2_32
+        )
+        strata_target_defaults(strata_platform_io_tests)
+        add_test(
+            NAME strata.desktop.platform_io
+            COMMAND strata_platform_io_tests "${STRATA_RESOURCE_ROOT}"
+        )
     endif()
 endif()
 

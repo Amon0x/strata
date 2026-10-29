@@ -451,18 +451,26 @@ ActionDispatchOutcome ApplicationContext::dispatch(
         std::optional<std::string> undo_label;
         std::optional<std::string> undo_coalesce;
         std::vector<std::pair<std::string, Value>> arguments;
+        // A list may take what arrived (a socket's message, a watched file's change, a tray
+        // menu's choice) with fromEvent; there `field`, as for setFromEvent, picks one of the
+        // event's fields rather than naming a record field.
+        const Value* from_event = action.payload.field("fromEvent");
+        const bool append_event = id == "state.listAppend" && from_event != nullptr &&
+                                  from_event->boolean() != nullptr && *from_event->boolean();
+        const bool takes_event = id == "state.setFromEvent" || append_event;
         if (const ValueObject* payload = action.payload.object()) {
             for (const auto& [argument_name, value] : payload->fields) {
                 if (argument_name == "undoLabel" && value.string() != nullptr) {
                     undo_label = *value.string();
                 } else if (argument_name == "undoCoalesce" && value.string() != nullptr) {
                     undo_coalesce = *value.string();
-                } else if (argument_name != "name" && argument_name != "field") {
+                } else if (argument_name != "name" && argument_name != "fromEvent" &&
+                           !(takes_event && argument_name == "field")) {
                     arguments.emplace_back(argument_name, value);
                 }
             }
         }
-        if (id == "state.setFromEvent") {
+        if (takes_event) {
             const auto value = std::ranges::find(arguments, "value", &decltype(arguments)::value_type::first);
             if (value != arguments.end()) arguments.erase(value);
             // `field` keeps one field of the event: the files of a drop, the path of a dialog.
@@ -472,22 +480,6 @@ ActionDispatchOutcome ApplicationContext::dispatch(
                 arguments.emplace_back("value", picked != nullptr ? *picked : Value{});
             } else {
                 arguments.emplace_back("value", event.value);
-            }
-        }
-        // `fromEvent` appends what the event brings, or its `field`: a tray menu's choice to a log.
-        if (id == "state.listAppend") {
-            const Value* from_event = action.payload.field("fromEvent");
-            std::erase_if(arguments,
-                          [](const auto& argument) { return argument.first == "fromEvent"; });
-            if (from_event != nullptr && from_event->boolean() != nullptr &&
-                *from_event->boolean()) {
-                std::erase_if(arguments,
-                              [](const auto& argument) { return argument.first == "value"; });
-                const Value* field = action.payload.field("field");
-                const Value* picked = field != nullptr && field->string() != nullptr
-                                          ? event.value.field(*field->string())
-                                          : &event.value;
-                arguments.emplace_back("value", picked != nullptr ? *picked : Value{});
             }
         }
         const StateSnapshot before = state_.snapshot();

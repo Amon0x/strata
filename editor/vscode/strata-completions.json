@@ -233,6 +233,158 @@
     },
     {
       "dispatchPolicy": "framework",
+      "id": "audio.pause",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "id",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/audio.pause@1",
+      "summary": "Pause a sound"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "audio.play",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "source",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "id",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "volume",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "loop",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "muted",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "rate",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "payloadContract": "strata.action-payload/audio.play@1",
+      "summary": "Play a sound or music file; then() receives its id and duration once it is open"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "audio.resume",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "id",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/audio.resume@1",
+      "summary": "Resume a paused sound"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "audio.set",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "id",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "volume",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "muted",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "loop",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "rate",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "payloadContract": "strata.action-payload/audio.set@1",
+      "summary": "Change the volume, muting, looping or speed of a playing sound"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "audio.stop",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "id",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/audio.stop@1",
+      "summary": "Stop a sound and release it"
+    },
+    {
+      "dispatchPolicy": "framework",
       "id": "clipboard.copyImage",
       "parameters": [
         {
@@ -347,6 +499,198 @@
     },
     {
       "dispatchPolicy": "framework",
+      "id": "file.info",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "path",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/file.info@1",
+      "summary": "Ask whether a file or folder exists; then() receives its size and modification time"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "file.list",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "path",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "pattern",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "recursive",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "payloadContract": "strata.action-payload/file.list@1",
+      "summary": "List a folder; then() receives its entries"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "file.read",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "path",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "as",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/file.read@1",
+      "summary": "Read a file as text, JSON or base64; then() receives its contents"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "file.trash",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "path",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/file.trash@1",
+      "summary": "Move a file or folder to the recycle bin, where it can be restored"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "file.unwatch",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "channel",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/file.unwatch@1",
+      "summary": "Stop watching for changes"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "file.watch",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "path",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "channel",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "recursive",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "payloadContract": "strata.action-payload/file.watch@1",
+      "summary": "Report changes to a file or folder as events on a channel"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "file.write",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "path",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "text",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "json",
+          "nullable": true,
+          "required": false,
+          "type": "any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "base64",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "append",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "createDirectories",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "payloadContract": "strata.action-payload/file.write@1",
+      "summary": "Write text, JSON or base64 bytes to a file"
+    },
+    {
+      "dispatchPolicy": "framework",
       "id": "focus.clear",
       "parameters": [],
       "payloadContract": "strata.action-payload/focus.clear@1",
@@ -422,6 +766,62 @@
       ],
       "payloadContract": "strata.action-payload/form.validate@1",
       "summary": "Validate a keyed form"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "http.request",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "url",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "method",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "headers",
+          "nullable": false,
+          "required": false,
+          "type": "any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "body",
+          "nullable": true,
+          "required": false,
+          "type": "any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timeout",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "as",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/http.request@1",
+      "summary": "Send an HTTP or HTTPS request; then() receives the status, headers and body"
     },
     {
       "dispatchPolicy": "framework",
@@ -892,6 +1292,110 @@
     },
     {
       "dispatchPolicy": "framework",
+      "id": "socket.close",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "id",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "code",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "reason",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/socket.close@1",
+      "summary": "Close a WebSocket"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "socket.open",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "id",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "url",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "headers",
+          "nullable": false,
+          "required": false,
+          "type": "any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "protocols",
+          "nullable": false,
+          "required": false,
+          "type": "any"
+        }
+      ],
+      "payloadContract": "strata.action-payload/socket.open@1",
+      "summary": "Open a WebSocket whose messages and state arrive as events on the channel named by its id"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "socket.send",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "id",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "text",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "json",
+          "nullable": true,
+          "required": false,
+          "type": "any"
+        }
+      ],
+      "payloadContract": "strata.action-payload/socket.send@1",
+      "summary": "Send text or JSON on an open WebSocket"
+    },
+    {
+      "dispatchPolicy": "framework",
       "id": "state.adjust",
       "parameters": [
         {
@@ -969,6 +1473,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "limit",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "undoLabel",
           "nullable": false,
           "required": false,
@@ -984,7 +1496,7 @@
         }
       ],
       "payloadContract": "strata.action-payload/state.listAppend@1",
-      "summary": "Append to declarative list state"
+      "summary": "Append a value, or the event (one field of it with field), to declarative list state, keeping at most limit of the newest items"
     },
     {
       "dispatchPolicy": "framework",

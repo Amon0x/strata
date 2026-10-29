@@ -36,6 +36,8 @@
 #include <wrl/client.h>
 
 #include "data/json.hpp"
+#include "media_events.hpp"
+#include "platform_io.hpp"
 #include "window_control.hpp"
 
 namespace strata::desktop {
@@ -406,57 +408,16 @@ class DropTarget final : public IDropTarget {
     ULONG references_ = 1U;
 };
 
-/** What a media engine says, kept until the frame loop reads it (it calls from its own threads). */
-class MediaEvents final : public IMFMediaEngineNotify {
-  public:
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** out) override {
-        if (out == nullptr)
-            return E_POINTER;
-        if (id == IID_IUnknown || id == __uuidof(IMFMediaEngineNotify)) {
-            *out = static_cast<IMFMediaEngineNotify*>(this);
-            AddRef();
-            return S_OK;
-        }
-        *out = nullptr;
-        return E_NOINTERFACE;
-    }
-    ULONG STDMETHODCALLTYPE AddRef() override {
-        return ++references_;
-    }
-    ULONG STDMETHODCALLTYPE Release() override {
-        const ULONG left = --references_;
-        if (left == 0U)
-            delete this;
-        return left;
-    }
-    HRESULT STDMETHODCALLTYPE EventNotify(DWORD event, DWORD_PTR, DWORD) override {
-        if (event == MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA)
-            loaded = true;
-        else if (event == MF_MEDIA_ENGINE_EVENT_ERROR)
-            failed = true;
-        return S_OK;
-    }
-
-    std::atomic<bool> loaded = false;
-    std::atomic<bool> failed = false;
-
-  private:
-    std::atomic<ULONG> references_ = 1U;
-};
-
 } // namespace
 
-struct PlatformServices::Impl final {
+struct PlatformServices::Impl final : PlatformOutbox {
     struct Client final {
         Impl* platform = nullptr;
         std::string id;
+        /** Raised when the session closes; a session opened again under the id gets a new one. */
+        std::shared_ptr<std::atomic<bool>> closed = std::make_shared<std::atomic<bool>>(false);
     };
-    struct Request final {
-        std::string client;
-        std::uint64_t number = 0U;
-        std::string kind;
-        JsonValue payload;
-    };
+    using Request = PlatformRequest;
 
     /** One video playing into a runtime image. */
     struct Video final {
@@ -489,9 +450,14 @@ struct PlatformServices::Impl final {
             throw std::invalid_argument("platform services require a window");
         ole = SUCCEEDED(OleInitialize(nullptr));
         system_appearance = read_appearance();
+        services.push_back(make_network_service(*this));
+        services.push_back(make_file_service(*this, this->resource_path));
+        services.push_back(make_audio_service(*this, this->resource_path));
     }
 
-    ~Impl() {
+    ~Impl() override {
+        // Their threads answer through this; they end first.
+        services.clear();
         for (auto& [id, video] : videos)
             release(video);
         videos.clear();
@@ -527,7 +493,7 @@ struct PlatformServices::Impl final {
             const std::scoped_lock lock(client->platform->mutex);
             client->platform->requests.push_back(
                 Request{client->id, static_cast<std::uint64_t>(*number->integer()), *kind->string(),
-                        std::move(parsed)});
+                        std::move(parsed), client->closed});
             return STRATA_STATUS_OK;
         } catch (...) {
             return STRATA_STATUS_INVALID_ARGUMENT;
@@ -538,6 +504,46 @@ struct PlatformServices::Impl final {
         return PlatformAnswer{request.client, request.number,
                               data::encode_canonical_json(JsonValue(std::move(fields))),
                               std::nullopt};
+    }
+
+    // ---- what services say from their threads ----
+
+    void reply(const Request& request, JsonValue::Object fields) override {
+        PlatformAnswer said = answer(request, std::move(fields));
+        const std::scoped_lock lock(mutex);
+        if (request.closed == nullptr || !request.closed->load())
+            answered.push_back(std::move(said));
+    }
+
+    void say(const Request& request, const std::string& channel, JsonValue data) override {
+        PlatformAnswer said{request.client, 0U, data::encode_canonical_json(data), std::nullopt,
+                            channel};
+        const std::scoped_lock lock(mutex);
+        if (request.closed == nullptr || !request.closed->load())
+            answered.push_back(std::move(said));
+    }
+
+    /** Forgets a session: what it asked is dropped, and what it started stops. */
+    void close_client(const std::string_view id) {
+        {
+            const std::scoped_lock lock(mutex);
+            if (const auto found = clients.find(id); found != clients.end()) {
+                found->second->closed->store(true);
+                found->second->closed = std::make_shared<std::atomic<bool>>(false);
+            }
+            std::erase_if(requests, [id](const Request& request) { return request.client == id; });
+            std::erase_if(answered, [id](const PlatformAnswer& said) { return said.client == id; });
+        }
+        for (const std::unique_ptr<PlatformService>& service : services)
+            service->close_client(id);
+        for (auto entry = videos.begin(); entry != videos.end();) {
+            if (entry->second.client == id) {
+                release(entry->second);
+                entry = videos.erase(entry);
+            } else {
+                ++entry;
+            }
+        }
     }
 
     // ---- dialogs ----
@@ -1384,6 +1390,8 @@ struct PlatformServices::Impl final {
             }
         }
         tick_videos(answers);
+        for (const std::unique_ptr<PlatformService>& service : services)
+            service->tick();
         return answers;
     }
 
@@ -1525,6 +1533,12 @@ struct PlatformServices::Impl final {
             pasted.clear();
             pasted.emplace(id, std::move(*pixels));
             answers.push_back(std::move(result));
+        } else if (const auto service = std::ranges::find_if(
+                       services,
+                       [&kind](const auto& candidate) { return candidate->serves(kind); });
+                   service != services.end()) {
+            // Requests, files, sockets and sounds answer later, through reply.
+            (*service)->run(request);
         } else {
             answers.push_back(
                 answer(request, {{"error", JsonValue("unknown platform request " + kind)}}));
@@ -1628,6 +1642,8 @@ struct PlatformServices::Impl final {
     std::uint64_t capture_count = 0U;
     SystemAppearance system_appearance;
     bool appearance_changed = false;
+    /** Network, files and sound: they finish later, on threads of their own. */
+    std::vector<std::unique_ptr<PlatformService>> services;
 };
 
 PlatformServices::PlatformServices(HWND window, ResourceReader read_resource,
@@ -1703,6 +1719,14 @@ bool PlatformServices::wants_frame() const noexcept {
 void PlatformServices::frame_presented(const std::uint32_t width, const std::uint32_t height,
                                        const std::span<const std::uint8_t> rgba) {
     impl_->frame_presented(width, height, rgba);
+}
+
+void PlatformServices::close_client(const std::string_view client) noexcept {
+    try {
+        impl_->close_client(client);
+    } catch (...) {
+        // Hosts close sessions while tearing down: nothing may escape.
+    }
 }
 
 bool PlatformServices::take_window_moved() noexcept {

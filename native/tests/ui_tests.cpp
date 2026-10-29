@@ -7339,6 +7339,93 @@ overlay Main { root Boxes() }
           "a named style kept a host value it read after the value changed");
 }
 
+/**
+ * What a host says arrives as an event: a list keeps it with `fromEvent` (newest `limit` of them),
+ * and `??` asks whether an answer has a field without a diagnostic when it has not.
+ */
+void test_event_appends_and_probed_fields() {
+    using namespace strata;
+    const auto run = [](const std::string_view shown) {
+        const auto bundle = runtime::ApplicationBundle::create();
+        runtime::ApplicationContext application("event-appends", bundle);
+        const std::string source = R"(
+overlay Main {
+  state answer = { ok: false, error: "" };
+  state log = [];
+  root Panel {
+    Button(key: "probe.set", label: "Set", onClick: action("state.setFromEvent", name: "answer"))
+    Button(key: "probe.append", label: "Append",
+           onClick: action("state.listAppend", name: "log", fromEvent: true, field: "text", limit: 2))
+    Text(key: "probe.error", text: )" +
+                                   std::string(shown) + R"()
+    Text(key: "probe.log", text: join(log, ","))
+  }
+}
+)";
+        const auto no_imports = [](const std::string_view,
+                                   const std::string_view path) -> compiler::ModuleSource {
+            throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+        };
+        check(application
+                  .compile_and_activate(compiler::ModuleSource{"event-appends.strata", source},
+                                        no_imports, 0U)
+                  .activated(),
+              "event append fixture did not activate");
+        ui::SurfaceEnvironment environment;
+        environment.framebuffer_width = 320;
+        environment.framebuffer_height = 200;
+        environment.logical_width = 320.0;
+        environment.logical_height = 200.0;
+        ui::Surface surface("event-appends", application, runtime::LayerRole::overlay, "Main",
+                            environment);
+        static_cast<void>(surface.frame(0));
+        const auto dispatch = [&](const std::string_view key, runtime::Value value) {
+            const ui::RetainedNode* node = surface.tree().find_key(key);
+            check(node != nullptr && node->description().properties.contains("onClick"),
+                  "event append fixture lost a button");
+            const runtime::ActionDispatchOutcome outcome = application.dispatch(
+                runtime::ActionEvent{"activated", std::string(key), std::move(value)},
+                *(*node->description().properties.at("onClick").action())->action,
+                node->description().state_scope);
+            check(outcome.status == runtime::ActionDispatchStatus::handled,
+                  "event append fixture action was not handled: " + outcome.message.value_or(""));
+        };
+        using Fields = std::vector<std::pair<std::string, runtime::Value>>;
+        for (const std::string_view said : {"one", "two", "three"})
+            dispatch("probe.append",
+                     runtime::Value(Fields{{"text", runtime::Value(std::string(said))}}));
+        // An answer without the field the state started with.
+        dispatch("probe.set", runtime::Value(Fields{{"ok", runtime::Value(true)}}));
+        surface.invalidate();
+        // Diagnostics an evaluation reports are published with the frame after it.
+        std::vector<runtime::RuntimeDiagnosticRecord> records;
+        for (const std::int64_t at : {16'666'667LL, 33'333'333LL, 50'000'000LL}) {
+            const ui::SurfaceFrame framed = surface.frame(at);
+            records.insert(records.end(), framed.diagnostics.records.begin(),
+                           framed.diagnostics.records.end());
+        }
+        const auto text = [&surface](const std::string_view key) {
+            const runtime::Value* value =
+                surface.tree().find_key(key)->description().properties.at("text").value();
+            return value != nullptr && value->string() != nullptr ? *value->string()
+                                                                  : std::string("<none>");
+        };
+        const bool reported =
+            std::ranges::any_of(records, [](const runtime::RuntimeDiagnosticRecord& record) {
+                return record.diagnostic.code == "STRATA.DSL.RUNTIME_MISSING_PROPERTY";
+            });
+        return std::make_tuple(text("probe.log"), text("probe.error"), reported);
+    };
+    const auto [log, probed, quiet_reported] = run(R"(answer.error ?? "none")");
+    check(log == "two,three", "listAppend fromEvent kept the wrong items: " + log);
+    check(probed == "none", "a missing field did not fall back: " + probed);
+    check(!quiet_reported, "a field probed with ?? reported a diagnostic");
+    const auto [unused_log, plain, reported] = run(R"(format("{0}", answer.error))");
+    static_cast<void>(unused_log);
+    static_cast<void>(plain);
+    check(reported, "a missing field read without ?? reported nothing");
+}
+
 void test_parameterized_component_state_retains_its_evaluated_initializer() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -8639,6 +8726,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_component_change_patches_ancestors_and_shares_unchanged_nodes();
             test_named_styles_follow_the_values_they_read();
             test_parameterized_component_state_retains_its_evaluated_initializer();
+            test_event_appends_and_probed_fields();
             test_tuning_slider_pipeline_is_proportional(arguments[1]);
             test_editor_draws_its_scrolled_layout(arguments[1]);
             test_phased_input_dispatch_and_gesture_claim();
