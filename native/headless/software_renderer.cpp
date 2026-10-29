@@ -120,7 +120,10 @@ struct PixelRect final {
     // Tone, as in the vertex stage: images (mode 1) and shadows (mode 6) are not ink, and a rounded
     // rect (mode 2) carries its border colour in values 8 to 10.
     const int mode = static_cast<int>(std::floor(result.data[14U] + 0.5F));
-    if (group.tone > 0.0 && mode != 1 && mode != 6) {
+    // A colour mask (mode 11) tones its texels in the pixel stage, its tone in value 4.
+    if (mode == 11)
+        result.data[4U] = static_cast<float>(group.tone);
+    if (group.tone > 0.0 && mode != 1 && mode != 6 && mode != 11) {
         const float tone = static_cast<float>(group.tone);
         host::tone_color(result.color.red, result.color.green, result.color.blue, tone);
         if (mode == 2 || (mode == host::draw_mode_coverage_mask && result.data[6U] > 0.5F))
@@ -582,8 +585,10 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                 Color source = interpolate_color(a, b, c, wa, wb, wc);
                 const std::array<float, 16U> data = interpolate_data(a, b, c, wa, wb, wc);
                 const int mode = static_cast<int>(std::floor(data[14U] + 0.5F));
-                if (mode == 1) {
-                    const Color sampled = texture_sample(u, v);
+                if (mode == 1 || mode == 11) {
+                    Color sampled = texture_sample(u, v);
+                    if (mode == 11 && data[4U] > 0.0F)
+                        host::tone_color(sampled.red, sampled.green, sampled.blue, data[4U]);
                     source.red *= sampled.red;
                     source.green *= sampled.green;
                     source.blue *= sampled.blue;

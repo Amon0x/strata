@@ -93,7 +93,7 @@ struct PreparedMask final {
     RenderColor color;
     std::string texture;
     std::optional<MaskGradient> gradient;
-    /** Joined shapes: the mask holds their colours (straight RGBA) and draws as an image. */
+    /** Joined shapes: the mask holds their colours (straight RGBA), toned like other ink. */
     bool colored = false;
     [[nodiscard]] friend bool operator==(const PreparedMask&, const PreparedMask&) = default;
 };
@@ -217,10 +217,12 @@ struct PreparationCache final {
     /** Where shape coverage masks pack, when the owner provides one, and its planned generation. */
     font::GlyphAtlas* shape_atlas = nullptr;
     /**
-     * Tiles of large shapes found empty (0) or fully covered (1), which take no atlas space: a
-     * full tile draws from one solid texel. A memo, so planning from a const cache may fill it.
+     * Tiles of large shapes found empty (0), fully covered (1), or (for joined shapes) one
+     * opaque colour throughout (2, the colour's RGBA packed above the low byte). They take no
+     * atlas space of their own: a full or one-colour tile draws from one solid texel. A memo, so
+     * planning from a const cache may fill it.
      */
-    mutable std::unordered_map<std::uint64_t, std::uint8_t> shape_tile_classes;
+    mutable std::unordered_map<std::uint64_t, std::uint64_t> shape_tile_classes;
     /** Groups whose masks rasterize denser than the display, ordered by group. */
     std::vector<GroupRasterScale> group_raster_scales;
     std::uint64_t planned_shape_generation = 0U;

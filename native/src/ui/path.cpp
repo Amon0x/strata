@@ -1,13 +1,15 @@
 #include "ui/path.hpp"
 
 #include <algorithm>
-#include <map>
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <numbers>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace strata::ui {
@@ -395,59 +397,257 @@ void collect_shape_numbers(const runtime::Value& value, std::vector<double>& num
 bool shapes_share_edges(const std::span<const PathShape> shapes, const Size size) {
     if (shapes.size() < 2U || !(size.width > 0.0) || !(size.height > 0.0))
         return false;
-    // Each edge files under its line, a direction and a distance from the origin rounded to a
-    // twentieth of a pixel, with its extent along that line; two shapes' edges on one line that
+    // An edge is shared where a stretch of one shape's outline runs along another's, straight or
+    // curved, for half a pixel or more in all: parallel and within a twentieth of a pixel.
+    constexpr double reach = 0.05;
+    constexpr double flatness = 0.02;
+    // Only shapes whose control-point boxes come within reach of another's can share an edge.
+    std::vector<Rect> boxes(shapes.size());
+    std::vector<bool> candidate(shapes.size(), false);
+    for (std::size_t index = 0U; index < shapes.size(); ++index) {
+        const PathShape& shape = shapes[index];
+        if (!shape.fill.has_value())
+            continue;
+        double left = std::numeric_limits<double>::infinity();
+        double top = left;
+        double right = -left;
+        double bottom = -left;
+        for (const PathSegment& segment : shape.path.segments()) {
+            if (segment.verb == PathVerb::close)
+                continue;
+            const auto include = [&](const Point point) {
+                left = std::min(left, point.x * size.width);
+                top = std::min(top, point.y * size.height);
+                right = std::max(right, point.x * size.width);
+                bottom = std::max(bottom, point.y * size.height);
+            };
+            include(segment.to);
+            if (segment.verb == PathVerb::quadratic || segment.verb == PathVerb::cubic)
+                include(segment.control_a);
+            if (segment.verb == PathVerb::cubic)
+                include(segment.control_b);
+        }
+        if (std::isfinite(left))
+            boxes[index] = Rect{left - reach, top - reach, right - left + reach * 2.0,
+                                bottom - top + reach * 2.0};
+    }
+    for (std::size_t first = 0U; first < shapes.size(); ++first) {
+        for (std::size_t second = first + 1U; second < shapes.size(); ++second) {
+            const Rect& one = boxes[first];
+            const Rect& two = boxes[second];
+            if (one.width > 0.0 && two.width > 0.0 && one.x <= two.right() && two.x <= one.right() &&
+                one.y <= two.bottom() && two.y <= one.bottom()) {
+                candidate[first] = true;
+                candidate[second] = true;
+            }
+        }
+    }
+
+    // Circular sectors, rings and circles are compared exactly: their arcs as arcs, their cuts as
+    // the straight edges they are. Everything else is flattened finely enough that two flattenings
+    // of one curve stay within a few hundredths of a pixel of each other.
+    struct Arc final {
+        std::size_t shape = 0U;
+        Point center;
+        double radius = 0.0;
+        double start = 0.0;
+        double sweep = 0.0;
+    };
+    struct Edge final {
+        std::size_t shape = 0U;
+        Point from;
+        Point to;
+    };
+    std::vector<Arc> arcs;
+    std::vector<Edge> lines;
+    // Shapes with curves other than a circle's: their flattened chords are compared by proximity.
+    std::vector<bool> curved(shapes.size(), false);
+    for (std::size_t index = 0U; index < shapes.size(); ++index) {
+        if (!candidate[index])
+            continue;
+        const PathShape& shape = shapes[index];
+        if (shape.primitive.has_value() &&
+            (shape.primitive->kind == ShapePrimitiveKind::sector ||
+             shape.primitive->kind == ShapePrimitiveKind::ellipse)) {
+            const ShapePrimitive& primitive = *shape.primitive;
+            const double radius = primitive.radius_x * size.width;
+            if (std::abs(radius - primitive.radius_y * size.height) <= 1.0e-6 * std::max(radius, 1.0)) {
+                const Point center{primitive.center.x * size.width, primitive.center.y * size.height};
+                const bool sector = primitive.kind == ShapePrimitiveKind::sector;
+                double start = sector ? primitive.start_degrees : 0.0;
+                double sweep = sector ? std::clamp(primitive.sweep_degrees, -360.0, 360.0) : 360.0;
+                if (sweep < 0.0) {
+                    start += sweep;
+                    sweep = -sweep;
+                }
+                const double inner = sector ? radius * primitive.inner_fraction : 0.0;
+                arcs.push_back(Arc{index, center, radius, start, sweep});
+                if (inner > 0.0)
+                    arcs.push_back(Arc{index, center, inner, start, sweep});
+                if (sector && sweep < 360.0) {
+                    for (const double angle : {start, start + sweep}) {
+                        const double radians = angle * std::numbers::pi / 180.0;
+                        const Point direction{std::cos(radians), std::sin(radians)};
+                        lines.push_back(Edge{index,
+                                             Point{center.x + direction.x * inner,
+                                                   center.y + direction.y * inner},
+                                             Point{center.x + direction.x * radius,
+                                                   center.y + direction.y * radius}});
+                    }
+                }
+                continue;
+            }
+        }
+        curved[index] = std::ranges::any_of(shape.path.segments(), [](const PathSegment& segment) {
+            return segment.verb == PathVerb::quadratic || segment.verb == PathVerb::cubic;
+        });
+        std::vector<PathContour> contours;
+        try {
+            contours = flatten_path(shape.path, size, flatness);
+        } catch (const std::exception&) {
+            continue;
+        }
+        for (const PathContour& contour : contours) {
+            const std::size_t count = contour.points.size();
+            for (std::size_t at = 0U; count >= 2U && at < count; ++at) {
+                const Point a = contour.points[at];
+                const Point b = contour.points[(at + 1U) % count];
+                lines.push_back(Edge{index, Point{a.x * size.width, a.y * size.height},
+                                     Point{b.x * size.width, b.y * size.height}});
+            }
+        }
+    }
+
+    // Arcs on one circle (one centre, one radius) whose angles overlap by half a pixel.
+    for (std::size_t first = 0U; first < arcs.size(); ++first) {
+        for (std::size_t second = first + 1U; second < arcs.size(); ++second) {
+            const Arc& one = arcs[first];
+            const Arc& two = arcs[second];
+            if (one.shape == two.shape || std::abs(one.radius - two.radius) > reach ||
+                std::hypot(one.center.x - two.center.x, one.center.y - two.center.y) > reach) {
+                continue;
+            }
+            // The overlap of the two angle ranges, either way round the circle.
+            double overlap = 0.0;
+            for (const double turn : {-360.0, 0.0, 360.0}) {
+                overlap += std::max(0.0, std::min(one.start + one.sweep, two.start + two.sweep + turn) -
+                                             std::max(one.start, two.start + turn));
+            }
+            if (overlap * std::numbers::pi / 180.0 * one.radius >= 0.5)
+                return true;
+        }
+    }
+
+    // Straight edges file under their line, a direction and a distance from the origin rounded to
+    // a twentieth of a pixel, with their extent along it; two shapes' edges on one line that
     // overlap by half a pixel are shared.
     struct Extent final {
         std::size_t shape = 0U;
         double from = 0.0;
         double to = 0.0;
     };
-    std::map<std::pair<std::int64_t, std::int64_t>, std::vector<Extent>> lines;
-    for (std::size_t index = 0U; index < shapes.size(); ++index) {
-        const PathShape& shape = shapes[index];
-        if (!shape.fill.has_value())
+    std::unordered_map<std::uint64_t, std::vector<Extent>> on_line;
+    for (const Edge& line : lines) {
+        const double length = std::hypot(line.to.x - line.from.x, line.to.y - line.from.y);
+        if (!(length >= 0.5) || !std::isfinite(length))
             continue;
-        std::vector<PathContour> contours;
-        try {
-            contours = flatten_path(shape.path, size, 0.25);
-        } catch (const std::exception&) {
-            continue;
+        double dx = (line.to.x - line.from.x) / length;
+        double dy = (line.to.y - line.from.y) / length;
+        if (dx < 0.0 || (dx == 0.0 && dy < 0.0)) {
+            dx = -dx;
+            dy = -dy;
         }
-        for (const PathContour& contour : contours) {
-            const std::size_t count = contour.points.size();
-            if (count < 2U)
-                continue;
-            for (std::size_t at = 0U; at < count; ++at) {
-                const Point a = contour.points[at];
-                const Point b = contour.points[(at + 1U) % count];
-                const Point from{a.x * size.width, a.y * size.height};
-                const Point to{b.x * size.width, b.y * size.height};
-                const double length = std::hypot(to.x - from.x, to.y - from.y);
-                if (!(length >= 0.5))
-                    continue;
-                double dx = (to.x - from.x) / length;
-                double dy = (to.y - from.y) / length;
-                if (dx < 0.0 || (dx == 0.0 && dy < 0.0)) {
-                    dx = -dx;
-                    dy = -dy;
-                }
-                const double offset = dx * from.y - dy * from.x;
-                const auto key = std::pair{static_cast<std::int64_t>(std::llround(
-                                               std::atan2(dy, dx) * 1.0e4)),
-                                           static_cast<std::int64_t>(std::llround(offset * 20.0))};
-                const double t0 = dx * from.x + dy * from.y;
-                const double t1 = dx * to.x + dy * to.y;
-                std::vector<Extent>& extents = lines[key];
-                for (const Extent& other : extents) {
-                    if (other.shape != index &&
-                        std::min(other.to, std::max(t0, t1)) -
-                                std::max(other.from, std::min(t0, t1)) >= 0.5) {
-                        return true;
-                    }
-                }
-                extents.push_back(Extent{index, std::min(t0, t1), std::max(t0, t1)});
+        const auto direction = static_cast<std::uint32_t>(std::llround(std::atan2(dy, dx) * 1.0e4));
+        const auto offset = static_cast<std::uint32_t>(
+            std::llround((dx * line.from.y - dy * line.from.x) * 20.0));
+        std::vector<Extent>& extents = on_line[(std::uint64_t{direction} << 32U) | offset];
+        const double t0 = dx * line.from.x + dy * line.from.y;
+        const double t1 = dx * line.to.x + dy * line.to.y;
+        for (const Extent& other : extents) {
+            if (other.shape != line.shape &&
+                std::min(other.to, std::max(t0, t1)) - std::max(other.from, std::min(t0, t1)) >= 0.5) {
+                return true;
             }
+        }
+        extents.push_back(Extent{line.shape, std::min(t0, t1), std::max(t0, t1)});
+    }
+
+    // The chords of curves two shapes share differ wherever their flattenings did: those are
+    // compared by proximity, in pieces no longer than a cell so a long chord is found wherever any
+    // stretch of it is shared and indexes into a handful of cells.
+    if (std::ranges::count(curved, true) < 2)
+        return false;
+    constexpr double cell = 16.0;
+    std::vector<Edge> edges;
+    for (const Edge& line : lines) {
+        if (!curved[line.shape])
+            continue;
+        const double length = std::hypot(line.to.x - line.from.x, line.to.y - line.from.y);
+        if (!(length > 1.0e-6) || !std::isfinite(length))
+            continue;
+        const auto pieces = static_cast<std::size_t>(std::min(std::ceil(length / cell), 1.0e5));
+        for (std::size_t piece = 0U; piece < pieces; ++piece) {
+            const double t0 = static_cast<double>(piece) / static_cast<double>(pieces);
+            const double t1 = static_cast<double>(piece + 1U) / static_cast<double>(pieces);
+            edges.push_back(Edge{line.shape,
+                                 Point{line.from.x + (line.to.x - line.from.x) * t0,
+                                       line.from.y + (line.to.y - line.from.y) * t0},
+                                 Point{line.from.x + (line.to.x - line.from.x) * t1,
+                                       line.from.y + (line.to.y - line.from.y) * t1}});
+        }
+    }
+    const auto cell_of = [](const double value) {
+        return static_cast<std::int64_t>(std::floor(value / cell));
+    };
+    const auto key = [](const std::int64_t x, const std::int64_t y) {
+        return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(x)) << 32U) |
+               static_cast<std::uint32_t>(y);
+    };
+    std::unordered_map<std::uint64_t, std::vector<std::size_t>> cells;
+    for (std::size_t index = 0U; index < edges.size(); ++index) {
+        const Edge& edge = edges[index];
+        const std::int64_t left = cell_of(std::min(edge.from.x, edge.to.x) - reach);
+        const std::int64_t right = cell_of(std::max(edge.from.x, edge.to.x) + reach);
+        const std::int64_t top = cell_of(std::min(edge.from.y, edge.to.y) - reach);
+        const std::int64_t bottom = cell_of(std::max(edge.from.y, edge.to.y) + reach);
+        for (std::int64_t y = top; y <= bottom; ++y) {
+            for (std::int64_t x = left; x <= right; ++x)
+                cells[key(x, y)].push_back(index);
+        }
+    }
+    std::vector<double> shared(shapes.size(), 0.0);
+    for (const Edge& edge : edges) {
+        const double dx = edge.to.x - edge.from.x;
+        const double dy = edge.to.y - edge.from.y;
+        const double length = std::hypot(dx, dy);
+        const Point middle{(edge.from.x + edge.to.x) * 0.5, (edge.from.y + edge.to.y) * 0.5};
+        const auto found = cells.find(key(cell_of(middle.x), cell_of(middle.y)));
+        if (found == cells.end())
+            continue;
+        for (const std::size_t other_index : found->second) {
+            const Edge& other = edges[other_index];
+            if (other.shape == edge.shape)
+                continue;
+            const double ox = other.to.x - other.from.x;
+            const double oy = other.to.y - other.from.y;
+            const double other_length = std::hypot(ox, oy);
+            // Parallel either way round, and the middle on the other edge, between its ends.
+            if (std::abs(dx * ox + dy * oy) < 0.99 * length * other_length)
+                continue;
+            const double along =
+                ((middle.x - other.from.x) * ox + (middle.y - other.from.y) * oy) /
+                (other_length * other_length);
+            if (along < 0.0 || along > 1.0)
+                continue;
+            const double across =
+                std::abs((middle.x - other.from.x) * oy - (middle.y - other.from.y) * ox) /
+                other_length;
+            if (across > reach)
+                continue;
+            shared[edge.shape] += length;
+            if (shared[edge.shape] >= 0.5)
+                return true;
+            break;
         }
     }
     return false;

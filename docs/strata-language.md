@@ -700,10 +700,12 @@ mask the way text glyphs are, at the shape's device size and sub-pixel position,
 follow their fill rule, strokes are a union, so a translucent stroke stays one even alpha where it
 crosses itself, and shapes larger than an atlas page are drawn in seamless tiles. Gradient paints
 are evaluated per pixel over the mask: every stop, `extend` mode and radial distance is exact.
-Shapes of one `Draw` that meet along an edge (pie slices without a gap, tiles, the pieces of a
-shape cut apart) are drawn as one picture: each pixel on the seam is split between them by area,
-so nothing behind them shows through as a hairline, and two colours meeting keep exactly their
-own shares of it. The same holds for the paths of an SVG image and a chart's stacked areas.
+Shapes of one `Draw` that meet along an edge, straight or curved (pie slices without a gap, the
+rings of a sunburst, tiles, the pieces of a shape cut apart), are drawn as one picture: each pixel
+on the seam is split between them by area, so nothing behind them shows through as a hairline, and
+two colours meeting keep exactly their own shares of it. It holds at any size and inside toned
+groups, and for the paths of an SVG image and a chart's stacked areas too. Shapes that touch at a
+single point only are drawn apart; the one pixel there is never seen.
 Inside a presentation group held at another scale (a node that sets a `tone`, or one whose scale
 stays put while other motion runs), masks rasterize at the group's density, so a zoomed shape is
 as sharp as one drawn at that size. A `Draw` takes up to 16,384 shapes and a path up to 262,144

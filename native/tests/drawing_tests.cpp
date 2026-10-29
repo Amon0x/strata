@@ -198,6 +198,23 @@ constexpr double box = 120.0;
                   std::to_string(slice * 15) + ", sweep: 15, fill: #FFFFFF }";
     }
     masked("pie of 24 touching slices", 1.0, 5.0, slices, pi * 48.0 * 48.0);
+    // A sunburst: an inner ring of three slices and an outer ring of five meet along a circle,
+    // their curves flattened differently, and along each ring's radial cuts.
+    std::string rings;
+    for (int slice = 0; slice < 3; ++slice) {
+        rings += std::string(slice == 0 ? "" : ", ") +
+                 "{ kind: \"sector\", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.2, "
+                 "start: " + std::to_string(slice * 120 + 10) + ", sweep: 120, fill: #FFFFFF }";
+    }
+    for (int slice = 0; slice < 5; ++slice) {
+        rings += ", { kind: \"sector\", center: { x: 0.5, y: 0.5 }, radius: 0.45, innerRadius: "
+                 "0.3, start: " + std::to_string(slice * 72 + 47) + ", sweep: 72, fill: #FFFFFF }";
+    }
+    masked("sunburst rings", 3.0, 5.0, rings, pi * (54.0 * 54.0 - 24.0 * 24.0));
+    // A square split along an S-curve, each half tracing the curve its own way round.
+    masked("square split by a curve", 4.0, 5.0,
+           R"({ kind: "path", commands: "M 0.1 0.1 L 0.5 0.1 C 0.8 0.4, 0.2 0.6, 0.5 0.9 L 0.1 0.9 Z", fill: #FFFFFF }, { kind: "path", commands: "M 0.5 0.1 L 0.9 0.1 L 0.9 0.9 L 0.5 0.9 C 0.2 0.6, 0.8 0.4, 0.5 0.1 Z", fill: #FFFFFF })",
+           96.0 * 96.0);
     // Two colours meeting on a diagonal: red keeps exactly its half where green meets it.
     masked("red and green halves", 2.0, 5.0,
            R"({ kind: "polygon", points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.1, y: 0.9 }], fill: #FF0000 }, { kind: "polygon", points: [{ x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }], fill: #00FF00 })",
@@ -441,6 +458,59 @@ void measure_group_scale(const std::filesystem::path& root, const std::string& b
           backend + ": a shape in a scaled group is not as sharp as the shape drawn at that size");
 }
 
+/**
+ * In a toned group, shapes drawn as one picture are toned like any other ink: two white triangles
+ * meeting along a diagonal come out the colour one white square does.
+ */
+void measure_tone(const std::filesystem::path& root, const std::string& backend) {
+    std::filesystem::create_directories(root / "assets" / "drawing");
+    {
+        std::ofstream module(root / "assets" / "drawing" / "toned.strata", std::ios::binary);
+        module << "screen Shapes {\n  root Panel(style: { background: null, border: null }, "
+                  "layout: { kind: \"PANEL\", width: 300, height: 140 }) {\n"
+                  "    Panel(style: { background: null, border: null, tone: 1 }, layout: { kind: "
+                  "\"PANEL\", width: 300, height: 140 }) {\n"
+                  "      Draw(layout: { width: 120, height: 120, placement: { x: 10, y: 10 } }, "
+                  "shapes: [{ kind: \"polygon\", points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, "
+                  "{ x: 0.1, y: 0.9 }], fill: #FFFFFF }, { kind: \"polygon\", points: [{ x: 0.9, "
+                  "y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }], fill: #FFFFFF }])\n"
+                  "      Draw(layout: { width: 120, height: 120, placement: { x: 160, y: 10 } }, "
+                  "shapes: [{ kind: \"polygon\", points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, "
+                  "{ x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }], fill: #FFFFFF }])\n"
+                  "    }\n  }\n}\n";
+    }
+    headless::Scenario scenario;
+    scenario.application_id = "drawing.tests";
+    scenario.surface_id = "drawing.tests";
+    scenario.module = "assets/drawing/toned.strata";
+    scenario.root = "Shapes";
+    scenario.root_role = "screen";
+    scenario.render_backend = backend;
+    scenario.width = 300.0;
+    scenario.height = 140.0;
+    scenario.scale = 1.0;
+    scenario.reduced_motion = true;
+    scenario.clear_color = {0U, 0U, 0U, 255U};
+    headless::ApplicationHost host(scenario, root);
+    host.frame(0);
+    const std::span<const std::uint8_t> pixels = host.pixels();
+    const std::uint32_t width = host.framebuffer_width();
+    const auto at = [&](const std::uint32_t x, const std::uint32_t y, const std::uint32_t channel) {
+        return static_cast<int>(pixels[(static_cast<std::size_t>(y) * width + x) * 4U + channel]);
+    };
+    int largest = 0;
+    for (std::uint32_t channel = 0U; channel < 3U; ++channel) {
+        for (const std::uint32_t y : {50U, 70U, 90U}) {
+            for (const std::uint32_t x : {40U, 70U, 100U})
+                largest = std::max(largest, std::abs(at(x, y, channel) - at(x + 150U, y, channel)));
+        }
+    }
+    std::cout << "  " << backend << " toned joined shapes: white became " << at(70U, 70U, 0U)
+              << " against " << at(220U, 70U, 0U) << ", largest difference " << largest << "\n";
+    check(at(220U, 70U, 0U) < 128 && largest <= 2,
+          backend + ": shapes drawn as one picture were not toned like a single shape");
+}
+
 } // namespace
 
 int main(const int argument_count, const char* const* const arguments) {
@@ -457,6 +527,9 @@ int main(const int argument_count, const char* const* const arguments) {
             large_scene("tiled pentagram", "", star, 2850.4448 * large * large),
             large_scene("rotated tiled pentagram", "rotate: 33", star,
                         2850.4448 * large * large),
+            large_scene("tiled square of four triangles", "",
+                        R"({ kind: "polygon", points: [{ x: 0.5, y: 0.5 }, { x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.5 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.5 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.5 }, { x: 0.1, y: 0.9 }, { x: 0.1, y: 0.1 }], fill: #FFFFFF })",
+                        832.0 * 832.0),
             large_scene(
                 "tiled radial gradient", "",
                 R"({ kind: "circle", center: { x: 0.5, y: 0.5 }, radius: 0.4, fill: { kind: "radial", center: { x: 0.5, y: 0.5 }, radius: 0.4, stops: [{ offset: 0, color: #FFFFFF }, { offset: 1, color: #000000 }] } })",
@@ -465,6 +538,7 @@ int main(const int argument_count, const char* const* const arguments) {
         for (const std::string& backend : available_backends()) {
             measure_animation(root, backend);
             measure_group_scale(root, backend);
+            measure_tone(root, backend);
             for (const double scale : {1.0, 1.25, 2.0}) {
                 for (const Scene& scene : scenes)
                     measure(root, backend, scale, scene);

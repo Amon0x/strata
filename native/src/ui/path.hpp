@@ -105,8 +105,9 @@ struct PathShape final {
 
 /**
  * Whether two of `shapes`, drawn in one frame of `size` logical pixels, share part of an edge: a
- * stretch of outline lying along the same line, at least half a pixel long. Such shapes leave a
- * hairline of whatever is behind them where they meet unless they are drawn as one picture.
+ * stretch of one's outline, straight or curved, running along another's for half a pixel or more.
+ * Such shapes leave a hairline of whatever is behind them where they meet unless they are drawn
+ * as one picture. Shapes touching at a point only do not count: one pixel there bleeds unseen.
  */
 [[nodiscard]] bool shapes_share_edges(std::span<const PathShape> shapes, Size size);
 

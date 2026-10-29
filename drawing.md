@@ -72,8 +72,11 @@ Ground rules:
       that share a stretch of outline (`shapes_share_edges`) are joined into one command and
       composited front to back by area into one colour mask, so a seam pixel is split between
       them instead of letting the background through; overlapping shapes still cover each other
-      as they would apart, translucent ones included. `Draw`, SVG images and stacked chart areas
-      join their shapes; shapes that only touch at a point, or are apart, draw as before. Mask
+      as they would apart, translucent ones included. Shared edges are found along curves as well
+      as lines (a sunburst's rings), joined pictures larger than a page are tiled (one-colour tiles
+      sharing a texel, and no tile drawn until all fit), and toned groups tone them like other ink
+      (draw mode 11). `Draw`, SVG images and stacked chart areas join their shapes; shapes that
+      only touch at a point, or are apart, draw as before. Mask
       curves now flatten to a thirtieth of a pixel, so a masked circle loses under 0.1% of its
       area to its chords.
 

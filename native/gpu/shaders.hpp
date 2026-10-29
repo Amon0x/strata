@@ -78,12 +78,16 @@ PixelInput main(VertexInput input) {
     // Tone belongs to ink: fills, borders, shapes and text. An image (mode 1) keeps its own colours
     // and a shadow (mode 6) stays a shadow. A rounded rect (mode 2) carries its border colour in
     // drawData2, which is toned with it.
-    // A banded gradient (mode 10 with a paint) carries its band's end colour there too.
+    // A banded gradient (mode 10 with a paint) carries its band's end colour there too. A colour
+    // mask (mode 11) is ink whose colours are in its texels: the pixel stage tones them, with the
+    // group's tone passed in drawData1.x.
     int mode = (int)floor(input.drawData3.z + 0.5);
-    float tone = (mode == 1 || mode == 6) ? 0.0 : group.opacity.y;
+    float tone = (mode == 1 || mode == 6 || mode == 11) ? 0.0 : group.opacity.y;
     output.color = float4(strataTone(input.color.rgb, tone), input.color.a);
     output.drawData0 = input.drawData0;
-    output.drawData1 = input.drawData1;
+    output.drawData1 = mode == 11
+        ? float4(group.opacity.y, input.drawData1.yzw)
+        : input.drawData1;
     output.drawData2 = (mode == 2 || (mode == 10 && input.drawData1.z > 0.5))
         ? float4(strataTone(input.drawData2.rgb, tone), input.drawData2.a)
         : input.drawData2;
@@ -323,12 +327,25 @@ int strataDrawMode(PixelInput input) {
     return (int)floor(input.drawData3.z + 0.5);
 }
 
+/** The vertex stage's strataTone, for ink whose colours come from a texture. */
+float3 strataTexelTone(float3 color, float tone) {
+    float high = max(color.r, max(color.g, color.b));
+    float low = min(color.r, min(color.g, color.b));
+    float ink = saturate((high - 0.5) * 4.0) * saturate(1.0 - (high - low) * 2.5);
+    float3 mirrored = float3(0.043, 0.071, 0.125) + (1.0 - high) * 0.6;
+    return lerp(color, mirrored, saturate(tone) * ink);
+}
+
 /** The shading Strata applies to one draw when no material overrides it. */
 float4 strataShade(PixelInput input) {
     int mode = strataDrawMode(input);
     float4 color = input.color;
     if (mode == 1) {
         color *= Texture0.Sample(Sampler0, input.uv);
+    } else if (mode == 11) {
+        // Joined shapes: their colours and coverage in straight RGBA, toned as ink.
+        float4 texel = Texture0.Sample(Sampler0, input.uv);
+        color *= float4(strataTexelTone(texel.rgb, input.drawData1.x), texel.a);
     } else if (mode == 2) {
         float2 size = max(input.drawData0.xy, 1.0);
         float4 radii = max(input.drawData1, 0.0);
