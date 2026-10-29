@@ -183,6 +183,39 @@ std::optional<runtime::ActionDispatchOutcome> InputRouter::execute_surface_actio
     if (id == "environment.set" && surface_framework_executor_) {
         return surface_framework_executor_(action);
     }
+    // A widget that is the target of the action's namespace and handles it (`zoom.fit` on a
+    // ZoomView) runs it on the keyed node, or on the first such node when none is named.
+    if (const std::size_t dot = id.find('.'); dot != std::string::npos && tree_ != nullptr) {
+        const std::string_view action_namespace = std::string_view(id).substr(0U, dot);
+        const std::vector<std::string_view> types =
+            widgets_.framework_action_types(action_namespace);
+        if (!types.empty()) {
+            const std::string* key = string_value(action.payload.field("key"));
+            RetainedNode* target = key != nullptr ? tree_->find_key(*key) : nullptr;
+            if (key == nullptr) {
+                for (const std::string_view type : types) {
+                    const std::vector<RetainedNode*>* nodes = tree_->find_type(type);
+                    if (nodes != nullptr && !nodes->empty()) {
+                        target = nodes->front();
+                        break;
+                    }
+                }
+            }
+            const WidgetLifecycle* const lifecycle =
+                target != nullptr ? widgets_.find(target->description().type) : nullptr;
+            if (lifecycle == nullptr || lifecycle->input.framework_actions != action_namespace ||
+                lifecycle->input.framework_action == nullptr) {
+                return surface_outcome(runtime::ActionDispatchStatus::failed,
+                                       "No attached target for '" + id + "'" +
+                                           (key != nullptr ? " with key '" + *key + "'." : "."));
+            }
+            WidgetInputScope scope(*this, *target, result, {}, {});
+            return surface_outcome(lifecycle->input.framework_action(
+                                       scope, std::string_view(id).substr(dot + 1U), action.payload)
+                                       ? runtime::ActionDispatchStatus::handled
+                                       : runtime::ActionDispatchStatus::ignored);
+        }
+    }
     static_cast<void>(node);
     return std::nullopt;
 }

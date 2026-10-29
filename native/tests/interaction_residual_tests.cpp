@@ -1748,6 +1748,254 @@ void test_movable_snapping(InputFixture& fixture) {
     check(offset().y == before.y + 10.0, "Shift did not nudge ten times as far");
 }
 
+// A released movable flings on with its velocity and springs onto the snap point that velocity
+// carries it toward, past the nearest one; a drag past rubber-band limits is resisted and springs
+// back inside them; the settle is reported with the snap index.
+void test_movable_fling_snap_and_bounds(InputFixture& fixture) {
+    const auto movable = [](runtime::Value options) {
+        return std::vector<ui::DescriptionBehavior>{
+            ui::DescriptionBehavior{"strata.movable", true, std::move(options), nullptr}};
+    };
+    fixture.adopt(node("Panel", "fling.root",
+                       {
+                           node("Panel", "fling.card", {}, sized(100.0, 100.0),
+                                movable(object({
+                                    {"axis", runtime::Value("x")},
+                                    {"bounds", runtime::Value("none")},
+                                    {"fling", runtime::Value(true)},
+                                    {"snapX", runtime::Value(std::vector<runtime::Value>{
+                                                  runtime::Value(-300.0), runtime::Value(0.0),
+                                                  runtime::Value(300.0)})},
+                                }))),
+                           node("Panel", "fling.sheet", {}, sized(100.0, 100.0),
+                                movable(object({
+                                    {"axis", runtime::Value("y")},
+                                    {"bounds", object({{"minY", runtime::Value(0.0)},
+                                                       {"maxY", runtime::Value(100.0)}})},
+                                }))),
+                       },
+                       sized(640.0, 480.0, "ROW")));
+    const auto offset = [&fixture](const std::string_view key) {
+        const ui::RetainedNode* node = fixture.tree_.find_key(key);
+        const runtime::Value* value =
+            node != nullptr ? node->retained_value("strata.movement.offset") : nullptr;
+        const runtime::Value* x = value != nullptr ? value->field("x") : nullptr;
+        const runtime::Value* y = value != nullptr ? value->field("y") : nullptr;
+        return ui::Point{x != nullptr && x->number() != nullptr ? *x->number() : 0.0,
+                         y != nullptr && y->number() != nullptr ? *y->number() : 0.0};
+    };
+    std::vector<data::JsonValue> settles;
+    const auto collect = [&settles](const ui::InputOperationResult& result) {
+        for (const data::JsonValue& event : result.events) {
+            const data::JsonValue* value = event.find("value");
+            const data::JsonValue* phase = value != nullptr ? value->find("phase") : nullptr;
+            if (phase != nullptr && phase->string() != nullptr && *phase->string() == "settle")
+                settles.push_back(*value);
+        }
+    };
+    // Frames until the movable comes to rest, 60 a second.
+    std::int64_t now = 1'000'000'000;
+    const auto settle = [&](const std::int64_t until) {
+        for (; now < until; now += 16'666'667) {
+            fixture.input_.publish_frame_time(now);
+            collect(fixture.input_.advance_frame());
+        }
+    };
+
+    // Released at 60 px moving 2000 px/s: friction carries it toward 560, so it passes the nearest
+    // snap point (0) and springs onto 300.
+    // One event a frame, as a pointer moving across frames arrives (moves within one frame are
+    // coalesced into the last).
+    const auto deliver = [&](const ui::PointerInputEvent& event) {
+        fixture.input_.publish_frame_time(event.timestamp_nanos);
+        collect(fixture.pointer({event}));
+    };
+    const ui::Point grip = center(fixture.bounds("fling.card").bounds);
+    deliver(ui::PointerInputEvent{grip, ui::PointerEventType::press, 31, 0, {}, {}, now});
+    for (int step = 1; step <= 3; ++step) {
+        deliver(ui::PointerInputEvent{ui::Point{grip.x + 20.0 * step, grip.y + 4.0 * step},
+                                      ui::PointerEventType::move,
+                                      31,
+                                      0,
+                                      {},
+                                      {},
+                                      now + step * 10'000'000});
+    }
+    deliver(ui::PointerInputEvent{ui::Point{grip.x + 60.0, grip.y + 12.0},
+                                  ui::PointerEventType::release,
+                                  31,
+                                  0,
+                                  {},
+                                  {},
+                                  now + 32'000'000});
+    check(offset("fling.card").y == 0.0, "axis x let the card move vertically");
+    now += 33'000'000;
+    settle(now + 3'000'000'000);
+    check(std::abs(offset("fling.card").x - 300.0) < 1.0e-6,
+          "the flick did not carry the card onto the far snap point: x = " +
+              std::to_string(offset("fling.card").x));
+    check(!settles.empty() && settles.back().find("snapped") != nullptr &&
+              settles.back().find("snapped")->number() != nullptr &&
+              *settles.back().find("snapped")->number() == 2.0,
+          "the settle did not report snap point 2");
+
+    // The same move released at rest snaps to the nearest point instead.
+    settles.clear();
+    const ui::Point moved = ui::Point{grip.x + 300.0, grip.y};
+    deliver(ui::PointerInputEvent{moved, ui::PointerEventType::press, 32, 0, {}, {}, now});
+    deliver(ui::PointerInputEvent{ui::Point{moved.x - 60.0, moved.y},
+                                  ui::PointerEventType::move,
+                                  32,
+                                  0,
+                                  {},
+                                  {},
+                                  now + 10'000'000});
+    deliver(ui::PointerInputEvent{ui::Point{moved.x - 60.0, moved.y},
+                                  ui::PointerEventType::release,
+                                  32,
+                                  0,
+                                  {},
+                                  {},
+                                  now + 400'000'000});
+    now += 401'000'000;
+    settle(now + 3'000'000'000);
+    check(std::abs(offset("fling.card").x - 300.0) < 1.0e-6,
+          "a slow release did not settle on the nearest snap point");
+
+    // Past its limits a drag is resisted: 200 px beyond maxY shows well short of that, and the
+    // release springs back onto the limit.
+    const ui::Point handle = center(fixture.bounds("fling.sheet").bounds);
+    deliver(ui::PointerInputEvent{handle, ui::PointerEventType::press, 33, 0, {}, {}, now});
+    deliver(ui::PointerInputEvent{ui::Point{handle.x, handle.y + 150.0},
+                                  ui::PointerEventType::move,
+                                  33,
+                                  0,
+                                  {},
+                                  {},
+                                  now + 10'000'000});
+    deliver(ui::PointerInputEvent{ui::Point{handle.x, handle.y + 300.0},
+                                  ui::PointerEventType::move,
+                                  33,
+                                  0,
+                                  {},
+                                  {},
+                                  now + 20'000'000});
+    const double stretched = offset("fling.sheet").y;
+    check(stretched > 100.0 && stretched < 200.0,
+          "a drag past the limit was not resisted like a rubber band: y = " +
+              std::to_string(stretched));
+    deliver(ui::PointerInputEvent{ui::Point{handle.x, handle.y + 300.0},
+                                  ui::PointerEventType::release,
+                                  33,
+                                  0,
+                                  {},
+                                  {},
+                                  now + 200'000'000});
+    now += 201'000'000;
+    settle(now + 3'000'000'000);
+    check(std::abs(offset("fling.sheet").y - 100.0) < 1.0e-6,
+          "the rubber band did not spring back onto the limit");
+}
+
+// After layout, `strata.scroll` reports a scroll's offset, progress, velocity and extents whenever
+// they change (and once more at rest, with no velocity), and `strata.size` reports a node's
+// laid-out size whenever it changes, but not again when it only flips back to the size before.
+void test_layout_observers(InputFixture& fixture) {
+    const auto observer = [](const std::string_view id) {
+        return std::vector<ui::DescriptionBehavior>{
+            ui::DescriptionBehavior{std::string(id), true, object({}), nullptr}};
+    };
+    const auto describe = [&](const double width) {
+        return node(
+            "Panel", "observe.root",
+            {
+                node("Panel", "observe.scroll",
+                     {node("Panel", "observe.content", {}, sized(200.0, 1000.0))},
+                     {{"$layout", layout(200.0, 200.0, "SCROLL")}}, observer("strata.scroll")),
+                node("Panel", "observe.sized", {}, sized(width, 50.0), observer("strata.size")),
+            },
+            sized(640.0, 480.0, "COLUMN"));
+    };
+    std::int64_t now = 2'000'000'000;
+    const auto relayout = [&](std::shared_ptr<const ui::DescriptionNode> description) {
+        if (description != nullptr) {
+            fixture.input_.begin_tree_update();
+            static_cast<void>(fixture.tree_.reconcile(std::move(description)));
+            static_cast<void>(fixture.input_.prepare(fixture.tree_));
+        }
+        const ui::LayoutResult& result =
+            fixture.layout_.layout(fixture.tree_, ui::LayoutEnvironment{
+                                                      0U,
+                                                      ui::Rect{0.0, 0.0, 640.0, 480.0},
+                                                      1.0,
+                                                      {},
+                                                      ui::PointSnapPolicy::nearest,
+                                                      ui::RectangleSnapPolicy::outward,
+                                                      false,
+                                                  });
+        fixture.input_.publish_layout(result);
+        fixture.input_.publish_frame_time(now);
+        return fixture.input_.after_layout();
+    };
+    const auto reported = [](const ui::InputOperationResult& result,
+                             const std::string_view type) -> std::optional<data::JsonValue> {
+        std::optional<data::JsonValue> found;
+        for (const data::JsonValue& event : result.events) {
+            const data::JsonValue* kind = event.find("type");
+            if (kind != nullptr && kind->string() != nullptr && *kind->string() == type)
+                found = *event.find("value");
+        }
+        return found;
+    };
+    const auto number = [](const std::optional<data::JsonValue>& value,
+                           const std::string_view name) {
+        const data::JsonValue* field = value.has_value() ? value->find(name) : nullptr;
+        return field != nullptr && field->number() != nullptr ? *field->number() : -1.0;
+    };
+
+    fixture.adopt(describe(300.0));
+    ui::InputOperationResult result = relayout(nullptr);
+    std::optional<data::JsonValue> scroll = reported(result, "scroll-changed");
+    std::optional<data::JsonValue> size = reported(result, "size-changed");
+    check(scroll.has_value() && number(scroll, "y") == 0.0 && number(scroll, "progressY") == 0.0 &&
+              number(scroll, "contentHeight") == 1000.0 &&
+              number(scroll, "viewportHeight") == 200.0,
+          "the first layout did not report the scroll's extents");
+    check(size.has_value() && number(size, "width") == 300.0 && number(size, "height") == 50.0,
+          "the first layout did not report the node's size");
+    check(!reported(relayout(nullptr), "size-changed").has_value() &&
+              !reported(relayout(nullptr), "scroll-changed").has_value(),
+          "an unchanged layout was reported again");
+
+    // Scrolled 400 of its 800 px range in 20 ms: half way, at 20000 px/s.
+    now += 20'000'000;
+    ui::InputOperationResult moved;
+    check(fixture.input_.scroll_to("observe.scroll", ui::Point{0.0, 400.0}, moved),
+          "the scroll did not move");
+    scroll = reported(relayout(nullptr), "scroll-changed");
+    check(number(scroll, "y") == 400.0 && number(scroll, "progressY") == 0.5 &&
+              std::abs(number(scroll, "velocityY") - 20000.0) < 1.0e-6,
+          "a moved scroll did not report its progress and velocity");
+    // At rest, once more without velocity.
+    now += 200'000'000;
+    scroll = reported(relayout(nullptr), "scroll-changed");
+    check(scroll.has_value() && number(scroll, "velocityY") == 0.0 && number(scroll, "y") == 400.0,
+          "a scroll at rest was not reported once more with no velocity");
+    check(!reported(relayout(nullptr), "scroll-changed").has_value(),
+          "a scroll at rest kept reporting");
+
+    // A size change is reported; one straight back to the size before, at once, is not.
+    now += 1'000'000;
+    size = reported(relayout(describe(420.0)), "size-changed");
+    check(number(size, "width") == 420.0, "a resized node did not report its new size");
+    now += 1'000'000;
+    check(!reported(relayout(describe(300.0)), "size-changed").has_value(),
+          "a size flipping straight back was reported (a feedback loop)");
+    now += 500'000'000;
+    size = reported(relayout(describe(360.0)), "size-changed");
+    check(number(size, "width") == 360.0, "a later size change was not reported");
+}
+
 // A backdrop observer resolves host luma reports into a bistable light/dark reading: it changes
 // only past a threshold, holds between them, believes a change only once it has persisted for the
 // dwell, and emits once per change.
@@ -3925,6 +4173,8 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_tooltip_disclosure(fixture);
         test_manipulation_slop(fixture);
         test_movable_snapping(fixture);
+        test_movable_fling_snap_and_bounds(fixture);
+        test_layout_observers(fixture);
         test_backdrop_observer(fixture);
         test_scale_handle(fixture);
         test_passive_descendant_activation(fixture);

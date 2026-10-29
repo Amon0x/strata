@@ -112,11 +112,52 @@ std::optional<double> local_presentation_tone(const RetainedNode& node,
     return tone.has_value() ? std::optional<double>(std::clamp(*tone, 0.0, 1.0)) : std::nullopt;
 }
 
-MotionTransform local_presentation_transform(
-    const RetainedNode& node,
-    const MotionRuntime& motion,
-    const Rect& bounds
-) noexcept {
+std::optional<ContentView> parent_content_view(const RetainedNode& node) noexcept {
+    const RetainedNode* const parent = node.parent();
+    const runtime::Value* const view =
+        parent != nullptr ? parent->retained_value(content_view_value) : nullptr;
+    if (view == nullptr || view->object() == nullptr)
+        return std::nullopt;
+    const auto component = [view](const std::string_view name, const double fallback) {
+        const runtime::Value* value = view->field(name);
+        return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())
+                   ? *value->number()
+                   : fallback;
+    };
+    const double zoom = component("zoom", 1.0);
+    if (!(zoom > 0.0))
+        return std::nullopt;
+    return ContentView{component("x", 0.0), component("y", 0.0), zoom};
+}
+
+namespace {
+
+[[nodiscard]] MotionTransform own_presentation_transform(const RetainedNode& node,
+                                                         const MotionRuntime& motion,
+                                                         const Rect& bounds) noexcept;
+
+} // namespace
+
+MotionTransform local_presentation_transform(const RetainedNode& node, const MotionRuntime& motion,
+                                             const Rect& bounds) noexcept {
+    const MotionTransform own = own_presentation_transform(node, motion, bounds);
+    const std::optional<ContentView> view = parent_content_view(node);
+    if (!view.has_value())
+        return own;
+    // The view scales about the child's own top-left and then pans: p -> b + (x, y) + z (p - b).
+    const MotionTransform presented{
+        bounds.x * (1.0 - view->zoom) + view->x,
+        bounds.y * (1.0 - view->zoom) + view->y,
+        view->zoom,
+        view->zoom,
+    };
+    return concatenate_presentation_transform(presented, own);
+}
+
+namespace {
+
+MotionTransform own_presentation_transform(const RetainedNode& node, const MotionRuntime& motion,
+                                           const Rect& bounds) noexcept {
     const MotionComputedValues* computed = motion.computed_values(node.identity());
     const PresentationStatics& statics = presentation_statics(node);
     const auto animated = [computed](const MotionProperty property) -> std::optional<double> {
@@ -224,6 +265,8 @@ MotionTransform local_presentation_transform(
         c,
     };
 }
+
+} // namespace
 
 double local_presentation_opacity(
     const RetainedNode& node,

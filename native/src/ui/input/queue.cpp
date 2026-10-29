@@ -350,6 +350,9 @@ bool InputRouter::requires_frame_advance() const noexcept {
            !pressed_pointer_targets_.empty() || !drag_sessions_.empty() ||
            scrollbar_drag_.has_value() || pending_focus_.has_value() || !pending_reveals_.empty() ||
            !pending_diagnostics_.empty() || !requested_widget_frames_.empty() ||
+           !requested_behavior_frames_.empty() ||
+           std::ranges::any_of(scroll_observations_,
+                               [](const auto& entry) { return entry.second.moving; }) ||
            !pending_delays_.empty() || timers_waiting_ || watched_frames_pending();
 }
 

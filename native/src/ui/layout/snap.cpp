@@ -45,6 +45,10 @@ std::string_view layout_kind_name(const LayoutKind value) noexcept {
     case LayoutKind::spacer: return "spacer";
     case LayoutKind::scroll: return "scroll";
     case LayoutKind::portal: return "portal";
+    case LayoutKind::masonry:
+        return "masonry";
+    case LayoutKind::canvas:
+        return "canvas";
     }
     return "panel";
 }

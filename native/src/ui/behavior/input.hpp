@@ -73,6 +73,13 @@ public:
     [[nodiscard]] bool cancel_gesture() noexcept;
     void mark_long_press_emitted();
     void set_retained(std::string name, runtime::Value value, DirtyReason reason);
+    /** Asks for this behavior's `advance` hook to run next frame
+     * (InputRouter::request_behavior_frame). */
+    bool request_frame();
+    /** The time of the frame being processed. */
+    [[nodiscard]] std::int64_t frame_time_nanos() const noexcept;
+    /** Whether the surface asks for reduced motion: animations land at once. */
+    [[nodiscard]] bool reduced_motion() const noexcept;
     void set_retained(
         RetainedNode& node,
         std::string name,

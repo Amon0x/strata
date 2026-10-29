@@ -49,10 +49,17 @@ void check_layout_kind(
         incompatible("wrap", "ROW or COLUMN");
         incompatible("alignContent", "ROW or COLUMN");
     }
-    if (*kind == "GRID" || *kind == "SCROLL" || *kind == "SPACER") {
+    if (*kind == "GRID" || *kind == "SCROLL" || *kind == "SPACER" || *kind == "MASONRY" ||
+        *kind == "CANVAS") {
         incompatible("alignItems", "ROW, COLUMN, PANEL, OVERLAY, PORTAL, or STACK");
         incompatible("justifyContent", "ROW, COLUMN, PANEL, OVERLAY, PORTAL, or STACK");
     }
+    if (*kind != "MASONRY") {
+        incompatible("columns", "MASONRY");
+        incompatible("minColumnWidth", "MASONRY");
+    }
+    if (*kind == "CANVAS")
+        incompatible("gap", "ROW, COLUMN, GRID, MASONRY, or SCROLL");
     if (layered) {
         const LayoutProperty* justify = find("justifyContent");
         const std::string* value = justify != nullptr && justify->value != nullptr
@@ -83,7 +90,9 @@ void check_layout_kind(
             return;
         }
     }
-    if (layered || *kind == "SPACER") incompatible("gap", "ROW, COLUMN, GRID, or SCROLL");
+    if (layered || *kind == "SPACER") {
+        incompatible("gap", "ROW, COLUMN, GRID, MASONRY, or SCROLL");
+    }
     if (*kind != "PORTAL") {
         incompatible("anchorPoint", "PORTAL");
         incompatible("detachFromParentClip", "PORTAL");

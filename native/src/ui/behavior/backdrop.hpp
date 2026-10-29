@@ -21,6 +21,21 @@ inline constexpr std::string_view backdrop_behavior_id = "strata.backdrop";
  * fractions of its box, `width`/`height`) and `{inside: false}` once it leaves.
  */
 inline constexpr std::string_view pointer_behavior_id = "strata.pointer";
+/**
+ * `strata.scroll` lets a scrolling node report where it is scrolled: after every layout in which
+ * its offset, content or viewport changed (wheel, drag, inertia, animated or programmatic scrolls
+ * and reveals alike), its action receives `x`, `y`, `progressX`, `progressY` (0..1 of the scroll
+ * range), `velocityX`, `velocityY` (logical px/s), `contentWidth`, `contentHeight`,
+ * `viewportWidth` and `viewportHeight`; once the scroll stops, it is told once more with zero
+ * velocity.
+ */
+inline constexpr std::string_view scroll_behavior_id = "strata.scroll";
+/**
+ * `strata.size` lets a node lay itself out by its own size: after every layout that changed its
+ * laid-out logical size, its action receives `width` and `height`. A size that answers the event
+ * by flipping straight back to the one before is not reported again (no feedback loop).
+ */
+inline constexpr std::string_view size_behavior_id = "strata.size";
 /** Retained reading: true while the node's backdrop is light. Absent until the first report. */
 inline constexpr std::string_view backdrop_light_value = "strata.backdrop.light";
 /** The luma that produced the retained reading. */

@@ -11,6 +11,7 @@
 #include "ui/widget/presentation.hpp"
 #include "ui/widget/range_slider_model.hpp"
 #include "ui/widget/semantics.hpp"
+#include "ui/widget/zoom_view_model.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -58,6 +59,14 @@ namespace {
     if (field == "strata.table.columnWidths") return table_widths(value);
     if (field == "strata.gesture.splitRatio") return value.number() != nullptr;
     if (field == "$expanded") return value.boolean() != nullptr;
+    if (field == "strata.content.view") {
+        const runtime::Value* x = value.field("x");
+        const runtime::Value* y = value.field("y");
+        const runtime::Value* zoom = value.field("zoom");
+        return value.object() != nullptr && x != nullptr && x->number() != nullptr &&
+               y != nullptr && y->number() != nullptr && zoom != nullptr &&
+               zoom->number() != nullptr && *zoom->number() > 0.0;
+    }
     return false;
 }
 
@@ -85,6 +94,7 @@ WidgetRegistry::WidgetRegistry() {
     register_markdown_widget(*this);
     register_date_picker_widget(*this);
     register_range_slider_widget(*this);
+    register_zoom_view_widget(*this);
     register_color_picker_widget(*this);
     register_lottie_widget(*this);
 
@@ -113,6 +123,8 @@ WidgetRegistry::WidgetRegistry() {
     register_persistence_phase(
         "Section", WidgetPersistencePhase{{"$expanded"}, &persisted_widget_value}
     );
+    register_persistence_phase(
+        "ZoomView", WidgetPersistencePhase{{"strata.content.view"}, &persisted_widget_value});
 }
 
 void register_builtin_widget_presenters(WidgetRegistry& registry) {
@@ -255,6 +267,7 @@ WidgetRegistry::WidgetRegistry(WidgetRegistry&& other) noexcept
       hover_disclosure_types_(std::move(other.hover_disclosure_types_)),
       notification_types_(std::move(other.notification_types_)),
       async_owner_types_(std::move(other.async_owner_types_)),
+      synchronized_types_(std::move(other.synchronized_types_)),
       text_editable_types_(std::move(other.text_editable_types_)),
       revision_(next_registry_revision()) {
     other.revision_ = next_registry_revision();
@@ -271,6 +284,7 @@ WidgetRegistry& WidgetRegistry::operator=(WidgetRegistry&& other) noexcept {
         hover_disclosure_types_ = std::move(other.hover_disclosure_types_);
         notification_types_ = std::move(other.notification_types_);
         async_owner_types_ = std::move(other.async_owner_types_);
+        synchronized_types_ = std::move(other.synchronized_types_);
         text_editable_types_ = std::move(other.text_editable_types_);
         revision_ = next_registry_revision();
         other.revision_ = next_registry_revision();
@@ -288,6 +302,7 @@ void WidgetRegistry::refresh_trait_types() {
     hover_disclosure_types_.clear();
     notification_types_.clear();
     async_owner_types_.clear();
+    synchronized_types_.clear();
     text_editable_types_.clear();
     for (const auto& [type, lifecycle] : lifecycles_) {
         if (lifecycle.command.declaration)
@@ -306,6 +321,8 @@ void WidgetRegistry::refresh_trait_types() {
             notification_types_.push_back(type);
         if (lifecycle.async_owners != nullptr)
             async_owner_types_.push_back(type);
+        if (lifecycle.input.synchronize != nullptr)
+            synchronized_types_.push_back(type);
         if (lifecycle.input.text_edit_mode != WidgetTextEditMode::none)
             text_editable_types_.push_back(type);
     }
@@ -316,6 +333,7 @@ void WidgetRegistry::refresh_trait_types() {
     std::ranges::sort(hover_disclosure_types_);
     std::ranges::sort(notification_types_);
     std::ranges::sort(async_owner_types_);
+    std::ranges::sort(synchronized_types_);
     // Highest priority first; equal priorities in name order.
     std::ranges::sort(modal_types_, [this](const std::string_view left,
                                            const std::string_view right) {
@@ -346,6 +364,10 @@ std::span<const std::string_view> WidgetRegistry::modal_types() const noexcept {
 
 std::span<const std::string_view> WidgetRegistry::hover_disclosure_types() const noexcept {
     return hover_disclosure_types_;
+}
+
+std::span<const std::string_view> WidgetRegistry::synchronized_types() const noexcept {
+    return synchronized_types_;
 }
 
 std::span<const std::string_view> WidgetRegistry::notification_types() const noexcept {

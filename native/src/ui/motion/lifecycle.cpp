@@ -117,6 +117,7 @@ void MotionRuntime::clear() noexcept {
     implementation_->active_nodes.clear();
     implementation_->disclosure_players.clear();
     implementation_->disclosure_samples.clear();
+    implementation_->shared_places.clear();
     implementation_->reduced_motion.reset();
 }
 

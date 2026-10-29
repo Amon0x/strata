@@ -1,6 +1,7 @@
 #include "ui/behavior/registry.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -14,6 +15,8 @@
 
 #include "runtime/value.hpp"
 #include "ui/behavior/input.hpp"
+#include "ui/motion/players.hpp"
+#include "ui/theme.hpp"
 #include "ui/tree.hpp"
 #include "ui/widget/input.hpp"
 
@@ -25,6 +28,7 @@ constexpr std::string_view activate_click = "strata.activate.click";
 constexpr std::string_view movement_offset = "strata.movement.offset";
 constexpr std::string_view movement_session = "strata.movement.session";
 constexpr std::string_view movement_guides = "strata.movement.guides";
+constexpr std::string_view movement_settle = "strata.movement.settle";
 constexpr std::string_view scale_session = "strata.scale.session";
 constexpr std::string_view runtime_size = "strata.gesture.runtimeSize";
 constexpr std::string_view resize_session = "strata.gesture.resizeSession";
@@ -228,23 +232,85 @@ long_press_duration(const BehaviorInputScope& scope) noexcept {
     return Point{number(field(value, "x"), fallback.x), number(field(value, "y"), fallback.y)};
 }
 
-[[nodiscard]] Point clamp_movement(BehaviorInputScope& scope, Point offset) noexcept {
+/**
+ * Where a movable's offset may rest. Option `bounds` is "parent" (the default: the box stays in its
+ * parent), "none", or limits on the offset itself (`minX`, `maxX`, `minY`, `maxY`, any of them).
+ * Past them a drag meets rubber-band resistance when `rubberBand` is on (the default for explicit
+ * limits) and stops dead otherwise.
+ */
+struct MovementLimits final {
+    double min_x = -std::numeric_limits<double>::infinity();
+    double max_x = std::numeric_limits<double>::infinity();
+    double min_y = -std::numeric_limits<double>::infinity();
+    double max_y = std::numeric_limits<double>::infinity();
+    bool rubber_band = false;
+
+    [[nodiscard]] Point clamp(const Point offset) const noexcept {
+        return Point{std::clamp(offset.x, min_x, std::max(min_x, max_x)),
+                     std::clamp(offset.y, min_y, std::max(min_y, max_y))};
+    }
+};
+
+[[nodiscard]] std::optional<MovementLimits> movement_limits(const BehaviorInputScope& scope) {
+    const runtime::Value* bounds = scope.option("bounds");
+    if (bounds != nullptr && bounds->object() != nullptr) {
+        MovementLimits limits;
+        limits.min_x = number(field(bounds, "minX"), limits.min_x);
+        limits.max_x = number(field(bounds, "maxX"), limits.max_x);
+        limits.min_y = number(field(bounds, "minY"), limits.min_y);
+        limits.max_y = number(field(bounds, "maxY"), limits.max_y);
+        limits.rubber_band = boolean(scope.option("rubberBand"), true);
+        return limits;
+    }
     if (!boolean(scope.option("clampToBounds"), true) ||
-        normalized(text(scope.option("bounds"), "parent")) == "none") {
-        return offset;
+        normalized(text(bounds, "parent")) == "none") {
+        return std::nullopt;
     }
     const LayoutRecord* node_layout = scope.layout();
-    RetainedNode* parent = scope.node().parent();
+    const RetainedNode* parent = scope.node().parent();
     const LayoutRecord* parent_layout = parent != nullptr ? scope.layout(*parent) : nullptr;
     if (node_layout == nullptr || parent_layout == nullptr)
-        return offset;
-    const Rect bounds = parent_layout->viewport.value_or(parent_layout->content_bounds);
-    const double min_x = bounds.x - node_layout->bounds.x;
-    const double max_x = bounds.right() - node_layout->bounds.right();
-    const double min_y = bounds.y - node_layout->bounds.y;
-    const double max_y = bounds.bottom() - node_layout->bounds.bottom();
-    offset.x = std::clamp(offset.x, std::min(min_x, max_x), std::max(min_x, max_x));
-    offset.y = std::clamp(offset.y, std::min(min_y, max_y), std::max(min_y, max_y));
+        return std::nullopt;
+    const Rect area = parent_layout->viewport.value_or(parent_layout->content_bounds);
+    const double min_x = area.x - node_layout->bounds.x;
+    const double max_x = area.right() - node_layout->bounds.right();
+    const double min_y = area.y - node_layout->bounds.y;
+    const double max_y = area.bottom() - node_layout->bounds.bottom();
+    return MovementLimits{std::min(min_x, max_x), std::max(min_x, max_x), std::min(min_y, max_y),
+                          std::max(min_y, max_y), boolean(scope.option("rubberBand"), false)};
+}
+
+[[nodiscard]] Point clamp_movement(const BehaviorInputScope& scope, const Point offset) {
+    const std::optional<MovementLimits> limits = movement_limits(scope);
+    return limits.has_value() ? limits->clamp(offset) : offset;
+}
+
+/**
+ * Past a limit the box follows the pointer less and less, as a scroll view's edge does: an
+ * overshoot of d shows as (1 - 1 / (0.55 d / extent + 1)) * extent, which never reaches the box's
+ * own extent.
+ */
+[[nodiscard]] double rubber_band(const double value, const double minimum, const double maximum,
+                                 const double extent) noexcept {
+    const double reach = std::max(extent, 1.0);
+    const auto resisted = [reach](const double overshoot) {
+        return (1.0 - 1.0 / (overshoot * 0.55 / reach + 1.0)) * reach;
+    };
+    if (value < minimum)
+        return minimum - resisted(minimum - value);
+    if (value > maximum)
+        return maximum + resisted(value - maximum);
+    return value;
+}
+
+/** Option `axis`: "x" or "y" keeps the movement on that axis; anything else moves freely. */
+[[nodiscard]] Point constrain_axis(const BehaviorInputScope& scope, Point offset,
+                                   const Point start) {
+    const std::string axis = normalized(text(scope.option("axis"), "both"));
+    if (axis == "x" || axis == "horizontal")
+        offset.y = start.y;
+    else if (axis == "y" || axis == "vertical")
+        offset.x = start.x;
     return offset;
 }
 
@@ -362,9 +428,10 @@ struct AxisSnap final {
 }
 
 /**
- * The `moved` event: `phase` (move, end or cancel), the offset, the box where it shows and its
- * container (surface coordinates), and the lines a snap aligned it to, so a host can keep the
- * placement the user chose and present guides of its own.
+ * The `moved` event: `phase` (move, end, cancel, or settling while it coasts or springs after
+ * release), the offset, the box where it shows and its container (surface coordinates), and the
+ * lines a snap aligned it to, so a host can keep the placement the user chose and present guides
+ * of its own. `snapped` is set only when it settles (emit_settled).
  */
 [[nodiscard]] bool emit_moved(BehaviorInputScope& scope, const std::string_view phase,
                               const Point offset, const MovementGuides& guides) {
@@ -384,6 +451,10 @@ struct AxisSnap final {
             {"container", rect_value(area.value_or(Rect{}))},
             {"guideX", guides.x.has_value() ? runtime::Value(*guides.x) : runtime::Value{}},
             {"guideY", guides.y.has_value() ? runtime::Value(*guides.y) : runtime::Value{}},
+            // Every phase has the settle's fields, so state set from any of them has one shape.
+            {"snapped", runtime::Value{}},
+            {"snappedX", runtime::Value{}},
+            {"snappedY", runtime::Value{}},
         }));
 }
 
@@ -433,6 +504,282 @@ struct AxisSnap final {
     return false;
 }
 
+/** What a released movable settles onto: snap targets per axis and the snap point chosen. */
+struct SettleTarget final {
+    std::optional<double> x;
+    std::optional<double> y;
+    std::optional<std::size_t> index;
+    std::optional<std::size_t> index_x;
+    std::optional<std::size_t> index_y;
+};
+
+[[nodiscard]] std::vector<double> numbers(const runtime::Value* value) {
+    std::vector<double> result;
+    if (value == nullptr || value->list() == nullptr)
+        return result;
+    for (const runtime::Value& entry : value->list()->values) {
+        if (entry.number() != nullptr && std::isfinite(*entry.number()))
+            result.push_back(*entry.number());
+    }
+    return result;
+}
+
+/** How fast a fling slows: its speed falls by e every 1 / `friction` seconds (option, default 4).
+ */
+[[nodiscard]] double fling_friction(const BehaviorInputScope& scope) noexcept {
+    return std::clamp(number(scope.option("friction"), 4.0), 0.5, 60.0);
+}
+
+/**
+ * The snap target a release reaches: options `snapPoints` (offsets {x, y}), or `snapX` and `snapY`
+ * (offsets per axis). The release velocity carries the box as far as friction lets it before the
+ * nearest target to where it would stop is chosen, so a flick passes the nearest point.
+ */
+[[nodiscard]] SettleTarget settle_target(const BehaviorInputScope& scope, const Point position,
+                                         const Point velocity) {
+    SettleTarget target;
+    const double friction = fling_friction(scope);
+    const Point projected{position.x + velocity.x / friction, position.y + velocity.y / friction};
+    const runtime::Value* points = scope.option("snapPoints");
+    if (points != nullptr && points->list() != nullptr && !points->list()->values.empty()) {
+        double best = std::numeric_limits<double>::infinity();
+        const std::vector<runtime::Value>& values = points->list()->values;
+        for (std::size_t index = 0U; index < values.size(); ++index) {
+            const Point candidate{number(field(&values[index], "x"), position.x),
+                                  number(field(&values[index], "y"), position.y)};
+            const double distance =
+                std::hypot(candidate.x - projected.x, candidate.y - projected.y);
+            if (distance < best) {
+                best = distance;
+                target.x = candidate.x;
+                target.y = candidate.y;
+                target.index = index;
+            }
+        }
+        return target;
+    }
+    const auto nearest = [](const std::vector<double>& candidates, const double value,
+                            std::optional<double>& chosen, std::optional<std::size_t>& index) {
+        double best = std::numeric_limits<double>::infinity();
+        for (std::size_t at = 0U; at < candidates.size(); ++at) {
+            if (const double distance = std::abs(candidates[at] - value); distance < best) {
+                best = distance;
+                chosen = candidates[at];
+                index = at;
+            }
+        }
+    };
+    nearest(numbers(scope.option("snapX")), projected.x, target.x, target.index_x);
+    nearest(numbers(scope.option("snapY")), projected.y, target.y, target.index_y);
+    target.index = target.index_x.has_value() ? target.index_x : target.index_y;
+    return target;
+}
+
+/**
+ * The spring a movable settles on: option `spring` names a motion policy ("spring" by default)
+ * whose spring easing gives stiffness and damping; a policy that is not a spring settles critically
+ * damped.
+ */
+[[nodiscard]] std::pair<double, double> settle_spring(const BehaviorInputScope& scope) {
+    const MotionTiming timing =
+        theme_motion_timing(scope.node().description(), text(scope.option("spring"), "spring"));
+    if (timing.easing.kind == MotionEasingKind::spring && timing.easing.x1 > 0.0 &&
+        timing.easing.y1 > 0.0) {
+        return {timing.easing.x1, timing.easing.y1};
+    }
+    constexpr double stiffness = 320.0;
+    return {stiffness, 2.0 * std::sqrt(stiffness)};
+}
+
+/** Axis modes of a settling movable, as kept in its retained settle state. */
+enum class SettleMode { rest = 0, coast = 1, spring = 2 };
+
+[[nodiscard]] runtime::Value index_value(const std::optional<std::size_t> index) {
+    return index.has_value() ? runtime::Value(static_cast<double>(*index)) : runtime::Value{};
+}
+
+/** The `moved` event with phase "settle": where the box came to rest and the snap point it took. */
+[[nodiscard]] bool emit_settled(BehaviorInputScope& scope, const Point offset,
+                                const runtime::Value* settle) {
+    const LayoutRecord* own = scope.layout();
+    const Rect bounds = own != nullptr ? Rect{own->bounds.x + offset.x, own->bounds.y + offset.y,
+                                              own->bounds.width, own->bounds.height}
+                                       : Rect{};
+    const runtime::Value* snapped = field(settle, "snapped");
+    const runtime::Value* snapped_x = field(settle, "snappedX");
+    const runtime::Value* snapped_y = field(settle, "snappedY");
+    return scope.emit("moved",
+                      object({
+                          {"phase", runtime::Value("settle")},
+                          {"x", runtime::Value(offset.x)},
+                          {"y", runtime::Value(offset.y)},
+                          {"bounds", rect_value(bounds)},
+                          {"container", rect_value(movement_area(scope).value_or(Rect{}))},
+                          {"guideX", runtime::Value{}},
+                          {"guideY", runtime::Value{}},
+                          {"snapped", snapped != nullptr ? *snapped : runtime::Value{}},
+                          {"snappedX", snapped_x != nullptr ? *snapped_x : runtime::Value{}},
+                          {"snappedY", snapped_y != nullptr ? *snapped_y : runtime::Value{}},
+                      }));
+}
+
+void store_settle(BehaviorInputScope& scope, const SettleMode mode_x, const SettleMode mode_y,
+                  const Point velocity, const Point target, const std::int64_t time,
+                  const runtime::Value& snapped, const runtime::Value& snapped_x,
+                  const runtime::Value& snapped_y) {
+    scope.set_retained(std::string(movement_settle),
+                       object({
+                           {"modeX", runtime::Value(static_cast<double>(mode_x))},
+                           {"modeY", runtime::Value(static_cast<double>(mode_y))},
+                           {"velocityX", runtime::Value(velocity.x)},
+                           {"velocityY", runtime::Value(velocity.y)},
+                           {"targetX", runtime::Value(target.x)},
+                           {"targetY", runtime::Value(target.y)},
+                           {"time", runtime::Value(static_cast<double>(time))},
+                           {"snapped", snapped},
+                           {"snappedX", snapped_x},
+                           {"snappedY", snapped_y},
+                       }),
+                       DirtyReason::input);
+}
+
+/**
+ * After release: each axis springs onto its snap target (`snapPoints`, `snapX`, `snapY`), coasts on
+ * with the release velocity when `fling` is on, springs back inside rubber-band limits it was
+ * dragged past, or rests where it is. The box settles over the frames that follow
+ * (movable_advance), reporting `settling` as it goes and `settle` when every axis has come to rest;
+ * one that rests where it was let go reports only its `end`.
+ */
+void begin_settle(BehaviorInputScope& scope, const Point velocity) {
+    const Point position = retained_point(scope.retained(movement_offset));
+    const SettleTarget snap = settle_target(scope, position, velocity);
+    const bool fling = boolean(scope.option("fling"), false);
+    const std::optional<MovementLimits> limits = movement_limits(scope);
+    const Point inside = limits.has_value() ? limits->clamp(position) : position;
+    const auto mode = [fling](const std::optional<double> snapped, const double at,
+                              const double held) {
+        if (snapped.has_value())
+            return SettleMode::spring;
+        if (fling)
+            return SettleMode::coast;
+        return at != held ? SettleMode::spring : SettleMode::rest;
+    };
+    const SettleMode mode_x = mode(snap.x, position.x, inside.x);
+    const SettleMode mode_y = mode(snap.y, position.y, inside.y);
+    // A box that stays where it was let go has finished with `end`: there is nothing to settle.
+    if (mode_x == SettleMode::rest && mode_y == SettleMode::rest)
+        return;
+    const Point target{snap.x.value_or(inside.x), snap.y.value_or(inside.y)};
+    store_settle(scope, mode_x, mode_y, velocity, target, scope.frame_time_nanos(),
+                 index_value(snap.index), index_value(snap.index_x), index_value(snap.index_y));
+    static_cast<void>(scope.request_frame());
+}
+
+/** One frame of a settling movable: coasting axes slow by friction, springing axes spring. */
+[[nodiscard]] bool movable_advance(BehaviorInputScope& scope) {
+    const runtime::Value* settle = scope.retained(movement_settle);
+    const runtime::Value* session = scope.retained(movement_session);
+    // A held pointer owns the box; a settle it interrupted was cleared on press.
+    if (settle == nullptr || settle->object() == nullptr ||
+        (session != nullptr && session->object() != nullptr)) {
+        return false;
+    }
+    const std::int64_t now = scope.frame_time_nanos();
+    const std::int64_t then = integer(field(settle, "time"), now);
+    const double remaining = std::clamp(static_cast<double>(now - then) * 1.0e-9, 0.0, 0.25);
+    const auto [stiffness, damping] = settle_spring(scope);
+    const double friction = fling_friction(scope);
+    const std::optional<MovementLimits> limits = movement_limits(scope);
+    Point position = retained_point(scope.retained(movement_offset));
+    Point velocity{number(field(settle, "velocityX"), 0.0),
+                   number(field(settle, "velocityY"), 0.0)};
+    Point target{number(field(settle, "targetX"), position.x),
+                 number(field(settle, "targetY"), position.y)};
+    std::array<SettleMode, 2U> modes{
+        static_cast<SettleMode>(integer(field(settle, "modeX"), 0)),
+        static_cast<SettleMode>(integer(field(settle, "modeY"), 0)),
+    };
+    const bool reduced = scope.reduced_motion();
+    const auto axis = [&](const std::size_t index, double& at, double& speed, double& goal,
+                          const double minimum, const double maximum) {
+        SettleMode& mode = modes[index];
+        if (reduced) {
+            // Without motion, a spring lands at once and a coast stops where it is.
+            if (mode == SettleMode::spring)
+                at = goal;
+            else if (mode == SettleMode::coast)
+                at = std::clamp(at, minimum, std::max(minimum, maximum));
+            speed = 0.0;
+            mode = SettleMode::rest;
+            return;
+        }
+        double left = remaining;
+        while (left > 0.0 && mode != SettleMode::rest) {
+            const double step = std::min(left, 1.0 / 120.0);
+            left -= step;
+            if (mode == SettleMode::coast) {
+                const double decay = std::exp(-friction * step);
+                at += speed * (1.0 - decay) / friction;
+                speed *= decay;
+                if (at < minimum || at > maximum) {
+                    if (limits.has_value() && limits->rubber_band) {
+                        // Past the edge the coast becomes a spring back to it, keeping its speed.
+                        goal = at < minimum ? minimum : maximum;
+                        mode = SettleMode::spring;
+                    } else {
+                        at = std::clamp(at, minimum, std::max(minimum, maximum));
+                        speed = 0.0;
+                        mode = SettleMode::rest;
+                    }
+                } else if (std::abs(speed) < 6.0) {
+                    speed = 0.0;
+                    mode = SettleMode::rest;
+                }
+            } else {
+                double offset = at - goal;
+                motion_detail::spring_step(stiffness, damping, step, offset, speed);
+                at = goal + offset;
+                if (std::abs(offset) < 0.1 && std::abs(speed) < 4.0) {
+                    at = goal;
+                    speed = 0.0;
+                    mode = SettleMode::rest;
+                }
+            }
+        }
+    };
+    const double infinity = std::numeric_limits<double>::infinity();
+    axis(0U, position.x, velocity.x, target.x, limits.has_value() ? limits->min_x : -infinity,
+         limits.has_value() ? limits->max_x : infinity);
+    axis(1U, position.y, velocity.y, target.y, limits.has_value() ? limits->min_y : -infinity,
+         limits.has_value() ? limits->max_y : infinity);
+    // Copied before any retained value is written: `settle` points into the retained state.
+    const runtime::Value snapped =
+        field(settle, "snapped") != nullptr ? *field(settle, "snapped") : runtime::Value{};
+    const runtime::Value snapped_x =
+        field(settle, "snappedX") != nullptr ? *field(settle, "snappedX") : runtime::Value{};
+    const runtime::Value snapped_y =
+        field(settle, "snappedY") != nullptr ? *field(settle, "snappedY") : runtime::Value{};
+    // Marked as animation, not input: hit testing follows a box moving on its own, so a press
+    // catches it where it shows.
+    scope.set_retained(
+        std::string(movement_offset),
+        object({{"x", runtime::Value(position.x)}, {"y", runtime::Value(position.y)}}),
+        DirtyReason::animation);
+    if (modes[0] == SettleMode::rest && modes[1] == SettleMode::rest) {
+        const runtime::Value settled = object({
+            {"snapped", snapped},
+            {"snappedX", snapped_x},
+            {"snappedY", snapped_y},
+        });
+        scope.set_retained(std::string(movement_settle), runtime::Value{}, DirtyReason::input);
+        return emit_settled(scope, position, &settled);
+    }
+    store_settle(scope, modes[0], modes[1], velocity, target, now, snapped, snapped_x, snapped_y);
+    static_cast<void>(scope.request_frame());
+    // Frames in between report where the box is, so what follows it can follow it.
+    return emit_moved(scope, "settling", position, MovementGuides{});
+}
+
 [[nodiscard]] bool movable_pointer(BehaviorInputScope& scope) {
     const PointerInputEvent* event = scope.pointer();
     if (event == nullptr || !boolean(scope.option("enabled"), true))
@@ -441,6 +788,8 @@ struct AxisSnap final {
     if (event->type == PointerEventType::press) {
         if (!movement_phase(scope) || event->button != 0)
             return false;
+        // A press catches a box still coasting or springing: it is held where it shows.
+        scope.set_retained(std::string(movement_settle), runtime::Value{}, DirtyReason::input);
         const Point start_offset = retained_point(scope.retained(movement_offset));
         scope.set_retained(
             std::string(movement_session),
@@ -455,6 +804,8 @@ struct AxisSnap final {
             DirtyReason::input);
         return false;
     }
+    const std::int64_t now =
+        event->timestamp_nanos > 0 ? event->timestamp_nanos : scope.frame_time_nanos();
     if (session == nullptr || session->object() == nullptr ||
         integer(field(session, "pointerId"), -1) != event->pointer_id) {
         return false;
@@ -480,20 +831,47 @@ struct AxisSnap final {
             return false;
         if (!scope.claim_gesture())
             return false;
-        Point next{
-            number(field(session, "offsetX"), 0.0) + event->position.x -
-                number(field(session, "startX"), event->position.x),
-            number(field(session, "offsetY"), 0.0) + event->position.y -
-                number(field(session, "startY"), event->position.y),
-        };
+        const Point origin{number(field(session, "offsetX"), 0.0),
+                           number(field(session, "offsetY"), 0.0)};
+        const Point raw = constrain_axis(
+            scope,
+            Point{
+                origin.x + event->position.x - number(field(session, "startX"), event->position.x),
+                origin.y + event->position.y - number(field(session, "startY"), event->position.y)},
+            origin);
         MovementGuides guides;
-        const Point snapped = snap_movement(scope, next, guides);
-        next = clamp_movement(scope, snapped);
+        const Point snapped = snap_movement(scope, raw, guides);
+        Point next = snapped;
+        if (const std::optional<MovementLimits> limits = movement_limits(scope);
+            limits.has_value()) {
+            const LayoutRecord* own = scope.layout();
+            next =
+                limits->rubber_band && own != nullptr
+                    ? Point{rubber_band(snapped.x, limits->min_x, limits->max_x, own->bounds.width),
+                            rubber_band(snapped.y, limits->min_y, limits->max_y,
+                                        own->bounds.height)}
+                    : limits->clamp(snapped);
+        }
         // A snap the bounds then overrode no longer lines anything up.
         if (next.x != snapped.x)
             guides.x.reset();
         if (next.y != snapped.y)
             guides.y.reset();
+        // The pointer's velocity, smoothed over the last moves, for a fling on release.
+        const runtime::Value* last_time_value = field(session, "time");
+        const std::int64_t last_time = integer(last_time_value, now);
+        const Point last{number(field(session, "rawX"), origin.x),
+                         number(field(session, "rawY"), origin.y)};
+        Point velocity{number(field(session, "velocityX"), 0.0),
+                       number(field(session, "velocityY"), 0.0)};
+        if (last_time_value != nullptr && now > last_time) {
+            const double seconds = static_cast<double>(now - last_time) * 1.0e-9;
+            const Point instant{(raw.x - last.x) / seconds, (raw.y - last.y) / seconds};
+            // A pause between moves leaves nothing of the earlier speed.
+            const double carried = seconds < 0.05 ? 0.35 : 0.0;
+            velocity = Point{instant.x * (1.0 - carried) + velocity.x * carried,
+                             instant.y * (1.0 - carried) + velocity.y * carried};
+        }
         scope.set_retained(std::string(movement_offset),
                            object({{"x", runtime::Value(next.x)}, {"y", runtime::Value(next.y)}}),
                            DirtyReason::input);
@@ -507,6 +885,11 @@ struct AxisSnap final {
                 {"offsetX", runtime::Value(number(field(session, "offsetX"), 0.0))},
                 {"offsetY", runtime::Value(number(field(session, "offsetY"), 0.0))},
                 {"dragged", runtime::Value(true)},
+                {"rawX", runtime::Value(raw.x)},
+                {"rawY", runtime::Value(raw.y)},
+                {"time", runtime::Value(static_cast<double>(now))},
+                {"velocityX", runtime::Value(velocity.x)},
+                {"velocityY", runtime::Value(velocity.y)},
             }),
             DirtyReason::input);
         static_cast<void>(emit_moved(scope, "move", next, guides));
@@ -514,6 +897,12 @@ struct AxisSnap final {
     }
     if (event->type == PointerEventType::release) {
         const bool dragged = boolean(field(session, "dragged"), false);
+        // A move the pointer stopped holding a while before letting go was not flung. Read before
+        // the session is cleared, which releases what `session` points to.
+        const bool recent = now - integer(field(session, "time"), 0) < 80'000'000;
+        const Point velocity = recent ? Point{number(field(session, "velocityX"), 0.0),
+                                              number(field(session, "velocityY"), 0.0)}
+                                      : Point{};
         scope.set_retained(std::string(movement_session), runtime::Value{}, DirtyReason::input);
         if (dragged) {
             const runtime::Value* shown = scope.retained(movement_guides);
@@ -528,6 +917,7 @@ struct AxisSnap final {
             scope.set_retained(std::string(movement_guides), runtime::Value{}, DirtyReason::input);
             static_cast<void>(
                 emit_moved(scope, "end", retained_point(scope.retained(movement_offset)), guides));
+            begin_settle(scope, constrain_axis(scope, velocity, Point{}));
         }
         return dragged;
     }
@@ -979,6 +1369,7 @@ void register_builtin_behavior_inputs(BehaviorRegistry& registry) {
     registry.register_input_phase("strata.movable", BehaviorInputPhase{
                                                         .pointer = &movable_pointer,
                                                         .key = &movable_key,
+                                                        .advance = &movable_advance,
                                                         .focusable = true,
                                                         .accepts_pointer = true,
                                                     });

@@ -40,6 +40,7 @@
 #include "ui/motion/catalog.hpp"
 #include "ui/motion/config.hpp"
 #include "ui/motion/players.hpp"
+#include "ui/presentation_geometry.hpp"
 #include "ui/render.hpp"
 #include "ui/render/packet.hpp"
 #include "ui/render/paint_geometry.hpp"
@@ -50,11 +51,12 @@
 #include "ui/surface.hpp"
 #include "ui/svg_image.hpp"
 #include "ui/text.hpp"
-#include "ui/widget/editor_geometry.hpp"
 #include "ui/theme.hpp"
 #include "ui/tree.hpp"
+#include "ui/widget/editor_geometry.hpp"
 #include "ui/widget/input.hpp"
 #include "ui/widget/registry.hpp"
+#include "ui/widget/zoom_view_model.hpp"
 
 namespace {
 
@@ -2551,6 +2553,148 @@ void test_grid_track_change_invalidates_layout() {
         layout.layout(tree, environment).find(tree.find_key("tracks.second")->identity());
     check(after != nullptr, "grid child was not rearranged");
     check_near(after->bounds.width, 75.0, "a grid track change did not rerun layout");
+}
+
+// MASONRY places each child in the column that is shortest when it comes (the leftmost of equals),
+// as wide as a column, and is as tall as its tallest column; the column count follows the width
+// through minColumnWidth, and a count with a minimum is a maximum.
+void test_masonry_layout() {
+    using namespace strata;
+    using namespace strata::ui;
+
+    const MasonryLayoutResolution placed =
+        resolve_masonry_layout(3U, 100.0, {50.0, 120.0, 80.0, 30.0, 60.0}, Point{10.0, 8.0});
+    check(placed.offsets.size() == 5U, "masonry placed a different number of children");
+    // Columns start at 0, 110 and 220. Heights after the first row: 58, 128, 88.
+    const std::vector<Point> expected{
+        {0.0, 0.0}, {110.0, 0.0}, {220.0, 0.0}, {0.0, 58.0}, {220.0, 88.0},
+    };
+    for (std::size_t index = 0U; index < expected.size(); ++index) {
+        check_near(placed.offsets[index].x, expected[index].x, "masonry column");
+        check_near(placed.offsets[index].y, expected[index].y, "masonry row offset");
+    }
+    // Column bottoms: 50+8+30 = 88, 120, 80+8+60 = 148.
+    check_near(placed.intrinsic_size.height, 148.0, "masonry height is not its tallest column");
+    check_near(placed.intrinsic_size.width, 320.0, "masonry width is not its columns and gaps");
+
+    LayoutStyle style;
+    style.gap = Point{10.0, 10.0};
+    style.min_column_width = 150.0;
+    check(masonry_column_count(style, 500.0) == 3U, "minColumnWidth did not fit three columns");
+    check(masonry_column_count(style, 100.0) == 1U, "a narrow masonry lost its only column");
+    style.masonry_columns = 2U;
+    check(masonry_column_count(style, 500.0) == 2U, "columns did not cap the derived count");
+    style.min_column_width.reset();
+    check(masonry_column_count(style, 90.0) == 2U, "a column count alone did not hold");
+
+    // Through the engine: three columns of a 320 px box, children as wide as a column.
+    const auto brick = [](const std::string& key, const double height) {
+        return node("Panel", key, {},
+                    layout_properties(object({{"height", runtime::Value(height)}})));
+    };
+    const auto wall = node("Panel", "masonry.root",
+                           {
+                               brick("masonry.a", 50.0),
+                               brick("masonry.b", 120.0),
+                               brick("masonry.c", 80.0),
+                               brick("masonry.d", 30.0),
+                           },
+                           layout_properties(object({
+                               {"columns", runtime::Value(3.0)},
+                               {"gap", runtime::Value(10.0)},
+                               {"kind", runtime::Value("MASONRY")},
+                               {"width", runtime::Value(320.0)},
+                           })));
+    const auto root = node("Panel", "masonry.host", {wall},
+                           layout_properties(object({
+                               {"height", runtime::Value(600.0)},
+                               {"kind", runtime::Value("COLUMN")},
+                               {"width", runtime::Value(800.0)},
+                           })));
+    RetainedTree tree;
+    static_cast<void>(tree.reconcile(root));
+    LayoutEngine engine;
+    const LayoutEnvironment environment{
+        0U,    Rect{0.0, 0.0, 800.0, 600.0}, 1.0,
+        {},    PointSnapPolicy::nearest,     RectangleSnapPolicy::outward,
+        false,
+    };
+    const LayoutResult& result = engine.layout(tree, environment);
+    const auto bounds = [&](const std::string_view key) {
+        const LayoutRecord* record = result.find(tree.find_key(key)->identity());
+        check(record != nullptr, "masonry child was not arranged");
+        return record->bounds;
+    };
+    check_near(bounds("masonry.a").width, 100.0, "a masonry child is not a column wide");
+    check_near(bounds("masonry.d").x, 0.0, "the fourth child did not go to the shortest column");
+    check_near(bounds("masonry.d").y, 60.0, "the fourth child is not under the first");
+    check_near(bounds("masonry.root").height, 120.0, "masonry box is not its tallest column");
+}
+
+// CANVAS lays children out at their own size wherever they are inset, however small the box.
+void test_canvas_layout() {
+    using namespace strata;
+    using namespace strata::ui;
+    const auto root = node("Panel", "canvas.root",
+                           {
+                               node("Panel", "canvas.far", {},
+                                    layout_properties(object({
+                                        {"height", runtime::Value(90.0)},
+                                        {"inset", object({{"left", runtime::Value(700.0)},
+                                                          {"top", runtime::Value(400.0)}})},
+                                        {"width", runtime::Value(300.0)},
+                                    }))),
+                           },
+                           layout_properties(object({
+                               {"height", runtime::Value(100.0)},
+                               {"kind", runtime::Value("CANVAS")},
+                               {"width", runtime::Value(100.0)},
+                           })));
+    RetainedTree tree;
+    static_cast<void>(tree.reconcile(root));
+    LayoutEngine engine;
+    const LayoutEnvironment environment{
+        0U,    Rect{0.0, 0.0, 800.0, 600.0}, 1.0,
+        {},    PointSnapPolicy::nearest,     RectangleSnapPolicy::outward,
+        false,
+    };
+    const LayoutResult& result = engine.layout(tree, environment);
+    const LayoutRecord* far = result.find(tree.find_key("canvas.far")->identity());
+    check(far != nullptr && far->bounds.x == 700.0 && far->bounds.y == 400.0 &&
+              far->bounds.width == 300.0 && far->bounds.height == 90.0,
+          "a canvas child was not placed at its inset at its own size");
+}
+
+// A ZoomView zooms about the cursor (the content under it stays put), fits its content centred
+// within its limits, and eases toward a target without overshooting it.
+void test_zoom_view_math() {
+    using namespace strata::ui;
+    const ZoomViewport start{20.0, 10.0, 1.0};
+    const Point anchor{220.0, 110.0};
+    const ZoomViewport zoomed = zoom_view_about(start, anchor, 2.0);
+    // The content point under the anchor, before and after.
+    const Point before{(anchor.x - start.x) / start.zoom, (anchor.y - start.y) / start.zoom};
+    const Point after{(anchor.x - zoomed.x) / zoomed.zoom, (anchor.y - zoomed.y) / zoomed.zoom};
+    check_near(after.x, before.x, "zooming moved the content under the cursor");
+    check_near(after.y, before.y, "zooming moved the content under the cursor");
+
+    const ZoomViewport fitted =
+        zoom_view_fit(Size{800.0, 400.0}, Rect{0.0, 0.0, 1600.0, 400.0}, 0.0, ZoomLimits{0.1, 8.0});
+    check_near(fitted.zoom, 0.5, "fit did not take the tighter axis");
+    check_near(fitted.x, 0.0, "fit did not centre horizontally");
+    check_near(fitted.y, 100.0, "fit did not centre vertically");
+    const ZoomViewport clamped =
+        zoom_view_fit(Size{800.0, 400.0}, Rect{0.0, 0.0, 10.0, 10.0}, 0.0, ZoomLimits{0.1, 4.0});
+    check_near(clamped.zoom, 4.0, "fit ignored maxZoom");
+
+    ZoomViewport current{};
+    const ZoomViewport target{100.0, -50.0, 3.0};
+    for (int frame = 0; frame < 120; ++frame) {
+        current = zoom_view_step(current, target, 1.0 / 60.0, nullptr, nullptr);
+        check(current.zoom <= target.zoom + 1.0e-9, "an eased zoom overshot its target");
+    }
+    check_near(current.zoom, target.zoom, "an eased zoom did not arrive");
+    check_near(current.x, target.x, "an eased pan did not arrive");
 }
 
 // A spring follows a moving target with the velocity it has, instead of starting from rest at each
@@ -5956,6 +6100,96 @@ overlay Staggered {
           "repositioning a settled item restarted its staggered entry");
 }
 
+// A node with a sharedKey that replaces one that left in the same rebuild flies from where its
+// predecessor showed (position and size) to its own box, painting above its siblings, and lands
+// exactly where it is laid out; going back flies the other way.
+void test_shared_element_transition() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("shared-elements", bundle);
+    const std::string source = R"(
+style Thumb { width: 40; height: 30; background: #3050A0FF; border: null; sharedKey: "photo"; sharedTransition: "standard"; }
+style Detail { width: 160; height: 120; background: #3050A0FF; border: null; sharedKey: "photo"; sharedTransition: "standard"; }
+component SharedFixture() {
+  state open = false;
+  Panel(layout: { kind: "COLUMN", width: 300, height: 260 }) {
+    Button(key: "shared.toggle", label: "Toggle", onClick: action("state.set", name: "open", value: !open), layout: { width: 80, height: 24 })
+    Panel(key: "shared.area", layout: { kind: "PANEL", width: 300, height: 200 }) {
+      if open {
+        Panel(key: "shared.detail", style: Detail, layout: { placement: { x: 120, y: 60 } })
+      } else {
+        Panel(key: "shared.thumb", style: Thumb, layout: { placement: { x: 10, y: 10 } })
+      }
+    }
+  }
+}
+overlay Shared {
+  root SharedFixture()
+}
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"shared.strata", source}, no_imports, 0U)
+              .activated(),
+          "shared element fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 300;
+    environment.framebuffer_height = 260;
+    environment.logical_width = 300.0;
+    environment.logical_height = 260.0;
+    ui::Surface surface("shared-elements", application, runtime::LayerRole::overlay, "Shared",
+                        environment);
+    // Where a node shows: its laid-out box under its own presentation transform.
+    const auto shown = [&surface](const std::string_view key) {
+        const ui::RetainedNode* node = surface.tree().find_key(key);
+        check(node != nullptr, "shared element fixture lost a node");
+        const ui::LayoutRecord* record = surface.layout().find(node->identity());
+        check(record != nullptr, "shared element fixture node was not laid out");
+        return ui::transform_presentation_bounds(record->bounds,
+                                                 surface.input().presentation_transform(*node));
+    };
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface.frame(now));
+    const ui::Rect thumb = shown("shared.thumb");
+    check_near(thumb.width, 40.0, "the thumbnail is not laid out as authored");
+
+    static_cast<void>(surface.input().click("shared.toggle"));
+    now += 16'000'000;
+    static_cast<void>(surface.frame(now));
+    const ui::Rect start = shown("shared.detail");
+    check(std::abs(start.x - thumb.x) < 1.0 && std::abs(start.y - thumb.y) < 1.0 &&
+              std::abs(start.width - thumb.width) < 1.0 &&
+              std::abs(start.height - thumb.height) < 1.0,
+          "the detail did not start where its thumbnail showed: " + std::to_string(start.x) + "," +
+              std::to_string(start.y) + " " + std::to_string(start.width) + "x" +
+              std::to_string(start.height));
+    check(surface.motion().in_shared_flight(surface.tree().find_key("shared.detail")->identity()),
+          "the detail is not in flight");
+    now += 100'000'000;
+    static_cast<void>(surface.frame(now));
+    const ui::Rect middle = shown("shared.detail");
+    check(middle.width > 40.0 && middle.width < 160.0 && middle.x > 10.0 && middle.x < 120.0,
+          "the flight did not move between the two boxes");
+    for (int frame = 0; frame < 60; ++frame) {
+        now += 16'000'000;
+        static_cast<void>(surface.frame(now));
+    }
+    const ui::Rect landed = shown("shared.detail");
+    check_near(landed.x, 120.0, "the flight did not land on its laid-out box");
+    check_near(landed.width, 160.0, "the flight did not land at its laid-out size");
+
+    // Back: the thumbnail flies from the detail.
+    static_cast<void>(surface.input().click("shared.toggle"));
+    now += 16'000'000;
+    static_cast<void>(surface.frame(now));
+    const ui::Rect back = shown("shared.thumb");
+    check(std::abs(back.x - 120.0) < 1.0 && std::abs(back.width - 160.0) < 1.0,
+          "the thumbnail did not fly back from the detail");
+}
+
 void test_presentation_group_animation() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -8680,6 +8914,10 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_zero_fill_weight_collapses_without_stealing_space();
         test_layout_motion_preserves_relative_units();
         test_spring_target_keeps_velocity();
+        test_masonry_layout();
+        test_canvas_layout();
+        test_zoom_view_math();
+        test_shared_element_transition();
         test_anchored_portal_is_out_of_flow_and_flips();
         test_virtualization_cache_queries_only_observed_keys();
         test_retained_layout_cache_scale_and_invalidation();

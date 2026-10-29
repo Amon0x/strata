@@ -441,6 +441,16 @@ class InputRouter final {
      * the node, and one it has left (or the pointer leaving the surface) receives that it is gone.
      */
     void track_pointer(const PointerInputEvent& event, InputOperationResult& result);
+    /**
+     * `strata.scroll` and `strata.size`, after layout: every observing node whose scroll position
+     * or extents, or whose laid-out size, changed since it was last told receives the new reading.
+     */
+    void observe_layout(InputOperationResult& result);
+    /**
+     * Schedules the node's behavior `advance` hooks for the next frame, once: a hook that is still
+     * animating asks again. Unlike pressed-pointer hooks, this runs with no pointer held.
+     */
+    bool request_behavior_frame(const RetainedNode& node);
     /** Constrains all focus acquisition and traversal to one retained subtree; null clears it. */
     [[nodiscard]] bool set_focus_containment(std::optional<std::string_view> key,
                                              InputOperationResult& result);
@@ -706,6 +716,9 @@ class InputRouter final {
                              Point position, InputOperationResult& result);
     [[nodiscard]] bool auto_scroll_drag(DragSession& session, InputOperationResult& result);
     void advance_widget_frames(InputOperationResult& result);
+    void advance_behavior_frames(InputOperationResult& result);
+    /** Runs widget `synchronize` hooks when the tree changed since they last ran. */
+    void synchronize_widgets(InputOperationResult& result);
     [[nodiscard]] bool route_scrollbar_pointer(const PointerInputEvent& event,
                                                InputOperationResult& result,
                                                RetainedNode* hit_target);
@@ -967,6 +980,28 @@ class InputRouter final {
         bool pending = true;
     };
     std::map<std::uint64_t, RequestedWidgetFrame> requested_widget_frames_;
+    /** The tree generation widget `synchronize` hooks last ran against. */
+    std::optional<std::uint64_t> synchronized_tree_generation_;
+    /** Nodes whose behaviors asked to advance next frame (request_behavior_frame). */
+    std::set<std::uint64_t> requested_behavior_frames_;
+    /** What a `strata.scroll` observer was last told, and when, for its velocity. */
+    struct ScrollObservation final {
+        Point offset;
+        Size content;
+        Size viewport;
+        Point velocity;
+        std::int64_t time_nanos = 0;
+        /** A zero velocity is still owed once the scroll stops moving. */
+        bool moving = false;
+    };
+    std::map<std::uint64_t, ScrollObservation> scroll_observations_;
+    /** What a `strata.size` observer was last told, the size before it, and when it changed. */
+    struct SizeObservation final {
+        Size last;
+        std::optional<Size> previous;
+        std::int64_t time_nanos = 0;
+    };
+    std::map<std::uint64_t, SizeObservation> size_observations_;
     std::map<std::uint64_t, std::int64_t> widget_frame_times_;
     std::optional<std::uint64_t> advancing_widget_frame_identity_;
     /**

@@ -1404,6 +1404,8 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
             auto apply_profile = profiler_.section("move-apply");
             motion_.apply_move_transitions(tree_, move_origins, *result, frame_time_nanos,
                                            environment_.reduced_motion);
+            motion_.apply_shared_transitions(tree_, *result, frame_time_nanos,
+                                             environment_.reduced_motion);
         }
         return *result;
     };

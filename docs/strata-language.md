@@ -386,6 +386,64 @@ stops scrolling: about 120 ms after the last wheel step or drag, and not while a
 eases to the nearest child's start, centre or end. Its snap points are its children, or the
 children of its one content box, so a carousel or a picker needs no extra structure.
 
+### Masonry and canvas layouts
+
+`kind: "MASONRY"` lays its children out in equal columns, Pinterest-style: each child is as wide as
+a column, as tall as its content (or its own height) makes it, and goes into the column that is
+shortest when its turn comes (the leftmost of equals). `columns` sets the column count;
+`minColumnWidth` derives it from the width instead, as many columns at least that wide as fit (with
+both, `columns` is the most it takes; with neither, columns are at least 240 wide). `gap` spaces the
+columns and the children in them. The box is as tall as its tallest column, so a masonry wall in a
+`SCROLL` scrolls its full height; placement is one pass over the children.
+
+```strata
+Scroll(vertical: true) {
+  Panel(layout: { kind: "MASONRY", width: { weight: 1 }, minColumnWidth: 180, gap: 10 }) {
+    for photo in photos {
+      Panel(key: photo.id, style: style(Card, height: photo.height)) { Text(text: photo.title) }
+    }
+  }
+}
+```
+
+`kind: "CANVAS"` lays each child out at its own natural size, unbounded by the canvas's size, at
+its `inset` `left` and `top` from the canvas's content origin (0 when unset). It suits boards and
+node graphs whose children have coordinates of their own; the canvas is as large as its own size
+says, or as far as its furthest child reaches. `ZoomView` lays its content out this way.
+
+```strata
+Panel(layout: { kind: "CANVAS", width: 1400, height: 900 }) {
+  Node(title: "Source", layout: { inset: { left: 120, top: 110 } })
+  Node(title: "Mix", layout: { inset: { left: 560, top: 360 } })
+}
+```
+
+### Zoomable canvases
+
+`ZoomView` presents its one child, laid out at its natural size, under a pan and zoom the user
+controls: the wheel zooms about the cursor (eased, by 1.2 a notch), dragging the background or
+content that does not take the pointer pans, a middle-button drag pans from anywhere, and Shift with
+the wheel (or a sideways swipe) pans. `minZoom` and `maxZoom` bound it (0.1 and 8 by default).
+Everything inside stays live: presses, hover and hit testing follow the zoomed content, so buttons
+on a zoomed canvas click. Text and shapes are rasterized again at the zoom they show (stepping by
+quarter octaves while a zoom eases, exactly once it rests), so they stay sharp rather than
+magnified.
+
+`view` (`{x, y, zoom}`: where the content's top-left shows, relative to where it is laid out, and
+its scale) with `onViewChange`, or `bind` to a state, lets the app read and restore it; a `view` the
+app sets is eased to. `zoom.fit {key, padding}` eases to show all of the content (padding 24 by
+default) and `zoom.reset {key}` back to its own size; with no key they act on the first ZoomView.
+`persistenceKey` keeps an uncontrolled view across runs.
+
+```strata
+state view = { x: 0, y: 0, zoom: 1 };
+Button(label: "Fit", onClick: action("zoom.fit", key: "board", padding: 32))
+Text(text: format("{0}%", round(view.zoom * 100)))
+ZoomView(key: "board", bind: view, minZoom: 0.25, maxZoom: 4, layout: { height: 480 }) {
+  Panel(layout: { kind: "CANVAS", width: 1400, height: 900 }) { Board() }
+}
+```
+
 ### Image fit
 
 `Image(fit:)` places an image of known size in its bounds: `FILL` (the default) stretches it;
@@ -931,6 +989,83 @@ component TiltCard() {
 For light that follows the pointer, a material reads it directly on the GPU instead (see
 `materialPointer` under [Authored materials](#authored-materials)): nothing in the interface
 changes as the pointer moves.
+
+### Scroll-linked effects
+
+The `strata.scroll` behavior on a `Scroll` (or any node laid out as `SCROLL`, such as a `List`)
+reports where it is scrolled after every layout that moved it, whatever moved it: the wheel, a drag,
+an eased or programmatic scroll, a reveal, or content that grew. Its action receives `x` and `y`
+(the offset), `progressX` and `progressY` (0 to 1 through the scroll range), `velocityX` and
+`velocityY` (logical px/s, smoothed over consecutive frames), `contentWidth`, `contentHeight`,
+`viewportWidth` and `viewportHeight`; when the scroll stops, it is told once more with zero
+velocity. It reports in the same frame the scroll moved, so what it drives moves with the content:
+a parallax layer, a reading-progress bar, a header that shrinks.
+
+```strata
+component Article() {
+  state reading = { x: 0, y: 0, progressX: 0, progressY: 0, velocityX: 0, velocityY: 0,
+                    contentWidth: 0, contentHeight: 0, viewportWidth: 0, viewportHeight: 0 };
+  Panel(layout: { kind: "OVERLAY" }) {
+    Scroll(behaviors: [{ id: "strata.scroll", action: action("state.setFromEvent", name: "reading") }]) {
+      Panel(style: style(Hero, translateY: reading.y * 0.5))  // parallax: half speed
+      Body()
+    }
+    Panel(style: style(Header, height: clamp(88 - reading.y * 0.5, 48, 88)))
+    Panel(style: style(Bar, scaleX: reading.progressY, transformOrigin: { x: 0, y: 0.5 }))
+  }
+}
+```
+
+### Laying out by its own size
+
+The `strata.size` behavior reports a node's laid-out logical size, `{width, height}`, after every
+layout that changed it, so a component can choose its arrangement by the width it is actually
+given (a container query) rather than the window's. The report lands in the frame that laid the node
+out, and what it changes is laid out again in that frame. A layout that answers its own report by
+flipping straight back to the size before is not reported again, so a narrow layout that makes the
+node wide and a wide one that makes it narrow settle instead of oscillating.
+
+```strata
+component ProfileCard() {
+  state size = { width: 0, height: 0 };
+  Panel(style: Card, behaviors: [{ id: "strata.size", action: action("state.setFromEvent", name: "size") }]) {
+    if size.width < 440 { StackedProfile() } else { SideBySideProfile() }
+  }
+}
+```
+
+### Flinging, snapping and bounds
+
+`strata.movable` lets the user drag a node; its options shape what happens when they let go.
+`fling: true` lets it coast on with the release velocity, slowing by `friction` (its speed falls by
+e every 1 / friction seconds, 4 by default). `snapPoints` (a list of `{x, y}` offsets) or `snapX`
+and `snapY` (offsets per axis) make it settle onto a snap point on a spring (the `spring` option
+names the motion policy, "spring" by default): the release velocity carries it as far as friction
+would before the nearest point to that is chosen, so a flick passes the nearest point. `bounds` is
+`"parent"` (the default), `"none"` or limits on the offset (`minX`, `maxX`, `minY`, `maxY`, any of
+them); past explicit limits the drag meets rubber-band resistance and springs back on release
+(`rubberBand: false` stops it dead; with `"parent"` bounds it is off unless asked for). `axis: "x"`
+or `"y"` keeps it on one axis.
+
+Its action receives `moved` events: `phase` `move` while dragged, `end` on release, `settling` each
+frame it coasts or springs, and `settle` once it comes to rest, with `snapped` (the index of the
+snap point it took, or of the `snapX`/`snapY` entry, with `snappedX`/`snappedY` per axis), `x` and
+`y` (the offset) and `bounds`. A press catches a settling box where it shows.
+
+```strata
+// A bottom sheet laid out half open, with open, half and tucked-away snap points.
+Panel(style: Sheet, behaviors: [{
+  id: "strata.movable",
+  action: action("state.setFromEvent", name: "sheet"),
+  options: { axis: "y", fling: true, snapY: [-130, 0, 132], bounds: { minY: -130, maxY: 132 } }
+}]) { SheetContent() }
+
+// A card flung off to either side, or springing back to the middle.
+Panel(style: Card, behaviors: [{
+  id: "strata.movable",
+  options: { fling: true, bounds: "none", snapPoints: [{ x: -520, y: 0 }, { x: 0, y: 0 }, { x: 520, y: 0 }] }
+}])
+```
 
 ### Anchored portals
 
@@ -1540,6 +1675,28 @@ currently displayed numeric/color values and blends them into the edited timelin
 owned property set, reverse mode, or repeating timeline is structural and restarts it from its new
 initial frame. Target-value, resolved-style, and measured-size channels always retarget from their
 current presentation value because their stable channel identity already defines compatibility.
+
+### Shared-element transitions
+
+A node with a `sharedKey` style that appears in the same rebuild in which a node with the same key
+left (a thumbnail on one page and the large image on the next, a list row and its detail view)
+flies from where the leaving node last showed, its position and size as presented, to its own box,
+on the motion policy its `sharedTransition` style names ("standard" by default; "spring" springs).
+It is a FLIP: the new node lays out where it belongs, starts transformed onto the old one's
+rectangle (scroll offsets and ancestors' transforms accounted for), and eases its translation and
+scale back to none, painting above its siblings while it flies. Going back flies the other way the
+same way. Reduced motion skips the flight.
+
+```strata
+if selected < 0 {
+  for photo in photos {
+    Panel(key: photo.id, style: style(Thumb, sharedKey: photo.id, sharedTransition: "spring"),
+          behaviors: [{ id: "strata.activate", action: action("state.set", name: "selected", value: photo.index) }])
+  }
+} else {
+  Panel(style: style(Detail, sharedKey: photos[selected].id, sharedTransition: "spring"))
+}
+```
 
 ## Keys
 

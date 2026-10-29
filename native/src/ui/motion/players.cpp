@@ -324,10 +324,8 @@ namespace {
     return MotionNumbers{std::make_shared<const std::vector<double>>(components)};
 }
 
-/**
- * Moves one coordinate of a unit-mass spring (stiffness k, damping c) `seconds` on, exactly:
- * `offset` from its target and `velocity` become what they are then.
- */
+} // namespace
+
 void spring_step(const double k, const double c, const double seconds, double& offset,
                  double& velocity) noexcept {
     const double omega = std::sqrt(k);
@@ -358,8 +356,6 @@ void spring_step(const double k, const double c, const double seconds, double& o
         velocity = a * fast * fast_decay + b * slow * slow_decay;
     }
 }
-
-} // namespace
 
 bool TargetPlayer::advance_spring(const MotionValue& next_target, const std::int64_t now_nanos) {
     const std::optional<std::vector<double>> goal = spring_components(next_target);

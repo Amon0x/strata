@@ -525,6 +525,27 @@ void LayoutEngine::arrange(
                 result
             );
         }
+    } else if (style.kind == LayoutKind::masonry && measured.masonry.has_value()) {
+        const MasonryLayoutResolution& masonry = *measured.masonry;
+        for (std::size_t index = 0U; index < flow_children.size(); ++index) {
+            const MeasuredNodePtr& child = flow_children[index];
+            const Point offset = index < masonry.offsets.size() ? masonry.offsets[index] : Point{};
+            arrange(child,
+                    Rect{content_bounds.x + offset.x, content_bounds.y + offset.y,
+                         child->measured_size.width, child->measured_size.height},
+                    child_clip, pin_context, environment, result);
+        }
+    } else if (style.kind == LayoutKind::canvas) {
+        std::vector<MeasuredNodePtr> ordered(flow_children.begin(), flow_children.end());
+        std::ranges::stable_sort(ordered, {},
+                                 [](const MeasuredNodePtr& child) { return child->style.z_index; });
+        for (const MeasuredNodePtr& child : ordered) {
+            arrange(child,
+                    Rect{content_bounds.x + child->style.inset.left.value_or(0.0),
+                         content_bounds.y + child->style.inset.top.value_or(0.0),
+                         child->measured_size.width, child->measured_size.height},
+                    child_clip, pin_context, environment, result);
+        }
     } else if (style.kind == LayoutKind::scroll) {
         std::optional<collection::VirtualExtentResolution> virtual_extents;
         Point resolved_scroll_offset = requested_scroll_offset;

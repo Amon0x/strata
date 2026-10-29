@@ -17,6 +17,9 @@ BehaviorRegistry::BehaviorRegistry() {
     register_input_phase("strata.fileDrop", BehaviorInputPhase{.accepts_pointer = true});
     // Driven by host events on a channel (InputRouter::platform), not by routed input.
     register_input_phase("strata.channel", BehaviorInputPhase{});
+    // Driven after layout by what the node's layout became (InputRouter::observe_layout).
+    register_input_phase(std::string(scroll_behavior_id), BehaviorInputPhase{});
+    register_input_phase(std::string(size_behavior_id), BehaviorInputPhase{});
     register_input_phase("strata.windowDrag", BehaviorInputPhase{.accepts_pointer = true});
     // Armed by a primary press and started past the drag slop (InputRouter::start_drag_out).
     register_input_phase("strata.dragOut", BehaviorInputPhase{.accepts_pointer = true});

@@ -368,6 +368,15 @@ NodeMotionConfig node_motion_config(const RetainedNode& node, MotionCatalog& cat
         }
     }
 
+    if (const std::string* shared = text(node_style(node, "sharedKey"));
+        shared != nullptr && !shared->empty()) {
+        result.shared_key = *shared;
+        if (const std::string* timing = text(node_style(node, "sharedTransition"));
+            timing != nullptr && !timing->empty()) {
+            result.shared_timing = *timing;
+        }
+    }
+
     const runtime::Value* motion_timeline = node_style(node, "$timeline");
     if (motion_timeline != nullptr && motion_timeline->object() != nullptr) {
         const std::string* id = text(motion_timeline->field("id"));

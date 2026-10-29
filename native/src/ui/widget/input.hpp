@@ -104,6 +104,13 @@ class WidgetInputScope final {
     [[nodiscard]] bool set_target_paint_bytes(std::string_view target_key, std::string_view name,
                                               std::span<const std::byte> value);
     void invalidate(DirtyReason reason);
+    /** Marks the node's direct children, as when what it presents them under has changed. */
+    void invalidate_children(DirtyReason reason);
+    /**
+     * Whether the pointer is over this node itself or only over passive descendants (no control,
+     * editor or pointer behavior between them), so a press there is the node's own.
+     */
+    [[nodiscard]] bool passive_pointer_target() const noexcept;
     [[nodiscard]] bool request_frame(WidgetFrameCost cost = WidgetFrameCost::paint);
     void cancel_frame() noexcept;
     void set_event_count(std::size_t count) noexcept;

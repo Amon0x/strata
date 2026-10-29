@@ -361,6 +361,20 @@ void WidgetInputScope::invalidate(const DirtyReason reason) {
         router_.frame_invalidator_();
 }
 
+void WidgetInputScope::invalidate_children(const DirtyReason reason) {
+    if (router_.tree_ == nullptr)
+        return;
+    for (const auto& child : node_.children())
+        static_cast<void>(router_.tree_->mark(child->identity(), reason));
+    if (router_.frame_invalidator_)
+        router_.frame_invalidator_();
+}
+
+bool WidgetInputScope::passive_pointer_target() const noexcept {
+    return pointer_target_ == nullptr || pointer_target_ == &node_ ||
+           router_.passive_pointer_path(node_, pointer_target_);
+}
+
 bool WidgetInputScope::request_frame(const WidgetFrameCost cost) {
     return router_.request_widget_frame(node_, cost);
 }

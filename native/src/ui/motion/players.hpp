@@ -9,6 +9,12 @@
 
 namespace strata::ui::motion_detail {
 
+/**
+ * Moves one coordinate of a unit-mass spring (stiffness k, damping c) `seconds` on, exactly:
+ * `offset` from its target and `velocity` become what they are then.
+ */
+void spring_step(double k, double c, double seconds, double& offset, double& velocity) noexcept;
+
 struct TimelineSample final {
     MotionComputedValues computed;
     double raw_progress = 0.0;

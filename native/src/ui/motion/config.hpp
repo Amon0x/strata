@@ -44,6 +44,10 @@ struct NodeMotionConfig final {
     std::vector<TimelineBinding> timelines;
     std::vector<MotionTimelineBinding> motion_timelines;
     std::vector<TargetBinding> targets;
+    /** Style `sharedKey`: the node takes over the place of a node that left with the same key. */
+    std::optional<std::string> shared_key;
+    /** Style `sharedTransition`: the motion policy it flies over ("standard" by default). */
+    std::string shared_timing = "standard";
 };
 
 [[nodiscard]] NodeMotionConfig node_motion_config(

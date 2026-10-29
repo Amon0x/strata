@@ -33,6 +33,21 @@ struct PerformanceDragStep final {
     double to_fraction = 0.9;
     std::uint32_t moves = 1U;
 };
+/**
+ * A free pointer gesture: press at `from` with `button`, move to `to` in `moves` even steps with
+ * `frames_per_move` frames after each (so the pace, and a fling's speed, are the scenario's), and
+ * release there. Without `press` it continues a gesture still held; without `release` it ends
+ * still holding, so a capture can see the drag.
+ */
+struct PerformanceGestureStep final {
+    host::Selector from;
+    host::Selector to;
+    std::int32_t button = 0;
+    std::uint32_t moves = 8U;
+    std::uint32_t frames_per_move = 1U;
+    bool press = true;
+    bool release = true;
+};
 struct PerformanceScrollStep final {
     host::Selector target;
     double delta_x = 0.0;
@@ -56,7 +71,7 @@ struct PerformanceCaptureStep final {
 using PerformanceStep =
     std::variant<PerformanceFramesStep, PerformanceClickStep, PerformanceMoveStep,
                  PerformanceDragStep, PerformanceScrollStep, PerformanceKeyStep,
-                 PerformanceCaptureStep, PerformanceFilesStep>;
+                 PerformanceCaptureStep, PerformanceFilesStep, PerformanceGestureStep>;
 
 struct PerformancePhase final {
     std::string name;

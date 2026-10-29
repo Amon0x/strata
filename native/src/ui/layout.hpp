@@ -61,7 +61,23 @@ struct LayoutEnvironment final {
                                          const LayoutEnvironment&) = default;
 };
 
-enum class LayoutKind { stack, row, column, grid, panel, overlay, spacer, scroll, portal };
+/**
+ * `masonry` packs children into equal columns, each into the column that is shortest so far;
+ * `canvas` lays each child out at its own natural size, free of the box's size, at its inset.
+ */
+enum class LayoutKind {
+    stack,
+    row,
+    column,
+    grid,
+    panel,
+    overlay,
+    spacer,
+    scroll,
+    portal,
+    masonry,
+    canvas
+};
 enum class LayoutAlign { start, center, end, stretch };
 enum class LayoutJustify { start, center, end, space_between, space_around, space_evenly };
 enum class LayoutAxis { horizontal, vertical };
@@ -164,6 +180,9 @@ struct LayoutStyle final {
     std::optional<std::size_t> grid_row;
     std::size_t column_span = 1U;
     std::size_t row_span = 1U;
+    /** MASONRY: the column count, or the narrowest a column may be (columns follow the width). */
+    std::optional<std::size_t> masonry_columns;
+    std::optional<double> min_column_width;
     bool scroll_horizontal = false;
     bool scroll_vertical = true;
     ScrollSnap scroll_snap = ScrollSnap::none;
@@ -247,6 +266,35 @@ struct GridLayoutResolution final {
     [[nodiscard]] friend bool operator==(const GridLayoutResolution&,
                                          const GridLayoutResolution&) = default;
 };
+
+/**
+ * Masonry placement shared by measurement and arrangement: every child is as wide as a column and
+ * sits at its offset from the content box's origin, in the column that was shortest when it came.
+ */
+struct MasonryLayoutResolution final {
+    std::size_t columns = 1U;
+    double column_width = 0.0;
+    std::vector<Point> offsets;
+    Size intrinsic_size;
+    [[nodiscard]] friend bool operator==(const MasonryLayoutResolution&,
+                                         const MasonryLayoutResolution&) = default;
+};
+
+/**
+ * The column count a MASONRY box uses at `available` content width: `columns` when set (as a
+ * maximum when `min_column_width` is also set), else as many columns of at least
+ * `min_column_width` as fit, and always at least one.
+ */
+[[nodiscard]] std::size_t masonry_column_count(const LayoutStyle& style, double available) noexcept;
+
+/**
+ * Places children of the given heights into `columns` columns `column_width` wide: each into the
+ * shortest column so far (the leftmost of equals), `gap` apart on both axes.
+ */
+[[nodiscard]] MasonryLayoutResolution resolve_masonry_layout(std::size_t columns,
+                                                             double column_width,
+                                                             const std::vector<double>& heights,
+                                                             Point gap);
 
 struct VisibleRange final {
     std::size_t start = 0U;
@@ -429,6 +477,7 @@ class LayoutEngine final {
         std::size_t flow_child_count = 0U;
         std::optional<LinearLayoutResolution> linear;
         std::optional<GridLayoutResolution> grid;
+        std::optional<MasonryLayoutResolution> masonry;
     };
 
     struct MeasurementCacheEntry final {

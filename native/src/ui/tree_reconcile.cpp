@@ -83,6 +83,7 @@ struct SiblingKey final {
     }
     for (const std::string_view field : {
              "columns",
+             "minColumnWidth",
              "rows",
              "scrollOffset",
              "scrollPin",

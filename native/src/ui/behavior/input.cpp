@@ -211,6 +211,18 @@ void BehaviorInputScope::mark_long_press_emitted() {
     }
 }
 
+bool BehaviorInputScope::request_frame() {
+    return router_.request_behavior_frame(node_);
+}
+
+std::int64_t BehaviorInputScope::frame_time_nanos() const noexcept {
+    return router_.frame_time_nanos_;
+}
+
+bool BehaviorInputScope::reduced_motion() const noexcept {
+    return router_.reduced_motion_;
+}
+
 void BehaviorInputScope::set_retained(std::string name, runtime::Value value,
                                       const DirtyReason reason) {
     set_retained(node_, std::move(name), std::move(value), reason);

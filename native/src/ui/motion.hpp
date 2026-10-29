@@ -110,6 +110,14 @@ public:
   void apply_move_transitions(RetainedTree& tree, const std::vector<MotionMoveOrigin>& origins,
                               const LayoutResult& after, std::int64_t frame_time_nanos,
                               bool reduced_motion);
+  /**
+   * Shared-element transitions, after each layout: a node with a `sharedKey` whose predecessor
+   * under that key has left the tree flies from the rectangle the predecessor last showed in
+   * (position and size, as presented) to its own, on its `sharedTransition` policy. Then every
+   * shared node's presented rectangle is recorded for the next node to take its key over.
+   */
+  void apply_shared_transitions(RetainedTree& tree, const LayoutResult& layout,
+                                std::int64_t frame_time_nanos, bool reduced_motion);
 
   [[nodiscard]] MotionFrameCounters advance(RetainedTree& tree,
                                             const std::shared_ptr<const runtime::RuntimeUnit>& unit,
@@ -130,6 +138,8 @@ public:
   [[nodiscard]] std::size_t active_count() const noexcept;
   /** True while any of the node's players is still running (its computed values may change). */
   [[nodiscard]] bool running(std::uint64_t identity) const noexcept;
+  /** True while the node flies in from a shared element's place: it paints above its siblings. */
+  [[nodiscard]] bool in_shared_flight(std::uint64_t identity) const noexcept;
   void clear() noexcept;
 
 private:

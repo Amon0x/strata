@@ -65,6 +65,9 @@ using WidgetClipHook = std::function<std::optional<Rect>(WidgetRenderScope& scop
 /** Whether a widget's overlay has anything to show now, decided without presenting it. */
 using WidgetOverlayShown = bool (*)(const RetainedNode& node, const InputRouter& input);
 using WidgetInputHook = std::function<bool(WidgetInputScope& scope)>;
+/** Handles `<namespace>.<operation>` for a widget that is that namespace's target. */
+using WidgetFrameworkActionHook = std::function<bool(
+    WidgetInputScope& scope, std::string_view operation, const runtime::Value& payload)>;
 using WidgetInspectionHook = std::function<void(WidgetInspectionScope& scope)>;
 using WidgetSemanticsHook = std::function<void(WidgetSemanticsScope& scope)>;
 struct WidgetFrameInfo final {
@@ -182,6 +185,13 @@ struct WidgetInputPhase final {
     WidgetFormRole form_role = WidgetFormRole::none;
     /** Framework action namespace this widget is the target of (`<namespace>.<operation>`). */
     std::string framework_actions;
+    /** Runs the namespace's actions on the targeted node (the keyed one, else the first). */
+    WidgetFrameworkActionHook framework_action = nullptr;
+    /**
+     * Runs on every attached node of the type after the tree changed, before layout: adopts
+     * controlled (authored) values into retained state.
+     */
+    WidgetInputHook synchronize = nullptr;
 };
 
 struct WidgetSemanticsPhase final {
@@ -324,6 +334,8 @@ class WidgetRegistry final {
     [[nodiscard]] std::span<const std::string_view> notification_types() const noexcept;
     /** Types that own async loads beyond their state scopes. */
     [[nodiscard]] std::span<const std::string_view> async_owner_types() const noexcept;
+    /** Types with an input `synchronize` hook, sorted. */
+    [[nodiscard]] std::span<const std::string_view> synchronized_types() const noexcept;
     /** Types that are the target of a framework action namespace, sorted. */
     [[nodiscard]] std::vector<std::string_view>
     framework_action_types(std::string_view action_namespace) const;
@@ -363,6 +375,7 @@ class WidgetRegistry final {
     std::vector<std::string_view> hover_disclosure_types_;
     std::vector<std::string_view> notification_types_;
     std::vector<std::string_view> async_owner_types_;
+    std::vector<std::string_view> synchronized_types_;
     std::vector<std::string_view> text_editable_types_;
     std::uint64_t revision_ = 0U;
 };

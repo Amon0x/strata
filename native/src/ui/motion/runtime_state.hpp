@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "geometry/primitives.hpp"
 #include "ui/motion.hpp"
 #include "ui/motion/catalog.hpp"
 #include "ui/motion/config.hpp"
@@ -30,6 +31,12 @@ struct MotionRuntime::Impl final {
         std::optional<CompiledMotion> move_template;
         std::optional<CompiledMotion> move_animation;
         bool move_requested = false;
+        /** The node's `sharedKey` and policy, as of its last discovered description. */
+        std::optional<std::string> shared_key;
+        std::string shared_timing;
+        /** A shared-element flight from where the node's predecessor showed, while it runs. */
+        std::optional<CompiledMotion> shared_animation;
+        motion_detail::TimelinePlayer shared_player;
         std::vector<MotionInspectionChannel> inspection;
         DirtyGenerationSnapshot observed_dirty;
     };
@@ -40,6 +47,12 @@ struct MotionRuntime::Impl final {
     std::set<std::uint64_t> active_nodes;
     std::map<std::uint64_t, motion_detail::TargetPlayer> disclosure_players;
     std::map<std::uint64_t, NormalizedMotionSample> disclosure_samples;
+    /** Where each shared element last showed on screen, and which node showed it. */
+    struct SharedPlace final {
+        std::uint64_t identity = 0U;
+        geometry::Rect bounds;
+    };
+    std::map<std::string, SharedPlace, std::less<>> shared_places;
     std::optional<bool> reduced_motion;
 
     /**

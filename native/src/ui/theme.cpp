@@ -232,6 +232,10 @@ void add_text_layout(ValueFields& fields, const ThemeTextLayoutStyle& style) {
         return "SCROLL";
     case LayoutKind::portal:
         return "PORTAL";
+    case LayoutKind::masonry:
+        return "MASONRY";
+    case LayoutKind::canvas:
+        return "CANVAS";
     }
     return "PANEL";
 }
@@ -316,7 +320,12 @@ void add_layout(ValueFields& fields, const ThemeWidgetLayoutStyle& style) {
     fields.insert_or_assign("wrap", runtime::Value(style.wrap));
     fields.insert_or_assign("clip", runtime::Value(style.clip));
     fields.insert_or_assign("zIndex", runtime::Value(static_cast<double>(style.z_index)));
-    fields.insert_or_assign("columns", layout_tracks(style.grid_columns));
+    // A MASONRY box counts its columns; a GRID lists its tracks.
+    fields.insert_or_assign("columns",
+                            style.masonry_columns.has_value()
+                                ? runtime::Value(static_cast<double>(*style.masonry_columns))
+                                : layout_tracks(style.grid_columns));
+    fields.insert_or_assign("minColumnWidth", nullable_number(style.min_column_width));
     fields.insert_or_assign("rows", layout_tracks(style.grid_rows));
     fields.insert_or_assign("gridColumn",
                             style.grid_column.has_value()

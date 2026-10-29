@@ -194,6 +194,31 @@ void require_object(const JsonValue& value, const std::string_view label) {
         }
         return result;
     }
+    if (operation == "gesture") {
+        require_object(argument, "gesture");
+        const JsonValue* from = optional(argument, "from");
+        const JsonValue* to = optional(argument, "to");
+        if (from == nullptr || to == nullptr)
+            throw std::invalid_argument("gesture requires from and to");
+        PerformanceGestureStep result;
+        result.from = selector(*from, "gesture.from");
+        result.to = selector(*to, "gesture.to");
+        if (const JsonValue* field = optional(argument, "button"); field != nullptr) {
+            const std::int64_t button = integer(*field, "gesture.button");
+            if (button < 0 || button > 2)
+                throw std::invalid_argument("gesture.button must be 0, 1 or 2");
+            result.button = static_cast<std::int32_t>(button);
+        }
+        if (const JsonValue* field = optional(argument, "moves"); field != nullptr)
+            result.moves = positive_count(*field, "gesture.moves");
+        if (const JsonValue* field = optional(argument, "framesPerMove"); field != nullptr)
+            result.frames_per_move = positive_count(*field, "gesture.framesPerMove");
+        if (const JsonValue* field = optional(argument, "press"); field != nullptr)
+            result.press = boolean(*field, "gesture.press");
+        if (const JsonValue* field = optional(argument, "release"); field != nullptr)
+            result.release = boolean(*field, "gesture.release");
+        return result;
+    }
     if (operation == "scroll") {
         require_object(argument, "scroll");
         PerformanceScrollStep result;
@@ -808,6 +833,31 @@ struct PerformanceRunner::Impl final {
             y * scale
         );
         run_frame(measured, phase, iteration, "drag-release:" + selector_label(step.target));
+    }
+
+    void execute(const PerformanceGestureStep& step, const bool measured, PhaseResult* phase,
+                 const std::uint32_t iteration) {
+        const auto [from_x, from_y] = resolve(step.from);
+        const auto [to_x, to_y] = resolve(step.to);
+        const double scale = host.scale();
+        if (step.press) {
+            host.pointer(STRATA_INPUT_POINTER_MOVE, 0, from_x * scale, from_y * scale);
+            run_frame(measured, phase, iteration, "gesture-hover");
+            host.pointer(STRATA_INPUT_POINTER_PRESS, step.button, from_x * scale, from_y * scale);
+            run_frame(measured, phase, iteration, "gesture-press");
+        }
+        for (std::uint32_t move = 1U; move <= step.moves; ++move) {
+            const double t = static_cast<double>(move) / static_cast<double>(step.moves);
+            host.pointer(STRATA_INPUT_POINTER_MOVE, step.button,
+                         (from_x + (to_x - from_x) * t) * scale,
+                         (from_y + (to_y - from_y) * t) * scale);
+            for (std::uint32_t frame = 0U; frame < step.frames_per_move; ++frame)
+                run_frame(measured, phase, iteration, "gesture-move");
+        }
+        if (step.release) {
+            host.pointer(STRATA_INPUT_POINTER_RELEASE, step.button, to_x * scale, to_y * scale);
+            run_frame(measured, phase, iteration, "gesture-release");
+        }
     }
 
     void execute(

@@ -161,6 +161,10 @@ constexpr double infinity = std::numeric_limits<double>::infinity();
     if (name == "SPACER") return LayoutKind::spacer;
     if (name == "SCROLL") return LayoutKind::scroll;
     if (name == "PORTAL") return LayoutKind::portal;
+    if (name == "MASONRY")
+        return LayoutKind::masonry;
+    if (name == "CANVAS")
+        return LayoutKind::canvas;
     return LayoutKind::panel;
 }
 

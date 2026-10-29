@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iterator>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -627,7 +628,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         std::uint32_t group = 0U;
         if (!isolates_content && !isolates_descendants && record->kind != LayoutKind::portal &&
             (tone.has_value() || motion_presentation_group(node, motion) ||
-             presentation_in_depth(node, motion))) {
+             presentation_in_depth(node, motion) || parent_content_view(node).has_value())) {
             group = implementation_->acquire_group(node.identity());
         }
         if (group != 0U) {
@@ -894,11 +895,13 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             ++counters.commands_emitted;
         }
         const std::size_t composition_prefix_end = output.size();
-        const auto child_z_index = [&layout](const RetainedNode& child) {
+        // A child flying in from a shared element's place paints above its siblings.
+        const auto child_z_index = [&layout, &motion](const RetainedNode& child) {
             const LayoutRecord* child_layout = layout.find(child.identity());
+            const bool flying = motion.in_shared_flight(child.identity());
             return child_layout != nullptr
-                       ? std::pair{child_layout->z_index, child_layout->positioned}
-                       : std::pair{0, false};
+                       ? std::tuple{child_layout->z_index, child_layout->positioned, flying}
+                       : std::tuple{0, false, flying};
         };
         const auto& retained_children = node.children();
         bool children_already_ordered = true;

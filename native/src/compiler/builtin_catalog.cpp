@@ -361,6 +361,7 @@ std::vector<DeclaredParameter> composed_widget_parameters(const BuiltinCatalog& 
         std::string_view("VirtualList"), std::string_view("Table"),
         std::string_view("TreeView"),    std::string_view("ItemGrid"),
         std::string_view("SplitPane"),   std::string_view("Section"),
+        std::string_view("ZoomView"),
     };
     for (const DeclaredParameter& framework : catalog.framework_widget_parameters) {
         if (framework.name == "persistenceKey" &&

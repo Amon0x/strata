@@ -103,7 +103,7 @@ bool LayoutEngine::measured_model_equal(const LayoutEngine::MeasuredNode& left,
            left.subtree_portals == right.subtree_portals &&
            left.content_motion_target_size == right.content_motion_target_size &&
            left.children == right.children && left.flow_child_count == right.flow_child_count &&
-           left.linear == right.linear && left.grid == right.grid;
+           left.linear == right.linear && left.grid == right.grid && left.masonry == right.masonry;
 }
 
 LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
@@ -377,6 +377,44 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         grid.intrinsic_size = resolved_grid_size(grid, available_content_width,
                                                  available_content_height, measured.style.gap);
         measured.grid = std::move(grid);
+    } else if (measured.style.kind == LayoutKind::masonry) {
+        const std::size_t columns = masonry_column_count(measured.style, available_content_width);
+        const double gaps = measured.style.gap.x * static_cast<double>(columns - 1U);
+        double column_width = 0.0;
+        if (std::isfinite(available_content_width)) {
+            column_width =
+                std::max(0.0, (available_content_width - gaps) / static_cast<double>(columns));
+        } else {
+            // Nothing bounds the width: a column is as wide as the widest child would be.
+            for (const RetainedNode* child : retained_children) {
+                column_width = std::max(
+                    column_width, measure(*child, content_constraints, environment, operations)
+                                      ->measured_size.width);
+            }
+        }
+        std::vector<double> heights;
+        heights.reserve(retained_children.size());
+        for (const RetainedNode* child : retained_children) {
+            // Every child takes its column's width and as much height as its content needs.
+            std::optional<LayoutStyle> adjusted;
+            const LayoutStyle& child_style = style_of(*child, adjusted);
+            Constraints child_constraints = content_constraints;
+            child_constraints.min_width = child_style.max_width.has_value() ? 0.0 : column_width;
+            child_constraints.max_width = column_width;
+            child_constraints.min_height = 0.0;
+            child_constraints.max_height = infinity;
+            measured.children.push_back(
+                measure(*child, child_constraints, environment, operations));
+            heights.push_back(measured.children.back()->measured_size.height);
+        }
+        measured.masonry =
+            resolve_masonry_layout(columns, column_width, heights, measured.style.gap);
+    } else if (measured.style.kind == LayoutKind::canvas) {
+        // A canvas never bounds its children: each takes the size its own content and style give.
+        for (const RetainedNode* child : retained_children) {
+            measured.children.push_back(
+                measure(*child, Constraints::unbounded(), environment, operations));
+        }
     } else {
         for (const auto& child : retained_children) {
             Constraints child_constraints = content_constraints;
@@ -467,6 +505,23 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         }
         if (measured.style.kind == LayoutKind::grid && measured.grid.has_value()) {
             return measured.grid->intrinsic_size;
+        }
+        if (measured.style.kind == LayoutKind::masonry && measured.masonry.has_value()) {
+            return measured.masonry->intrinsic_size;
+        }
+        if (measured.style.kind == LayoutKind::canvas) {
+            // A canvas reaches as far as its furthest child, from where each is inset.
+            Size extent;
+            for (std::size_t index = 0U; index < measured.flow_child_count; ++index) {
+                const MeasuredNode& child = *measured.children[index];
+                if (attached_only && child.node->lifecycle() == RetainedLifecycle::exiting)
+                    continue;
+                extent.width = std::max(extent.width, child.style.inset.left.value_or(0.0) +
+                                                          child.measured_size.width);
+                extent.height = std::max(extent.height, child.style.inset.top.value_or(0.0) +
+                                                            child.measured_size.height);
+            }
+            return extent;
         }
         Size result;
         std::size_t count = 0U;

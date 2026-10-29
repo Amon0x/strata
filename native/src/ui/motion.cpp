@@ -97,7 +97,8 @@ namespace {
 
 [[nodiscard]] bool has_motion(const motion_detail::NodeMotionConfig& config) noexcept {
     return !config.triggers.empty() || !config.timelines.empty() ||
-           !config.motion_timelines.empty() || !config.targets.empty();
+           !config.motion_timelines.empty() || !config.targets.empty() ||
+           config.shared_key.has_value();
 }
 
 } // namespace
@@ -222,6 +223,8 @@ MotionFrameCounters MotionRuntime::evaluate(
             } else {
                 state.move_template.reset();
             }
+            state.shared_key = config.shared_key;
+            state.shared_timing = config.shared_timing;
             retained_triggers.clear();
             retained_timelines.clear();
             retained_motion_timelines.clear();
@@ -360,6 +363,30 @@ MotionFrameCounters MotionRuntime::evaluate(
             std::erase_if(state.target_players, [&](const auto& entry) {
                 return !retains(retained_targets, std::string_view(entry.first));
             });
+
+            // A shared-element flight is a one-shot FLIP like MOVE, laid over whatever else the
+            // node animates; once it lands the node shows as laid out.
+            if (state.shared_animation.has_value() &&
+                node.lifecycle() == RetainedLifecycle::attached) {
+                const motion_detail::TimelineSample sample = state.shared_player.advance(
+                    *state.shared_animation, true, MotionDirection::forward, frame_time_nanos,
+                    node_reduced_motion);
+                if (sample.running) {
+                    for (const auto& [property, value] : sample.computed.values)
+                        next.values.insert_or_assign(property, value);
+                    running = true;
+                } else {
+                    state.shared_animation.reset();
+                    state.shared_player = motion_detail::TimelinePlayer{};
+                    // Landed: it goes back to its place among its siblings.
+                    if (node.parent() != nullptr)
+                        static_cast<void>(
+                            tree.mark(node.parent()->identity(), DirtyReason::animation));
+                }
+            } else if (state.shared_animation.has_value()) {
+                state.shared_animation.reset();
+                state.shared_player = motion_detail::TimelinePlayer{};
+            }
 
             bool mutated = state.computed != next;
             if (mutated) {
@@ -547,6 +574,11 @@ std::size_t MotionRuntime::active_count() const noexcept {
 
 bool MotionRuntime::running(const std::uint64_t identity) const noexcept {
     return implementation_->active_nodes.contains(identity);
+}
+
+bool MotionRuntime::in_shared_flight(const std::uint64_t identity) const noexcept {
+    const auto found = implementation_->nodes.find(identity);
+    return found != implementation_->nodes.end() && found->second.shared_animation.has_value();
 }
 
 } // namespace strata::ui

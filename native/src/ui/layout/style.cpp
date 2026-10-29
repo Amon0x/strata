@@ -222,6 +222,15 @@ LayoutStyle layout_style(const DescriptionNode& description) {
     if (rows == nullptr)
         rows = scalar_property(description, "rows");
     style.grid_columns = layout_tracks(columns);
+    if (columns != nullptr && columns->number() != nullptr && std::isfinite(*columns->number()) &&
+        *columns->number() >= 1.0) {
+        style.masonry_columns =
+            static_cast<std::size_t>(std::min(std::floor(*columns->number()), 4096.0));
+    }
+    if (const double minimum = number(field(layout, "minColumnWidth"));
+        std::isfinite(minimum) && minimum > 0.0) {
+        style.min_column_width = minimum;
+    }
     style.grid_rows = layout_tracks(rows);
     style.grid_column = index_value(field(layout, "gridColumn"));
     style.grid_row = index_value(field(layout, "gridRow"));

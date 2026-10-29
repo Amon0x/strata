@@ -12,6 +12,24 @@ class MotionRuntime;
 class RetainedNode;
 
 /** The presentation inputs a node's description sets, as its style or as direct properties. */
+/**
+ * Retained on a node that presents its children under a view of its own (a zoomable canvas):
+ * `{x, y, zoom}`, mapping a point p of a child, relative to the child's own top-left, to
+ * (x, y) + zoom * p there. Children are drawn, hit and rasterized under it.
+ */
+inline constexpr std::string_view content_view_value = "strata.content.view";
+
+/** A parent's content view: pan and zoom. */
+struct ContentView final {
+    double x = 0.0;
+    double y = 0.0;
+    double zoom = 1.0;
+    [[nodiscard]] friend bool operator==(const ContentView&, const ContentView&) = default;
+};
+
+/** The view the node's parent presents it under, when the parent has one (content_view_value). */
+[[nodiscard]] std::optional<ContentView> parent_content_view(const RetainedNode& node) noexcept;
+
 struct PresentationStatics final {
     std::optional<double> scale;
     std::optional<double> scale_x;

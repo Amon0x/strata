@@ -403,12 +403,14 @@ void text_geometry(
 ) {
     Point origin = text.origin;
     if (draw.transform.axis_aligned_translation() && !text.glyphs.empty()) {
-        origin.x = std::round((origin.x + draw.transform.m02) * context.scale) /
-            context.scale - draw.transform.m02;
+        // Glyphs land on the grid they were rasterized for: a zoomed group's is finer.
+        const double density = context.scale * text.raster_scale;
+        origin.x =
+            std::round((origin.x + draw.transform.m02) * density) / density - draw.transform.m02;
         if (text.mode == font::GlyphRasterMode::coverage) {
             const double baseline = text.glyphs.front().baseline;
-            origin.y = std::round((origin.y + baseline + draw.transform.m12) * context.scale) /
-                context.scale - draw.transform.m12 - baseline;
+            origin.y = std::round((origin.y + baseline + draw.transform.m12) * density) / density -
+                       draw.transform.m12 - baseline;
         }
     }
     // Geometry is encoded into a fresh per-draw fragment, so size it for every glyph's quad.

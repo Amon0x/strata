@@ -56,6 +56,8 @@ struct PreparedText final {
     TextEffects effects{};
     /** A run's shadow: its glyphs moved by the shadow's offset, in its colour, softened. */
     bool shadow = false;
+    /** Density beyond the display scale its glyphs were rasterized at (a zoomed group's). */
+    double raster_scale = 1.0;
 };
 
 using PreparedTextPtr = std::shared_ptr<const PreparedText>;
@@ -153,6 +155,7 @@ struct PreparedTextCacheEntry final {
     const TextEngine* text_engine = nullptr;
     std::uint64_t atlas_generation = 0U;
     double display_scale = 1.0;
+    double raster_scale = 1.0;
     std::vector<PreparedTextPtr> groups;
 };
 
