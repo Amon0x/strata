@@ -45,6 +45,7 @@
 #include "platform.hpp"
 #include "renderer.hpp"
 #include "showcase.hpp"
+#include "win32/key_names.hpp"
 
 namespace strata::desktop {
 
@@ -93,30 +94,6 @@ namespace {
         result |= STRATA_KEY_MODIFIER_SUPER;
     }
     return result;
-}
-
-[[nodiscard]] std::string key_name(const std::uint32_t key) {
-    switch (key) {
-    case VK_TAB: return "tab";
-    case VK_RETURN: return "enter";
-    case VK_SPACE: return "space";
-    case VK_ESCAPE: return "escape";
-    case VK_BACK: return "backspace";
-    case VK_DELETE: return "delete";
-    case VK_LEFT: return "left";
-    case VK_RIGHT: return "right";
-    case VK_UP: return "up";
-    case VK_DOWN: return "down";
-    case VK_HOME: return "home";
-    case VK_END: return "end";
-    case VK_PRIOR: return "page_up";
-    case VK_NEXT: return "page_down";
-    case VK_INSERT: return "insert";
-    default:
-        if (key >= 'A' && key <= 'Z') return std::string(1U, static_cast<char>('a' + key - 'A'));
-        if (key >= '0' && key <= '9') return std::string(1U, static_cast<char>(key));
-        return "win32:" + std::to_string(key);
-    }
 }
 
 template <typename Byte>
@@ -2088,7 +2065,7 @@ void Host::key(const std::uint32_t virtual_key, const std::uint32_t action) {
         }
         return;
     }
-    const std::string name = key_name(virtual_key);
+    const std::string name = strata::win32::key_name(virtual_key);
     strata_input_event event{};
     event.kind = STRATA_INPUT_KEY;
     event.key_action = action;

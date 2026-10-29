@@ -58,6 +58,23 @@ std::string key_name(const SDL_Keycode key) {
             return std::string(1, static_cast<char>(key));
         if (key >= SDLK_F1 && key <= SDLK_F12)
             return "f" + std::to_string(key - SDLK_F1 + 1);
+        if (key >= SDLK_KP_1 && key <= SDLK_KP_9)
+            return std::string(1, static_cast<char>('1' + (key - SDLK_KP_1)));
+        if (key == SDLK_KP_0)
+            return "0";
+        if (key == SDLK_KP_PLUS)
+            return "+";
+        if (key == SDLK_KP_MINUS)
+            return "-";
+        if (key == SDLK_KP_MULTIPLY)
+            return "*";
+        if (key == SDLK_KP_DIVIDE)
+            return "/";
+        if (key == SDLK_KP_PERIOD)
+            return ".";
+        // SDL's keycode for a character key is the character itself.
+        if (key > SDLK_SPACE && key < 127)
+            return std::string(1, static_cast<char>(key));
         return {};
     }
 }

@@ -18,6 +18,8 @@
 
 #include <strata/strata.hpp>
 
+#include "key_names.hpp"
+
 namespace strata::win32 {
 namespace {
 
@@ -86,32 +88,6 @@ namespace {
         result = result | KeyModifiers::super_key;
     }
     return result;
-}
-
-[[nodiscard]] std::string key_name(const std::uint32_t key) {
-    switch (key) {
-    case VK_TAB: return "tab";
-    case VK_RETURN: return "enter";
-    case VK_SPACE: return "space";
-    case VK_ESCAPE: return "escape";
-    case VK_BACK: return "backspace";
-    case VK_DELETE: return "delete";
-    case VK_LEFT: return "left";
-    case VK_RIGHT: return "right";
-    case VK_UP: return "up";
-    case VK_DOWN: return "down";
-    case VK_HOME: return "home";
-    case VK_END: return "end";
-    case VK_PRIOR: return "page_up";
-    case VK_NEXT: return "page_down";
-    case VK_INSERT: return "insert";
-    default:
-        if (key >= 'A' && key <= 'Z') {
-            return std::string(1U, static_cast<char>('a' + key - 'A'));
-        }
-        if (key >= '0' && key <= '9') return std::string(1U, static_cast<char>(key));
-        return "win32:" + std::to_string(key);
-    }
 }
 
 /** The system cursor for one of the `STRATA_POINTER_CURSOR_*` shapes; NONE hides the pointer. */
@@ -499,12 +475,9 @@ std::optional<std::intptr_t> InputAdapter::handle(
             : (HIWORD(long_parameter) & KF_REPEAT) != 0U
                 ? KeyAction::repeat
                 : KeyAction::press;
-        enqueue(surface, InputEvent::key(
-            key_name(static_cast<std::uint32_t>(word_parameter)),
-            action,
-            current_modifiers(),
-            impl_->now()
-        ));
+        enqueue(surface,
+                InputEvent::key(win32::key_name(static_cast<std::uint32_t>(word_parameter)), action,
+                                current_modifiers(), impl_->now()));
         const bool system = message == WM_SYSKEYDOWN || message == WM_SYSKEYUP;
         return system && !impl_->options.consume_system_keys
             ? std::nullopt

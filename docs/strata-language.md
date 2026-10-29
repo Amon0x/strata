@@ -424,7 +424,10 @@ Panel(layout: { kind: "CANVAS", width: 1400, height: 900 }) {
 `ZoomView` presents its one child, laid out at its natural size, under a pan and zoom the user
 controls: the wheel zooms about the cursor (eased, by 1.2 a notch), dragging the background or
 content that does not take the pointer pans, a middle-button drag pans from anywhere, and Shift with
-the wheel (or a sideways swipe) pans. `minZoom` and `maxZoom` bound it (0.1 and 8 by default).
+the wheel (or a sideways swipe) pans. Pressing the view focuses it; then `+` or `=` zooms in and
+`-` out about its middle (with or without Ctrl, and from a focused control on the canvas too), `0`
+goes back to the content's own size, Shift+1 fits all of it, and the arrows pan (Shift: five times
+as far). `minZoom` and `maxZoom` bound it (0.1 and 8 by default).
 Everything inside stays live: presses, hover and hit testing follow the zoomed content, so buttons
 on a zoomed canvas click. Text and shapes are rasterized again at the zoom they show (stepping by
 quarter octaves while a zoom eases, exactly once it rests), so they stay sharp rather than
@@ -823,8 +826,9 @@ Panel(behaviors: [{ id: "strata.channel", options: { channel: "chat" },
 ```
 
 `match` narrows a listener to what has the given fields: `options: { channel: "tray", match: { id:
-"quit" } }` hears only the tray menu's Quit. A node attaches a behavior once, so listeners for
-different matches sit on different nodes (a wrapper component around the content works well).
+"quit" } }` hears only the tray menu's Quit. A node attaches a behavior once (the compiler
+reports a second entry with the same `id`), so listeners for different matches sit on different
+nodes (a wrapper component around the content works well).
 `state.listAppend` with `fromEvent: true` appends what the event brings, or its `field`, so a
 listener can keep a log: `action("state.listAppend", name: "log", fromEvent: true, field: "id")`.
 

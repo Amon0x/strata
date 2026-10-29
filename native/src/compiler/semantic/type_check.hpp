@@ -138,6 +138,13 @@ private:
                            const bool nullable, const std::string& component_path);
 
     /**
+     * A `behaviors` list that names one behavior twice: a node attaches each behavior once, so the
+     * second attachment is reported where it is written (behaviors whose `id` is computed are
+     * checked when the node is built).
+     */
+    void behavior_attachments(const Expression& behaviors, const std::string& component_path);
+
+    /**
      * Structural validation of a declared object type: every authored entry is checked against its
      * declared field type, unknown entries are rejected unless the type opts into them, and missing
      * required fields are reported at the object itself.

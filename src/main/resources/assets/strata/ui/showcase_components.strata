@@ -2930,7 +2930,7 @@ component LayoutPage() {
           GraphCard(title: "Export", note: "Writes the video.", left: 1020, top: 560, tint: #4ADE80FF)
         }
       }
-      Text(text: "Wheel zooms at the cursor (eased), drag the paper or middle-drag anywhere to pan, Shift+wheel pans. Buttons inside still click, and the text is rasterized again at the zoom it shows.", style: CardNote, wrapMode: "WORD")
+      Text(text: "Wheel zooms at the cursor (eased), drag the paper or middle-drag anywhere to pan, Shift+wheel pans. Click the paper, then + and - zoom, the arrows pan, 0 resets and Shift+1 fits. Buttons inside still click, and the text is rasterized again at the zoom it shows.", style: CardNote, wrapMode: "WORD")
     }
   }
 }
@@ -3611,7 +3611,7 @@ component ExpectedText(selectedPage: string) {
   } else if selectedPage == "TYPE" {
     Text(text: "Emoji, Arabic, Hebrew, Han, kana, Hangul and Devanagari draw from the system's own fonts, Arabic joined and right-to-left runs ordered inside left-to-right lines. Bahnschrift and Segoe UI Variable change weight and width from one file (fontWeight, fontVariation); drag the sliders. Shapes clip their content to circles, hexagons, stars, diamonds, ellipses and polygons (clipShape), the star turning as it goes. The list fades out at its top and bottom as it scrolls (fadeEdges). The headings are drawn with a gradient, an outline, a neon glow and a soft shadow (textGradient, textOutline, textGlow, textShadow).", wrapMode: "WORD")
   } else if selectedPage == "LAYOUT" {
-    Text(text: "Scroll the reading pane: the header shrinks, the bar fills and the hero art lags at half speed (strata.scroll). Drag the slider: the card switches between stacked and side-by-side by its own width (strata.size). Open a thumbnail: it flies into the detail view and back (sharedKey). Flick the sheet between its snap points and fling cards off the deck (strata.movable fling, snapY, snapPoints, rubber-band bounds). The masonry wall fills its shortest column. Zoom the canvas with the wheel, pan by dragging the paper; Fit and Reset ease the view, buttons on the cards still click, and the text stays sharp at every zoom.", wrapMode: "WORD")
+    Text(text: "Scroll the reading pane: the header shrinks, the bar fills and the hero art lags at half speed (strata.scroll). Drag the slider: the card switches between stacked and side-by-side by its own width (strata.size). Open a thumbnail: it flies into the detail view and back (sharedKey). Flick the sheet between its snap points and fling cards off the deck (strata.movable fling, snapY, snapPoints, rubber-band bounds). The masonry wall fills its shortest column. Zoom the canvas with the wheel (or click it and use + - 0, Shift+1 and the arrows), pan by dragging the paper; Fit and Reset ease the view, buttons on the cards still click, and the text stays sharp at every zoom.", wrapMode: "WORD")
   } else if selectedPage == "INTERACT" {
     Text(text: "Spotlight cards light up under the pointer, and their rims glow from across the grid: the material reads the pointer on the GPU (materialPointer). Tilt cards turn in 3D toward it (strata.pointer drives rotateX and rotateY, perspective is real). The carousel springs between cards, the race compares easings from linear to bouncy springs, and the heart beats on a five-keyframe animation.", wrapMode: "WORD")
   } else if selectedPage == "MENU" {

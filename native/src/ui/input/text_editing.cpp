@@ -450,7 +450,12 @@ InputOperationResult InputRouter::key(KeyInputEvent event, const bool navigation
     InputOperationResult result;
     result.injected_events = 1U;
     result.processed_events = 1U;
-    const std::string normalized_key = lower_ascii(event.key);
+    // Hosts that spell Page Up and Page Down with an underscore reach the same handlers.
+    std::string normalized_key = lower_ascii(event.key);
+    if (normalized_key == "page_up")
+        normalized_key = "pageup";
+    else if (normalized_key == "page_down")
+        normalized_key = "pagedown";
     const KeyModifiers modifiers = event.modifiers;
     // OS window-switching and modifier-only events are not keyboard navigation.
     if (event.type != KeyEventType::release && !modifiers.alt && !modifiers.super_key &&

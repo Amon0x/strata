@@ -93,8 +93,10 @@ struct ParsedShortcut final {
         } else if (!token.empty() && !result.key.has_value()) {
             if (token == "esc") token = "escape";
             else if (token == "return") token = "enter";
-            else if (token == "pgup") token = "page_up";
-            else if (token == "pgdn") token = "page_down";
+            else if (token == "pgup" || token == "page_up")
+                token = "pageup";
+            else if (token == "pgdn" || token == "page_down")
+                token = "pagedown";
             result.key = std::move(token);
         } else {
             return {};
@@ -121,8 +123,10 @@ struct ParsedShortcut final {
     if (key == "down") return "↓";
     if (key == "left") return "←";
     if (key == "right") return "→";
-    if (key == "page_up") return "PageUp";
-    if (key == "page_down") return "PageDown";
+    if (key == "pageup")
+        return "PageUp";
+    if (key == "pagedown")
+        return "PageDown";
     std::string result(key);
     std::ranges::transform(result, result.begin(), [](const unsigned char character) {
         return static_cast<char>(std::toupper(character));

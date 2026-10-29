@@ -36,6 +36,8 @@ constexpr double ease_rate = 16.0;
 constexpr double wheel_zoom_step = 1.2;
 /** One wheel notch pans this far (logical px) with Shift held, or sideways. */
 constexpr double wheel_pan_step = 48.0;
+/** One arrow key pans this far (logical px); with Shift, five times as far. */
+constexpr double key_pan_step = 40.0;
 
 [[nodiscard]] double finite(const runtime::Value* value, const double fallback) noexcept {
     return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())
@@ -284,6 +286,79 @@ void zoom_view_frame(WidgetInputScope& scope, const WidgetFrameInfo& frame) {
     static_cast<void>(scope.request_frame(WidgetFrameCost::paint));
 }
 
+/** Shows all of the content, `padding` clear of the edges, easing there. */
+bool fit_content(WidgetInputScope& scope, const double padding) {
+    const RetainedNode* child = content(scope.node());
+    const LayoutRecord* child_record = child != nullptr ? scope.layout(*child) : nullptr;
+    const LayoutRecord* own = scope.layout();
+    if (child_record == nullptr || own == nullptr)
+        return false;
+    // The viewport as seen from the content's origin, which may sit inset in the view.
+    const Point origin = content_origin(scope);
+    const Rect viewport = own->content_bounds;
+    const ZoomViewport fitted =
+        zoom_view_fit(Size{viewport.width, viewport.height},
+                      Rect{0.0, 0.0, child_record->bounds.width, child_record->bounds.height},
+                      padding, limits(scope));
+    ease_to(scope, ZoomViewport{fitted.x + viewport.x - origin.x, fitted.y + viewport.y - origin.y,
+                                fitted.zoom});
+    return true;
+}
+
+/**
+ * With the view focused, `+` or `=` zooms in and `-` out (by a wheel notch, about the middle of
+ * the view, with or without Ctrl), `0` goes back to the content's own size, Shift+1 fits all of it,
+ * and the arrows pan (five times as far with Shift). Each builds on a zoom that is still easing.
+ * The zoom keys reach the view from a focused control on its canvas too.
+ */
+bool zoom_view_key(WidgetInputScope& scope) {
+    if (scope.modifiers().alt || scope.modifiers().super_key)
+        return false;
+    const std::string_view key = scope.key();
+    const ZoomViewport current = zoom_view_current(scope.node());
+    const ZoomViewport base = eased_target(scope).value_or(current);
+    const bool shift = scope.modifiers().shift;
+    if (key == "0" && !shift) {
+        ease_to(scope, ZoomViewport{});
+        return true;
+    }
+    if (key == "1" && shift && !scope.modifiers().control)
+        return fit_content(scope, 24.0);
+    double factor = 0.0;
+    if (key == "+" || key == "=")
+        factor = wheel_zoom_step;
+    else if (key == "-")
+        factor = 1.0 / wheel_zoom_step;
+    if (factor > 0.0) {
+        const LayoutRecord* own = scope.layout();
+        if (own == nullptr)
+            return false;
+        const Point origin = content_origin(scope);
+        const Point anchor{own->content_bounds.x + own->content_bounds.width * 0.5 - origin.x,
+                           own->content_bounds.y + own->content_bounds.height * 0.5 - origin.y};
+        const double zoom = limits(scope).clamp(base.zoom * factor);
+        ease_to(scope, zoom_view_about(base, anchor, zoom));
+        return true;
+    }
+    // The arrows pan only when the view itself has focus: a control on the canvas keeps them.
+    if (scope.modifiers().control || scope.phase() != InputEventPhase::target)
+        return false;
+    const double step = key_pan_step * (shift ? 5.0 : 1.0);
+    Point by{};
+    if (key == "left")
+        by.x = step;
+    else if (key == "right")
+        by.x = -step;
+    else if (key == "up")
+        by.y = step;
+    else if (key == "down")
+        by.y = -step;
+    else
+        return false;
+    ease_to(scope, ZoomViewport{base.x + by.x, base.y + by.y, base.zoom});
+    return true;
+}
+
 /** A `view` the app set (or restored) that the canvas has not shown yet is eased to. */
 bool zoom_view_synchronize(WidgetInputScope& scope) {
     const std::optional<ZoomViewport> controlled = view_from(scope.property("view"));
@@ -315,21 +390,7 @@ bool zoom_view_action(WidgetInputScope& scope, const std::string_view operation,
     }
     if (operation != "fit")
         return false;
-    const RetainedNode* child = content(scope.node());
-    const LayoutRecord* child_record = child != nullptr ? scope.layout(*child) : nullptr;
-    const LayoutRecord* own = scope.layout();
-    if (child_record == nullptr || own == nullptr)
-        return false;
-    // The viewport as seen from the content's origin, which may sit inset in the view.
-    const Point origin = content_origin(scope);
-    const Rect viewport = own->content_bounds;
-    const ZoomViewport fitted =
-        zoom_view_fit(Size{viewport.width, viewport.height},
-                      Rect{0.0, 0.0, child_record->bounds.width, child_record->bounds.height},
-                      std::max(0.0, finite(payload.field("padding"), 24.0)), limits(scope));
-    ease_to(scope, ZoomViewport{fitted.x + viewport.x - origin.x, fitted.y + viewport.y - origin.y,
-                                fitted.zoom});
-    return true;
+    return fit_content(scope, std::max(0.0, finite(payload.field("padding"), 24.0)));
 }
 
 } // namespace
@@ -380,6 +441,8 @@ void register_zoom_view_widget(WidgetRegistry& registry) {
     lifecycle.describe = WidgetDescribePhase{&zoom_defaults, nullptr, {}, "ZoomView", true};
     lifecycle.input.pointer = &zoom_view_pointer;
     lifecycle.input.event = &zoom_view_event;
+    lifecycle.input.key = &zoom_view_key;
+    lifecycle.input.focusable = true;
     lifecycle.input.action_property = "onViewChange";
     lifecycle.input.framework_actions = "zoom";
     lifecycle.input.framework_action = &zoom_view_action;

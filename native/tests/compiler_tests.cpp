@@ -665,6 +665,14 @@ void test_each_problem_is_reported_once() {
            "  Panel(style: Centered) { Text(text: \"b\") }\n"
            "} }",
            "STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN");
+    single("screen Main { root Panel(behaviors: [{ id: \"strata.hoverable\" }, "
+           "{ id: \"strata.hoverable\", enabled: false }]) { Text(text: \"a\") } }",
+           "STRATA.DSL.SEMANTIC_DUPLICATE_BEHAVIOR");
+    const auto distinct =
+        compile_source("screen Main { root Panel(behaviors: [{ id: \"strata.hoverable\" }, "
+                       "{ id: \"strata.focusable\" }]) { Text(text: \"a\") } }");
+    check(diagnostic_count(distinct, "STRATA.DSL.SEMANTIC_DUPLICATE_BEHAVIOR") == 0U,
+          "two different behaviors were reported as one attached twice:" + describe(distinct));
 }
 
 // A misspelled type is named as such, and lowering reads every declared type exactly as semantic

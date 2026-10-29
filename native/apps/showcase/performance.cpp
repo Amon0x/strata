@@ -35,6 +35,7 @@
 
 #include "data/json.hpp"
 #include "png.hpp"
+#include "win32/key_names.hpp"
 
 namespace strata::desktop {
 namespace {
@@ -288,27 +289,11 @@ void require_object(const JsonValue& value, const std::string_view label) {
     return "coordinates";
 }
 
+/** The virtual key the hosts name `key` (see `win32::key_name`): "f7", "pageup", "a", "=". */
 [[nodiscard]] std::uint32_t virtual_key(const std::string_view key) {
-    if (key == "f2") return VK_F2;
-    if (key == "f3") return VK_F3;
-    if (key == "f4") return VK_F4;
-    if (key == "f6") return VK_F6;
-    if (key == "f7") return VK_F7;
-    if (key == "f8") return VK_F8;
-    if (key == "f9") return VK_F9;
-    if (key == "f10") return VK_F10;
-    if (key == "tab") return VK_TAB;
-    if (key == "enter") return VK_RETURN;
-    if (key == "space") return VK_SPACE;
-    if (key == "escape") return VK_ESCAPE;
-    if (key == "left") return VK_LEFT;
-    if (key == "right") return VK_RIGHT;
-    if (key == "up") return VK_UP;
-    if (key == "down") return VK_DOWN;
-    if (key == "home") return VK_HOME;
-    if (key == "end") return VK_END;
-    if (key.size() == 1U && key.front() >= 'a' && key.front() <= 'z') {
-        return static_cast<std::uint32_t>('A' + key.front() - 'a');
+    for (std::uint32_t code = 1U; code < 255U; ++code) {
+        if (strata::win32::key_name(code) == key)
+            return code;
     }
     throw std::invalid_argument("performance key '" + std::string(key) + "' is unsupported");
 }

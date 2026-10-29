@@ -40,6 +40,7 @@
 #include "ui/widget/registry.hpp"
 #include "ui/widget/shell_model.hpp"
 #include "ui/widget/subtarget.hpp"
+#include "ui/widget/zoom_view_model.hpp"
 
 namespace {
 
@@ -1304,6 +1305,68 @@ void test_slider_pointer_matches_rendered_track(InputFixture& fixture) {
     check(value() == 90.0, "Slider Page Down did not move by ten steps");
     static_cast<void>(fixture.input_.key("pageup"));
     check(value() == 100.0, "Slider Page Up did not clamp at the maximum");
+    // Hosts that spell the key with an underscore reach the same handler.
+    static_cast<void>(fixture.input_.key("page_down"));
+    check(value() == 90.0, "Slider ignored a host's page_down");
+}
+
+// A focused ZoomView zooms with + and -, pans with the arrows and goes back to its content's own
+// size with 0, easing each time and building on a zoom that is still easing.
+void test_zoom_view_keys(InputFixture& fixture) {
+    fixture.adopt(node("ZoomView", "zoom.keys",
+                       {node("Panel", "zoom.keys.content", {}, sized(800.0, 600.0, "CANVAS"))}));
+    const ui::Point inside = center(fixture.bounds("zoom.keys").bounds);
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{inside, ui::PointerEventType::press, 61, 0},
+        ui::PointerInputEvent{inside, ui::PointerEventType::release, 61, 0},
+    }));
+    check(fixture.focused("zoom.keys"), "pressing a ZoomView did not focus it");
+    const auto target = [&fixture]() -> std::optional<ui::ZoomViewport> {
+        const ui::RetainedNode* zoom = fixture.tree_.find_key("zoom.keys");
+        const runtime::Value* value =
+            zoom != nullptr ? zoom->retained_value("$zoomTarget") : nullptr;
+        if (value == nullptr || value->object() == nullptr)
+            return std::nullopt;
+        const auto number = [value](const std::string_view name) {
+            const runtime::Value* field = value->field(name);
+            return field != nullptr && field->number() != nullptr ? *field->number() : 0.0;
+        };
+        return ui::ZoomViewport{number("x"), number("y"), number("zoom")};
+    };
+
+    static_cast<void>(fixture.input_.key("="));
+    std::optional<ui::ZoomViewport> eased = target();
+    check(eased.has_value() && std::abs(eased->zoom - 1.2) < 1.0e-9,
+          "= did not zoom a focused ZoomView in by a notch");
+    // About the middle of the view: the content point at its centre stays there.
+    const ui::Rect shown = fixture.bounds("zoom.keys").content_bounds;
+    const ui::Point middle{shown.x + shown.width * 0.5, shown.y + shown.height * 0.5};
+    check(eased.has_value() && std::abs(eased->x - (middle.x - middle.x * 1.2)) < 1.0e-6 &&
+              std::abs(eased->y - (middle.y - middle.y * 1.2)) < 1.0e-6,
+          "a key zoom did not keep the middle of the view in place");
+    static_cast<void>(fixture.input_.key("+"));
+    eased = target();
+    check(eased.has_value() && std::abs(eased->zoom - 1.44) < 1.0e-9,
+          "+ did not build on the zoom still easing");
+    static_cast<void>(fixture.input_.key("-"));
+    static_cast<void>(fixture.input_.key("-"));
+    eased = target();
+    check(eased.has_value() && std::abs(eased->zoom - 1.0) < 1.0e-9,
+          "- did not zoom back out by a notch each");
+    static_cast<void>(fixture.input_.key("right"));
+    const std::optional<ui::ZoomViewport> panned = target();
+    check(panned.has_value() && eased.has_value() &&
+              std::abs(panned->x - (eased->x - 40.0)) < 1.0e-9 &&
+              std::abs(panned->y - eased->y) < 1.0e-9,
+          "Right did not pan the content left by a step");
+    static_cast<void>(fixture.input_.key("down", ui::KeyModifiers{.shift = true}));
+    const std::optional<ui::ZoomViewport> far = target();
+    check(far.has_value() && panned.has_value() && std::abs(far->y - (panned->y - 200.0)) < 1.0e-9,
+          "Shift+Down did not pan five steps");
+    static_cast<void>(fixture.input_.key("0"));
+    eased = target();
+    check(eased.has_value() && eased->zoom == 1.0 && eased->x == 0.0 && eased->y == 0.0,
+          "0 did not go back to the content's own size");
 }
 
 void test_choice_semantics(InputFixture& fixture) {
@@ -4440,6 +4503,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_banner_semantics(fixture);
         test_event_outcome_pairing(fixture);
         test_removed_focused_editor_commits(fixture);
+        test_zoom_view_keys(fixture);
         test_virtual_focused_row_stays_realized(resources);
         test_post_layout_reveal_reaches_layout(resources);
         test_sticky_table_header_blocks_hits(resources);

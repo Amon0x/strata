@@ -333,8 +333,10 @@ bool InputRouter::scroll_focused_ancestor(
         const std::optional<Point> limits = scroll_limits(*current);
         if (layout == nullptr || !layout->viewport.has_value() || !limits.has_value()) continue;
         Point next = layout->scroll_offset;
-        if (key == "page_up") next.y -= layout->viewport->height;
-        else if (key == "page_down") next.y += layout->viewport->height;
+        if (key == "pageup")
+            next.y -= layout->viewport->height;
+        else if (key == "pagedown")
+            next.y += layout->viewport->height;
         else if (key == "home") next.y = 0.0;
         else if (key == "end") next.y = limits->y;
         else return false;

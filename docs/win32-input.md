@@ -56,7 +56,11 @@ The adapter handles:
 
 - pointer movement, five buttons, leave tracking, capture, and cancellation;
 - vertical and horizontal wheel coordinates/deltas;
-- modifiers, key press/release/repeat, and portable key names;
+- modifiers, key press/release/repeat, and portable key names: `enter`, `escape`, `tab`,
+  `space`, `backspace`, `delete`, `insert`, the arrows `left`/`right`/`up`/`down`, `home`, `end`,
+  `pageup`, `pagedown`, `f1`–`f24`, `shift`, `control`, `alt`, `super`, `contextmenu`, and for
+  character keys the character the key carries unshifted on a US layout (`a`, `7`, `=`, `-`, `/`,
+  `[`); the number pad's digits and operators name the same characters (`+` and `*` included);
 - UTF-16 surrogate pairs and `WM_UNICHAR` committed text;
 - IME committed/preedit text and UTF-8 selection ranges;
 - focus, capture, and cancel messages that terminate active interaction state.

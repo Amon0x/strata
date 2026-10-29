@@ -164,6 +164,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_DERIVED_CYCLE` | `native/src/compiler/semantic/policy.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_ANIMATION_FRAME` | `native/src/compiler/semantic/animations.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_ARGUMENT` | `native/src/compiler/semantic/type_check.cpp`<br>`native/src/compiler/semantic/type_check_calls.cpp`<br>`native/src/compiler/semantic/type_check_slots.cpp` |
+| `STRATA.DSL.SEMANTIC_DUPLICATE_BEHAVIOR` | `native/src/compiler/semantic/type_check.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_DECLARATION` | `native/src/compiler/semantic/declarations.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_KEY` | `native/src/compiler/semantic/policy.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_PARAMETER` | `native/src/compiler/semantic/declarations.cpp` |

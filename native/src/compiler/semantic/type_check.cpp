@@ -224,6 +224,36 @@ void TypeChecker::widget_defaults(const Property& property, const std::string& p
     }
 }
 
+void TypeChecker::behavior_attachments(const Expression& behaviors,
+                                       const std::string& component_path) {
+    const auto* list = std::get_if<ListExpression>(&behaviors.node);
+    if (list == nullptr)
+        return;
+    std::set<std::string, std::less<>> attached;
+    for (const ExpressionPtr& element : list->elements) {
+        const auto* map = element != nullptr ? std::get_if<MapExpression>(&element->node) : nullptr;
+        if (map == nullptr)
+            continue;
+        for (const MapEntry& entry : map->entries) {
+            const auto* name = std::get_if<IdentifierMapKey>(&entry.key);
+            const auto* quoted = std::get_if<StringMapKey>(&entry.key);
+            if ((name == nullptr || name->name != "id") &&
+                (quoted == nullptr || quoted->value != "id"))
+                continue;
+            const auto* literal = std::get_if<LiteralExpression>(&entry.value->node);
+            const auto* id =
+                literal != nullptr ? std::get_if<StringLiteral>(&literal->value) : nullptr;
+            if (id != nullptr && !attached.insert(id->value).second) {
+                report("STRATA.DSL.SEMANTIC_DUPLICATE_BEHAVIOR",
+                       "Behavior '" + id->value +
+                           "' is attached more than once; a node attaches each behavior once, "
+                           "with all its options in one entry.",
+                       entry.span, component_path, "one '" + id->value + "' entry");
+            }
+        }
+    }
+}
+
 void TypeChecker::call(const WidgetCall& call, const std::string& path,
                        const std::size_t maximum_loop_items, const BlockContext context) {
     const std::string call_path = path + "/" + call.name;
@@ -336,6 +366,8 @@ void TypeChecker::call(const WidgetCall& call, const std::string& path,
         }
         validate_expected(*argument.value, *parameter->type, parameter->nullable,
                           call_path + "." + parameter->name);
+        if (parameter->name == "behaviors")
+            behavior_attachments(*argument.value, call_path + "." + parameter->name);
     }
     for (const SchemaParameter& parameter : parameters) {
         if (parameter.required && !consumed.contains(parameter.name) &&
