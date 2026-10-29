@@ -4,6 +4,8 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -17,6 +19,7 @@
 #include <dxgi.h>
 #include <wrl/client.h>
 
+#include <strata/d3d11.hpp>
 #include <strata/render_packet.hpp>
 
 namespace strata::desktop {
@@ -52,6 +55,21 @@ void require_hresult(const HRESULT result, const std::string_view operation) {
 
 } // namespace
 
+namespace {
+
+[[nodiscard]] std::filesystem::path local_application_data() {
+    wchar_t* local = nullptr;
+    std::size_t size = 0U;
+    const errno_t status = _wdupenv_s(&local, &size, L"LOCALAPPDATA");
+    const std::filesystem::path root = status == 0 && local != nullptr
+                                           ? std::filesystem::path(local)
+                                           : std::filesystem::temp_directory_path();
+    std::free(local);
+    return root;
+}
+
+} // namespace
+
 struct Renderer::Impl final {
     Impl(HWND window, const bool vsync, const bool asynchronous_shader_compilation)
         : window(window), vsync(vsync) {
@@ -64,6 +82,8 @@ struct Renderer::Impl final {
             fail_hresult("COM initialization", com_status);
         create_device();
         capture_adapter_info();
+        // Compiled art keeps between runs, so a page drawing art shows it from its first frame.
+        d3d11::set_art_cache_directory(local_application_data() / "Strata" / "art");
         renderer = std::make_unique<d3d11::RenderContext>(device.Get(), context.Get(),
                                                           asynchronous_shader_compilation);
         RECT client{};

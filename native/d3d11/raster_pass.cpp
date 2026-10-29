@@ -7,13 +7,15 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <future>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <stdexcept>
-#include <unordered_map>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #define WIN32_LEAN_AND_MEAN
@@ -24,6 +26,7 @@
 #include <wrl/client.h>
 
 #include "gpu/raster_shaders.hpp"
+#include <strata/d3d11.hpp>
 #include <strata/raster_job.hpp>
 
 namespace strata::d3d11 {
@@ -42,16 +45,83 @@ void require_hresult(const HRESULT result, const std::string_view operation) {
 using shaders::entries;
 using Bytecode = std::array<ComPtr<ID3DBlob>, entries.size()>;
 
+/**
+ * Art compiles without fxc's optimizer: it is compiled the first time a page draws it, and the
+ * driver optimizes the bytecode itself, so the program runs as fast and appears several times
+ * sooner. The raster kernels, compiled at startup where nothing waits, keep it.
+ */
+constexpr UINT art_optimization = D3DCOMPILE_SKIP_OPTIMIZATION;
+
+/** set_art_cache_directory's directory, read by the threads that write compiled art. */
+std::mutex art_cache_mutex;
+std::filesystem::path art_cache_directory;
+
+[[nodiscard]] std::filesystem::path art_cache_file(const std::string_view text,
+                                                   const std::string_view entry) {
+    const std::lock_guard lock(art_cache_mutex);
+    if (art_cache_directory.empty())
+        return {};
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const std::string_view part :
+         {text, std::string_view("|"), entry, std::string_view("|d3d11-fxc-skip-optimization-1")}) {
+        for (const char byte : part) {
+            hash ^= static_cast<unsigned char>(byte);
+            hash *= 1099511628211ULL;
+        }
+    }
+    char name[40];
+    std::snprintf(name, sizeof(name), "art-%016llx.dxbc", static_cast<unsigned long long>(hash));
+    return art_cache_directory / name;
+}
+
+/** A compiled art kernel from the cache, if one is there. */
+[[nodiscard]] ComPtr<ID3DBlob> cached_art(const std::filesystem::path& file) {
+    if (file.empty())
+        return nullptr;
+    std::ifstream input(file, std::ios::binary | std::ios::ate);
+    if (!input)
+        return nullptr;
+    const std::streamsize size = input.tellg();
+    if (size <= 0)
+        return nullptr;
+    ComPtr<ID3DBlob> blob;
+    if (FAILED(D3DCreateBlob(static_cast<SIZE_T>(size), &blob)))
+        return nullptr;
+    input.seekg(0);
+    if (!input.read(static_cast<char*>(blob->GetBufferPointer()), size))
+        return nullptr;
+    return blob;
+}
+
+/** Keeps a compiled art kernel for later runs; a cache that cannot be written is skipped. */
+void cache_art(const std::filesystem::path& file, ID3DBlob* const code) noexcept {
+    if (file.empty() || code == nullptr)
+        return;
+    try {
+        std::error_code error;
+        std::filesystem::create_directories(file.parent_path(), error);
+        const std::filesystem::path partial = file.string() + ".partial";
+        {
+            std::ofstream output(partial, std::ios::binary | std::ios::trunc);
+            output.write(static_cast<const char*>(code->GetBufferPointer()),
+                         static_cast<std::streamsize>(code->GetBufferSize()));
+            if (!output)
+                return;
+        }
+        std::filesystem::rename(partial, file, error);
+    } catch (...) {
+    }
+}
+
 [[nodiscard]] ComPtr<ID3DBlob> compile(const char* const entry, const bool rgba,
-                                      const std::string_view text = shaders::source) {
+                                       const std::string_view text = shaders::source,
+                                       const UINT optimization = D3DCOMPILE_OPTIMIZATION_LEVEL3) {
     const D3D_SHADER_MACRO rgba_macros[]{{"STRATA_RASTER_RGBA", "1"}, {nullptr, nullptr}};
     ComPtr<ID3DBlob> code;
     ComPtr<ID3DBlob> diagnostics;
-    const HRESULT status =
-        D3DCompile(text.data(), text.size(), "strata.d3d11.raster.hlsl",
-                   rgba ? rgba_macros : nullptr, nullptr, entry, "cs_5_0",
-                   D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3, 0U, &code,
-                   &diagnostics);
+    const HRESULT status = D3DCompile(
+        text.data(), text.size(), "strata.d3d11.raster.hlsl", rgba ? rgba_macros : nullptr, nullptr,
+        entry, "cs_5_0", D3DCOMPILE_ENABLE_STRICTNESS | optimization, 0U, &code, &diagnostics);
     if (FAILED(status)) {
         const std::string detail =
             diagnostics == nullptr
@@ -156,12 +226,18 @@ struct WorkBuffer final {
 
 } // namespace
 
-/** An art program: its kernels, compiling in the background until they are ready. */
-struct ArtProgram final {
-    std::shared_future<std::array<ComPtr<ID3DBlob>, shaders::art_entries.size()>> code;
-    ComPtr<ID3D11ComputeShader> stroke;
-    ComPtr<ID3D11ComputeShader> fill;
+/**
+ * One kernel of an art program (its stroke or its fill), compiled in the background when a
+ * layer first needs it, each on its own thread.
+ */
+struct ArtKernel final {
+    std::shared_future<ComPtr<ID3DBlob>> code;
+    ComPtr<ID3D11ComputeShader> shader;
     bool failed = false;
+};
+
+struct ArtProgram final {
+    std::array<ArtKernel, shaders::art_entries.size()> kernels;
 };
 
 struct RasterPass::Impl final {
@@ -203,40 +279,45 @@ struct RasterPass::Impl final {
         context->Dispatch(groups(threads), 1U, 1U);
     }
 
-    /** An art layer's kernels when they are ready: compiled, made, and not failed. */
-    [[nodiscard]] ArtProgram* art_program(const std::string& source) {
-        const std::size_t key = std::hash<std::string>{}(source);
-        auto found = art_programs.find(key);
-        if (found == art_programs.end()) {
-            ArtProgram program;
-            program.code = std::async(std::launch::async, [text = shaders::art_source(source)] {
-                               std::array<ComPtr<ID3DBlob>, shaders::art_entries.size()> code;
-                               for (std::size_t index = 0U; index < code.size(); ++index)
-                                   code[index] = compile(shaders::art_entries[index], false, text);
-                               return code;
-                           }).share();
-            found = art_programs.emplace(key, std::move(program)).first;
-        }
-        ArtProgram& program = found->second;
-        if (program.failed)
+    /** An art layer's kernel (`stroked` or its fill) once it is ready, else null. */
+    [[nodiscard]] ID3D11ComputeShader* art_kernel(const std::string& source, const bool stroked) {
+        ArtKernel& kernel =
+            art_programs[std::hash<std::string>{}(source)].kernels[stroked ? 0U : 1U];
+        if (kernel.failed)
             return nullptr;
-        if (program.stroke == nullptr) {
-            if (program.code.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
-                return nullptr;
-            try {
-                const auto& code = program.code.get();
-                program.stroke = create(device.Get(), code[0]);
-                program.fill = create(device.Get(), code[1]);
-            } catch (const std::exception& error) {
-                // A program that does not compile draws nothing, rather than failing frames; the
-                // author sees why once.
-                std::fprintf(stderr, "strata: an art program failed to compile: %s\n",
-                             error.what());
-                program.failed = true;
-                return nullptr;
+        if (kernel.shader != nullptr)
+            return kernel.shader.Get();
+        if (!kernel.code.valid()) {
+            const char* const entry = shaders::art_entries[stroked ? 0U : 1U];
+            std::string text = shaders::art_source(source);
+            const std::filesystem::path file = art_cache_file(text, entry);
+            // Compiled on an earlier run: made now, so the page shows its art from its first frame.
+            if (ComPtr<ID3DBlob> cached = cached_art(file); cached != nullptr) {
+                ComPtr<ID3D11ComputeShader> shader;
+                if (SUCCEEDED(device->CreateComputeShader(
+                        cached->GetBufferPointer(), cached->GetBufferSize(), nullptr, &shader))) {
+                    kernel.shader = std::move(shader);
+                    return kernel.shader.Get();
+                }
             }
+            kernel.code = std::async(std::launch::async, [text = std::move(text), entry, file] {
+                              ComPtr<ID3DBlob> code = compile(entry, false, text, art_optimization);
+                              cache_art(file, code.Get());
+                              return code;
+                          }).share();
         }
-        return &program;
+        if (kernel.code.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return nullptr;
+        try {
+            kernel.shader = create(device.Get(), kernel.code.get());
+        } catch (const std::exception& error) {
+            // A program that does not compile draws nothing, rather than failing frames; the
+            // author sees why once.
+            std::fprintf(stderr, "strata: an art program failed to compile: %s\n", error.what());
+            kernel.failed = true;
+            return nullptr;
+        }
+        return kernel.shader.Get();
     }
 
     void run(const host::RasterJob& job, const bool rgba, ID3D11UnorderedAccessView* const target,
@@ -329,14 +410,13 @@ struct RasterPass::Impl final {
             dispatch(accumulate.Get(), values, layer.segment_count);
             dispatch(stroke.Get(), values, layer.piece_count);
             if (layer.art.has_value()) {
-                if (ArtProgram* program = art_program(layer.art->source); program != nullptr) {
+                if (ID3D11ComputeShader* const kernel =
+                        art_kernel(layer.art->source, layer.art->stroked);
+                    kernel != nullptr) {
                     values.art_base = art_offsets[index];
                     const std::uint32_t count = layer.art->count;
-                    if (layer.art->stroked)
-                        dispatch(program->stroke.Get(), values,
-                                 layer.art->closed ? count : count - 1U);
-                    else
-                        dispatch(program->fill.Get(), values, count);
+                    dispatch(kernel, values,
+                             layer.art->stroked ? (layer.art->closed ? count : count - 1U) : count);
                 }
             }
             // A group of threads a row.
@@ -376,6 +456,11 @@ struct RasterPass::Impl final {
     std::vector<std::uint32_t> lut_data;
     shaders::Constants last;
 };
+
+void set_art_cache_directory(std::filesystem::path directory) {
+    const std::lock_guard lock(art_cache_mutex);
+    art_cache_directory = std::move(directory);
+}
 
 void RasterPass::prepare() {
     static_cast<void>(bytecode());

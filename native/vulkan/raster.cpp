@@ -116,57 +116,49 @@ void Renderer::Impl::reserve_raster_buffer(std::unique_ptr<Buffer>& buffer,
         vkCmdFillBuffer(command, buffer->buffer, 0, VK_WHOLE_SIZE, 0U);
 }
 
-Renderer::Impl::ArtProgram* Renderer::Impl::art_program(const std::string& source) {
-    const std::size_t key = std::hash<std::string>{}(source);
-    auto found = art_programs.find(key);
-    if (found == art_programs.end()) {
-        ArtProgram program;
-        program.code = std::async(std::launch::async, [text = shaders::art_source(source)] {
-                           std::array<std::vector<std::uint32_t>, 2U> code;
-                           for (std::size_t index = 0U; index < code.size(); ++index) {
-                               code[index] = compile_hlsl_compute(
-                                   text, shaders::art_entries[index], "strata.art");
-                           }
-                           return code;
-                       }).share();
-        found = art_programs.emplace(key, std::move(program)).first;
+// Art compiles without the SPIR-V optimizer: it is compiled the first time a page draws it, and
+// the driver optimizes the kernel itself, so it appears sooner and runs as fast.
+VkPipeline Renderer::Impl::art_kernel(const std::string& source, const bool stroked) {
+    const std::size_t index = stroked ? 0U : 1U;
+    ArtKernel& kernel = art_programs[std::hash<std::string>{}(source)].kernels[index];
+    if (kernel.failed)
+        return VK_NULL_HANDLE;
+    if (kernel.pipeline != VK_NULL_HANDLE)
+        return kernel.pipeline;
+    if (!kernel.code.valid()) {
+        kernel.code = std::async(std::launch::async, [text = shaders::art_source(source),
+                                                      entry = shaders::art_entries[index]] {
+                          return compile_hlsl_compute(text, entry, "strata.art", false);
+                      }).share();
     }
-    ArtProgram& program = found->second;
-    if (program.failed)
-        return nullptr;
-    if (program.stroke == VK_NULL_HANDLE) {
-        if (program.code.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
-            return nullptr;
-        try {
-            const auto& code = program.code.get();
-            std::array<VkPipeline*, 2U> targets{&program.stroke, &program.fill};
-            for (std::size_t index = 0U; index < code.size(); ++index) {
-                VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-                mi.codeSize = code[index].size() * sizeof(std::uint32_t);
-                mi.pCode = code[index].data();
-                VkShaderModule module{};
-                check(vkCreateShaderModule(device.device, &mi, nullptr, &module),
-                      "create art shader module");
-                VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
-                ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-                ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-                ci.stage.module = module;
-                ci.stage.pName = shaders::art_entries[index];
-                ci.layout = raster_layout;
-                const VkResult result = vkCreateComputePipelines(device.device, pipeline_cache, 1,
-                                                                 &ci, nullptr, targets[index]);
-                vkDestroyShaderModule(device.device, module, nullptr);
-                check(result, "create art pipeline");
-            }
-        } catch (const std::exception& error) {
-            // A program that does not compile draws nothing, rather than failing frames; the
-            // author sees why once.
-            std::fprintf(stderr, "strata: an art program failed to compile: %s\n", error.what());
-            program.failed = true;
-            return nullptr;
-        }
+    if (kernel.code.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return VK_NULL_HANDLE;
+    try {
+        const std::vector<std::uint32_t>& code = kernel.code.get();
+        VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+        mi.codeSize = code.size() * sizeof(std::uint32_t);
+        mi.pCode = code.data();
+        VkShaderModule module{};
+        check(vkCreateShaderModule(device.device, &mi, nullptr, &module),
+              "create art shader module");
+        VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+        ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        ci.stage.module = module;
+        ci.stage.pName = shaders::art_entries[index];
+        ci.layout = raster_layout;
+        const VkResult result = vkCreateComputePipelines(device.device, pipeline_cache, 1, &ci,
+                                                         nullptr, &kernel.pipeline);
+        vkDestroyShaderModule(device.device, module, nullptr);
+        check(result, "create art pipeline");
+    } catch (const std::exception& error) {
+        // A program that does not compile draws nothing, rather than failing frames; the author
+        // sees why once.
+        std::fprintf(stderr, "strata: an art program failed to compile: %s\n", error.what());
+        kernel.failed = true;
+        return VK_NULL_HANDLE;
     }
-    return &program;
+    return kernel.pipeline;
 }
 
 void Renderer::Impl::forget_live_art(const host::ResourceOperation& operation, const bool whole) {
@@ -332,13 +324,12 @@ void Renderer::Impl::rasterize(const host::ResourceOperation& operation, Image& 
         dispatch(0U, layer.segment_count);
         dispatch(1U, layer.piece_count);
         if (layer.art.has_value()) {
-            if (ArtProgram* program = art_program(layer.art->source); program != nullptr) {
+            if (const VkPipeline kernel = art_kernel(layer.art->source, layer.art->stroked);
+                kernel != VK_NULL_HANDLE) {
                 values.art_base = art_bases[index];
                 const std::uint32_t count = layer.art->count;
-                if (layer.art->stroked)
-                    dispatch_with(program->stroke, layer.art->closed ? count : count - 1U);
-                else
-                    dispatch_with(program->fill, count);
+                dispatch_with(kernel, layer.art->stroked ? (layer.art->closed ? count : count - 1U)
+                                                         : count);
             }
         }
         // A group of threads a row.

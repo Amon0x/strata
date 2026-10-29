@@ -23,9 +23,9 @@ Renderer::Impl::~Impl() {
     }
     for (auto& [key, program] : art_programs) {
         (void)key;
-        for (VkPipeline pipeline : {program.stroke, program.fill}) {
-            if (pipeline)
-                vkDestroyPipeline(device.device, pipeline, nullptr);
+        for (const ArtKernel& kernel : program.kernels) {
+            if (kernel.pipeline)
+                vkDestroyPipeline(device.device, kernel.pipeline, nullptr);
         }
     }
     if (raster_layout)

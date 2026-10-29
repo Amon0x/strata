@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -223,5 +224,13 @@ class Presenter final {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+/**
+ * Where compiled art programs (Present::art) persist between runs, so a page drawing art shows it
+ * at once rather than after its program compiles. Process-wide; empty, the default, keeps them in
+ * memory only. Entries are named by a hash of their whole source, so a changed program or engine
+ * never reads a stale one.
+ */
+void set_art_cache_directory(std::filesystem::path directory);
 
 } // namespace strata::d3d11
