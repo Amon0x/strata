@@ -365,6 +365,44 @@ Path Path::arc(
     return path;
 }
 
+Path Path::sector(
+    const Point center,
+    const double radius_x,
+    const double radius_y,
+    const double inner_fraction,
+    const double start_degrees,
+    const double sweep_degrees
+) {
+    if (!std::isfinite(inner_fraction) || inner_fraction < 0.0 || inner_fraction >= 1.0) {
+        throw std::invalid_argument("a sector's inner radius must be at least zero and below its radius");
+    }
+    const double sweep = std::clamp(sweep_degrees, -360.0, 360.0);
+    if (inner_fraction == 0.0) {
+        if (std::abs(sweep) >= 360.0) return ellipse(center, radius_x, radius_y);
+        return arc(center, radius_x, radius_y, start_degrees, sweep, true);
+    }
+    const double inner_x = radius_x * inner_fraction;
+    const double inner_y = radius_y * inner_fraction;
+    Path outer = arc(center, radius_x, radius_y, start_degrees, sweep, false);
+    Path inner = arc(center, inner_x, inner_y, start_degrees + sweep, -sweep, false);
+    std::vector<PathSegment> segments(outer.segments().begin(), outer.segments().end());
+    if (std::abs(sweep) >= 360.0) {
+        // A ring: two closed contours wound against each other, so the hole stays empty under
+        // either fill rule.
+        segments.push_back(PathSegment{PathVerb::close, {}, {}, {}});
+        segments.insert(segments.end(), inner.segments().begin(), inner.segments().end());
+        segments.push_back(PathSegment{PathVerb::close, {}, {}, {}});
+    } else {
+        const std::span<const PathSegment> back = inner.segments();
+        segments.push_back(PathSegment{PathVerb::line, {}, {}, back.front().to});
+        segments.insert(segments.end(), back.begin() + 1, back.end());
+        segments.push_back(PathSegment{PathVerb::close, {}, {}, {}});
+    }
+    Path path(std::move(segments));
+    path.validate();
+    return path;
+}
+
 Path Path::parse(const std::string_view commands) {
     Path path = PathParser(commands).run();
     path.validate();

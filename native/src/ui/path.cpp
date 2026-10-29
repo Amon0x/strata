@@ -131,6 +131,46 @@ std::string_view path_join_name(const PathJoin join) noexcept {
     return "miter";
 }
 
+PathShape ellipse_shape(const Point center, const double radius_x, const double radius_y,
+                        std::optional<Paint> fill, std::optional<Paint> stroke,
+                        std::optional<StrokeStyle> stroke_style) {
+    if (stroke.has_value() && !stroke_style.has_value())
+        stroke_style = StrokeStyle{};
+    PathShape shape{Path::ellipse(center, radius_x, radius_y), std::move(fill), std::move(stroke),
+                    std::move(stroke_style)};
+    shape.primitive = ShapePrimitive{ShapePrimitiveKind::ellipse, center, radius_x, radius_y};
+    return shape;
+}
+
+PathShape sector_shape(const Point center, const double radius_x, const double radius_y,
+                       const double inner_fraction, const double start_degrees,
+                       const double sweep_degrees, Paint fill) {
+    PathShape shape{
+        Path::sector(center, radius_x, radius_y, inner_fraction, start_degrees, sweep_degrees),
+        std::move(fill)};
+    shape.primitive = ShapePrimitive{ShapePrimitiveKind::sector, center, radius_x, radius_y,
+                                     inner_fraction, start_degrees, sweep_degrees};
+    return shape;
+}
+
+PathShape arc_shape(const Point center, const double radius_x, const double radius_y,
+                    const double start_degrees, const double sweep_degrees, Paint stroke,
+                    StrokeStyle stroke_style) {
+    PathShape shape{Path::arc(center, radius_x, radius_y, start_degrees, sweep_degrees, false),
+                    std::nullopt, std::move(stroke), std::move(stroke_style)};
+    shape.primitive = ShapePrimitive{ShapePrimitiveKind::arc, center, radius_x, radius_y, 0.0,
+                                     start_degrees, sweep_degrees};
+    return shape;
+}
+
+PathShape segment_shape(const Point from, const Point to, Paint stroke, StrokeStyle stroke_style) {
+    PathShape shape{Path::line(from, to), std::nullopt, std::move(stroke), std::move(stroke_style)};
+    shape.primitive = ShapePrimitive{ShapePrimitiveKind::segment};
+    shape.primitive->from = from;
+    shape.primitive->to = to;
+    return shape;
+}
+
 std::optional<PathShape> path_shape_from_value(const runtime::Value* const value) {
     if (value == nullptr || value->object() == nullptr) return std::nullopt;
     const runtime::Value* kind_value = field(*value, "kind");
@@ -150,6 +190,9 @@ std::optional<PathShape> path_shape_from_value(const runtime::Value* const value
             throw std::invalid_argument("a line shape requires 'from' and 'to'");
         }
         shape.path = Path::line(*from, *to);
+        shape.primitive = ShapePrimitive{ShapePrimitiveKind::segment};
+        shape.primitive->from = *from;
+        shape.primitive->to = *to;
     } else if (kind == "polyline" || kind == "polygon") {
         shape.path = Path::polyline(point_list(*value, "points"), kind == "polygon");
     } else if (kind == "rect") {
@@ -170,6 +213,22 @@ std::optional<PathShape> path_shape_from_value(const runtime::Value* const value
         const double radius_x = number_field(*value, "radiusX").value_or(radius.value_or(0.5));
         const double radius_y = number_field(*value, "radiusY").value_or(radius.value_or(0.5));
         shape.path = Path::ellipse(center, radius_x, radius_y);
+        shape.primitive = ShapePrimitive{ShapePrimitiveKind::ellipse, center, radius_x, radius_y};
+    } else if (kind == "sector" || kind == "ring") {
+        const Point center = point_field(*value, "center").value_or(Point{0.5, 0.5});
+        const std::optional<double> radius = number_field(*value, "radius");
+        const double radius_x = number_field(*value, "radiusX").value_or(radius.value_or(0.5));
+        const double radius_y = number_field(*value, "radiusY").value_or(radius.value_or(0.5));
+        const double inner = number_field(*value, "innerRadius").value_or(kind == "ring" ? 0.3 : 0.0);
+        const double outer = std::max(radius_x, radius_y);
+        if (!(outer > 0.0) || inner < 0.0 || inner >= outer) {
+            throw std::invalid_argument("a sector's innerRadius must be at least 0 and below its radius");
+        }
+        const double start = kind == "ring" ? 0.0 : number_field(*value, "start").value_or(0.0);
+        const double sweep = kind == "ring" ? 360.0 : number_field(*value, "sweep").value_or(360.0);
+        shape.path = Path::sector(center, radius_x, radius_y, inner / outer, start, sweep);
+        shape.primitive = ShapePrimitive{ShapePrimitiveKind::sector, center, radius_x, radius_y,
+                                         inner / outer, start, sweep};
     } else if (kind == "arc") {
         const Point center = point_field(*value, "center").value_or(Point{0.5, 0.5});
         const std::optional<double> radius = number_field(*value, "radius");
@@ -178,16 +237,15 @@ std::optional<PathShape> path_shape_from_value(const runtime::Value* const value
         if (!start.has_value() || !sweep.has_value()) {
             throw std::invalid_argument("an arc shape requires 'start' and 'sweep' angles");
         }
-        shape.path = Path::arc(
-            center,
-            number_field(*value, "radiusX").value_or(radius.value_or(0.5)),
-            number_field(*value, "radiusY").value_or(radius.value_or(0.5)),
-            *start,
-            *sweep,
-            field(*value, "includeCenter") != nullptr &&
-                field(*value, "includeCenter")->boolean() != nullptr &&
-                *field(*value, "includeCenter")->boolean()
-        );
+        const double radius_x = number_field(*value, "radiusX").value_or(radius.value_or(0.5));
+        const double radius_y = number_field(*value, "radiusY").value_or(radius.value_or(0.5));
+        const bool include_center = field(*value, "includeCenter") != nullptr &&
+                                    field(*value, "includeCenter")->boolean() != nullptr &&
+                                    *field(*value, "includeCenter")->boolean();
+        shape.path = Path::arc(center, radius_x, radius_y, *start, *sweep, include_center);
+        shape.primitive = ShapePrimitive{
+            include_center ? ShapePrimitiveKind::sector : ShapePrimitiveKind::arc,
+            center, radius_x, radius_y, 0.0, *start, *sweep};
     } else {
         throw std::invalid_argument("unsupported shape kind '" + kind + "'");
     }

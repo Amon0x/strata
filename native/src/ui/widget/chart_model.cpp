@@ -368,8 +368,7 @@ ChartProjection chart_projection(const ChartState& state, const Rect bounds,
     if (state.circular()) {
         const double side = std::min(area.width, area.height);
         projection.center = Point{area.x + area.width * 0.5, area.y + area.height * 0.5};
-        // Room for a hovered slice to step out.
-        projection.radius = std::max(0.0, side * 0.5 - 8.0);
+        projection.radius = std::max(0.0, side * 0.5 - 2.0);
         projection.inner_radius = state.kind == ChartKind::donut ? projection.radius * 0.6 : 0.0;
         projection.plot = Rect{projection.center.x - projection.radius,
                                projection.center.y - projection.radius, projection.radius * 2.0,
@@ -577,9 +576,10 @@ void dot(WidgetRenderScope& scope, const Point center, const double radius,
         style = StrokeStyle{};
         style->width = 2.0;
     }
-    scope.shape(frame, PathShape{Path::ellipse(Point{0.5, 0.5}, 0.5, 0.5), Paint(fill),
-                                 ring.has_value() ? std::optional<Paint>(Paint(*ring)) : std::nullopt,
-                                 style});
+    scope.shape(frame, ellipse_shape(Point{0.5, 0.5}, 0.5, 0.5, Paint(fill),
+                                     ring.has_value() ? std::optional<Paint>(Paint(*ring))
+                                                      : std::nullopt,
+                                     style));
 }
 
 [[nodiscard]] double text_height(const WidgetRenderScope& scope) {
@@ -640,35 +640,26 @@ void circular_content(WidgetRenderScope& scope, ChartState& state, ChartProjecti
         entry.color = slice_color(scope, entry.index);
     const std::optional<std::size_t> focus = inspected(scope, state);
     const RenderColor ink = scope.visual().foreground;
-    // Slices part with a hairline of empty angle; the inspected one grows outward from the same
-    // centre, so its arcs stay concentric with the rest.
+    // Slices part with a hairline of empty angle and all keep one radius; inspecting one dims
+    // the others rather than resizing anything.
     const double inner = projection.inner_radius;
     const double gap_degrees =
         projection.slices.size() > 1U
             ? 1.5 / std::max(1.0, (projection.radius + inner) * 0.5) * 180.0 / std::numbers::pi
             : 0.0;
+    const double outer = projection.radius;
+    const Rect frame{projection.center.x - outer, projection.center.y - outer, outer * 2.0,
+                     outer * 2.0};
     for (ChartSlice& slice : projection.slices) {
         slice.color = slice_color(scope, slice.index);
-        const double outer = projection.radius + (focus == slice.index ? 6.0 : 0.0);
-        const double start = slice.start + std::min(gap_degrees, slice.sweep * 0.25) * 0.5;
-        const double sweep = std::max(0.0, slice.sweep - std::min(gap_degrees, slice.sweep * 0.25));
-        if (sweep <= 0.0)
+        const double pad = std::min(gap_degrees, slice.sweep * 0.25);
+        const double sweep = std::max(0.0, slice.sweep - pad);
+        if (sweep <= 0.0 || outer <= 0.0)
             continue;
-        const Rect frame{projection.center.x - outer, projection.center.y - outer, outer * 2.0,
-                         outer * 2.0};
-        if (inner > 0.0) {
-            // A ring: an arc on the ring's middle, stroked as wide as the ring.
-            const double middle = (outer + inner) * 0.5 / (outer * 2.0);
-            StrokeStyle style;
-            style.width = outer - inner;
-            scope.shape(frame, PathShape{Path::arc(Point{0.5, 0.5}, middle, middle, start - 90.0,
-                                                   sweep),
-                                         std::nullopt, Paint(slice.color), style});
-        } else {
-            scope.shape(frame, PathShape{Path::arc(Point{0.5, 0.5}, 0.5, 0.5, start - 90.0, sweep,
-                                                   true),
-                                         Paint(slice.color)});
-        }
+        const RenderColor paint =
+            focus.has_value() && *focus != slice.index ? with_alpha(slice.color, 0.4) : slice.color;
+        scope.shape(frame, sector_shape(Point{0.5, 0.5}, 0.5, 0.5, inner / outer,
+                                        slice.start + pad * 0.5 - 90.0, sweep, Paint(paint)));
     }
     if (projection.inner_radius > 0.0) {
         // The ring's middle names the inspected slice, or the total.

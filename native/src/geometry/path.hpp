@@ -64,6 +64,20 @@ public:
         bool include_center = false
     );
     /**
+     * A slice of an elliptical ring: the outer arc from `start_degrees` sweeping `sweep_degrees`
+     * (clockwise for a positive sweep, 0 degrees pointing right), back along the arc at
+     * `inner_fraction` of the radii. An inner fraction of zero is a pie slice through the centre;
+     * a full turn with a positive inner fraction is a ring, its hole wound the other way.
+     */
+    [[nodiscard]] static Path sector(
+        Point center,
+        double radius_x,
+        double radius_y,
+        double inner_fraction,
+        double start_degrees,
+        double sweep_degrees
+    );
+    /**
      * Parses the compact outline form: `M`/`L`/`H`/`V`/`Q`/`C`/`Z`, each also in its relative
      * lowercase spelling. Throws std::invalid_argument naming the offending command.
      */

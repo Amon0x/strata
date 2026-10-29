@@ -134,6 +134,33 @@ float roundedBoxSdf(float2 p, float2 halfSize, float4 radii) {
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
 
+/** The direction a rounded box's distance grows in: host::rounded_box_distance. */
+float2 strataRoundedBoxNormal(float2 p, float2 halfSize, float4 radii) {
+    float2 quadrant = step(float2(0.0, 0.0), p);
+    float radius = lerp(
+        lerp(radii.x, radii.w, quadrant.y),
+        lerp(radii.y, radii.z, quadrant.y),
+        quadrant.x
+    );
+    radius = min(radius, min(halfSize.x, halfSize.y));
+    float2 q = abs(p) - halfSize + radius;
+    if (q.x > 0.0 && q.y > 0.0) {
+        return normalize(q * float2(p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0));
+    }
+    return q.x >= q.y ? float2(1.0, 0.0) : float2(0.0, 1.0);
+}
+
+/** A device pixel's footprint across local direction `normal` at local position `p`. */
+float strataFootprint(float2 normal, float2 p) {
+    return max(abs(dot(normal, ddx(p))) + abs(dot(normal, ddy(p))), 1e-6);
+}
+
+/** A rounded rect's or border's edge coverage: host::rounded_edge_coverage. */
+float strataRoundedEdge(float distance, float footprint, float softness) {
+    if (softness <= 1.0) return saturate(0.5 - distance / footprint);
+    return 1.0 - smoothstep(-softness, softness, distance);
+}
+
 float median3(float r, float g, float b) {
     return max(min(r, g), min(max(r, g), b));
 }
@@ -145,6 +172,127 @@ float median3(float r, float g, float b) {
 float strataTextCoverage(float coverage, float3 ink) {
     float strength = 0.12 + 0.68 * dot(ink, float3(0.2126, 0.7152, 0.0722));
     return saturate(coverage + strength * coverage * (1.0 - coverage));
+}
+
+/**
+ * Analytic shapes (modes 7 ellipse, 8 ring sector, 9 segment): host/render_shapes.hpp documents the
+ * draw data and the coverage model, and every CPU backend implements the same functions.
+ */
+struct StrataShape {
+    /** A solid edge's signed distance, or a stroke's distance from its centreline. */
+    float distance;
+    /** The stroke's half width; negative for a solid. */
+    float halfWidth;
+    /** The local direction `distance` grows in; its sign is irrelevant. */
+    float2 normal;
+    /** How far past a straight stroke end the point lies; very negative when it has none. */
+    float beyond;
+    float2 along;
+};
+
+StrataShape strataShape(float distance, float halfWidth, float2 normal) {
+    StrataShape shape;
+    shape.distance = distance;
+    shape.halfWidth = halfWidth;
+    shape.normal = dot(normal, normal) > 1e-24 ? normalize(normal) : float2(1.0, 0.0);
+    shape.beyond = -1e9;
+    shape.along = float2(1.0, 0.0);
+    return shape;
+}
+
+StrataShape strataEllipseDistance(float2 p, float2 radii, float halfWidth) {
+    float width = halfWidth > 0.0 ? halfWidth : -1.0;
+    if (abs(radii.x - radii.y) <= 1e-4 * max(radii.x, radii.y))
+        return strataShape(length(p) - radii.x, width, p);
+    float2 r = max(radii, 1e-4);
+    float k0 = length(p / r);
+    float2 gradient = p / (r * r);
+    float k1 = length(gradient);
+    return strataShape(k0 < 1e-6 ? -min(r.x, r.y) : k0 * (k0 - 1.0) / k1, width, gradient);
+}
+
+StrataShape strataSectorDistance(float2 p, float outer, float inner, float start, float sweep,
+                                 bool round) {
+    float radius = length(p);
+    float middle = (outer + inner) * 0.5;
+    float halfWidth = (outer - inner) * 0.5;
+    if (sweep >= 6.2831850) {
+        if (round || inner > 0.0) return strataShape(radius - middle, halfWidth, p);
+        return strataShape(radius - outer, -1.0, p);
+    }
+    float mid = start + sweep * 0.5;
+    float c = cos(mid);
+    float s = sin(mid);
+    float turned = -s * p.x + c * p.y;
+    float fold = turned < 0.0 ? -1.0 : 1.0;
+    float2 q = float2(c * p.x + s * p.y, turned * fold);
+    float halfSweep = sweep * 0.5;
+    float2 edge = float2(cos(halfSweep), sin(halfSweep));
+    bool within = atan2(q.y, q.x) <= halfSweep;
+    if (round) {
+        if (within) return strataShape(radius - middle, halfWidth, p);
+        float2 fromEnd = q - edge * middle;
+        float2 unfolded = float2(fromEnd.x, fromEnd.y * fold);
+        return strataShape(length(fromEnd), halfWidth,
+                           float2(c * unfolded.x - s * unfolded.y, s * unfolded.x + c * unfolded.y));
+    }
+    float along = dot(q, edge);
+    float across = abs(q.y * edge.x - q.x * edge.y);
+    float toRay = along >= 0.0 ? across : radius;
+    float wedge = within ? -toRay : toRay;
+    float ring = inner > 0.0 ? max(radius - outer, inner - radius) : radius - outer;
+    float2 normal = p;
+    if (wedge > ring && along >= 0.0) {
+        float2 unfolded = float2(-edge.y, edge.x * fold);
+        normal = float2(c * unfolded.x - s * unfolded.y, s * unfolded.x + c * unfolded.y);
+    }
+    return strataShape(max(ring, wedge), -1.0, normal);
+}
+
+StrataShape strataSegmentDistance(float2 p, float2 end, float halfWidth, int caps) {
+    float len = length(end);
+    float2 dir = len > 1e-6 ? end / len : float2(1.0, 0.0);
+    float t = dot(p, dir);
+    if (caps == 1) {
+        float2 offset = p - dir * clamp(t, 0.0, len);
+        float distance = length(offset);
+        return strataShape(distance, halfWidth, distance > 1e-6 ? offset : float2(-dir.y, dir.x));
+    }
+    float extension = caps == 2 ? halfWidth : 0.0;
+    StrataShape shape = strataShape(dir.x * p.y - dir.y * p.x, halfWidth, float2(-dir.y, dir.x));
+    shape.beyond = max(-t - extension, t - len - extension);
+    shape.along = dir;
+    return shape;
+}
+
+/** Box-filtered coverage of an analytic shape: host::analytic_shape_coverage. */
+float strataAnalyticCoverage(int mode, PixelInput input) {
+    float2 p = input.uv * input.drawData0.xy - input.drawData0.zw;
+    StrataShape shape;
+    if (mode == 7) {
+        shape = strataEllipseDistance(p, input.drawData1.xy, input.drawData1.z);
+    } else if (mode == 8) {
+        shape = strataSectorDistance(p, input.drawData1.x, input.drawData1.y, input.drawData1.z,
+                                     input.drawData1.w, input.drawData2.x > 0.5);
+    } else {
+        shape = strataSegmentDistance(p, input.drawData1.xy, input.drawData1.z,
+                                      (int)floor(input.drawData1.w + 0.5));
+    }
+    // A device pixel's footprint across the direction the distance grows in.
+    float2 alongX = ddx(p);
+    float2 alongY = ddy(p);
+    float footprint = max(abs(dot(shape.normal, alongX)) + abs(dot(shape.normal, alongY)), 1e-6);
+    float coverage;
+    if (shape.halfWidth >= 0.0) {
+        float centre = abs(shape.distance) / footprint;
+        float band = shape.halfWidth / footprint;
+        coverage = saturate(min(centre + band, 0.5) - max(centre - band, -0.5));
+    } else {
+        coverage = saturate(0.5 - shape.distance / footprint);
+    }
+    if (shape.beyond <= -1e8) return coverage;
+    float endFootprint = max(abs(dot(shape.along, alongX)) + abs(dot(shape.along, alongY)), 1e-6);
+    return coverage * saturate(0.5 - shape.beyond / endFootprint);
 }
 
 /** The draw mode this vertex was submitted with; selects which silhouette the draw data describes. */
@@ -161,14 +309,13 @@ float4 strataShade(PixelInput input) {
     } else if (mode == 2) {
         float2 size = max(input.drawData0.xy, 1.0);
         float4 radii = max(input.drawData1, 0.0);
-        float softness = max(input.drawData0.z, 0.5);
+        float softness = input.drawData0.z;
         float borderWidth = max(input.drawData0.w, 0.0);
         float2 p = (input.uv - 0.5) * size;
         float distance = roundedBoxSdf(p, size * 0.5, radii);
-        float alpha = 1.0 - smoothstep(-softness, softness, distance);
-        float borderMix = 1.0 - smoothstep(
-            borderWidth - softness, borderWidth + softness, -distance
-        );
+        float footprint = strataFootprint(strataRoundedBoxNormal(p, size * 0.5, radii), p);
+        float alpha = strataRoundedEdge(distance, footprint, softness);
+        float borderMix = 1.0 - strataRoundedEdge(distance + borderWidth, footprint, softness);
         color = lerp(
             color,
             input.drawData2,
@@ -179,11 +326,12 @@ float4 strataShade(PixelInput input) {
         float2 size = max(input.drawData0.xy, 1.0);
         float4 radii = max(input.drawData1, 0.0);
         float width = max(input.drawData0.z, 0.0);
-        float softness = max(input.drawData0.w, 0.5);
+        float softness = input.drawData0.w;
         float2 p = (input.uv - 0.5) * size;
         float distance = roundedBoxSdf(p, size * 0.5, radii);
-        float outer = 1.0 - smoothstep(-softness, softness, distance);
-        float inner = 1.0 - smoothstep(-softness, softness, distance + width);
+        float footprint = strataFootprint(strataRoundedBoxNormal(p, size * 0.5, radii), p);
+        float outer = strataRoundedEdge(distance, footprint, softness);
+        float inner = strataRoundedEdge(distance + width, footprint, softness);
         color.a *= saturate(outer - inner);
     } else if (mode == 4) {
         color.a *= strataTextCoverage(Texture0.Sample(Sampler0, input.uv).r, color.rgb);
@@ -208,13 +356,19 @@ float4 strataShade(PixelInput input) {
         float distance = roundedBoxSdf(p, shapeSize * 0.5, radii);
         // Only the source's own silhouette stays uncovered; it sits `offset` behind the shadow.
         float source = roundedBoxSdf(p + input.drawData2.zw, shapeSize * 0.5, radii);
-        float outside = smoothstep(-1.0, 1.0, source);
+        float outside = 1.0 - strataRoundedEdge(
+            source,
+            strataFootprint(strataRoundedBoxNormal(p + input.drawData2.zw, shapeSize * 0.5, radii), p),
+            1.0
+        );
         float falloff = 1.0 - smoothstep(
             0.0,
             blurRadius,
             max(distance - spread, 0.0)
         );
         color.a *= outside * falloff;
+    } else if (mode >= 7 && mode <= 9) {
+        color.a *= strataAnalyticCoverage(mode, input);
     }
     color.a *= input.drawData3.w;
     return color;

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <numbers>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -508,6 +509,154 @@ void paint_mesh_geometry(
     for (const std::uint32_t index : mesh.indices) output.indices.push_back(local_base + index);
 }
 
+/**
+ * A rounded rect's or border's quad grown by one device pixel on every side, with its texture
+ * coordinates running past [0, 1] by as much, so the pixel stage still measures the same box from
+ * them but its edge's coverage ramp, which reaches half a pixel outside, is never cut off. Only
+ * the built-in shading reads coordinates that way; an authored material keeps the exact quad.
+ */
+[[nodiscard]] std::pair<Rect, TextureRegion> edge_outset(const PreparedDraw& draw,
+                                                         const Rect bounds,
+                                                         const SubmissionContext& context) {
+    if ((draw.material.id != "strata:rounded_rect" && draw.material.id != "strata:border") ||
+        bounds.width <= 0.0 || bounds.height <= 0.0) {
+        return {bounds, full_uv};
+    }
+    const double transform_scale = std::max(
+        std::hypot(draw.transform.m00, draw.transform.m10),
+        std::hypot(draw.transform.m01, draw.transform.m11)
+    );
+    const double margin = 1.0 / std::max(context.scale * std::max(transform_scale, 0.01), 0.01);
+    return {
+        Rect{bounds.x - margin, bounds.y - margin, bounds.width + margin * 2.0,
+             bounds.height + margin * 2.0},
+        TextureRegion{-margin / bounds.width, -margin / bounds.height,
+                      1.0 + margin * 2.0 / bounds.width, 1.0 + margin * 2.0 / bounds.height},
+    };
+}
+
+/** The analytic draw modes and their draw data: include/strata/render_shapes.hpp. */
+constexpr int analytic_ellipse_mode = 7;
+constexpr int analytic_sector_mode = 8;
+constexpr int analytic_segment_mode = 9;
+
+/**
+ * Draws a shape the pixel stage can evaluate analytically (host/render_shapes.hpp) as outset quads:
+ * exact coverage at any scale or transform, and no tessellation. Returns false, drawing nothing,
+ * when the shape needs its path: gradients, dashes, authored materials, a stroked sector, a
+ * filled open arc, square-capped arcs, or a sector that is not circular on screen.
+ */
+[[nodiscard]] bool analytic_shape_geometry(
+    RenderSubmission& output,
+    const PreparedDraw& draw,
+    const PathRenderCommand& command,
+    std::array<float, draw_data_float_count> data,
+    const std::uint32_t batch_base_vertex,
+    const SubmissionContext& context
+) {
+    const PathShape& shape = command.shape;
+    if (!shape.primitive.has_value() || draw.material.id != "strata:solid" ||
+        !draw.material.parameters.empty()) {
+        return false;
+    }
+    const auto solid = [](const std::optional<Paint>& paint) {
+        return !paint.has_value() || paint->gradient() == nullptr;
+    };
+    if (!solid(shape.fill) || !solid(shape.stroke)) return false;
+    const StrokeStyle style = shape.stroke_style.value_or(StrokeStyle{});
+    if (shape.stroke.has_value() && !style.dash.empty()) return false;
+    const ShapePrimitive& primitive = *shape.primitive;
+    const Rect bounds = command.bounds;
+    const double transform_scale = std::max(
+        std::hypot(draw.transform.m00, draw.transform.m10),
+        std::hypot(draw.transform.m01, draw.transform.m11)
+    );
+    // One and a half device pixels of margin: the coverage ramp reaches half a pixel past an edge.
+    const double margin = 1.5 / std::max(context.scale * std::max(transform_scale, 0.01), 0.01);
+    const Point center{bounds.x + primitive.center.x * bounds.width,
+                       bounds.y + primitive.center.y * bounds.height};
+    const double radius_x = primitive.radius_x * bounds.width;
+    const double radius_y = primitive.radius_y * bounds.height;
+    const bool circular =
+        std::abs(radius_x - radius_y) <= 1.0e-6 * std::max({radius_x, radius_y, 1.0});
+    const double half_width = std::max(style.width, 0.0) * 0.5;
+    const auto emit = [&](const Rect quad_bounds, const Point reference, const RenderColor color,
+                          const int mode, const std::array<float, 7U> parameters) {
+        std::array<float, draw_data_float_count> values = data;
+        values[0] = static_cast<float>(quad_bounds.width);
+        values[1] = static_cast<float>(quad_bounds.height);
+        values[2] = static_cast<float>(reference.x - quad_bounds.x);
+        values[3] = static_cast<float>(reference.y - quad_bounds.y);
+        for (std::size_t index = 0U; index < parameters.size(); ++index)
+            values[4U + index] = parameters[index];
+        values[14] = static_cast<float>(mode);
+        quad(output, draw, quad_bounds, color, full_uv, values, batch_base_vertex);
+    };
+    const auto around = [](const Point at, const double reach_x, const double reach_y) {
+        return Rect{at.x - reach_x, at.y - reach_y, reach_x * 2.0, reach_y * 2.0};
+    };
+    constexpr double radians = std::numbers::pi / 180.0;
+    switch (primitive.kind) {
+    case ShapePrimitiveKind::ellipse:
+        if (shape.fill.has_value()) {
+            emit(around(center, radius_x + margin, radius_y + margin), center,
+                 shape.fill->representative(), analytic_ellipse_mode,
+                 {static_cast<float>(radius_x), static_cast<float>(radius_y), 0.0F, 0.0F, 0.0F,
+                  0.0F, 0.0F});
+        }
+        if (shape.stroke.has_value() && half_width > 0.0) {
+            emit(around(center, radius_x + half_width + margin, radius_y + half_width + margin),
+                 center, shape.stroke->representative(), analytic_ellipse_mode,
+                 {static_cast<float>(radius_x), static_cast<float>(radius_y),
+                  static_cast<float>(half_width), 0.0F, 0.0F, 0.0F, 0.0F});
+        }
+        return true;
+    case ShapePrimitiveKind::sector:
+    case ShapePrimitiveKind::arc: {
+        const bool arc = primitive.kind == ShapePrimitiveKind::arc;
+        if (!circular || (arc ? shape.fill.has_value() || style.cap == PathCap::square
+                              : shape.stroke.has_value()))
+            return false;
+        double start = primitive.start_degrees;
+        double sweep = std::clamp(primitive.sweep_degrees, -360.0, 360.0);
+        if (sweep < 0.0) {
+            start += sweep;
+            sweep = -sweep;
+        }
+        const double outer = arc ? radius_x + half_width : radius_x;
+        const double inner = arc ? std::max(0.0, radius_x - half_width)
+                                 : radius_x * primitive.inner_fraction;
+        const std::optional<Paint>& paint = arc ? shape.stroke : shape.fill;
+        if (!paint.has_value() || (arc && half_width <= 0.0)) return true;
+        emit(around(center, outer + margin, outer + margin), center, paint->representative(),
+             analytic_sector_mode,
+             {static_cast<float>(outer), static_cast<float>(inner),
+              static_cast<float>(start * radians), static_cast<float>(sweep * radians),
+              arc && style.cap == PathCap::round ? 1.0F : 0.0F, 0.0F, 0.0F});
+        return true;
+    }
+    case ShapePrimitiveKind::segment: {
+        if (!shape.stroke.has_value() || half_width <= 0.0) return true;
+        const Point from{bounds.x + primitive.from.x * bounds.width,
+                         bounds.y + primitive.from.y * bounds.height};
+        const Point to{bounds.x + primitive.to.x * bounds.width,
+                       bounds.y + primitive.to.y * bounds.height};
+        const double reach = half_width + margin;
+        const Rect quad_bounds{std::min(from.x, to.x) - reach, std::min(from.y, to.y) - reach,
+                               std::abs(to.x - from.x) + reach * 2.0,
+                               std::abs(to.y - from.y) + reach * 2.0};
+        const float caps = style.cap == PathCap::round ? 1.0F
+                           : style.cap == PathCap::square ? 2.0F
+                                                          : 0.0F;
+        emit(quad_bounds, from, shape.stroke->representative(), analytic_segment_mode,
+             {static_cast<float>(to.x - from.x), static_cast<float>(to.y - from.y),
+              static_cast<float>(half_width), caps, 0.0F, 0.0F, 0.0F});
+        return true;
+    }
+    }
+    return false;
+}
+
 void geometry(
     RenderSubmission& output,
     const PreparedDraw& draw,
@@ -533,13 +682,13 @@ void geometry(
                     batch_base_vertex
                 );
             } else {
-                quad(
-                    output, draw, command.bounds, command.fill.representative(), full_uv, data,
-                    batch_base_vertex
-                );
+                const auto [bounds, uv] = edge_outset(draw, command.bounds, context);
+                quad(output, draw, bounds, command.fill.representative(), uv, data,
+                     batch_base_vertex);
             }
         } else if constexpr (std::is_same_v<Type, BorderRenderCommand>) {
-            quad(output, draw, command.bounds, command.border.color, full_uv, data, batch_base_vertex);
+            const auto [bounds, uv] = edge_outset(draw, command.bounds, context);
+            quad(output, draw, bounds, command.border.color, uv, data, batch_base_vertex);
         } else if constexpr (std::is_same_v<Type, ImageRenderCommand>) {
             quad(output, draw, command.bounds, command.tint, command.source, data, batch_base_vertex);
         } else if constexpr (std::is_same_v<Type, NinePatchRenderCommand>) {
@@ -549,6 +698,8 @@ void geometry(
                 text_geometry(output, draw, *command, data, batch_base_vertex, context);
             }
         } else if constexpr (std::is_same_v<Type, PathRenderCommand>) {
+            if (analytic_shape_geometry(output, draw, command, data, batch_base_vertex, context))
+                return;
             const double transform_scale = std::max(
                 std::hypot(draw.transform.m00, draw.transform.m10),
                 std::hypot(draw.transform.m01, draw.transform.m11)

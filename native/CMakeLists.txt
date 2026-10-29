@@ -1288,6 +1288,13 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         strata_target_defaults(strata_effect_refresh_tests)
         add_test(NAME strata.effect_refresh COMMAND strata_effect_refresh_tests)
 
+        # Measures shape coverage, as area, through every backend this build has.
+        add_executable(strata_drawing_tests tests/drawing_tests.cpp)
+        target_link_libraries(strata_drawing_tests PRIVATE strata_headless_host)
+        strata_target_defaults(strata_drawing_tests)
+        add_test(NAME strata.render.drawing
+                 COMMAND strata_drawing_tests ${CMAKE_CURRENT_BINARY_DIR}/drawing-tests)
+
         # Replays recorded and scripted packet streams through every backend this build has.
         add_executable(strata_render_differential_tests tests/render_differential_tests.cpp)
         target_link_libraries(strata_render_differential_tests PRIVATE strata_headless_host)

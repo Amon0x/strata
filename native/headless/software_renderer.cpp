@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "gpu/effect_policy.hpp"
+#include <strata/render_shapes.hpp>
 
 namespace strata::headless {
 namespace {
@@ -598,16 +599,28 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                     };
                     const float px = (u - 0.5F) * shape_width;
                     const float py = (v - 0.5F) * shape_height;
+                    for (float& radius : radii)
+                        radius = std::max(radius, 0.0F);
+                    // The footprint a device pixel spans across a rounded box's edge, as the
+                    // pixel stage measures it from the local position's derivatives.
+                    const auto footprint = [&](const host::ShapeDistance& box, const float width,
+                                               const float height) {
+                        return host::pixel_footprint(box.normal_x, box.normal_y, du_dx * width,
+                                                     dv_dx * height, du_dy * width,
+                                                     dv_dy * height);
+                    };
                     if (mode == 2) {
-                        const float softness = std::max(data[2U], 0.5F);
+                        const float softness = data[2U];
                         const float border_width = std::max(data[3U], 0.0F);
-                        const float distance =
-                            rounded_box_sdf(px, py, shape_width * 0.5F, shape_height * 0.5F, radii);
-                        const float alpha = 1.0F - smoothstep(-softness, softness, distance);
-                        const float border_mix =
-                            saturate((1.0F - smoothstep(border_width - softness,
-                                                        border_width + softness, -distance)) *
-                                     (border_width >= 0.001F ? 1.0F : 0.0F));
+                        const host::ShapeDistance box = host::rounded_box_distance(
+                            px, py, shape_width * 0.5F, shape_height * 0.5F, radii.data());
+                        const float distance = box.distance;
+                        const float pixel = footprint(box, shape_width, shape_height);
+                        const float alpha = host::rounded_edge_coverage(distance, pixel, softness);
+                        const float border_mix = saturate(
+                            (1.0F - host::rounded_edge_coverage(distance + border_width, pixel,
+                                                                softness)) *
+                            (border_width >= 0.001F ? 1.0F : 0.0F));
                         source.red += (data[8U] - source.red) * border_mix;
                         source.green += (data[9U] - source.green) * border_mix;
                         source.blue += (data[10U] - source.blue) * border_mix;
@@ -615,12 +628,14 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         source.alpha *= alpha;
                     } else if (mode == 3) {
                         const float line_width = std::max(data[2U], 0.0F);
-                        const float softness = std::max(data[3U], 0.5F);
-                        const float distance =
-                            rounded_box_sdf(px, py, shape_width * 0.5F, shape_height * 0.5F, radii);
-                        const float outer = 1.0F - smoothstep(-softness, softness, distance);
+                        const float softness = data[3U];
+                        const host::ShapeDistance box = host::rounded_box_distance(
+                            px, py, shape_width * 0.5F, shape_height * 0.5F, radii.data());
+                        const float pixel = footprint(box, shape_width, shape_height);
+                        const float outer =
+                            host::rounded_edge_coverage(box.distance, pixel, softness);
                         const float inner =
-                            1.0F - smoothstep(-softness, softness, distance + line_width);
+                            host::rounded_edge_coverage(box.distance + line_width, pixel, softness);
                         source.alpha *= saturate(outer - inner);
                     } else {
                         const float radius = std::max(data[2U], 0.5F);
@@ -644,7 +659,13 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                             shape_height * 0.5F,
                             radii
                         );
-                        const float outside = smoothstep(-1.0F, 1.0F, source_distance);
+                        const host::ShapeDistance source_box = host::rounded_box_distance(
+                            shadow_x + data[10U], shadow_y + data[11U], shape_width * 0.5F,
+                            shape_height * 0.5F, radii.data());
+                        const float outside =
+                            1.0F - host::rounded_edge_coverage(
+                                       source_distance,
+                                       footprint(source_box, quad_width, quad_height), 1.0F);
                         const float falloff = 1.0F - smoothstep(
                             0.0F,
                             radius,
@@ -674,6 +695,9 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                     const float range =
                         std::max(0.5F * (unit_x * screen_u + unit_y * screen_v), 1.0F);
                     source.alpha *= saturate(signed_distance * range + 0.5F);
+                } else if (mode >= host::draw_mode_ellipse && mode <= host::draw_mode_segment) {
+                    source.alpha *= host::analytic_shape_coverage(
+                        mode, u, v, du_dx, dv_dx, du_dy, dv_dy, data.data());
                 }
                 source.alpha *= data[15U];
                 if (source.alpha <= 0.000001F)

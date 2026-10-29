@@ -672,12 +672,21 @@ Draw(layout: { width: { weight: 1 }, height: 58 }, shapes: [
 ])
 ```
 
-Shape kinds are `line`, `polyline`, `polygon`, `rect`, `circle`, `ellipse`, `arc` and `path`. A
-`path` outline uses the compact `M`/`L`/`H`/`V`/`Q`/`C`/`Z` commands, in absolute or relative
-(lowercase) spelling, and is parsed at compile time: a malformed outline is a compile error on the
-literal, not a shape missing at runtime. `strokeStyle` carries `width`, `cap` (`butt`/`round`/
-`square`), `join` (`miter`/`round`/`bevel`), `miterLimit`, `dash` and `dashOffset`. Fills and
-strokes are antialiased by the tessellator, and a `points` list may come straight from host data.
+Shape kinds are `line`, `polyline`, `polygon`, `rect`, `circle`, `ellipse`, `arc`, `sector`,
+`ring` and `path`. A `sector` is a slice of a ring between `innerRadius` and `radius` from `start`
+sweeping `sweep` degrees (an `innerRadius` of 0, the default, is a pie slice); a `ring` is the
+whole ring, `innerRadius` 0.3 unless given. A `path` outline uses the compact
+`M`/`L`/`H`/`V`/`Q`/`C`/`Z` commands, in absolute or relative (lowercase) spelling, and is parsed at
+compile time: a malformed outline is a compile error on the literal, not a shape missing at
+runtime. `strokeStyle` carries `width`, `cap` (`butt`/`round`/`square`), `join`
+(`miter`/`round`/`bevel`), `miterLimit`, `dash` and `dashOffset`. A `points` list may come straight
+from host data.
+
+Circles and ellipses (filled or stroked), sectors and rings, arcs stroked with butt or round caps,
+and lines, all in a solid color without dashes, are drawn analytically by the pixel stage: their
+edges land exactly on the geometry, their antialiasing is the true share of each pixel they cover
+at any scale, rotation or animation, and a stroke thinner than a pixel draws proportionally lighter
+rather than a pixel wide. Other outlines are tessellated.
 
 An `image` shape maps an image's `source` region (normalized, as for `Image.source`) onto the
 parallelogram whose top-left, top-right and bottom-left corners are its three `points`, multiplied
