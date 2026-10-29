@@ -297,6 +297,8 @@ InputOperationResult InputRouter::process_queued(const std::function<bool()>& st
                 return restore_time(text(std::move(value)));
             } else if constexpr (std::is_same_v<Event, ImePreeditInputEvent>) {
                 return restore_time(ime_preedit(std::move(value)));
+            } else if constexpr (std::is_same_v<Event, PlatformInputEvent>) {
+                return restore_time(platform(std::move(value)));
             } else {
                 KeyModifiers modifiers = value.modifiers;
                 std::string key = value.direction;

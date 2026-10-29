@@ -666,6 +666,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             desktop/application.cpp
             desktop/host_services.cpp
             desktop/ime.cpp
+            desktop/platform.cpp
             desktop/renderer.cpp
     )
     add_library(Strata::desktop ALIAS strata_desktop_host)
@@ -678,9 +679,12 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             strata_host_session
             d3d11
             d3dcompiler
+            dwmapi
             imm32
             ole32
+            shell32
             user32
+            windowscodecs
     )
     target_include_directories(
         strata_desktop_host

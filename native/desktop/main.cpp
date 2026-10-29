@@ -228,6 +228,13 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
             return handled.has_value() ? static_cast<LRESULT>(*handled)
                                        : DefWindowProcW(window, message, word, long_value);
         }
+        if (app->host != nullptr) {
+            if (const std::optional<std::intptr_t> handled =
+                    app->host->window_message(message, word, long_value);
+                handled.has_value()) {
+                return static_cast<LRESULT>(*handled);
+            }
+        }
         if (const std::optional<LRESULT> handled = strata::desktop::win32::translate_window_input(
                 *app, app->input, window, message, word, long_value);
             handled.has_value()) {

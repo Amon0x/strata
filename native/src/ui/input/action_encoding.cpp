@@ -54,15 +54,17 @@ JsonValue InputRouter::canonical_action(
         "origin",
         value.action->origin.has_value() ? origin(*value.action->origin) : JsonValue{}
     );
-    fields.emplace_back("payload", object({
-        {"actions", array(std::move(actions))},
-        {"kind", JsonValue("action-composition")},
-        {"mode", JsonValue(
-            *value.composition == runtime::ActionCompositionMode::sequence ? "sequence"
-            : *value.composition == runtime::ActionCompositionMode::parallel ? "parallel"
-                                                                             : "delay"
-        )},
-    }));
+    fields.emplace_back(
+        "payload",
+        object({
+            {"actions", array(std::move(actions))},
+            {"kind", JsonValue("action-composition")},
+            {"mode",
+             JsonValue(*value.composition == runtime::ActionCompositionMode::sequence   ? "sequence"
+                       : *value.composition == runtime::ActionCompositionMode::parallel ? "parallel"
+                       : *value.composition == runtime::ActionCompositionMode::then     ? "then"
+                                                                                        : "delay")},
+        }));
     fields.emplace_back("payloadContract", JsonValue(value.action->contract->payload_contract));
     return JsonValue(std::move(fields));
 }

@@ -173,7 +173,8 @@ struct Renderer::Impl final {
         const double elapsed =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started_at).count();
         constexpr std::array<float, 4U> clear{0.035F, 0.043F, 0.059F, 1.0F};
-        renderer->begin_frame(clear, elapsed);
+        constexpr std::array<float, 4U> see_through{0.0F, 0.0F, 0.0F, 0.0F};
+        renderer->begin_frame(transparent ? see_through : clear, elapsed);
     }
 
     [[nodiscard]] bool end_frame() {
@@ -212,13 +213,16 @@ struct Renderer::Impl final {
                         static_cast<std::size_t>(frame.width) * 4U);
         }
         context->Unmap(staging.Get(), 0U);
-        // The swap chain holds premultiplied-free opaque frames: alpha says nothing here.
-        for (std::size_t texel = 3U; texel < frame.rgba.size(); texel += 4U)
-            frame.rgba[texel] = 255U;
+        // An opaque window's alpha says nothing; over a system backdrop it is what shows through.
+        if (!transparent) {
+            for (std::size_t texel = 3U; texel < frame.rgba.size(); texel += 4U)
+                frame.rgba[texel] = 255U;
+        }
         return frame;
     }
 
     bool capture_requested = false;
+    bool transparent = false;
     std::optional<FrameCapture> capture;
     HWND window = nullptr;
     bool owns_com = false;
@@ -288,6 +292,10 @@ bool Renderer::end_frame() {
 void Renderer::set_pointer(
     const std::optional<std::array<double, 2U>> framebuffer_position) noexcept {
     impl_->renderer->set_pointer(framebuffer_position);
+}
+
+void Renderer::set_transparent(const bool transparent) noexcept {
+    impl_->transparent = transparent;
 }
 
 void Renderer::capture_next_frame() noexcept {

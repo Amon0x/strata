@@ -477,6 +477,33 @@ runtime::ActionDispatchOutcome InputRouter::execute_composition(
             std::nullopt,
         };
     }
+    if (*composition.composition == runtime::ActionCompositionMode::then) {
+        if (composition.children.size() != 2U || composition.children[0] == nullptr ||
+            composition.children[1] == nullptr) {
+            return runtime::ActionDispatchOutcome{
+                runtime::ActionDispatchStatus::failed,
+                composition.action->id(),
+                {"strata.surface.declarative"},
+                "then needs a request and the action that receives its answer.",
+            };
+        }
+        last_platform_request_.reset();
+        const runtime::ActionDispatchOutcome first =
+            execute_action(event, *composition.children[0], node, result);
+        if (first.status == runtime::ActionDispatchStatus::failed ||
+            first.status == runtime::ActionDispatchStatus::unhandled) {
+            return first;
+        }
+        // A platform request answers later; anything else has finished, so `next` runs now.
+        if (last_platform_request_.has_value()) {
+            pending_continuations_.insert_or_assign(
+                *last_platform_request_,
+                PendingContinuation{node.identity(), composition.children[1]});
+            last_platform_request_.reset();
+            return first;
+        }
+        return execute_action(event, *composition.children[1], node, result);
+    }
     application_.undo().begin_group(public_surface_id_);
     std::vector<runtime::ActionDispatchOutcome> outcomes;
     outcomes.reserve(composition.children.size());

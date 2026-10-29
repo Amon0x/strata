@@ -280,6 +280,7 @@ struct Names final {
     Symbol base = Symbol::intern("base");
     Symbol exponent = Symbol::intern("exponent");
     Symbol after = Symbol::intern("after");
+    Symbol next = Symbol::intern("next");
     Symbol pattern = Symbol::intern("pattern");
     Symbol utc_offset_minutes = Symbol::intern("utcOffsetMinutes");
     Symbol month_names = Symbol::intern("monthNames");
@@ -1907,6 +1908,27 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         ActionValue delayed{std::move(action), ActionCompositionMode::delay, {*step.action()}};
         delayed.delay_nanoseconds = std::max<std::int64_t>(0, after.duration()->nanoseconds);
         return ExpressionValue(std::make_shared<const ActionValue>(std::move(delayed)));
+    }
+    case HelperKind::then: {
+        const ProgramArgument* first_argument = argument(program, node, known.action, 0U);
+        const ProgramArgument* next_argument = argument(program, node, known.next, 1U);
+        const ExpressionValue first =
+            first_argument != nullptr ? evaluate_node(program, first_argument->value, scope, reads)
+                                      : ExpressionValue{};
+        const ExpressionValue next =
+            next_argument != nullptr ? evaluate_node(program, next_argument->value, scope, reads)
+                                     : ExpressionValue{};
+        const auto contract = actions_.contract("action.sequence");
+        if (first.action() == nullptr || next.action() == nullptr || contract == nullptr) {
+            report(node, scope, "STRATA.DSL.RUNTIME_ACTION_COMPOSITION",
+                   "then requires two typed actions.");
+            return ExpressionValue(std::make_shared<const ActionValue>(ActionValue{}));
+        }
+        auto action = std::make_shared<const Action>(
+            contract, Value(std::vector<std::pair<std::string, Value>>{}),
+            action_origin(program, node, scope));
+        return ExpressionValue(std::make_shared<const ActionValue>(ActionValue{
+            std::move(action), ActionCompositionMode::then, {*first.action(), *next.action()}}));
     }
     case HelperKind::when_style: {
         const Value condition = argument_value(program, node, scope, known.condition, 0U, reads);

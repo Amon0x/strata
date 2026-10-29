@@ -177,6 +177,8 @@ std::optional<runtime::ActionDispatchOutcome> InputRouter::execute_surface_actio
         return surface_outcome(runtime::ActionDispatchStatus::handled, *message);
     }
     if (id == "command.execute") return execute_command_action(action, node, result);
+    if (std::optional<runtime::ActionDispatchOutcome> platform = execute_platform_action(action))
+        return platform;
     if (id == "environment.set" && surface_framework_executor_) {
         return surface_framework_executor_(action);
     }

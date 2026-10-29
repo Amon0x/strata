@@ -457,7 +457,7 @@ ActionDispatchOutcome ApplicationContext::dispatch(
                     undo_label = *value.string();
                 } else if (argument_name == "undoCoalesce" && value.string() != nullptr) {
                     undo_coalesce = *value.string();
-                } else if (argument_name != "name") {
+                } else if (argument_name != "name" && argument_name != "field") {
                     arguments.emplace_back(argument_name, value);
                 }
             }
@@ -465,7 +465,14 @@ ActionDispatchOutcome ApplicationContext::dispatch(
         if (id == "state.setFromEvent") {
             const auto value = std::ranges::find(arguments, "value", &decltype(arguments)::value_type::first);
             if (value != arguments.end()) arguments.erase(value);
-            arguments.emplace_back("value", event.value);
+            // `field` keeps one field of the event: the files of a drop, the path of a dialog.
+            const Value* field = action.payload.field("field");
+            if (field != nullptr && field->string() != nullptr) {
+                const Value* picked = event.value.field(*field->string());
+                arguments.emplace_back("value", picked != nullptr ? *picked : Value{});
+            } else {
+                arguments.emplace_back("value", event.value);
+            }
         }
         const StateSnapshot before = state_.snapshot();
         // A state that takes any kind is held to its declared schema instead.

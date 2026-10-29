@@ -1527,6 +1527,8 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
                                         : target;
     hover_route(hover_target);
     track_pointer(event, result);
+    if (event.type == PointerEventType::press && event.button == 0)
+        start_window_drag(event, hover_target);
     InputDispatchState dispatch = route_pointer_event(dispatch_target, hover_target, event, result);
     pressed = pressed_pointer_targets_.find(event.pointer_id);
     const bool gesture_claimed = pressed != pressed_pointer_targets_.end() &&

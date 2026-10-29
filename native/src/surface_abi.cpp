@@ -530,6 +530,35 @@ void require_finite(const double value, const char* const message) {
             event_modifiers,
             value.timestamp_nanoseconds,
         };
+    case STRATA_INPUT_FILE_DRAG:
+    case STRATA_INPUT_FILE_DROP:
+    case STRATA_INPUT_FILE_DRAG_LEAVE: {
+        require_finite(value.x, "file drag x-coordinate must be finite");
+        require_finite(value.y, "file drag y-coordinate must be finite");
+        strata::ui::PlatformInputEvent files;
+        files.kind = value.kind == STRATA_INPUT_FILE_DRAG ? strata::ui::PlatformInputKind::file_drag
+                     : value.kind == STRATA_INPUT_FILE_DROP
+                         ? strata::ui::PlatformInputKind::file_drop
+                         : strata::ui::PlatformInputKind::file_leave;
+        files.position = strata::ui::Point{value.x, value.y};
+        const std::string paths = input_text(value.text, true);
+        for (std::size_t start = 0U; start < paths.size();) {
+            const std::size_t end = std::min(paths.find('\n', start), paths.size());
+            if (end > start)
+                files.files.push_back(paths.substr(start, end - start));
+            start = end + 1U;
+        }
+        files.timestamp_nanos = value.timestamp_nanoseconds;
+        return files;
+    }
+    case STRATA_INPUT_PLATFORM_RESULT: {
+        strata::ui::PlatformInputEvent answer;
+        answer.kind = strata::ui::PlatformInputKind::result;
+        answer.request = value.selection_start;
+        answer.result_json = input_text(value.text, true);
+        answer.timestamp_nanos = value.timestamp_nanoseconds;
+        return answer;
+    }
     default:
         throw std::invalid_argument("input event kind is invalid");
     }

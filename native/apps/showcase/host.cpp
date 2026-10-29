@@ -42,6 +42,7 @@
 #include "durable_writer.hpp"
 #include "host/session.hpp"
 #include "host_services.hpp"
+#include "platform.hpp"
 #include "renderer.hpp"
 #include "showcase.hpp"
 
@@ -259,16 +260,11 @@ struct Host::Impl final {
         [[nodiscard]] strata::host::Bindings& bindings() { return session->bindings(); }
     };
 
-    Impl(
-        HWND window,
-        std::filesystem::path resource_root,
-        std::string instance_label,
-        const HostOptions options
-    )
-        : window(window),
-          services(window, std::move(resource_root)),
-          renderer(window, options.vsync),
-          instance_label(std::move(instance_label)),
+    Impl(HWND window, std::filesystem::path resource_root, std::string instance_label,
+         const HostOptions options)
+        : window(window), services(window, std::move(resource_root)),
+          platform(window, [this](const std::string_view id) { return services.bytes(id); }),
+          renderer(window, options.vsync), instance_label(std::move(instance_label)),
           showcase_model(this->instance_label) {
         if (this->instance_label.empty()) {
             throw std::invalid_argument("desktop instance label must not be empty");
@@ -289,6 +285,9 @@ struct Host::Impl final {
             logical_width(),
             logical_height()
         );
+        // Files dragged in from the shell go to the layer that takes input, in logical units.
+        platform.accept_files([this](const std::uint32_t kind, const double x, const double y,
+                                     const std::string& paths) { files(kind, x, y, paths); });
         performance_hud_enabled = options.performance_hud;
         profile_sampling_enabled = options.profile_sampling;
         if (options.performance_hud) {
@@ -656,6 +655,7 @@ struct Host::Impl final {
         adapters.resources = services.resource_adapter();
         adapters.clipboard = services.clipboard_adapter();
         adapters.ime = services.ime_adapter(result.id);
+        adapters.effects = platform.effect_adapter(result.id);
         adapters.durable_store = strata_durable_store_adapter{
             sizeof(strata_durable_store_adapter), this, &Impl::durable_load, &Impl::durable_write,
         };
@@ -1632,8 +1632,54 @@ struct Host::Impl final {
             : nullptr;
     }
 
+    void files(const std::uint32_t kind, const double x, const double y, const std::string& paths) {
+        flush_pointer_move();
+        strata_input_event event{};
+        event.kind = kind;
+        event.x = x / display_scale;
+        event.y = y / display_scale;
+        enqueue(event, paths);
+    }
+
+    /**
+     * Runs the platform requests the last frame made (a dialog blocks here, between frames) and
+     * hands each answer to the layer that asked, publishing any image it brings first.
+     */
+    void answer_platform_requests() {
+        for (PlatformAnswer& answer : platform.pump()) {
+            for (Layer* const layer : layers()) {
+                if (!layer->live() || layer->id != answer.client)
+                    continue;
+                if (answer.image.has_value()) {
+                    layer->runtime().publish_image(answer.image->id, answer.image->width,
+                                                   answer.image->height, answer.image->rgba);
+                }
+                strata_input_event event{};
+                event.struct_size = sizeof(event);
+                event.version = STRATA_INPUT_EVENT_VERSION_2;
+                event.kind = STRATA_INPUT_PLATFORM_RESULT;
+                event.selection_start = answer.request;
+                event.text = strata::view(answer.json);
+                event.timestamp_nanoseconds = now();
+                layer->session->enqueue(std::span<const strata_input_event>(&event, 1U));
+            }
+        }
+        // The system's move loop swallowed the release of the press that began it.
+        if (platform.take_window_moved()) {
+            pending_pointer_move.reset();
+            for (Layer* const layer : layers()) {
+                if (layer->live()) {
+                    static_cast<void>(
+                        strata_surface_cancel_interactions(layer->surface().native_handle()));
+                }
+            }
+        }
+        renderer.set_transparent(platform.transparent());
+    }
+
     void frame() {
         const auto host_frame_started = std::chrono::steady_clock::now();
+        answer_platform_requests();
         Layer* const interactive = interactive_layer();
         std::int64_t tooling_nanos = 0;
         flush_pointer_move();
@@ -1757,6 +1803,7 @@ struct Host::Impl final {
 
     HWND window = nullptr;
     HostServices services;
+    PlatformServices platform;
     Renderer renderer;
     std::string instance_label;
     ShowcaseModel showcase_model;
@@ -1961,6 +2008,17 @@ void Host::cancel_interactions() noexcept {
 }
 
 void Host::frame() { impl_->frame(); }
+
+void Host::files(const std::uint32_t kind, const double x, const double y,
+                 const std::string& paths) {
+    impl_->files(kind, x, y, paths);
+}
+
+std::optional<std::intptr_t> Host::window_message(const std::uint32_t message,
+                                                  const std::uintptr_t word,
+                                                  const std::intptr_t long_value) {
+    return impl_->platform.window_message(message, word, long_value);
+}
 double Host::scale() const noexcept { return impl_->display_scale; }
 
 const DesktopFrameSample& Host::last_frame_sample() const noexcept {

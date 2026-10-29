@@ -211,6 +211,22 @@ void require_object(const JsonValue& value, const std::string_view label) {
         return result;
     }
     if (operation == "key") return PerformanceKeyStep{text(argument, "key")};
+    if (operation == "files") {
+        require_object(argument, "files");
+        PerformanceFilesStep result;
+        result.target = selector(argument, "files");
+        if (const JsonValue* paths = optional(argument, "paths"); paths != nullptr) {
+            for (const JsonValue& path : require_array(*paths, "files.paths"))
+                result.paths.push_back(text(path, "files.paths"));
+        }
+        if (result.paths.empty())
+            throw std::invalid_argument("files requires paths");
+        if (const JsonValue* drop = optional(argument, "drop");
+            drop != nullptr && drop->boolean() != nullptr) {
+            result.drop = *drop->boolean();
+        }
+        return result;
+    }
     if (operation == "capture")
         return PerformanceCaptureStep{text(argument, "capture")};
     throw std::invalid_argument(std::string(label) + " has unknown operation '" + operation + "'");
@@ -694,6 +710,21 @@ struct PerformanceRunner::Impl final {
             throw std::runtime_error("capture found no presented frame");
         std::filesystem::create_directories(output_root);
         headless::write_png(output_root / step.file, frame->width, frame->height, frame->rgba);
+    }
+
+    void execute(const PerformanceFilesStep& step, const bool measured, PhaseResult* phase,
+                 const std::uint32_t iteration) {
+        const auto [x, y] = resolve(step.target);
+        const double scale = host.scale();
+        std::string paths;
+        for (const std::string& path : step.paths)
+            paths += (paths.empty() ? "" : "\n") + path;
+        host.files(STRATA_INPUT_FILE_DRAG, x * scale, y * scale, paths);
+        run_frame(measured, phase, iteration, "files-over:" + selector_label(step.target));
+        if (step.drop) {
+            host.files(STRATA_INPUT_FILE_DROP, x * scale, y * scale, paths);
+            run_frame(measured, phase, iteration, "files-drop:" + selector_label(step.target));
+        }
     }
 
     void execute(

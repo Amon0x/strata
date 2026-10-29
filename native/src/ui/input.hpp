@@ -164,6 +164,22 @@ struct NavigationInputEvent final {
     std::int64_t timestamp_nanos = 0;
 };
 
+/** What a PlatformInputEvent carries: files dragged in from the OS, or a host's answer. */
+enum class PlatformInputKind { file_drag, file_drop, file_leave, result };
+
+/**
+ * Input from the platform rather than a device: files dragged over or dropped on the surface
+ * (`strata.fileDrop`), or the answer to a platform request a `then` action waits for.
+ */
+struct PlatformInputEvent final {
+    PlatformInputKind kind = PlatformInputKind::result;
+    Point position{};
+    std::vector<std::string> files;
+    std::uint64_t request = 0U;
+    std::string result_json;
+    std::int64_t timestamp_nanos = 0;
+};
+
 /** Stable propagation position shared by widget and behavior input lifecycles. */
 enum class InputEventPhase { capture, target, bubble, advance, after_layout };
 
@@ -253,8 +269,9 @@ class InputDispatchContext final {
 };
 
 /** Platform-neutral input packet consumed atomically by one surface-owned queue. */
-using SurfaceInputEvent = std::variant<PointerInputEvent, ScrollInputEvent, KeyInputEvent,
-                                       TextInputEvent, ImePreeditInputEvent, NavigationInputEvent>;
+using SurfaceInputEvent =
+    std::variant<PointerInputEvent, ScrollInputEvent, KeyInputEvent, TextInputEvent,
+                 ImePreeditInputEvent, NavigationInputEvent, PlatformInputEvent>;
 
 /** Surface-local input budgets and gesture thresholds shared by every platform adapter. */
 struct InputProcessingConfig final {
@@ -643,6 +660,16 @@ class InputRouter final {
     [[nodiscard]] InputOperationResult key(KeyInputEvent event, bool navigation_traversal_repeat);
     [[nodiscard]] InputOperationResult text(TextInputEvent event);
     [[nodiscard]] InputOperationResult ime_preedit(ImePreeditInputEvent event);
+    /** Files dragged in, routed to `strata.fileDrop`, or a host's answer to a platform request. */
+    [[nodiscard]] InputOperationResult platform(PlatformInputEvent event);
+    /**
+     * system.*, window.* and image clipboard actions: sent to the host as the `strata.platform`
+     * effect with a fresh request number; nothing when `id` is none of them.
+     */
+    [[nodiscard]] std::optional<runtime::ActionDispatchOutcome>
+    execute_platform_action(const runtime::Action& action);
+    /** `strata.windowDrag`: a primary press on such a node (not on a control) moves the window. */
+    void start_window_drag(const PointerInputEvent& event, const RetainedNode* target);
     /** Routes the pending/captured pointer through the drag gesture state machine. */
     [[nodiscard]] bool route_pointer_drag(const PointerInputEvent& event,
                                           InputOperationResult& result);
@@ -867,6 +894,18 @@ class InputRouter final {
         std::shared_ptr<const runtime::ActionValue> action;
     };
     std::vector<PendingDelay> pending_delays_;
+    /** The `next` of a `then` action, waiting for its platform request's answer. */
+    struct PendingContinuation final {
+        std::uint64_t node_identity = 0U;
+        std::shared_ptr<const runtime::ActionValue> action;
+    };
+    std::map<std::uint64_t, PendingContinuation> pending_continuations_;
+    std::uint64_t next_platform_request_ = 0U;
+    /** The request the last platform action made, for a `then` to wait on. */
+    std::optional<std::uint64_t> last_platform_request_;
+    /** The `strata.fileDrop` node files are being dragged over. */
+    std::optional<std::uint64_t> file_drop_target_;
+    std::int64_t last_window_drag_press_nanos_ = 0;
     void run_due_delays(InputOperationResult& result);
     /** One authored timer's schedule: its interval, when it fires next, and whether it is done. */
     struct TimerSchedule final {

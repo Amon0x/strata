@@ -41,6 +41,12 @@ struct PerformanceScrollStep final {
 struct PerformanceKeyStep final {
     std::string key;
 };
+/** Files dragged over (or dropped on) the selected node, as the shell would bring them. */
+struct PerformanceFilesStep final {
+    host::Selector target;
+    std::vector<std::string> paths;
+    bool drop = true;
+};
 /** Saves the next frame Strata presents, read from its swap chain, to a PNG under the output root.
  */
 struct PerformanceCaptureStep final {
@@ -50,7 +56,7 @@ struct PerformanceCaptureStep final {
 using PerformanceStep =
     std::variant<PerformanceFramesStep, PerformanceClickStep, PerformanceMoveStep,
                  PerformanceDragStep, PerformanceScrollStep, PerformanceKeyStep,
-                 PerformanceCaptureStep>;
+                 PerformanceCaptureStep, PerformanceFilesStep>;
 
 struct PerformancePhase final {
     std::string name;

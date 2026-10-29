@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <strata/strata.h>
 
@@ -32,6 +33,10 @@ enum class InputKind {
     text,
     ime_preedit,
     navigation,
+    file_drag,
+    file_drop,
+    file_drag_leave,
+    platform_result,
 };
 
 enum class KeyAction { press, release, repeat };
@@ -110,6 +115,11 @@ struct InputEvent final {
         KeyModifiers modifiers = KeyModifiers::none,
         std::int64_t timestamp_nanoseconds = 0
     );
+    /** Files dragged from the OS: `kind` is file_drag, file_drop or file_drag_leave. */
+    [[nodiscard]] static InputEvent files(InputKind kind, Point position,
+                                          const std::vector<std::string>& paths);
+    /** The host's answer to platform request `request`, as JSON. */
+    [[nodiscard]] static InputEvent platform_result(std::uint64_t request, std::string json);
 
     [[nodiscard]] strata_input_event native() const noexcept;
 };
@@ -207,6 +217,31 @@ inline InputEvent InputEvent::navigation(
     return result;
 }
 
+inline InputEvent InputEvent::files(const InputKind kind, const Point position,
+                                    const std::vector<std::string>& paths) {
+    if (kind != InputKind::file_drag && kind != InputKind::file_drop &&
+        kind != InputKind::file_drag_leave) {
+        throw std::invalid_argument("file input requires a file event kind");
+    }
+    InputEvent result;
+    result.kind = kind;
+    result.position = position;
+    for (const std::string& path : paths) {
+        if (!result.text.empty())
+            result.text += '\n';
+        result.text += path;
+    }
+    return result;
+}
+
+inline InputEvent InputEvent::platform_result(const std::uint64_t request, std::string json) {
+    InputEvent result;
+    result.kind = InputKind::platform_result;
+    result.selection_start = request;
+    result.text = std::move(json);
+    return result;
+}
+
 inline strata_input_event InputEvent::native() const noexcept {
     const auto native_kind = [this] {
         switch (kind) {
@@ -219,6 +254,14 @@ inline strata_input_event InputEvent::native() const noexcept {
         case InputKind::text: return STRATA_INPUT_TEXT;
         case InputKind::ime_preedit: return STRATA_INPUT_IME_PREEDIT;
         case InputKind::navigation: return STRATA_INPUT_NAVIGATION;
+        case InputKind::file_drag:
+            return STRATA_INPUT_FILE_DRAG;
+        case InputKind::file_drop:
+            return STRATA_INPUT_FILE_DROP;
+        case InputKind::file_drag_leave:
+            return STRATA_INPUT_FILE_DRAG_LEAVE;
+        case InputKind::platform_result:
+            return STRATA_INPUT_PLATFORM_RESULT;
         }
         return STRATA_INPUT_POINTER_CANCEL;
     }();

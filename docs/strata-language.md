@@ -605,6 +605,42 @@ Text(text: "Headline", style: style(Title, font: "system:bahnschrift.ttf", fontW
                                     fontVariation: "wdth 80"))
 ```
 
+### Talking to the operating system
+
+A document reaches the operating system through actions. `system.openFile` (`title`, `filters`,
+`multiple`, `folder`) and `system.saveFile` (`title`, `filters`, `name`) show the system's own
+dialogs; filters are `{ name, patterns }` objects or `"Name|*.png;*.jpg"` strings. `system.notify`
+(`title`, `body`) shows a notification from the app's tray icon, and `system.open` (`target`)
+opens a file, folder or link in its default application. `window.minimize`,
+`window.toggleMaximize` and `window.close` act on the window, and `window.setChrome` (`titleBar`:
+`"custom"` or `"system"`; `backdrop`: `"mica"`, `"acrylic"`, `"tabbed"` or `"none"`; `dark`)
+changes it: with a custom title bar the document draws its own, and with a backdrop the window
+shows the system's material wherever the document draws nothing. `clipboard.copyImage` (`image`: a
+resource path or runtime image id) puts an image on the clipboard; `clipboard.readImage` takes one
+off it as a runtime image.
+
+An answer arrives later, so `then(request, next)` runs `next` with it as its event once it does:
+`{ cancelled, path, paths }` from a dialog, `{ image, width, height }` from `clipboard.readImage`.
+`state.setFromEvent` keeps the whole answer, or one of its fields with `field`.
+
+```strata
+Button(label: "Open…", onClick: then(
+  action("system.openFile", multiple: true, filters: [{ name: "Images", patterns: "*.png;*.jpg" }]),
+  action("state.setFromEvent", name: "picked")))
+```
+
+Two behaviors take the rest. `strata.fileDrop` hears files dragged in from the shell: its action
+receives `{ over, dropped, files }` as files arrive over the node, leave it, and are dropped on it.
+`strata.windowDrag` makes a node a title bar: a press on it (not on a control inside it) moves the
+window, with the system's snapping, and a double press maximizes or restores it.
+
+```strata
+Panel(style: TitleBar, behaviors: [{ id: "strata.windowDrag" }]) { Text(text: "My app") }
+```
+
+A host provides these through the `strata.platform` effect (see `strata.h`); the Windows desktop
+host provides them all.
+
 ### Following the pointer
 
 The `strata.pointer` behavior tells a node where the pointer is over it. Its action receives an

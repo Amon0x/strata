@@ -327,6 +327,16 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::map,
                                                          .label = "strata.hoverable options",
                                                          .value = declared_type_reference("any")})},
+        DeclaredNamedType{.id = "strataFileDropOptions",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::map,
+                                                         .label = "strata.fileDrop options",
+                                                         .value = declared_type_reference("any")})},
+        DeclaredNamedType{.id = "strataWindowDragOptions",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::map,
+                                                         .label = "strata.windowDrag options",
+                                                         .value = declared_type_reference("any")})},
         DeclaredNamedType{.id = "strataPointerOptions",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::map,
@@ -1003,6 +1013,7 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                                           declared_type_reference("strataDisabledBehavior"),
                                           declared_type_reference("strataDragSourceBehavior"),
                                           declared_type_reference("strataDropTargetBehavior"),
+                                          declared_type_reference("strataFileDropBehavior"),
                                           declared_type_reference("strataFocusableBehavior"),
                                           declared_type_reference("strataHoverableBehavior"),
                                           declared_type_reference("strataMovableBehavior"),
@@ -1010,7 +1021,8 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                                           declared_type_reference("strataReorderTargetBehavior"),
                                           declared_type_reference("strataResizeBehavior"),
                                           declared_type_reference("strataScaleBehavior"),
-                                          declared_type_reference("strataSplitHandleBehavior")}})},
+                                          declared_type_reference("strataSplitHandleBehavior"),
+                                          declared_type_reference("strataWindowDragBehavior")}})},
         DeclaredNamedType{
             .id = "strataActivateBehavior",
             .definition = declared_type(DeclaredType{
@@ -1173,6 +1185,60 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::string_literal,
                                                          .literal = "strata.hoverable"})},
+        DeclaredNamedType{
+            .id = "strataFileDropBehavior",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "strata.fileDrop behavior",
+                .fields =
+                    {DeclaredTypeField{.name = "action",
+                                       .type = declared_type_reference("action"),
+                                       .required = false,
+                                       .nullable = true},
+                     DeclaredTypeField{.name = "enabled",
+                                       .type = declared_type_reference("boolean"),
+                                       .required = false,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "id",
+                                       .type = declared_type_reference("literalStrataFileDrop"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "options",
+                                       .type = declared_type_reference("strataFileDropOptions"),
+                                       .required = false,
+                                       .nullable = false}},
+                .value = declared_type_reference("any")})},
+        DeclaredNamedType{.id = "literalStrataFileDrop",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::string_literal,
+                                                         .literal = "strata.fileDrop"})},
+        DeclaredNamedType{
+            .id = "strataWindowDragBehavior",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "strata.windowDrag behavior",
+                .fields =
+                    {DeclaredTypeField{.name = "action",
+                                       .type = declared_type_reference("action"),
+                                       .required = false,
+                                       .nullable = true},
+                     DeclaredTypeField{.name = "enabled",
+                                       .type = declared_type_reference("boolean"),
+                                       .required = false,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "id",
+                                       .type = declared_type_reference("literalStrataWindowDrag"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "options",
+                                       .type = declared_type_reference("strataWindowDragOptions"),
+                                       .required = false,
+                                       .nullable = false}},
+                .value = declared_type_reference("any")})},
+        DeclaredNamedType{.id = "literalStrataWindowDrag",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::string_literal,
+                                                         .literal = "strata.windowDrag"})},
         DeclaredNamedType{
             .id = "strataPointerBehavior",
             .definition = declared_type(DeclaredType{

@@ -415,6 +415,8 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
                          .options = declared_type_reference("dragSourceOptions")},
         DeclaredBehavior{.id = "strata.drop-target",
                          .options = declared_type_reference("dropTargetOptions")},
+        DeclaredBehavior{.id = "strata.fileDrop",
+                         .options = declared_type_reference("strataFileDropOptions")},
         DeclaredBehavior{.id = "strata.focusable",
                          .options = declared_type_reference("strataFocusableOptions")},
         DeclaredBehavior{.id = "strata.hoverable",
@@ -430,6 +432,8 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredBehavior{.id = "strata.scale", .options = declared_type_reference("scaleOptions")},
         DeclaredBehavior{.id = "strata.split-handle",
                          .options = declared_type_reference("splitHandleOptions")},
+        DeclaredBehavior{.id = "strata.windowDrag",
+                         .options = declared_type_reference("strataWindowDragOptions")},
     };
     catalog.materials = {
         DeclaredMaterial{

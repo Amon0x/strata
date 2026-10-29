@@ -80,6 +80,11 @@ public:
     void text(std::string utf8);
     void ime_preedit(std::string utf8, std::size_t selection_start, std::size_t selection_end);
     void cancel_interactions() noexcept;
+    /** Files dragged from the shell: FILE_DRAG, FILE_DROP or FILE_DRAG_LEAVE, at client pixels. */
+    void files(std::uint32_t kind, double x, double y, const std::string& paths);
+    /** Window messages the platform layer answers (custom title bar, tray icon); else nothing. */
+    [[nodiscard]] std::optional<std::intptr_t>
+    window_message(std::uint32_t message, std::uintptr_t word, std::intptr_t long_value);
     /** The pointer shape the interactive layer asks for; nullopt when no layer is live. */
     [[nodiscard]] std::optional<std::uint32_t> pointer_cursor() noexcept;
     void frame();

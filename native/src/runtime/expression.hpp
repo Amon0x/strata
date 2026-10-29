@@ -83,7 +83,8 @@ struct ExpressionHostDependency final {
  * How a composed action runs its steps: in order, together, or (`delay`) its one step once a
  * duration has passed.
  */
-enum class ActionCompositionMode { sequence, parallel, delay };
+/** `then` runs its first step, and its second with the answer once the first's request has one. */
+enum class ActionCompositionMode { sequence, parallel, delay, then };
 
 struct ActionValue final {
     ActionValue() = default;

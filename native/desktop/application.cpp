@@ -25,8 +25,9 @@
 #include "host/session.hpp"
 #include "host_services.hpp"
 #include "ime.hpp"
-#include "window_input.hpp"
+#include "platform.hpp"
 #include "renderer.hpp"
+#include "window_input.hpp"
 #include <strata/render_packet.hpp>
 
 namespace strata::desktop {
@@ -129,6 +130,7 @@ struct ApplicationHost::Impl final {
     Impl(HWND window, std::filesystem::path resource_root, ApplicationConfig config,
          const ApplicationOptions options)
         : window(window), config(std::move(config)), services(window, std::move(resource_root)),
+          platform(window, [this](const std::string_view id) { return services.bytes(id); }),
           renderer(window, options.vsync, options.asynchronous_shader_compilation) {
         try {
             initialize();
@@ -237,7 +239,18 @@ struct ApplicationHost::Impl final {
         adapters.resources = services.resource_adapter();
         adapters.clipboard = services.clipboard_adapter();
         adapters.ime = services.ime_adapter(config.application_id);
+        adapters.effects = platform.effect_adapter(config.application_id);
         session.emplace(std::move(options), adapters);
+        // Files dragged in from the shell, in logical units.
+        platform.accept_files([this](const std::uint32_t kind, const double x, const double y,
+                                     const std::string& paths) {
+            flush_pointer_move();
+            strata_input_event event{};
+            event.kind = kind;
+            event.x = x / scale;
+            event.y = y / scale;
+            enqueue(event, paths);
+        });
 
         for (const strata::MaterialDeclaration& declaration :
              session->runtime().material_declarations("hlsl")) {
@@ -359,9 +372,31 @@ struct ApplicationHost::Impl final {
         enqueue(event);
     }
 
+    /** Runs the platform requests the last frame made and hands their answers back. */
+    void answer_platform_requests() {
+        for (PlatformAnswer& answer : platform.pump()) {
+            if (answer.image.has_value()) {
+                session->runtime().publish_image(answer.image->id, answer.image->width,
+                                                 answer.image->height, answer.image->rgba);
+            }
+            strata_input_event event{};
+            event.kind = STRATA_INPUT_PLATFORM_RESULT;
+            event.selection_start = answer.request;
+            enqueue(event, answer.json);
+        }
+        // The system's move loop swallowed the release of the press that began it.
+        if (platform.take_window_moved()) {
+            pending_pointer_move.reset();
+            static_cast<void>(
+                strata_surface_cancel_interactions(session->surface().native_handle()));
+        }
+        renderer.set_transparent(platform.transparent());
+    }
+
     void frame() {
         if (!session.has_value() || !session->has_surface())
             throw std::logic_error("desktop application must be activated before framing");
+        answer_platform_requests();
         flush_pointer_move();
         frame_time = now();
         const host::SurfacePacketFrame framed = session->frame(frame_time);
@@ -396,6 +431,7 @@ struct ApplicationHost::Impl final {
     HWND window = nullptr;
     ApplicationConfig config;
     HostServices services;
+    PlatformServices platform;
     Renderer renderer;
     std::optional<host::Session> session;
     std::vector<Diagnostic> diagnostics;
@@ -522,6 +558,11 @@ ApplicationHost::handle_window_message(const std::uint32_t message, const std::u
                                        const std::intptr_t long_value) {
     const WPARAM word_parameter = static_cast<WPARAM>(word);
     const LPARAM long_parameter = static_cast<LPARAM>(long_value);
+    if (const std::optional<std::intptr_t> platform =
+            impl_->platform.window_message(message, word, long_value);
+        platform.has_value()) {
+        return platform;
+    }
     switch (message) {
     case WM_SIZE: {
         const std::uint32_t width = LOWORD(long_parameter);

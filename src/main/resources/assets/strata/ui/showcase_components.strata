@@ -1215,6 +1215,8 @@ component ShellPage() {
 
 component Showcase() {
   state selectedPage = "EXTEND";
+  // The window's chrome (SYSTEM page): "system", or a backdrop under a custom title bar.
+  state chrome = "system";
   state controlModalOpen = false;
 
   Panel(
@@ -1228,16 +1230,16 @@ component Showcase() {
     ]
   ) {
     Panel(key: "targets.content", style: ContentRoot) {
-      ShowcaseHeader(selectedPage: selectedPage)
+      ShowcaseHeader(selectedPage: selectedPage, chrome: chrome)
       EventConsole()
       if env.compact {
         Panel(style: BodyColumn) {
-          PageViewport(selectedPage: selectedPage)
+          PageViewport(selectedPage: selectedPage, chrome: chrome)
           ExpectedPanel(selectedPage: selectedPage, width: { weight: 1 }, height: "content")
         }
       } else {
         Panel(style: BodyRow) {
-          PageViewport(selectedPage: selectedPage)
+          PageViewport(selectedPage: selectedPage, chrome: chrome)
           ExpectedPanel(selectedPage: selectedPage, width: 310, height: { weight: 1 })
         }
       }
@@ -1250,7 +1252,7 @@ component Showcase() {
   }
 }
 
-component PageViewport(selectedPage: string) {
+component PageViewport(selectedPage: string, chrome: Binding<string>) {
   Panel(
     key: "targets.page.host",
     style: PageHost,
@@ -1280,6 +1282,8 @@ component PageViewport(selectedPage: string) {
       Scroll(key: "targets.page.scroll.interact", persistenceKey: "showcase.page.scroll.interact", vertical: true, horizontal: false, style: PageScroll) { InteractPage() }
     } else if selectedPage == "DRAW" {
       Scroll(key: "targets.page.scroll.draw", persistenceKey: "showcase.page.scroll.draw", vertical: true, horizontal: false, style: PageScroll) { DrawPage() }
+    } else if selectedPage == "SYSTEM" {
+      Scroll(key: "targets.page.scroll.system", persistenceKey: "showcase.page.scroll.system", vertical: true, horizontal: false, style: PageScroll) { SystemPage(chrome: chrome) }
     } else if selectedPage == "SHELL" {
       Scroll(key: "targets.page.scroll.shell", persistenceKey: "showcase.page.scroll.shell", vertical: true, horizontal: false, style: PageScroll) { ShellPage() }
     } else {
@@ -1288,10 +1292,12 @@ component PageViewport(selectedPage: string) {
   }
 }
 
-component ShowcaseHeader(selectedPage: Binding<string>) {
+component ShowcaseHeader(selectedPage: Binding<string>, chrome: Binding<string>) {
   Panel(
     style: Header,
-    material: material("demo:aurora", intensity: 0.85, tint: #7C6BFFFF)
+    material: material("demo:aurora", intensity: chrome == "system" ? 0.85 : 0.45, tint: #7C6BFFFF),
+    // With the title bar drawn here, the header is what moves the window.
+    behaviors: [{ id: "strata.windowDrag", enabled: chrome != "system" }]
   ) {
     Text(text: format("STRATA / {0}", selectedPage), style: TitleText, layout: { width: 175 })
     Tabs(
@@ -1309,13 +1315,25 @@ component ShowcaseHeader(selectedPage: Binding<string>) {
         { id: "ADAPT", label: "ADAPT" },
         { id: "INSPECT", label: "INSPECT" },
         { id: "DATA", label: "DATA" },
-        { id: "SHELL", label: "SHELL" }
+        { id: "SHELL", label: "SHELL" },
+        { id: "SYSTEM", label: "SYSTEM" }
       ],
       selectedId: selectedPage,
       layout: { width: { weight: 1 }, height: 34 },
       onChange: action("state.setFromEvent", name: "selectedPage")
     )
     Text(text: env.viewport, style: TelemetryText)
+    if chrome != "system" {
+      WindowButtons()
+    }
+  }
+}
+
+component WindowButtons() {
+  Panel(style: style(ActionRow, width: "content", gap: 4, wrap: false)) {
+    Button(key: "window.min", label: "—", variant: "compact", onClick: action("window.minimize"))
+    Button(key: "window.max", label: "▢", variant: "compact", onClick: action("window.toggleMaximize"))
+    Button(key: "window.close", label: "✕", variant: "compact", onClick: action("window.close"))
   }
 }
 
@@ -1621,6 +1639,128 @@ component WeightSample(weight: number) {
   Panel(style: style(PageColumn, gap: 2, width: "content")) {
     Text(text: "Strata", style: style(WeightText, fontWeight: weight))
     Text(text: format("wght {0}", weight), style: CardNote)
+  }
+}
+
+style DropZone {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: 18;
+  gap: 6;
+  radius: 14;
+  background: #121926FF;
+  border: { width: 2, color: #2C3850FF };
+}
+
+style DropZoneOver extends DropZone {
+  background: #1B2A44FF;
+  border: { width: 2, color: #7FB4FFFF };
+}
+
+style PastedFrame {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: 10;
+  radius: 12;
+  background: #0D121BFF;
+  border: { width: 1, color: #2A3342FF };
+}
+
+component SystemPage(chrome: Binding<string>) {
+  state drop = { over: false, dropped: false, files: [] };
+  state dropFiles: List<string> = [];
+  state picked = { cancelled: true, path: "", paths: [] };
+  state saved = { cancelled: true, path: "", paths: [] };
+  state pasted = { image: "", width: 0, height: 0 };
+  state copied = { copied: false, width: 0, height: 0 };
+  state applied = { titleBar: "system", backdrop: "none" };
+  Panel(style: PageColumn) {
+    Card(title: "DRAG FILES IN FROM EXPLORER") {
+      Panel(
+        key: "system.dropzone",
+        style: drop.over ? DropZoneOver : DropZone,
+        animateChanges: { properties: ["background"], policy: "snappy" },
+        behaviors: [{ id: "strata.fileDrop", action: sequence(
+          action("state.setFromEvent", name: "drop"),
+          action("state.setFromEvent", name: "dropFiles", field: "files")) }]
+      ) {
+        Text(text: drop.over ? "Let go to drop them" : "Drop files anywhere in this box", style: style(WorldText, pixelSize: 20))
+        Text(text: drop.over ? format("{0} file(s) over the box", count(drop.files)) : (drop.dropped ? format("Dropped {0} file(s):", count(drop.files)) : "strata.fileDrop hears them arrive, leave and drop."), style: CardNote)
+        if drop.dropped {
+          for file in dropFiles {
+            Text(text: file, style: style(CardNote, color: #CFE0FFFF), maxLines: 1, overflow: "ELLIPSIS")
+          }
+        }
+      }
+    }
+    Card(title: "OPEN AND SAVE DIALOGS") {
+      Panel(style: ActionRow) {
+        Button(key: "system.open.files", label: "Open files…", onClick: then(
+          action("system.openFile", title: "Pick some files", multiple: true,
+                 filters: [{ name: "Images", patterns: "*.png;*.jpg;*.jpeg;*.gif;*.webp" }, { name: "Everything", patterns: "*.*" }]),
+          action("state.setFromEvent", name: "picked")))
+        Button(key: "system.open.folder", label: "Pick a folder…", onClick: then(
+          action("system.openFile", title: "Pick a folder", folder: true),
+          action("state.setFromEvent", name: "picked")))
+        Button(key: "system.save", label: "Save as…", onClick: then(
+          action("system.saveFile", title: "Save notes", name: "strata-notes.txt",
+                 filters: ["Text|*.txt", "Everything|*.*"]),
+          action("state.setFromEvent", name: "saved")))
+        Button(key: "system.reveal", label: "Open what I picked", enabled: picked.path != "", onClick: action("system.open", target: picked.path))
+      }
+      Text(text: picked.cancelled ? "Nothing picked yet." : format("Picked {0}: {1}", count(picked.paths), picked.path), style: CardNote, maxLines: 2, wrapMode: "WORD")
+      Text(text: saved.cancelled ? "Nothing saved yet." : format("Would save to {0}", saved.path), style: CardNote, maxLines: 2, wrapMode: "WORD")
+    }
+    Card(title: "NOTIFICATIONS AND THE SHELL") {
+      Panel(style: ActionRow) {
+        Button(key: "system.notify", label: "Send a notification", onClick: action("system.notify", title: "Strata", body: "Hello from a .strata document. Click me to bring the window back."))
+        Button(key: "system.open.fonts", label: "Open the Fonts folder", onClick: action("system.open", target: "C:\\Windows\\Fonts"))
+        Button(key: "system.open.web", label: "Open a link", onClick: action("system.open", target: "https://learn.microsoft.com/windows/apps/design/style/mica"))
+      }
+      Text(text: "Notifications come from the app's tray icon; clicking the icon or the notification brings the window back.", style: CardNote, wrapMode: "WORD")
+    }
+    Card(title: "WINDOW CHROME: YOUR OWN TITLE BAR OVER MICA OR ACRYLIC") {
+      Panel(style: ActionRow) {
+        Button(key: "chrome.mica", label: "Mica", onClick: sequence(
+          action("state.set", name: "chrome", value: "mica"),
+          then(action("window.setChrome", titleBar: "custom", backdrop: "mica"),
+               action("state.setFromEvent", name: "applied"))))
+        Button(key: "chrome.acrylic", label: "Acrylic", onClick: sequence(
+          action("state.set", name: "chrome", value: "acrylic"),
+          then(action("window.setChrome", titleBar: "custom", backdrop: "acrylic"),
+               action("state.setFromEvent", name: "applied"))))
+        Button(key: "chrome.tabbed", label: "Tabbed", onClick: sequence(
+          action("state.set", name: "chrome", value: "tabbed"),
+          then(action("window.setChrome", titleBar: "custom", backdrop: "tabbed"),
+               action("state.setFromEvent", name: "applied"))))
+        Button(key: "chrome.system", label: "System title bar", onClick: sequence(
+          action("state.set", name: "chrome", value: "system"),
+          then(action("window.setChrome", titleBar: "system", backdrop: "none"),
+               action("state.setFromEvent", name: "applied"))))
+      }
+      Panel(style: ActionRow) {
+        Button(key: "window.minimize", label: "Minimize", onClick: action("window.minimize"))
+        Button(key: "window.maximize", label: "Maximize / restore", onClick: action("window.toggleMaximize"))
+      }
+      Text(text: format("The window applied: {0} title bar, {1} backdrop.", applied.titleBar, applied.backdrop), style: style(CardNote, color: #CFE0FFFF))
+      Text(text: format("Chrome: {0}. With a custom title bar the header is the title bar: drag it to move the window (snap works), double-click it to maximize; the buttons at its right minimize, maximize and close. The window's background is the system's backdrop wherever the page draws nothing.", chrome), style: CardNote, wrapMode: "WORD")
+    }
+    Card(title: "IMAGES ON THE CLIPBOARD") {
+      Panel(style: ActionRow) {
+        Button(key: "clipboard.paste.image", label: "Paste image", onClick: then(action("clipboard.readImage"), action("state.setFromEvent", name: "pasted")))
+        Button(key: "clipboard.copy.pasted", label: "Copy it back", enabled: pasted.image != "", onClick: then(action("clipboard.copyImage", image: pasted.image), action("state.setFromEvent", name: "copied")))
+        Button(key: "clipboard.copy.icon", label: "Copy an app image", onClick: then(action("clipboard.copyImage", image: "assets/strata/textures/ui/icons/chevron-down.png"), action("state.setFromEvent", name: "copied")))
+      }
+      Text(text: pasted.image == "" ? "Copy an image anywhere (Win+Shift+S works), then Paste image." : format("Pasted {0} x {1} pixels as {2}", pasted.width, pasted.height, pasted.image), style: CardNote)
+      Text(text: copied.copied ? format("Copied a {0} x {1} image: paste it into Paint or a chat.", copied.width, copied.height) : "", style: CardNote)
+      if pasted.image != "" {
+        Panel(style: PastedFrame) {
+          Image(image: pasted.image, layout: { width: { weight: 1 }, height: 260 }, fit: "CONTAIN")
+        }
+      }
+    }
   }
 }
 
@@ -2365,6 +2505,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "Particles drift and bounce behind the menu, joined by lines that fade as they part. Move the pointer over it: nearby particles reach for it and lean toward it, under the buttons too. The GPU draws all of it every frame; the CPU only reports where the pointer is.", wrapMode: "WORD")
   } else if selectedPage == "DRAW" {
     Text(text: "The three canvases move every frame. A timer advances the data every 2.2 s while Auto is on, and Shuffle data steps it at once; either morphs the charts, gauge, sunburst and blob over the standard motion policy; the sunburst's slices meet with no seam. The loops turn and breathe without blurring an edge. Reduced motion snaps the data and stops the loops.", wrapMode: "WORD")
+  } else if selectedPage == "SYSTEM" {
+    Text(text: "Drag files from Explorer onto the drop box: it lights up as they arrive and lists them when dropped. Open files, pick a folder or save: the dialogs are Windows' own, and their answers land in state. Send a notification from the tray icon; open a folder or link in its default app. Mica, Acrylic and Tabbed turn the header into the title bar (drag to move, double-click to maximize, buttons at its right) over the system backdrop. Paste an image from the clipboard and copy it back.", wrapMode: "WORD")
   } else if selectedPage == "SHELL" {
     Text(text: "Menus, toolbars, command-bound controls, shortcut tooltips, and the palette resolve one live command definition. Disabled and checked states update everywhere. Palette search ranks prefix and word-boundary matches, Enter executes, Escape restores focus. Toasts stack without blocking input; breadcrumbs, disclosure, and chips emit typed events.", wrapMode: "WORD")
   } else {
