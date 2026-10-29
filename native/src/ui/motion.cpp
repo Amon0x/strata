@@ -576,6 +576,12 @@ bool MotionRuntime::running(const std::uint64_t identity) const noexcept {
     return implementation_->active_nodes.contains(identity);
 }
 
+bool MotionRuntime::shared_flights() const noexcept {
+    return std::ranges::any_of(implementation_->nodes, [](const auto& entry) {
+        return entry.second.shared_animation.has_value();
+    });
+}
+
 bool MotionRuntime::in_shared_flight(const std::uint64_t identity) const noexcept {
     const auto found = implementation_->nodes.find(identity);
     return found != implementation_->nodes.end() && found->second.shared_animation.has_value();

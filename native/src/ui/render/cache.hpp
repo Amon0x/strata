@@ -143,6 +143,8 @@ struct RenderEngine::Impl final {
     std::unordered_map<std::uint64_t, RenderGroup> groups;
     std::vector<std::uint32_t> free_group_indices;
     std::uint32_t next_group_index = 1U;
+    /** A shared-element flight ran last frame: its landing frame composes afresh too. */
+    bool flights_last_frame = false;
     /** Returns this node's stable group index, or zero when the group table is full. */
     std::uint32_t acquire_group(std::uint64_t identity);
     /** Drops groups no longer referenced by the frame and attaches the table to its commands. */

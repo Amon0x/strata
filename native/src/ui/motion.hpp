@@ -138,8 +138,13 @@ public:
   [[nodiscard]] std::size_t active_count() const noexcept;
   /** True while any of the node's players is still running (its computed values may change). */
   [[nodiscard]] bool running(std::uint64_t identity) const noexcept;
-  /** True while the node flies in from a shared element's place: it paints above its siblings. */
+  /**
+   * True while the node flies in from a shared element's place: it paints above everything,
+   * outside the clips of its ancestors, until it lands.
+   */
   [[nodiscard]] bool in_shared_flight(std::uint64_t identity) const noexcept;
+  /** Whether any node is in a shared-element flight. */
+  [[nodiscard]] bool shared_flights() const noexcept;
   void clear() noexcept;
 
 private:

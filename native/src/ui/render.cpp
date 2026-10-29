@@ -427,6 +427,23 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         collect_portals(collect_portals, *tree.root(), false);
     const std::vector<DetachedOverlayRoot> overlays = collect_overlays();
 
+    // A node in a shared-element flight paints above everything, unclipped by its ancestors: it
+    // is set aside where it stands, with the transform, opacity and group it inherits there, and
+    // drawn after the portals. While flights run (and on the frame they land) every subtree is
+    // composed afresh, since a cached one would hold, or lack, the flying node.
+    struct Flight final {
+        const RetainedNode* node = nullptr;
+        MotionTransform transform;
+        double opacity = 1.0;
+        std::uint32_t group = 0U;
+    };
+    std::vector<Flight> flights;
+    const bool flights_now = motion.shared_flights();
+    const bool compose_fresh = flights_now || implementation_->flights_last_frame;
+    // Layout bakes every ancestor's clip into a node's clip; a flight drawn on top keeps only the
+    // clips of its own subtree.
+    bool drawing_flights = false;
+    implementation_->flights_last_frame = flights_now;
     const auto visit = [&](const auto& self, const RetainedNode& node, const bool render_portals,
                            const std::optional<Rect> inherited_render_clip,
                            const MotionTransform inherited_transform,
@@ -443,7 +460,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         const bool hovered = input.hovered(node.identity());
         const bool active = input.active(node.identity());
         auto found = implementation_->fragments.find(node.identity());
-        if (found != implementation_->fragments.end() && found->second.composition.has_value()) {
+        if (!compose_fresh && found != implementation_->fragments.end() &&
+            found->second.composition.has_value()) {
             Impl::CachedFragment::CompositionPlan& retained = *found->second.composition;
             const auto append_retained_subtree = [&output, &counters](const auto& plan) {
                 if (plan.subtree_translation != Point{}) {
@@ -665,7 +683,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         const double foreground_opacity =
             isolates_content || isolates_descendants ? 1.0 : descendant_opacity;
         std::optional<Rect> scope_clip_rect = inherited_render_clip;
-        if (!record->local_clip.has_value()) {
+        if (!record->local_clip.has_value() && !drawing_flights) {
             scope_clip_rect = intersect_clip(scope_clip_rect, record->clip);
         }
         const DirtyGenerationSnapshot node_generations = node.dirty_generations();
@@ -923,6 +941,11 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             });
         }
         for (const RetainedNode* child : ordered_children) {
+            if (flights_now && !render_portals && motion.in_shared_flight(child->identity())) {
+                flights.push_back(Flight{child, effective_transform, child_descendant_opacity,
+                                         group != 0U ? group : inherited_group});
+                continue;
+            }
             self(self, *child, render_portals, child_render_clip, effective_transform,
                  child_descendant_opacity, group != 0U ? group : inherited_group);
         }
@@ -1142,6 +1165,21 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     for (const RetainedNode* portal : portals) {
         visit(visit, *portal, true, std::nullopt, MotionTransform{}, 1.0, 0U);
         ++counters.portals_rendered;
+    }
+    // Flights land on top, inside the group they fly within so they move with it. Drawing one
+    // as a portal keeps it from setting itself aside again.
+    drawing_flights = true;
+    for (const Flight& flight : flights) {
+        if (flight.group != 0U) {
+            output.append(GroupPushRenderCommand{flight.group});
+            ++counters.commands_emitted;
+        }
+        visit(visit, *flight.node, true, std::nullopt, flight.transform, flight.opacity,
+              flight.group);
+        if (flight.group != 0U) {
+            output.append(GroupPopRenderCommand{});
+            ++counters.commands_emitted;
+        }
     }
     // Cache the presentation table with its commands; cache hits must retain tone and motion.
     implementation_->publish_groups(output);

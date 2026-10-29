@@ -1684,8 +1684,9 @@ flies from where the leaving node last showed, its position and size as presente
 on the motion policy its `sharedTransition` style names ("standard" by default; "spring" springs).
 It is a FLIP: the new node lays out where it belongs, starts transformed onto the old one's
 rectangle (scroll offsets and ancestors' transforms accounted for), and eases its translation and
-scale back to none, painting above its siblings while it flies. Going back flies the other way the
-same way. Reduced motion skips the flight.
+scale back to none. While it flies it paints above everything, outside the clips of its ancestors
+(a scroll view does not cut it off), and lands back in its place among them. Going back flies the
+other way the same way. Reduced motion skips the flight.
 
 ```strata
 if selected < 0 {
