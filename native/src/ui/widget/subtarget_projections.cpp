@@ -236,8 +236,8 @@ Targets calendar(const WidgetSubtargetContext& context) {
         result.push_back(WidgetSubtarget{
             node.identity(), "day:" + text, WidgetSubtargetKind::choice, index + 2U, cell.bounds,
             runtime::Value(text),
-            std::string(calendar_month_name(cell.date.month)) + " " +
-                std::to_string(cell.date.day) + ", " + std::to_string(cell.date.year),
+            state.month_name(cell.date.month) + " " + std::to_string(cell.date.day) + ", " +
+                std::to_string(cell.date.year),
             {}, cell.enabled, false, z});
     }
     return result;

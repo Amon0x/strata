@@ -597,9 +597,45 @@ void append_texture_regions(const RenderPacket& packet,
     return index;
 }
 
+/**
+ * The presented box surrounds what a turned group draws. Map presented pixels back into the group
+ * and mask by the batch's own rounded rectangle there, so a blur or effect keeps its turned shape;
+ * clips authored inside the group map back the same way.
+ */
+void mask_turned_group(const PresentationGroup& group, const double x, const double y,
+                       const double width, const double height,
+                       const std::array<double, 4U>& radii, std::vector<RoundedClip>& clips) {
+    if (group.shear_x == 0.0 && group.shear_y == 0.0)
+        return;
+    const double determinant = group.scale_x * group.scale_y - group.shear_x * group.shear_y;
+    if (determinant == 0.0 || !std::isfinite(determinant))
+        return;
+    const double a = group.scale_y / determinant;
+    const double b = -group.shear_x / determinant;
+    const double c = -group.shear_y / determinant;
+    const double d = group.scale_x / determinant;
+    const std::array<double, 6U> inverse{
+        a, b, -(a * group.translate_x + b * group.translate_y),
+        c, d, -(c * group.translate_x + d * group.translate_y),
+    };
+    for (RoundedClip& clip : clips) {
+        const std::array<double, 6U> m = clip.inverse_transform;
+        clip.inverse_transform = {
+            m[0U] * inverse[0U] + m[1U] * inverse[3U],
+            m[0U] * inverse[1U] + m[1U] * inverse[4U],
+            m[0U] * inverse[2U] + m[1U] * inverse[5U] + m[2U],
+            m[3U] * inverse[0U] + m[4U] * inverse[3U],
+            m[3U] * inverse[1U] + m[4U] * inverse[4U],
+            m[3U] * inverse[2U] + m[4U] * inverse[5U] + m[5U],
+        };
+    }
+    if (clips.size() < maximum_rounded_clip_depth)
+        clips.push_back(RoundedClip{x, y, width, height, radii, inverse});
+}
+
 /** Writes the presented bounds of a group-local blur/effect batch into `target` (same kind). */
 void present(const SubmissionBatch& local, const std::vector<PresentationGroup>& groups,
-             SubmissionBatch& target) noexcept {
+             SubmissionBatch& target) {
     // A rotated group's effects are sampled over the box around their turned rectangle.
     const auto place = [](const PresentationGroup& group, const double x, const double y,
                           const double width, const double height, auto& output) {
@@ -610,8 +646,13 @@ void present(const SubmissionBatch& local, const std::vector<PresentationGroup>&
         output.height = placed[3U] - placed[1U];
     };
     if (const auto* blur = std::get_if<BlurBatch>(&local); blur != nullptr) {
-        place(group_of(groups, blur->group), blur->x, blur->y, blur->width, blur->height,
-              std::get<BlurBatch>(target));
+        const PresentationGroup group = group_of(groups, blur->group);
+        BlurBatch& output = std::get<BlurBatch>(target);
+        place(group, blur->x, blur->y, blur->width, blur->height, output);
+        // The batch is presented again whenever the table moves: start from its own clips.
+        output.rounded_clips = blur->rounded_clips;
+        mask_turned_group(group, blur->x, blur->y, blur->width, blur->height, {},
+                          output.rounded_clips);
     } else if (const auto* effect = std::get_if<EffectBatch>(&local); effect != nullptr) {
         const PresentationGroup group = group_of(groups, effect->group);
         EffectBatch& output = std::get<EffectBatch>(target);
@@ -625,6 +666,9 @@ void present(const SubmissionBatch& local, const std::vector<PresentationGroup>&
             output.radii[corner] = effect->radii[corner] * radius_scale;
         output.opacity = effect->opacity * group.opacity;
         output.tone = group.tone;
+        output.rounded_clips = effect->rounded_clips;
+        mask_turned_group(group, effect->x, effect->y, effect->width, effect->height,
+                          effect->radii, output.rounded_clips);
     }
 }
 

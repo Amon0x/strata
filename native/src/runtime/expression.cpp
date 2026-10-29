@@ -104,12 +104,23 @@ struct CivilDate final {
  * quote); any other character is copied. Names are English.
  */
 [[nodiscard]] std::string format_date(const double milliseconds, const std::string_view pattern,
-                                      const double offset_minutes) {
-    static constexpr std::array<std::string_view, 12U> months{
+                                      const double offset_minutes,
+                                      const std::vector<std::string>& month_names,
+                                      const std::vector<std::string>& weekday_names) {
+    static const std::vector<std::string> english_months{
         "January", "February", "March",     "April",   "May",      "June",
         "July",    "August",   "September", "October", "November", "December"};
-    static constexpr std::array<std::string_view, 7U> weekdays{
-        "Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"};
+    static const std::vector<std::string> english_weekdays{
+        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+    // Authored names replace English only when complete: twelve months, seven days from Sunday.
+    const std::vector<std::string>& months =
+        month_names.size() == 12U ? month_names : english_months;
+    const std::vector<std::string>& weekdays =
+        weekday_names.size() == 7U ? weekday_names : english_weekdays;
+    // Short names are a name's first three characters.
+    const auto short_name = [](const std::string& name) {
+        return name.substr(0U, utf8_offset(name, 3U));
+    };
     // Bounded to years -9999..9999 so every field stays a sensible width.
     constexpr double limit = 253402300799999.0;
     const double clamped = std::clamp(
@@ -128,7 +139,8 @@ struct CivilDate final {
     const auto minute = static_cast<int>(within / 60'000 % 60);
     const auto second = static_cast<int>(within / 1000 % 60);
     const auto millisecond = static_cast<int>(within % 1000);
-    const auto weekday = static_cast<std::size_t>(((days % 7) + 7) % 7);
+    // 1970-01-01 was a Thursday; names are indexed from Sunday.
+    const auto weekday = static_cast<std::size_t>(((days % 7) + 7 + 4) % 7);
     const auto padded = [](const std::int64_t value, const std::size_t width) {
         std::string digits = std::to_string(value < 0 ? -value : value);
         if (digits.size() < width)
@@ -160,14 +172,13 @@ struct CivilDate final {
                                 : padded(date.year, run);
             break;
         case 'M':
-            result += run >= 4U   ? std::string(months[date.month - 1U])
-                      : run == 3U ? std::string(months[date.month - 1U].substr(0U, 3U))
+            result += run >= 4U   ? months[date.month - 1U]
+                      : run == 3U ? short_name(months[date.month - 1U])
                                   : padded(date.month, run);
             break;
         case 'd': result += padded(date.day, run); break;
         case 'E':
-            result += run >= 4U ? std::string(weekdays[weekday])
-                                : std::string(weekdays[weekday].substr(0U, 3U));
+            result += run >= 4U ? weekdays[weekday] : short_name(weekdays[weekday]);
             break;
         case 'H': result += padded(hour, run); break;
         case 'h': result += padded(hour % 12 == 0 ? 12 : hour % 12, run); break;
@@ -271,6 +282,8 @@ struct Names final {
     Symbol after = Symbol::intern("after");
     Symbol pattern = Symbol::intern("pattern");
     Symbol utc_offset_minutes = Symbol::intern("utcOffsetMinutes");
+    Symbol month_names = Symbol::intern("monthNames");
+    Symbol weekday_names = Symbol::intern("weekdayNames");
     Symbol action = Symbol::intern("action");
     Symbol prefix = Symbol::intern("prefix");
     Symbol suffix = Symbol::intern("suffix");
@@ -1862,9 +1875,19 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         const Value value = argument_value(program, node, scope, known.value, 0U, reads);
         const Value pattern = argument_value(program, node, scope, known.pattern, 1U, reads);
         const Value offset = argument_value(program, node, scope, known.utc_offset_minutes, 2U, reads);
+        const auto names = [&](const Symbol name, const std::size_t position) {
+            const Value list = argument_value(program, node, scope, name, position, reads);
+            std::vector<std::string> result;
+            if (const ValueList* values = list.list(); values != nullptr) {
+                for (const Value& entry : values->values)
+                    result.push_back(display_string(entry));
+            }
+            return result;
+        };
         return ExpressionValue(Value(format_date(
             value.number() != nullptr ? *value.number() : 0.0, display_string(pattern),
-            offset.number() != nullptr ? *offset.number() : 0.0)));
+            offset.number() != nullptr ? *offset.number() : 0.0, names(known.month_names, 3U),
+            names(known.weekday_names, 4U))));
     }
     case HelperKind::delay: {
         const Value after = argument_value(program, node, scope, known.after, 0U, reads);

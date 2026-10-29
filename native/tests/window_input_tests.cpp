@@ -45,8 +45,7 @@ struct RecordingSink final {
         preedits.push_back(std::move(value));
     }
     void cancel_interactions() noexcept { ++cancels; }
-    [[nodiscard]] std::optional<std::uint32_t> pointer_cursor() noexcept { return cursor; }
-    std::optional<std::uint32_t> cursor;
+
 };
 
 // Mouse buttons press, capture and release; X buttons report TRUE; the wheel is in steps.

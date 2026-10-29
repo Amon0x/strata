@@ -67,6 +67,22 @@ namespace {
         std::floor(resolved), static_cast<double>(std::numeric_limits<std::uint32_t>::max())));
 }
 
+/** A `fontWeight` as a number from 1 to 1000; zero when there is none. */
+[[nodiscard]] std::uint16_t numeric_font_weight(const runtime::Value* weight) noexcept {
+    if (weight != nullptr && weight->number() != nullptr && std::isfinite(*weight->number()))
+        return static_cast<std::uint16_t>(std::clamp(std::round(*weight->number()), 1.0, 1000.0));
+    if (weight == nullptr || weight->string() == nullptr)
+        return 0U;
+    const std::string_view name = *weight->string();
+    return name == "THIN"       ? 100U
+           : name == "LIGHT"    ? 300U
+           : name == "MEDIUM"   ? 500U
+           : name == "SEMIBOLD" ? 600U
+           : name == "BOLD"     ? 700U
+           : name == "BLACK"    ? 900U
+                                : 400U;
+}
+
 /**
  * Applies a named `fontWeight` and `fontStyle` over numeric style flags: a weight of 600 or more
  * (or SEMIBOLD, BOLD, BLACK) is bold, any lighter weight is not; ITALIC and NORMAL set and clear
@@ -383,6 +399,10 @@ std::uint32_t TextEngine::font_style_flags(const RetainedNode& node) const noexc
                                  style_field(node.description(), "fontStyle"));
 }
 
+std::uint16_t TextEngine::font_weight(const RetainedNode& node) const noexcept {
+    return numeric_font_weight(style_field(node.description(), "fontWeight"));
+}
+
 const runtime::Value* text_style_field(const DescriptionNode& description,
                                        const std::string_view name) noexcept {
     return style_field(description, name);
@@ -463,6 +483,7 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
         line_height_multiplier(node),
         letter_spacing(node),
         font_style_flags(node),
+        font_weight(node),
         font_rasterization(node),
         resolved_wrap,
         overrides != nullptr && overrides->wrap_mode.has_value()
@@ -529,6 +550,8 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
             with_named_font_style(
                 unsigned_flags(run_field("fontStyleFlags"), result.font_style_flags),
                 run_field("fontWeight"), run_field("fontStyle")),
+            run_field("fontWeight") != nullptr ? numeric_font_weight(run_field("fontWeight"))
+                                               : result.font_weight,
             font_rasterization_value(run_field("fontRasterization"), result.font_rasterization),
             packed_color(run_field("color")),
             interactive,
@@ -649,7 +672,8 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
 
     const auto fallback_order = [this](const std::string& requested,
                                        const std::vector<std::string>& authored,
-                                       const std::uint32_t requested_style_flags) {
+                                       const std::uint32_t requested_style_flags,
+                                       const std::uint16_t requested_weight) {
         FontOrder base;
         const auto append = [&base, this](const std::string& id) {
             const auto found = fonts_.find(id);
@@ -661,12 +685,27 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
                 base.push_back(&*found);
         };
         append(requested);
+        // Every bound face of the requested font's family can serve a weight or style the
+        // requested face lacks, without the author listing them as fallbacks.
+        if (const auto found = fonts_.find(requested); found != fonts_.end()) {
+            const font::FontMetadata& family = found->second.metadata();
+            if (!family.family.empty()) {
+                for (const auto& face : fonts_) {
+                    if (face.second.metadata().family == family.family)
+                        append(face.first);
+                }
+            }
+        }
         for (const std::string& id : authored)
             append(id);
         append("strata:fonts/default");
 
         const std::uint32_t requested_known = requested_style_flags & font::known_font_style_flags;
-        if (requested_known == 0U)
+        // Without a numeric weight the bold bit stands for 700 and its absence for 400.
+        const std::uint16_t weight = requested_weight != 0U ? requested_weight
+                                     : (requested_known & font::font_style_bold) != 0U ? 700U
+                                                                                         : 400U;
+        if (requested_known == 0U && requested_weight == 0U)
             return base;
 
         // A fallback list is face-ordered, but matching faces from the same authored family form
@@ -694,11 +733,41 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
                 }
             }
             std::ranges::stable_sort(
-                family, [&base, requested_known](const std::size_t left, const std::size_t right) {
+                family, [&base, requested_known, weight, requested_weight](const std::size_t left,
+                                                                            const std::size_t right) {
+                    const font::FontMetadata& left_face = base[left]->second.metadata();
+                    const font::FontMetadata& right_face = base[right]->second.metadata();
+                    // Italic is matched first; then the face whose weight class is nearest.
+                    const bool left_italic =
+                        (left_face.style_flags & font::font_style_italic) ==
+                        (requested_known & font::font_style_italic);
+                    const bool right_italic =
+                        (right_face.style_flags & font::font_style_italic) ==
+                        (requested_known & font::font_style_italic);
+                    if (left_italic != right_italic)
+                        return left_italic;
+                    // A bare bold request wants a face that is bold; a numeric weight wants the
+                    // face whose weight class is nearest.
+                    if (requested_weight == 0U) {
+                        const bool left_bold =
+                            (left_face.style_flags & font::font_style_bold) ==
+                            (requested_known & font::font_style_bold);
+                        const bool right_bold =
+                            (right_face.style_flags & font::font_style_bold) ==
+                            (requested_known & font::font_style_bold);
+                        if (left_bold != right_bold)
+                            return left_bold;
+                    }
+                    if (left_face.weight_class != 0U && right_face.weight_class != 0U) {
+                        const int left_distance = std::abs(left_face.weight_class - weight);
+                        const int right_distance = std::abs(right_face.weight_class - weight);
+                        if (left_distance != right_distance)
+                            return left_distance < right_distance;
+                    }
                     const std::uint32_t left_style =
-                        base[left]->second.metadata().style_flags & font::known_font_style_flags;
+                        left_face.style_flags & font::known_font_style_flags;
                     const std::uint32_t right_style =
-                        base[right]->second.metadata().style_flags & font::known_font_style_flags;
+                        right_face.style_flags & font::known_font_style_flags;
                     const bool left_exact = left_style == requested_known;
                     const bool right_exact = right_style == requested_known;
                     if (left_exact != right_exact)
@@ -720,12 +789,13 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
     };
 
     const FontOrder default_font_order =
-        fallback_order(key.font_id, key.fallback_fonts, key.font_style_flags);
+        fallback_order(key.font_id, key.fallback_fonts, key.font_style_flags, key.font_weight);
     std::vector<FontOrder> style_font_orders;
     style_font_orders.reserve(key.style_runs.size());
     for (const StyleRun& style : key.style_runs) {
         style_font_orders.push_back(
-            fallback_order(style.font_id, style.fallback_fonts, style.font_style_flags));
+            fallback_order(style.font_id, style.fallback_fonts, style.font_style_flags,
+                           style.font_weight));
     }
 
     std::vector<Unit> units;
@@ -1069,7 +1139,7 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         const FontOrder marker_fonts = fallback_order(
             marker_request,
             marker.fallback_fonts != nullptr ? *marker.fallback_fonts : key.fallback_fonts,
-            marker.font_style_flags);
+            marker.font_style_flags, key.font_weight);
         for (const FontCandidate* candidate : marker_fonts) {
             const std::uint16_t glyph = candidate->second.glyph_id(marker.code_point);
             if (glyph == 0U)

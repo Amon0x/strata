@@ -5958,7 +5958,7 @@ animation Spin {
 }
 overlay Spinning {
   root Panel(key: "spin.root", layout: { kind: "PANEL", width: 200, height: 200 }) {
-    Panel(key: "spin.card", style: style(background: #3050A0FF), enter: Spin,
+    Panel(key: "spin.card", style: style(background: #3050A0FF, effect: effect("blur", radius: 6)), enter: Spin,
       layout: { width: 100, height: 40, placement: { x: 50, y: 80 } })
   }
 }
@@ -6003,6 +6003,27 @@ overlay Spinning {
               std::abs(decoded.place_x(150.0, 100.0) - (100.0 + 50.0 * half_root)) < 1e-6 &&
               std::abs(decoded.place_y(150.0, 100.0) - (100.0 + 50.0 * half_root)) < 1e-6,
           "the decoded group did not turn its content about the card's centre");
+    // A blur in the turned group is masked to the card's turned rectangle: its last rounded clip
+    // maps presented pixels back into the group, so the card's centre maps to itself.
+    bool masked = false;
+    for (const host::SubmissionBatch& batch : packet.batches) {
+        const std::vector<host::RoundedClip>* clips = nullptr;
+        if (const auto* blur = std::get_if<host::BlurBatch>(&batch); blur != nullptr && blur->group != 0U)
+            clips = &blur->rounded_clips;
+        if (const auto* effect = std::get_if<host::EffectBatch>(&batch);
+            effect != nullptr && effect->group != 0U)
+            clips = &effect->rounded_clips;
+        if (clips == nullptr || clips->empty())
+            continue;
+        const host::RoundedClip& mask = clips->back();
+        const auto& m = mask.inverse_transform;
+        const double x = 100.0 + 50.0 * half_root;
+        const double y = 100.0 + 50.0 * half_root;
+        masked = mask.width == 100.0 && mask.height == 40.0 &&
+                 std::abs(m[0] * x + m[1] * y + m[2] - 150.0) < 1e-6 &&
+                 std::abs(m[3] * x + m[4] * y + m[5] - 100.0) < 1e-6;
+    }
+    check(masked, "a blur in a turned group was not masked by the group's turned rectangle");
 }
 
 void test_cached_tone_during_pointer_hold() {

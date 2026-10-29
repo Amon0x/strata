@@ -136,6 +136,26 @@ void calendar_pick(WidgetInputScope& scope, const CalendarState& state, const Ca
     if (!state.allows(day))
         return;
     calendar_move(scope, day);
+    if (state.range) {
+        // The first pick starts a range; the next ends it, in either order.
+        std::optional<CalendarDate> start = day;
+        std::optional<CalendarDate> end;
+        if (state.range_start.has_value() && !state.range_end.has_value()) {
+            start = std::min(*state.range_start, day);
+            end = std::max(*state.range_start, day);
+        }
+        const auto text = [](const std::optional<CalendarDate>& date) {
+            return date.has_value() ? runtime::Value(date->text()) : runtime::Value{};
+        };
+        if (scope.property("rangeStart") == nullptr)
+            scope.set_retained("$rangeStart", text(start), DirtyReason::properties);
+        if (scope.property("rangeEnd") == nullptr)
+            scope.set_retained("$rangeEnd", text(end), DirtyReason::properties);
+        scope.value_changed("onRangeChange", "range-changed",
+                            runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{
+                                {"end", text(end)}, {"start", text(start)}}));
+        return;
+    }
     const runtime::Value* controlled = scope.property("value");
     if (controlled == nullptr)
         scope.set_retained("$value", runtime::Value(day.text()), DirtyReason::properties);

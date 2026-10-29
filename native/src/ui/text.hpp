@@ -153,6 +153,8 @@ class TextEngine final {
     [[nodiscard]] std::string font_id(const RetainedNode& node) const;
     [[nodiscard]] double pixel_size(const RetainedNode& node) const noexcept;
     [[nodiscard]] std::uint32_t font_style_flags(const RetainedNode& node) const noexcept;
+    /** The node's authored numeric `fontWeight`, or zero when it names none. */
+    [[nodiscard]] std::uint16_t font_weight(const RetainedNode& node) const noexcept;
     [[nodiscard]] FontRasterization font_rasterization(const RetainedNode& node) const noexcept;
     [[nodiscard]] double line_height_multiplier(const RetainedNode& node) const noexcept;
     [[nodiscard]] double letter_spacing(const RetainedNode& node) const noexcept;
@@ -191,6 +193,8 @@ class TextEngine final {
         double line_height_multiplier = 1.0;
         double letter_spacing = 0.0;
         std::uint32_t font_style_flags = 0U;
+        /** The authored numeric weight (100..1000), or zero when only the bold bit asks. */
+        std::uint16_t font_weight = 0U;
         FontRasterization font_rasterization = FontRasterization::grayscale;
         std::optional<std::uint32_t> color_rgba;
         bool interactive = false;
@@ -206,6 +210,7 @@ class TextEngine final {
         double line_height_multiplier = 0.0;
         double letter_spacing = 0.0;
         std::uint32_t font_style_flags = 0U;
+        std::uint16_t font_weight = 0U;
         FontRasterization font_rasterization = FontRasterization::grayscale;
         std::optional<double> wrap_width;
         std::string wrap_mode;

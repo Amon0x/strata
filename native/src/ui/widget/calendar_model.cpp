@@ -5,6 +5,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 #include "ui/tree.hpp"
 
@@ -22,6 +23,31 @@ namespace {
                                                           : std::nullopt;
 }
 
+/** A list of exactly `count` strings, else the English fallback. */
+[[nodiscard]] std::vector<std::string> names(const runtime::Value* value, const std::size_t count,
+                                             std::initializer_list<std::string_view> fallback) {
+    std::vector<std::string> result;
+    if (value != nullptr && value->list() != nullptr && value->list()->values.size() == count) {
+        for (const runtime::Value& entry : value->list()->values) {
+            if (entry.string() == nullptr)
+                break;
+            result.push_back(*entry.string());
+        }
+    }
+    if (result.size() != count)
+        result.assign(fallback.begin(), fallback.end());
+    return result;
+}
+
+/** A date property: the controlled value if the property is present, else retained state. */
+[[nodiscard]] std::optional<CalendarDate> controlled_date(const RetainedNode& node,
+                                                         const std::string_view controlled,
+                                                         const std::string_view retained) {
+    if (const runtime::Value* value = property(node, controlled); value != nullptr)
+        return date_value(value);
+    return date_value(node.retained_value(retained));
+}
+
 [[nodiscard]] bool leap(const std::int32_t year) noexcept {
     return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
 }
@@ -36,18 +62,6 @@ std::uint32_t calendar_days_in_month(const std::int32_t year, const std::uint32_
     return month == 2U && leap(year) ? 29U : lengths[month - 1U];
 }
 
-std::string_view calendar_month_name(const std::uint32_t month) noexcept {
-    static constexpr std::array<std::string_view, 12U> names{
-        "January", "February", "March",     "April",   "May",      "June",
-        "July",    "August",   "September", "October", "November", "December"};
-    return month >= 1U && month <= 12U ? names[month - 1U] : std::string_view{};
-}
-
-std::string_view calendar_weekday_short(const std::uint32_t weekday) noexcept {
-    static constexpr std::array<std::string_view, 7U> names{"Su", "Mo", "Tu", "We",
-                                                            "Th", "Fr", "Sa"};
-    return names[weekday % 7U];
-}
 
 std::optional<CalendarDate> CalendarDate::parse(const std::string_view text) noexcept {
     // Exactly YYYY-MM-DD: the one form Calendar reads and writes.
@@ -126,6 +140,22 @@ bool CalendarState::allows(const CalendarDate& date) const noexcept {
     return (!minimum.has_value() || date >= *minimum) && (!maximum.has_value() || date <= *maximum);
 }
 
+const std::string& CalendarState::month_name(const std::uint32_t number) const noexcept {
+    return month_names[(number + 11U) % 12U];
+}
+
+const std::string& CalendarState::weekday_name(const std::uint32_t weekday) const noexcept {
+    return weekday_names[weekday % 7U];
+}
+
+bool CalendarState::in_range(const CalendarDate& date) const noexcept {
+    if (!range_start.has_value())
+        return false;
+    if (!range_end.has_value())
+        return date == *range_start;
+    return date >= *range_start && date <= *range_end;
+}
+
 CalendarState calendar_state(const RetainedNode& node) {
     CalendarState state;
     // The selection: controlled value, then what the user picked, then the authored default.
@@ -143,6 +173,17 @@ CalendarState calendar_state(const RetainedNode& node) {
             break;
         }
     }
+    state.month_names = names(property(node, "monthNames"), 12U,
+                              {"January", "February", "March", "April", "May", "June", "July",
+                               "August", "September", "October", "November", "December"});
+    state.weekday_names = names(property(node, "weekdayNames"), 7U,
+                                {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"});
+    if (const runtime::Value* selection = property(node, "selection");
+        selection != nullptr && selection->string() != nullptr && *selection->string() == "RANGE") {
+        state.range = true;
+        state.range_start = controlled_date(node, "rangeStart", "$rangeStart");
+        state.range_end = controlled_date(node, "rangeEnd", "$rangeEnd");
+    }
     state.minimum = date_value(property(node, "min"));
     state.maximum = date_value(property(node, "max"));
     state.today = date_value(property(node, "today"));
@@ -151,8 +192,8 @@ CalendarState calendar_state(const RetainedNode& node) {
         state.first_weekday =
             static_cast<std::uint32_t>(std::clamp(std::floor(*first->number()), 0.0, 6.0));
     }
-    const CalendarDate anchor = state.selected.value_or(
-        state.today.value_or(state.minimum.value_or(CalendarDate{2000, 1U, 1U})));
+    const CalendarDate anchor = state.selected.value_or(state.range_start.value_or(
+        state.today.value_or(state.minimum.value_or(CalendarDate{2000, 1U, 1U}))));
     state.cursor = date_value(node.retained_value("$cursor")).value_or(anchor);
     const CalendarDate shown = date_value(node.retained_value("$month")).value_or(state.cursor);
     state.month = CalendarDate{shown.year, shown.month, 1U};

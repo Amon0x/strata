@@ -200,7 +200,13 @@ void add_builtin_helpers(BuiltinCatalog& catalog) {
                                                         .type = declared_type_reference("string"),
                                                         .required = true},
                                       DeclaredParameter{.name = "utcOffsetMinutes",
-                                                        .type = declared_type_reference("number")}},
+                                                        .type = declared_type_reference("number")},
+                                      DeclaredParameter{
+                                          .name = "monthNames",
+                                          .type = declared_type_reference("fallbackFontsList")},
+                                      DeclaredParameter{
+                                          .name = "weekdayNames",
+                                          .type = declared_type_reference("fallbackFontsList")}},
                        .return_type = declared_type_reference("string"),
                        .capabilities = {"FORMATTING"}},
         DeclaredHelper{.name = "formatNumber",

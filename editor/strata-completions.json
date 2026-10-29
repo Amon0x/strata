@@ -1880,6 +1880,22 @@
           "nullable": false,
           "required": false,
           "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "monthNames",
+          "nullable": false,
+          "required": false,
+          "type": "list of string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "weekdayNames",
+          "nullable": false,
+          "required": false,
+          "type": "list of string"
         }
       ],
       "returnType": "string"
@@ -4389,6 +4405,11 @@
           "callbackParameter": "onChange",
           "description": "Carries the picked day as \"YYYY-MM-DD\".",
           "name": "date change"
+        },
+        {
+          "callbackParameter": "onRangeChange",
+          "description": "Carries { start, end }; end is null until picked.",
+          "name": "range change"
         }
       ],
       "name": "Calendar",
@@ -4448,6 +4469,49 @@
           "nullable": false,
           "required": false,
           "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "RANGE",
+            "SINGLE"
+          ],
+          "name": "selection",
+          "nullable": false,
+          "required": false,
+          "type": "\"RANGE\" | \"SINGLE\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "rangeStart",
+          "nullable": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "rangeEnd",
+          "nullable": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "monthNames",
+          "nullable": false,
+          "required": false,
+          "type": "list of string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "weekdayNames",
+          "nullable": false,
+          "required": false,
+          "type": "list of string"
         },
         {
           "aliases": [],
@@ -4632,6 +4696,14 @@
           "aliases": [],
           "enumValues": [],
           "name": "onChange",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onRangeChange",
           "nullable": false,
           "required": false,
           "type": "action"

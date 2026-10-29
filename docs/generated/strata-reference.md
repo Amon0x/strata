@@ -140,6 +140,11 @@ Children: `false` · Capabilities: —
 | `max` | string | false | true | — |
 | `today` | string | false | true | — |
 | `firstDayOfWeek` | number | false | false | — |
+| `selection` | "RANGE" \| "SINGLE" | false | false | — |
+| `rangeStart` | string | false | true | — |
+| `rangeEnd` | string | false | true | — |
+| `monthNames` | list of string | false | false | — |
+| `weekdayNames` | list of string | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
 | `style` | style | false | false | — |
@@ -162,6 +167,7 @@ Children: `false` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `onChange` | action | false | false | — |
+| `onRangeChange` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `animation` | animation | false | false | — |
 | `behaviors` | list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: "LEFT" \| "MIDDLE" \| "RIGHT", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of ("ALT" \| "CONTROL" \| "SHIFT" \| "SUPER"), policy?: "KEYBOARD_ONLY" \| "POINTER_AND_KEYBOARD" \| "POINTER_ONLY" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), insertionAxis?: "HORIZONTAL" \| "VERTICAL" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { bounds?: "none" \| "parent", clampToBounds?: boolean, enabled?: boolean, handleKey?: key, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, step?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: "HORIZONTAL" \| "VERTICAL", payloadType: string } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } }) | false | false | — |
@@ -169,6 +175,7 @@ Children: `false` · Capabilities: —
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
 | `date change` | `onChange` | unspecified | Carries the picked day as "YYYY-MM-DD". |
+| `range change` | `onRangeChange` | unspecified | Carries { start, end }; end is null until picked. |
 
 Retained state entries: 3 · Binding shorthands: 1
 

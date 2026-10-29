@@ -52,7 +52,8 @@ struct WindowInputState final {
 
 /**
  * Translates one window message into Strata input on `sink`, which offers pointer, scroll, key,
- * text, ime_preedit, cancel_interactions and pointer_cursor (nullopt when no surface shows). Returns the message result when the message is
+ * text, ime_preedit and cancel_interactions, and optionally pointer_cursor (nullopt when no
+ * surface shows). Returns the message result when the message is
  * input; nullopt when it is not, or when the system must still see it (a system key other than
  * F10), so the caller passes it on to DefWindowProc. Window management (size, DPI, close) stays
  * with the caller.
@@ -77,14 +78,19 @@ template <typename Sink>
     };
     switch (message) {
     case WM_SETCURSOR: {
-        // Only the client area shows the surface's shape; borders and captions keep their own.
-        if (LOWORD(long_value) != HTCLIENT)
+        // Only the client area shows the surface's shape; borders and captions keep their own. A
+        // sink that cannot name a shape leaves the window's class cursor in place.
+        if constexpr (requires { sink.pointer_cursor(); }) {
+            if (LOWORD(long_value) != HTCLIENT)
+                return std::nullopt;
+            const std::optional<std::uint32_t> cursor = sink.pointer_cursor();
+            if (!cursor.has_value())
+                return std::nullopt;
+            SetCursor(system_cursor(*cursor));
+            return TRUE;
+        } else {
             return std::nullopt;
-        const std::optional<std::uint32_t> cursor = sink.pointer_cursor();
-        if (!cursor.has_value())
-            return std::nullopt;
-        SetCursor(system_cursor(*cursor));
-        return TRUE;
+        }
     }
     case WM_MOUSEMOVE:
         if (!state.tracking_mouse_leave) {

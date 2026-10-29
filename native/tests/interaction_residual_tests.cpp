@@ -2994,7 +2994,7 @@ void test_rotation_draws_and_hits_the_turned_shape(const std::filesystem::path& 
     const std::string source = R"(
 overlay Rotated {
   root Panel(key: "rotated.root", layout: { kind: "PANEL", width: 200, height: 200 }) {
-    Panel(key: "rotated.card", style: style(rotate: 45, background: #FF8800FF, clip: true), layout: { width: 100, height: 100, placement: { x: 50, y: 50 } }) {
+    Panel(key: "rotated.card", style: style(rotate: 45, background: #FF8800FF, clip: true, effect: effect("blur", radius: 6)), layout: { width: 100, height: 100, placement: { x: 50, y: 50 } }) {
       Panel(key: "rotated.inner", style: style(background: #FFFFFFFF), layout: { width: 100, height: 100 })
     }
   }
@@ -3023,6 +3023,19 @@ overlay Rotated {
         }
     }
     check(turned, "a 45 degree rotation did not emit a rotating transform");
+    // The turned blur is masked to its shape: a clip of its own bounds wraps the effect.
+    bool masked_effect = false;
+    const std::vector<ui::RenderCommand>& stream = surface->render_commands().commands();
+    for (std::size_t index = 1U; index + 1U < stream.size(); ++index) {
+        const auto* clip = std::get_if<ui::ClipPushRenderCommand>(&stream[index - 1U]);
+        const bool effect = std::holds_alternative<ui::BackdropEffectRenderCommand>(stream[index]) ||
+                            std::holds_alternative<ui::BlurRegionRenderCommand>(stream[index]);
+        masked_effect = masked_effect ||
+                        (clip != nullptr && effect &&
+                         clip->rect == ui::Rect{50.0, 50.0, 100.0, 100.0} &&
+                         std::holds_alternative<ui::ClipPopRenderCommand>(stream[index + 1U]));
+    }
+    check(masked_effect, "a rotated effect was not masked to its turned shape");
     check(clipped_with_turn, "a rotated clip did not stay in the rotated content's space");
     // The card's corner (52, 52) lies outside the turned square, though inside its box.
     const ui::RetainedNode* corner = surface->input().inspection_target(ui::Point{52.0, 52.0});
@@ -3261,6 +3274,114 @@ overlay Dates {
           "a day after max was picked by a click");
 }
 
+void test_calendar_ranges_and_localized_names(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Trips {
+  state picked = { start: "", end: "" };
+  root Panel(key: "trips.root", layout: { kind: "COLUMN", width: 320, height: 400 }) {
+    Calendar(key: "trips.calendar", selection: "RANGE", defaultValue: "2024-03-01",
+             monthNames: ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz",
+                          "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"],
+             weekdayNames: ["Pz", "Pt", "Sa", "Ça", "Pe", "Cu", "Ct"],
+             onRangeChange: action("state.setFromEvent", name: "picked"))
+    Text(key: "trips.range", text: (picked.start ?? "") + ".." + (picked.end ?? ""))
+    Text(key: "trips.date", text: formatDate(1709287205123, "EEEE d MMMM yyyy",
+                                             monthNames: ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs",
+                                                          "Haziran", "Temmuz", "Ağustos", "Eylül",
+                                                          "Ekim", "Kasım", "Aralık"],
+                                             weekdayNames: ["Pazar", "Pazartesi", "Salı", "Çarşamba",
+                                                            "Perşembe", "Cuma", "Cumartesi"]))
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("calendar-ranges", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Trips", 320.0, 400.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const ui::RetainedNode* calendar = surface->tree().find_key("trips.calendar");
+    const auto text_of = [&](const std::string_view key) {
+        const ui::RetainedNode* node = surface->tree().find_key(key);
+        const auto found = node->description().properties.find("text");
+        return found->second.value() != nullptr && found->second.value()->string() != nullptr
+                   ? *found->second.value()->string()
+                   : std::string{};
+    };
+    check(text_of("trips.date") == "Cuma 1 Mart 2024",
+          "formatDate did not use the month and weekday names it was given");
+    const std::vector<ui::WidgetSubtarget> shown = surface->input().subtargets(calendar->identity());
+    check(shown.size() == 44U && shown[2].label == "Şubat 26, 2024",
+          "a Calendar did not label its days with the month names it was given");
+    const auto click = [&](const std::string_view id) {
+        for (const ui::WidgetSubtarget& target : surface->input().subtargets(calendar->identity())) {
+            if (target.id != id)
+                continue;
+            std::vector<ui::SurfaceInputEvent> events;
+            events.emplace_back(
+                ui::PointerInputEvent{center(target.bounds), ui::PointerEventType::press, 4, 0});
+            events.emplace_back(
+                ui::PointerInputEvent{center(target.bounds), ui::PointerEventType::release, 4, 0});
+            static_cast<void>(surface->input().enqueue(std::move(events)));
+            static_cast<void>(surface->frame(now += 16'000'000));
+            static_cast<void>(surface->frame(now += 16'000'000));
+            return;
+        }
+        check(false, "range fixture is missing a day");
+    };
+    click("day:2024-03-18");
+    check(text_of("trips.range") == "2024-03-18..",
+          "the first pick of a range did not start it with an open end");
+    click("day:2024-03-11");
+    check(text_of("trips.range") == "2024-03-11..2024-03-18",
+          "the second pick did not end the range, ordering it earliest first");
+    std::size_t band_days = 0U;
+    for (const ui::RenderCommand& command : surface->render_commands().commands())
+        band_days += std::holds_alternative<ui::SolidRectRenderCommand>(command) ? 1U : 0U;
+    check(band_days >= 8U, "a finished range did not band the days it covers");
+    click("day:2024-03-25");
+    check(text_of("trips.range") == "2024-03-25..",
+          "a pick after a finished range did not start a new one");
+}
+
+void test_theme_tokens_resolve_inside_nested_values(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Nested {
+  root Panel(key: "nested.root", layout: { kind: "COLUMN", width: 200, height: 200 }) {
+    Panel(key: "nested.card",
+          style: style(background: theme.surfaceRaised, radius: 6,
+                       border: { width: 2, color: theme.danger },
+                       shadows: [{ color: theme.accent, radius: 4 }]),
+          layout: { width: 100, height: 60 })
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("nested-tokens", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Nested", 200.0, 200.0);
+    static_cast<void>(surface->frame(1'000'000));
+    const ui::ThemeTokens tokens;
+    bool border = false;
+    bool shadow = false;
+    for (const ui::RenderCommand& command : surface->render_commands().commands()) {
+        if (const auto* rect = std::get_if<ui::RoundedRectRenderCommand>(&command);
+            rect != nullptr && rect->border.has_value() && rect->border->width == 2.0) {
+            border = rect->border->color == tokens.danger;
+        }
+        if (const auto* line = std::get_if<ui::BorderRenderCommand>(&command);
+            line != nullptr && line->border.width == 2.0) {
+            border = line->border.color == tokens.danger;
+        }
+        if (const auto* cast = std::get_if<ui::ShadowRenderCommand>(&command)) {
+            shadow = cast->color.red == tokens.accent.red && cast->color.green == tokens.accent.green &&
+                     cast->color.blue == tokens.accent.blue;
+        }
+    }
+    check(border, "a theme token inside a border did not resolve to the theme's colour");
+    check(shadow, "a theme token inside a shadow list did not resolve to the theme's colour");
+}
+
 void test_palette_projection_is_cached_across_frames(const std::filesystem::path& resources) {
     std::string commands;
     for (int index = 0; index < 40; ++index) {
@@ -3411,6 +3532,8 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_scroll_snaps_to_the_nearest_child(resources);
         test_image_fit_keeps_the_aspect_ratio();
         test_calendar_picks_days_by_pointer_and_keyboard(resources);
+        test_calendar_ranges_and_localized_names(resources);
+        test_theme_tokens_resolve_inside_nested_values(resources);
         test_palette_projection_is_cached_across_frames(resources);
         test_environment_set_rebuilds_once(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";

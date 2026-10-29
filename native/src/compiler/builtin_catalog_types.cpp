@@ -1851,6 +1851,11 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                 .kind = DeclaredTypeKind::enumeration,
                 .label = "image fit",
                 .values = {"CONTAIN", "COVER", "FILL", "NONE", "SCALE_DOWN"}})},
+        DeclaredNamedType{.id = "calendarSelection",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,
+                                                         .label = "calendar selection",
+                                                         .values = {"RANGE", "SINGLE"}})},
         DeclaredNamedType{.id = "scrollSnap",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,

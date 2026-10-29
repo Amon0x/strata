@@ -625,6 +625,50 @@ void apply_motion(ValueFields& fields, const ThemeNullable<ThemeAnimationSet>& v
     return std::nullopt;
 }
 
+/**
+ * A value with its theme tokens resolved wherever they sit: inside a border, a shadow list or any
+ * other map or list. Nothing when the value holds no token, so plain values are never copied. A
+ * token that resolves to nothing becomes null, as an unset property would be.
+ */
+[[nodiscard]] std::optional<runtime::Value> resolve_nested_tokens(const runtime::Value& value,
+                                                                  const ThemeTokens& tokens) {
+    if (const runtime::ThemeTokenValue* token = value.theme_token(); token != nullptr)
+        return resolve_token(*token, tokens).value_or(runtime::Value{});
+    if (const runtime::ValueObject* object = value.object(); object != nullptr) {
+        std::optional<std::vector<std::pair<std::string, runtime::Value>>> fields;
+        for (std::size_t index = 0U; index < object->fields.size(); ++index) {
+            const auto& [name, field] = object->fields[index];
+            std::optional<runtime::Value> resolved = resolve_nested_tokens(field, tokens);
+            if (!resolved.has_value() && !fields.has_value())
+                continue;
+            if (!fields.has_value()) {
+                fields.emplace(object->fields.begin(),
+                               object->fields.begin() + static_cast<std::ptrdiff_t>(index));
+            }
+            fields->emplace_back(name, resolved.has_value() ? std::move(*resolved) : field);
+        }
+        return fields.has_value() ? std::optional<runtime::Value>(runtime::Value(std::move(*fields)))
+                                  : std::nullopt;
+    }
+    if (const runtime::ValueList* list = value.list(); list != nullptr) {
+        std::optional<std::vector<runtime::Value>> values;
+        for (std::size_t index = 0U; index < list->values.size(); ++index) {
+            std::optional<runtime::Value> resolved =
+                resolve_nested_tokens(list->values[index], tokens);
+            if (!resolved.has_value() && !values.has_value())
+                continue;
+            if (!values.has_value()) {
+                values.emplace(list->values.begin(),
+                               list->values.begin() + static_cast<std::ptrdiff_t>(index));
+            }
+            values->push_back(resolved.has_value() ? std::move(*resolved) : list->values[index]);
+        }
+        return values.has_value() ? std::optional<runtime::Value>(runtime::Value(std::move(*values)))
+                                  : std::nullopt;
+    }
+    return std::nullopt;
+}
+
 /** Every palette token resolved for one theme; materialized once per theme onto its nodes. */
 [[nodiscard]] runtime::Value palette_value(const ThemeTokens& tokens) {
     std::vector<std::pair<std::string, runtime::Value>> fields;
@@ -865,6 +909,15 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
                 ++stats.symbolic_token_patches;
                 continue;
             }
+            // Tokens nested in a border, shadows or a paint resolve the same way.
+            if (std::optional<runtime::Value> concrete =
+                    resolve_nested_tokens(value, effective->tokens());
+                concrete.has_value()) {
+                concrete_fields.insert_or_assign(name, *concrete);
+                resolved.insert_or_assign(name, std::move(*concrete));
+                ++stats.symbolic_token_patches;
+                continue;
+            }
             concrete_fields.insert_or_assign(name, value);
             if (merge_all)
                 resolved.insert_or_assign(name, value);
@@ -887,6 +940,22 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
             resolve_authored_fields(property(*source, "textStyle"), false);
         concrete.has_value()) {
         properties.insert_or_assign("textStyle", runtime::ExpressionValue(*concrete));
+    }
+    // Widget arguments take tokens too (an image's tint, a Calendar's colours), at any depth.
+    for (auto& [name, expression] : properties) {
+        if (name.starts_with('$') || name == "visualStyle" || name == "textVisualStyle" ||
+            name == "textStyle" || name == "style" || name == "layout") {
+            continue;
+        }
+        const runtime::Value* value = expression.value();
+        if (value == nullptr)
+            continue;
+        if (std::optional<runtime::Value> concrete =
+                resolve_nested_tokens(*value, effective->tokens());
+            concrete.has_value()) {
+            expression = runtime::ExpressionValue(std::move(*concrete));
+            ++stats.symbolic_token_patches;
+        }
     }
     if (authored_color_field && !authored_foreground_field) {
         const auto authored_color = resolved.find("color");

@@ -1523,6 +1523,22 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
               family_styled.resolved_runs.front().font_id == "family-bold" &&
               family_styled.resolved_runs.front().font_style_flags == font::font_style_bold,
           "authored family fallback did not resolve the canonical intrinsic bold face");
+    // A numeric weight picks the family's nearest face: medium.ttf (500) shares the family.
+    const auto face_for_weight = [&](const double weight) {
+        ui::RetainedTree weighted_tree;
+        const ui::RetainedNode& weighted_node = *retain(
+            weighted_tree, text_node("Text", object({
+                               {"font", runtime::Value("family-regular")},
+                               {"fontWeight", runtime::Value(weight)},
+                               {"pixelSize", runtime::Value(24.0)},
+                           })));
+        const ui::TextLayout weighted = engine.layout(weighted_node, "A");
+        return weighted.glyph_font_ids.empty() ? std::string{} : weighted.glyph_font_ids.front();
+    };
+    check(face_for_weight(500.0) == "explicit",
+          "a numeric font weight did not pick the family face nearest to it");
+    check(face_for_weight(400.0) == "family-regular",
+          "a regular font weight left the requested face for another weight");
     const double intrinsic_bold_advance =
         static_cast<double>(intrinsic_bold.horizontal_advance(intrinsic_bold.glyph_id('A'))) *
         24.0 / static_cast<double>(intrinsic_bold.units_per_em());

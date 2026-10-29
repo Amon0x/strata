@@ -196,9 +196,12 @@ the rounded clip follows presentation transforms rather than degrading to its ax
 `radius: { top: 12, bottomRight: 4 }` rounds a tab's top corners and one bottom corner. Fills,
 borders, shadows and clips all follow the per-corner shape.
 
-Text takes `fontWeight` (a number from 100 to 900, or `THIN`, `LIGHT`, `NORMAL`, `MEDIUM`,
-`SEMIBOLD`, `BOLD` or `BLACK`; 600 and above draws bold) and `fontStyle` (`NORMAL` or `ITALIC`), on
-the node or on a rich text span's style. `textDecoration` draws `UNDERLINE`, `LINE_THROUGH` or both
+Text takes `fontWeight` (a number from 1 to 1000, or `THIN` 100, `LIGHT` 300, `NORMAL` 400,
+`MEDIUM` 500, `SEMIBOLD` 600, `BOLD` 700 or `BLACK` 900) and `fontStyle` (`NORMAL` or `ITALIC`),
+on the node or on a rich text span's style. Every font the surface binds that shares the requested
+font's family competes for the text: an italic face for italic, then the face whose OS/2 weight is
+nearest, so binding a family's faces is all it takes to use them. Only when no bound face is bold
+or italic is the glyph emboldened or slanted; a face of weight 600 or more counts as bold. `textDecoration` draws `UNDERLINE`, `LINE_THROUGH` or both
 (`UNDERLINE_LINE_THROUGH`) under each line the text covers, in the text's colour unless
 `textDecorationColor` sets one; a span's `textDecoration: "NONE"` turns its node's decoration off.
 
@@ -270,8 +273,10 @@ define leaves the property at its themed default, as an unset style property wou
 
 A token stays symbolic while the surface evaluates expressions and resolves when it applies the
 style property against the effective theme of that node, so a `ThemeScope` subtree reads its own
-values. Operators cannot compute with a token (`theme.spacingUnit * 2` is a type error); write the
-token itself as the style value.
+values. A token resolves wherever it sits: a style property, a field inside one (a border's
+`color`, a shadow in `shadows`, a gradient stop), or a widget argument such as an image's `tint`.
+Operators cannot compute with a token (`theme.spacingUnit * 2` is a type error); write the token
+itself as the value.
 
 ### Layer placement and anchors
 
@@ -366,6 +371,16 @@ Panel(layout: { kind: "ROW", gap: 12, stackBelow: 520 }) {
 }
 ```
 
+Two alternatives with complementary thresholds swap whole subtrees by width: both are described,
+and only the one that fits takes part in layout, hit testing and drawing.
+
+```strata
+Panel(layout: { kind: "PANEL", width: { weight: 1 } }) {
+  CompactToolbar(layout: { hideAbove: 600 })
+  FullToolbar(layout: { hideBelow: 600 })
+}
+```
+
 A `SCROLL` layout's `scrollSnap` (`START`, `CENTER` or `END`) settles it on a child once the user
 stops scrolling: about 120 ms after the last wheel step or drag, and not while a press is held, it
 eases to the nearest child's start, centre or end. Its snap points are its children, or the
@@ -393,8 +408,16 @@ picked, `today` to ring the current day (the host knows the date; pass it in), a
 with the header buttons; keyboard users move by day with the arrows, by month with Page Up and Page
 Down (a year with Shift), to the week's ends with Home and End, and pick with Enter or Space.
 
+`selection: "RANGE"` picks a span instead: the first pick starts it, the next ends it (in either
+order), and a pick after that starts a new one. `rangeStart`/`rangeEnd` control it, and
+`onRangeChange` carries `{ start, end }`, with `end` null until it is picked; the days between are
+banded. `monthNames` (twelve) and `weekdayNames` (seven, from Sunday) put the calendar in any
+language.
+
 ```strata
 Calendar(bind: due, today: env.today, min: env.today)
+Calendar(selection: "RANGE", onRangeChange: action("state.setFromEvent", name: "trip"),
+         monthNames: locale.months, weekdayNames: locale.weekdayInitials)
 ```
 
 ### Pointer cursor
@@ -411,7 +434,8 @@ Calendar(bind: due, today: env.today, min: env.today)
 `rotate` turns a node clockwise by degrees about its `transformOrigin` (`{ x, y }` as fractions of
 its bounds, the centre by default), after `scale` and before `translateX`/`translateY`. Like the
 other presentation properties it moves nothing in layout, and `animateChanges`, `motions` and
-keyframes can drive it. A rotated node's clip turns with it, and it is hit within its turned shape.
+keyframes can drive it. A rotated node's clip turns with it, it is hit within its turned shape,
+and its blur or backdrop effect is masked to the turned shape too.
 
 ```strata
 animation Spin { from { rotate: 0 } to { rotate: 360 } duration: 900ms; repeat: "forever"; }
@@ -799,8 +823,9 @@ at most 10000 of them. `sqrt` and `pow(base, exponent)` complete the numeric hel
 `formatDate(value, pattern, utcOffsetMinutes?)` formats a timestamp in milliseconds since
 1970-01-01 UTC, shifted by an optional offset (the host knows the user's zone; pass it in).
 Patterns use `yyyy`/`yy`, `MMMM`/`MMM`/`MM`/`M`, `dd`/`d`, `EEEE`/`EEE`, `HH`/`H`, `hh`/`h`,
-`mm`, `ss`, `SSS` and `a`; quoted text is literal: `formatDate(sent, "EEE d MMM 'at' HH:mm")`. Names
-are English.
+`mm`, `ss`, `SSS` and `a`; quoted text is literal: `formatDate(sent, "EEE d MMM 'at' HH:mm")`.
+Names are English unless `monthNames` (twelve) and `weekdayNames` (seven, from Sunday) give others;
+the short forms are their first three characters.
 
 Collection helpers accept bounded pure lambdas such as `item -> item.enabled`. View helpers are
 `filter`, `map`, `sortBy`, `distinctBy`, `groupBy`, `flatten`, `takeWhile`, `window`, and `page`;

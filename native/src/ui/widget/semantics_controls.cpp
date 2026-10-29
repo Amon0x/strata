@@ -71,6 +71,12 @@ void number_field(WidgetSemanticsScope& scope) {
 void calendar(WidgetSemanticsScope& scope) {
     label_or_key(scope);
     const CalendarState state = calendar_state(scope.node());
+    if (state.range) {
+        scope.default_value_text(
+            (state.range_start.has_value() ? state.range_start->text() : std::string{}) + " - " +
+            (state.range_end.has_value() ? state.range_end->text() : std::string{}));
+        return;
+    }
     scope.default_value_text(state.selected.has_value() ? state.selected->text() : std::string{});
 }
 

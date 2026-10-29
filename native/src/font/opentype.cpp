@@ -1573,6 +1573,8 @@ struct OpenTypeFont::Impl final {
             if ((selection & 0x0020U) != 0U) metadata.style_flags |= font_style_bold;
             if ((selection & 0x0001U) != 0U) metadata.style_flags |= font_style_italic;
         }
+        // A semibold or heavier face is bold in itself, so a bold request never thickens it again.
+        if (weight >= 600U) metadata.style_flags |= font_style_bold;
     }
 
     void parse_name_metadata() {

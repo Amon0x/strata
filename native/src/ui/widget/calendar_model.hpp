@@ -29,9 +29,6 @@ struct CalendarDate final {
 };
 
 [[nodiscard]] std::uint32_t calendar_days_in_month(std::int32_t year, std::uint32_t month) noexcept;
-[[nodiscard]] std::string_view calendar_month_name(std::uint32_t month) noexcept;
-/** Two-letter weekday names from Sunday. */
-[[nodiscard]] std::string_view calendar_weekday_short(std::uint32_t weekday) noexcept;
 
 /** One day cell of a month view. */
 struct CalendarCell final {
@@ -65,8 +62,19 @@ struct CalendarState final {
     std::optional<CalendarDate> maximum;
     std::optional<CalendarDate> today;
     std::uint32_t first_weekday = 1U;
+    /** `selection: "RANGE"` picks a start and then an end instead of one day. */
+    bool range = false;
+    std::optional<CalendarDate> range_start;
+    std::optional<CalendarDate> range_end;
+    /** Twelve month names, and seven weekday labels from Sunday: authored, else English. */
+    std::vector<std::string> month_names;
+    std::vector<std::string> weekday_names;
 
     [[nodiscard]] bool allows(const CalendarDate& date) const noexcept;
+    [[nodiscard]] const std::string& month_name(std::uint32_t number) const noexcept;
+    [[nodiscard]] const std::string& weekday_name(std::uint32_t weekday) const noexcept;
+    /** The day is the range's start, its end, or between them. */
+    [[nodiscard]] bool in_range(const CalendarDate& date) const noexcept;
 };
 
 [[nodiscard]] CalendarState calendar_state(const RetainedNode& node);

@@ -614,6 +614,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             effective_transform = MotionTransform{};
             descendant_opacity = 1.0;
         }
+        // Rotated (baked) effects are masked to their turned shape by a clip around them.
+        const bool turned_effects = group == 0U && !effective_transform.axis_aligned();
         std::optional<EffectState> rendered_effect = local_effect;
         if (rendered_effect.has_value()) {
             rendered_effect->opacity *= descendant_opacity;
@@ -758,13 +760,26 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 });
                 ++counters.commands_emitted;
             } else if (rendered_effect->input == EffectInput::backdrop) {
+                // A turned effect samples the box around it; the clip masks it to its shape.
+                if (turned_effects) {
+                    output.append(ClipPushRenderCommand{record->bounds, corners});
+                    ++counters.commands_emitted;
+                }
                 output.append(BackdropEffectRenderCommand{
                     record->bounds,
                     corners,
                     *rendered_effect,
                 });
                 ++counters.commands_emitted;
+                if (turned_effects) {
+                    output.append(ClipPopRenderCommand{});
+                    ++counters.commands_emitted;
+                }
             } else if (rendered_effect->input == EffectInput::content) {
+                if (turned_effects) {
+                    output.append(ClipPushRenderCommand{record->bounds, corners});
+                    ++counters.commands_emitted;
+                }
                 output.append(ContentEffectPushRenderCommand{
                     record->bounds,
                     corners,
@@ -774,6 +789,10 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             }
         }
         if (isolates_descendants) {
+            if (turned_effects) {
+                output.append(ClipPushRenderCommand{record->bounds, corners});
+                ++counters.commands_emitted;
+            }
             output.append(ContentEffectPushRenderCommand{
                 record->bounds,
                 corners,
@@ -967,10 +986,18 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         if (isolates_descendants) {
             output.append(ContentEffectPopRenderCommand{});
             ++counters.commands_emitted;
+            if (turned_effects) {
+                output.append(ClipPopRenderCommand{});
+                ++counters.commands_emitted;
+            }
         }
         if (isolates_content) {
             output.append(ContentEffectPopRenderCommand{});
             ++counters.commands_emitted;
+            if (turned_effects) {
+                output.append(ClipPopRenderCommand{});
+                ++counters.commands_emitted;
+            }
         }
         if (group == 0U && !transform.identity()) {
             output.append(TransformPopRenderCommand{});
