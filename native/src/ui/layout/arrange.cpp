@@ -710,28 +710,6 @@ void LayoutEngine::arrange(
         } else {
             record.visible_range = VisibleRange{};
         }
-    } else if (style.kind == LayoutKind::radial) {
-        // Each child centred on the ring in the middle of its equal share of the sweep, so a sweep
-        // growing from 0 to 360 deals them out round the circle from the start angle.
-        const Point centre{content_bounds.x + content_bounds.width * 0.5,
-                           content_bounds.y + content_bounds.height * 0.5};
-        double largest = 0.0;
-        for (const MeasuredNodePtr& child : flow_children)
-            largest = std::max({largest, child->measured_size.width, child->measured_size.height});
-        const double radius = style.radial_radius.value_or(std::max(
-            0.0, (std::min(content_bounds.width, content_bounds.height) - largest) * 0.5));
-        const double share =
-            flow_children.empty() ? 0.0 : style.radial_sweep / static_cast<double>(flow_children.size());
-        for (std::size_t index = 0U; index < flow_children.size(); ++index) {
-            const MeasuredNodePtr& child = flow_children[index];
-            const double angle = (style.radial_start + share * (static_cast<double>(index) + 0.5)) *
-                                 std::numbers::pi / 180.0;
-            arrange(child,
-                    Rect{centre.x + radius * std::cos(angle) - child->measured_size.width * 0.5,
-                         centre.y + radius * std::sin(angle) - child->measured_size.height * 0.5,
-                         child->measured_size.width, child->measured_size.height},
-                    child_clip, pin_context, environment, result);
-        }
     } else if (style.kind != LayoutKind::spacer) {
         std::vector<MeasuredNodePtr> ordered(flow_children.begin(), flow_children.end());
         std::ranges::stable_sort(ordered, {}, [](const MeasuredNodePtr& child) {

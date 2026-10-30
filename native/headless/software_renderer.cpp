@@ -261,6 +261,30 @@ struct PixelRect final {
         const float ry = std::max(half_height, 0.0001F);
         if (clip.shape == 1U)
             return (std::hypot(px / rx, py / ry) - 1.0F) * std::min(rx, ry);
+        if (clip.shape == 4U) {
+            // As the shader's roundedClipSectorSdf.
+            const float qx = px / rx;
+            const float qy = py / ry;
+            const float radius = std::hypot(qx, qy);
+            const float start = static_cast<float>(clip.radii[0U]);
+            const float sweep = static_cast<float>(clip.radii[1U]);
+            const float inner = static_cast<float>(clip.radii[2U]);
+            float result = std::max(radius - 1.0F, inner - radius);
+            if (sweep < 359.999F) {
+                const float angle = std::atan2(qy, qx) * 57.2957795F;
+                const float into = std::fmod(angle - start + 720.0F, 360.0F);
+                float wedge = 0.0F;
+                if (into <= sweep) {
+                    const float nearer = std::min(into, sweep - into) * 0.0174532925F;
+                    wedge = -(nearer < 1.5707963F ? radius * std::sin(nearer) : radius);
+                } else {
+                    const float nearer = std::min(into - sweep, 360.0F - into) * 0.0174532925F;
+                    wedge = nearer < 1.5707963F ? radius * std::sin(nearer) : radius;
+                }
+                result = std::max(result, wedge);
+            }
+            return result * std::min(rx, ry);
+        }
         if (clip.shape == 2U || clip.shape == 3U) {
             // As the shader's roundedClipPolygonSdf.
             const float qx = px / rx;

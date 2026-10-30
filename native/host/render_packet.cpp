@@ -214,7 +214,7 @@ class Reader final {
         clip.sides = input.number();
         for (double& value : clip.fade)
             value = input.number();
-        if (clip.shape > 3U || !std::isfinite(clip.sides) || clip.sides < 0.0 ||
+        if (clip.shape > 4U || !std::isfinite(clip.sides) || clip.sides < 0.0 ||
             clip.sides > 64.0 || std::ranges::any_of(clip.fade, [](const double value) {
                 return !std::isfinite(value) || value < 0.0;
             })) {

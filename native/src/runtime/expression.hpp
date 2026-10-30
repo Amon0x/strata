@@ -590,20 +590,34 @@ class DependencyRecorder final {
  * One evaluation of `animate(target, duration, easing, delay, from)`: where the call is (an
  * instance path and an expression of a program) and what it heads for.
  */
+/** A damped spring, as `animate`'s `spring` argument sets it (SI-like units, seconds). */
+struct AnimateSpring final {
+    double stiffness = 170.0;
+    double damping = 26.0;
+    double mass = 1.0;
+    [[nodiscard]] friend bool operator==(const AnimateSpring&, const AnimateSpring&) = default;
+};
+
+/**
+ * Its target is a number, a colour, or a record or list of them (a point, a size, a palette):
+ * whatever it is made of moves part by part. Anything else is not animated.
+ */
 struct AnimateCall final {
     std::string_view instance_path;
     std::uint64_t program = 0U;
     ExpressionId expression = 0U;
-    double target = 0.0;
-    std::optional<double> from;
+    Value target;
+    std::optional<Value> from;
     std::int64_t duration_nanos = 300'000'000;
     std::int64_t delay_nanos = 0;
     std::string_view easing = "cubic-in-out";
+    /** Moves by physics instead of a curve: carried on with its velocity when retargeted. */
+    std::optional<AnimateSpring> spring;
 };
 
 /** Where an `animate` call is now, and whether it is still on its way. */
 struct AnimateSample final {
-    double value = 0.0;
+    Value value;
     bool running = false;
     /** The time it was sampled at, which a running call's reads depend on. */
     std::int64_t time_nanos = 0;

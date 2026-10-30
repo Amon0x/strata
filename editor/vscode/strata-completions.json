@@ -2933,9 +2933,7 @@
       "returnType": "action"
     },
     {
-      "capabilities": [
-        "NUMERIC"
-      ],
+      "capabilities": [],
       "name": "animate",
       "parameters": [
         {
@@ -2944,7 +2942,7 @@
           "name": "target",
           "nullable": false,
           "required": true,
-          "type": "number"
+          "type": "any"
         },
         {
           "aliases": [],
@@ -2976,10 +2974,18 @@
           "name": "from",
           "nullable": true,
           "required": false,
-          "type": "number"
+          "type": "any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "spring",
+          "nullable": true,
+          "required": false,
+          "type": "{ damping?: number, mass?: number, stiffness?: number }"
         }
       ],
-      "returnType": "number"
+      "returnType": "any"
     },
     {
       "capabilities": [
@@ -5271,7 +5277,7 @@
     {
       "name": "kind",
       "nullable": false,
-      "type": "\"CANVAS\" | \"COLUMN\" | \"GRID\" | \"MASONRY\" | \"OVERLAY\" | \"PANEL\" | \"PORTAL\" | \"RADIAL\" | \"ROW\" | \"SCROLL\" | \"SPACER\" | \"STACK\""
+      "type": "\"CANVAS\" | \"COLUMN\" | \"GRID\" | \"MASONRY\" | \"OVERLAY\" | \"PANEL\" | \"PORTAL\" | \"ROW\" | \"SCROLL\" | \"SPACER\" | \"STACK\""
     },
     {
       "name": "margin",
@@ -5327,21 +5333,6 @@
       "name": "position",
       "nullable": false,
       "type": "\"ABSOLUTE\" | \"FLOW\" | \"STICKY\""
-    },
-    {
-      "name": "radialRadius",
-      "nullable": false,
-      "type": "number"
-    },
-    {
-      "name": "radialStart",
-      "nullable": false,
-      "type": "number"
-    },
-    {
-      "name": "radialSweep",
-      "nullable": false,
-      "type": "number"
     },
     {
       "name": "rowSpan",
@@ -5664,7 +5655,7 @@
     {
       "name": "kind",
       "nullable": false,
-      "type": "\"CANVAS\" | \"COLUMN\" | \"GRID\" | \"MASONRY\" | \"OVERLAY\" | \"PANEL\" | \"PORTAL\" | \"RADIAL\" | \"ROW\" | \"SCROLL\" | \"SPACER\" | \"STACK\""
+      "type": "\"CANVAS\" | \"COLUMN\" | \"GRID\" | \"MASONRY\" | \"OVERLAY\" | \"PANEL\" | \"PORTAL\" | \"ROW\" | \"SCROLL\" | \"SPACER\" | \"STACK\""
     },
     {
       "name": "letterSpacing",
@@ -5767,21 +5758,6 @@
       "type": "\"ABSOLUTE\" | \"FLOW\" | \"STICKY\""
     },
     {
-      "name": "radialRadius",
-      "nullable": false,
-      "type": "number"
-    },
-    {
-      "name": "radialStart",
-      "nullable": false,
-      "type": "number"
-    },
-    {
-      "name": "radialSweep",
-      "nullable": false,
-      "type": "number"
-    },
-    {
       "name": "radius",
       "nullable": false,
       "type": "number | { all?: number, bottom?: number, bottomLeft?: number, bottomRight?: number, left?: number, right?: number, top?: number, topLeft?: number, topRight?: number }"
@@ -5824,7 +5800,7 @@
     {
       "name": "clipShape",
       "nullable": false,
-      "type": "clip shape: circle, diamond, ellipse, hexagon, polygon, rect or star"
+      "type": "clip shape: circle, diamond, ellipse, hexagon, polygon, rect or star | { center?: { x: number, y: number }, commands?: path, fill?: paint, fillRule?: \"evenodd\" | \"nonzero\", from?: { x: number, y: number }, height?: number, image?: image, includeCenter?: boolean, innerRadius?: number, kind: \"arc\" | \"circle\" | \"ellipse\" | \"image\" | \"line\" | \"path\" | \"polygon\" | \"polyline\" | \"rect\" | \"ring\" | \"sector\", pathLength?: number, points?: list of { x: number, y: number }, radius?: number, radiusX?: number, radiusY?: number, source?: { height?: number, u?: number, v?: number, width?: number }, start?: number, stroke?: paint, strokeStyle?: { cap?: \"butt\" | \"round\" | \"square\", dash?: list of number, dashOffset?: number, join?: \"bevel\" | \"miter\" | \"round\", miterLimit?: number, width?: number }, sweep?: number, tint?: color, to?: { x: number, y: number }, width?: number, x?: number, y?: number }"
     },
     {
       "name": "textGradient",

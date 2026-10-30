@@ -3,7 +3,6 @@
 // and fans its options out; CLOSE spins it all down into the hub like a vortex.
 style Page { kind: "OVERLAY"; width: { weight: 1 }; height: { weight: 1 }; padding: 0; background: #1A1D22; border: null; }
 style Layer { kind: "OVERLAY"; width: 600; height: 600; padding: 0; background: null; border: null; }
-style Ring { kind: "RADIAL"; width: 600; height: 600; padding: 0; background: null; border: null; }
 style Tool { kind: "COLUMN"; width: 80; height: 50; padding: 0; gap: 7; alignItems: "CENTER"; justifyContent: "CENTER"; background: null; border: null; }
 style ToolName { font: "strata:fonts/mono"; pixelSize: 10.5; letterSpacing: 1; }
 style Option { kind: "COLUMN"; width: 70; height: 30; padding: 0; alignItems: "CENTER"; justifyContent: "CENTER"; background: null; border: null; }
@@ -20,8 +19,8 @@ fn fanOut() = 0.4
 fn ease(x: number) = x * x * (3 - 2 * x)
 fn stage(t: number, from: number, length: number) = ease(clamp((t - from) / length, 0, 1))
 fn point(angle: number, radius: number) = { x: 0.5 + radius * cos(angle * 3.14159265 / 180), y: 0.5 + radius * sin(angle * 3.14159265 / 180) }
-// Ink between the resting grey-white and the accent orange.
-fn ink(k: number) = rgb(220 + 20 * k, 225 - 87 * k, 232 - 157 * k)
+// A child centred at an angle and radius of its 600 px layer: placement is layout by arithmetic.
+fn at(angle: number, radius: number) = { x: { fraction: point(angle, radius).x }, y: { fraction: point(angle, radius).y }, anchorX: 0.5, anchorY: 0.5 }
 
 fn icon(name: string, color: color) =
   name == "draw" ? [
@@ -81,13 +80,15 @@ overlay RadialSelector {
           to: point(-120 + 60 * i + spin, hub() + (ring - hub()) * lines), stroke: #E6E8EC, strokeStyle: { width: 3 } })
       ])
 
-      // The tools, each centred in its slice.
-      Panel(key: "radial.tools", style: style(Ring, radialRadius: 96 * pull, radialStart: -120 + spin, radialSweep: 360)) {
+      // The tools, each centred in its slice; a hovered one's colours move to the accent.
+      Panel(key: "radial.tools", style: Layer) {
         for tool, index in tools {
-          derived lit = animate(hovered == index ? 1 : 0, duration: 160ms, easing: "cubic-out")
-          Panel(key: `radial.tool.${index}`, style: style(Tool, opacity: shown * pull, rotate: spin * 0.5)) {
-            Draw(key: `radial.icon.${index}`, layout: { width: 22, height: 22 }, shapes: icon(tool.id, ink(lit)))
-            Text(key: `radial.name.${index}`, text: tool.name, style: style(ToolName, color: rgb(140 + 96 * lit, 149 + 89 * lit, 166 + 76 * lit)))
+          derived ink = animate(hovered == index ? #F08A4B : #DCE1E8, duration: 160ms, easing: "cubic-out")
+          derived label = animate(hovered == index ? #ECEEF2 : #8C95A6, duration: 160ms, easing: "cubic-out")
+          Panel(key: `radial.tool.${index}`, style: style(Tool, opacity: shown * pull, rotate: spin * 0.5),
+                layout: { placement: at(-90 + 60 * index + spin, 0.16 * pull) }) {
+            Draw(key: `radial.icon.${index}`, layout: { width: 22, height: 22 }, shapes: icon(tool.id, ink))
+            Text(key: `radial.name.${index}`, text: tool.name, style: style(ToolName, color: label))
           }
         }
       }
@@ -96,29 +97,30 @@ overlay RadialSelector {
       // its options out beyond the rim.
       if open && t > 0.99 {
         for tool, index in tools {
-          derived lit = animate(hovered == index ? 1 : 0, duration: 160ms, easing: "cubic-out")
-          derived fan = animate(hovered == index ? 1 : 0, duration: 300ms, easing: "cubic-out")
+          // The tint bulges out on a spring; the fan wipes open round from its start.
+          derived lit = animate(hovered == index ? 1 : 0, spring: { stiffness: 420, damping: 22 })
+          derived fan = animate(hovered == index ? 1 : 0, duration: 340ms, easing: "cubic-out")
           derived from = -90 + 60 * index - 51.75
           Panel(key: `radial.slice.${index}`, style: Layer,
                 hitShape: { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: rim(), innerRadius: hub(), start: -120 + 60 * index, sweep: 60 },
                 onHover: inside => { if inside { hovered = index } else if hovered == index { hovered = -1 } }) {
-            if lit > 0.001 {
+            if lit > 0.001 || lit < -0.001 {
               Draw(key: `radial.tint.${index}`, layout: { width: 600, height: 600 }, shapes: [
                 { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: rim() + 0.014 * lit, innerRadius: hub() + 0.004, start: -120 + 60 * index + 0.4, sweep: 59.2,
-                  fill: rgba(232, 118, 58, 0.2 * lit) }
+                  fill: rgba(232, 118, 58, 0.2 * clamp(lit, 0, 1)) }
               ])
             }
-            if fan > 0.001 {
-              Panel(key: `radial.fan.${index}`, style: Layer,
+            if fan > 0 {
+              // The whole fan, segments and names, is clipped to a sector that sweeps open.
+              Panel(key: `radial.fan.${index}`,
+                    style: style(Layer, clipShape: { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: fanOut() + 0.01, innerRadius: rim(), start: from, sweep: 103.5 * fan }),
                     hitShape: { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: fanOut(), innerRadius: rim(), start: from, sweep: 103.5 }) {
-                // Three segments open one after another, each sweeping round from its own start.
                 Draw(key: `radial.fan.band.${index}`, layout: { width: 600, height: 600 }, shapes: [
-                  ...map(range(0, 3), j => { id: j, kind: "sector", center: { x: 0.5, y: 0.5 }, radius: fanIn() + (fanOut() - fanIn()) * fan, innerRadius: fanIn(),
-                    start: from + 34.5 * j + 1.25, sweep: 32 * clamp(fan * 1.8 - j * 0.4, 0, 1),
-                    fill: #2A2F38, stroke: #15181D, strokeStyle: { width: 3 } }) ])
-                Panel(key: `radial.fan.names.${index}`, style: style(Ring, radialRadius: 202, radialStart: from, radialSweep: 103.5)) {
+                  ...map(range(0, 3), j => { id: j, kind: "sector", center: { x: 0.5, y: 0.5 }, radius: fanOut(), innerRadius: fanIn(),
+                    start: from + 34.5 * j + 1.25, sweep: 32, fill: #2A2F38, stroke: #15181D, strokeStyle: { width: 3 } }) ])
+                Panel(key: `radial.fan.names.${index}`, style: Layer) {
                   for option, slot in tool.options {
-                    Panel(key: `radial.option.${index}.${slot}`, style: style(Option, opacity: clamp(fan * 2.2 - slot * 0.45 - 0.4, 0, 1)),
+                    Panel(key: `radial.option.${index}.${slot}`, style: Option, layout: { placement: at(from + 34.5 * (slot + 0.5), 0.336) },
                           behaviors: [{ id: "strata.pointer", action: e => { if e.phase == "press" { picked = `${tool.name} / ${option}` } } }]) {
                       Text(text: option, style: OptionName)
                     }

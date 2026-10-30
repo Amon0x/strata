@@ -533,26 +533,172 @@ bool DescriptionBuilder::reads_frame_time() const {
     return found != host_readers_.end() && !found->second.empty();
 }
 
-std::pair<double, bool> DescriptionBuilder::sampled(const AnimationSlot& slot,
-                                                    const std::int64_t now) {
-    if (slot.from == slot.target)
-        return {slot.target, false};
+namespace {
+
+/**
+ * The numbers `value` is made of, appended to `parts`, and its structure appended to `shape`: a
+ * number, a colour (four channels), or a list or record of them. False for anything else.
+ */
+[[nodiscard]] bool animated_parts(const runtime::Value& value, std::string& shape,
+                                  std::vector<double>& parts) {
+    if (const double* number = value.number(); number != nullptr) {
+        shape += 'n';
+        parts.push_back(*number);
+        return true;
+    }
+    if (const runtime::ColorValue* color = value.color(); color != nullptr) {
+        shape += 'c';
+        parts.insert(parts.end(), {static_cast<double>(color->red), static_cast<double>(color->green),
+                                   static_cast<double>(color->blue), static_cast<double>(color->alpha)});
+        return true;
+    }
+    if (const runtime::ValueList* list = value.list(); list != nullptr) {
+        shape += '[';
+        for (const runtime::Value& entry : list->values) {
+            if (!animated_parts(entry, shape, parts))
+                return false;
+        }
+        shape += ']';
+        return true;
+    }
+    if (const runtime::ValueObject* object = value.object(); object != nullptr) {
+        shape += '{';
+        for (const auto& [name, entry] : object->fields) {
+            shape += name;
+            shape += ':';
+            if (!animated_parts(entry, shape, parts))
+                return false;
+            shape += ',';
+        }
+        shape += '}';
+        return true;
+    }
+    return false;
+}
+
+/** `layout` with its numbers replaced, in order, by `parts` from `next` on. */
+[[nodiscard]] runtime::Value animated_value(const runtime::Value& layout,
+                                            const std::vector<double>& parts, std::size_t& next) {
+    if (layout.number() != nullptr)
+        return runtime::Value(parts[next++]);
+    if (layout.color() != nullptr) {
+        const auto channel = [&]() {
+            return static_cast<std::uint8_t>(std::clamp(std::lround(parts[next++]), 0L, 255L));
+        };
+        runtime::ColorValue color;
+        color.red = channel();
+        color.green = channel();
+        color.blue = channel();
+        color.alpha = channel();
+        return runtime::Value(color);
+    }
+    if (const runtime::ValueList* list = layout.list(); list != nullptr) {
+        std::vector<runtime::Value> values;
+        values.reserve(list->values.size());
+        for (const runtime::Value& entry : list->values)
+            values.push_back(animated_value(entry, parts, next));
+        return runtime::Value(std::move(values));
+    }
+    std::vector<std::pair<std::string, runtime::Value>> fields;
+    for (const auto& [name, entry] : layout.object()->fields)
+        fields.emplace_back(name, animated_value(entry, parts, next));
+    return runtime::Value(std::move(fields));
+}
+
+/**
+ * A damped spring's offset from its rest and its velocity, `seconds` after it was at `offset`
+ * moving at `velocity`: the exact solution, so any frame is where the spring truly is.
+ */
+[[nodiscard]] std::pair<double, double> spring_at(const double offset, const double velocity,
+                                                  const double seconds,
+                                                  const runtime::AnimateSpring& spring) {
+    const double mass = std::max(1.0e-6, spring.mass);
+    const double stiffness = std::max(1.0e-6, spring.stiffness);
+    const double damping = std::max(0.0, spring.damping);
+    const double natural = std::sqrt(stiffness / mass);
+    const double ratio = damping / (2.0 * std::sqrt(stiffness * mass));
+    if (std::abs(ratio - 1.0) < 1.0e-6) {
+        const double carried = velocity + natural * offset;
+        const double decay = std::exp(-natural * seconds);
+        return {(offset + carried * seconds) * decay, (velocity - natural * carried * seconds) * decay};
+    }
+    if (ratio < 1.0) {
+        const double damped = natural * std::sqrt(1.0 - ratio * ratio);
+        const double decay_rate = ratio * natural;
+        const double decay = std::exp(-decay_rate * seconds);
+        const double c = std::cos(damped * seconds);
+        const double s = std::sin(damped * seconds);
+        return {decay * (offset * c + (velocity + decay_rate * offset) / damped * s),
+                decay * (velocity * c -
+                         (decay_rate * velocity + natural * natural * offset) / damped * s)};
+    }
+    const double spread = natural * std::sqrt(ratio * ratio - 1.0);
+    const double fast = -ratio * natural - spread;
+    const double slow = -ratio * natural + spread;
+    const double b = (slow * offset - velocity) / (slow - fast);
+    const double a = offset - b;
+    return {a * std::exp(slow * seconds) + b * std::exp(fast * seconds),
+            a * slow * std::exp(slow * seconds) + b * fast * std::exp(fast * seconds)};
+}
+
+} // namespace
+
+DescriptionBuilder::AnimationState DescriptionBuilder::sampled(const AnimationSlot& slot,
+                                                               const std::int64_t now) {
+    AnimationState state;
+    state.position = slot.target;
+    state.velocity.assign(slot.target.size(), 0.0);
+    if (slot.from == slot.target &&
+        std::ranges::all_of(slot.velocity, [](const double v) { return v == 0.0; }))
+        return state;
     const std::int64_t elapsed = now - slot.start_nanos - slot.delay_nanos;
-    if (elapsed <= 0)
-        return {slot.from, true};
+    if (elapsed <= 0) {
+        state.position = slot.from;
+        state.velocity = slot.velocity;
+        state.running = true;
+        return state;
+    }
+    if (slot.spring.has_value()) {
+        // Each part rings out toward its target; it is at rest once every part is within a
+        // thousandth of how far it set out from (and barely moving).
+        const double seconds = static_cast<double>(elapsed) / 1.0e9;
+        for (std::size_t index = 0U; index < slot.target.size(); ++index) {
+            const double offset = slot.from[index] - slot.target[index];
+            const double speed = index < slot.velocity.size() ? slot.velocity[index] : 0.0;
+            const auto [x, v] = spring_at(offset, speed, seconds, *slot.spring);
+            const double scale = std::max(1.0, std::abs(offset) + std::abs(speed) * 0.1);
+            if (std::abs(x) > 1.0e-3 * scale || std::abs(v) > 1.0e-2 * scale)
+                state.running = true;
+            state.position[index] = slot.target[index] + x;
+            state.velocity[index] = v;
+        }
+        if (!state.running) {
+            state.position = slot.target;
+            state.velocity.assign(slot.target.size(), 0.0);
+        }
+        return state;
+    }
     if (slot.duration_nanos <= 0 || elapsed >= slot.duration_nanos)
-        return {slot.target, false};
+        return state;
     const double fraction =
         static_cast<double>(elapsed) / static_cast<double>(slot.duration_nanos);
-    return {slot.from + (slot.target - slot.from) * motion_easing(slot.easing, fraction), true};
+    const double eased = motion_easing(slot.easing, fraction);
+    for (std::size_t index = 0U; index < slot.target.size(); ++index)
+        state.position[index] = slot.from[index] + (slot.target[index] - slot.from[index]) * eased;
+    state.running = true;
+    return state;
 }
 
 runtime::AnimateSample DescriptionBuilder::animate(const runtime::AnimateCall& call) {
     Frame* const current = frame();
-    if (current == nullptr || current->instance == nullptr)
+    std::string shape;
+    std::vector<double> target;
+    // Only what is made of numbers moves; anything else is its target at once.
+    if (current == nullptr || current->instance == nullptr ||
+        !animated_parts(call.target, shape, target))
         return runtime::AnimateSample{call.target, false, frame_time_};
     // The call site: where in the instance, which expression, and its how-many-th evaluation in
-    // this description (a function evaluated twice holds two tweens).
+    // this description (a function evaluated twice holds two motions).
     std::string key(call.instance_path);
     key += '\n';
     key += std::to_string(call.program);
@@ -564,6 +710,7 @@ runtime::AnimateSample DescriptionBuilder::animate(const runtime::AnimateCall& c
     const auto timing = [&](AnimationSlot& slot) {
         slot.delay_nanos = call.delay_nanos;
         slot.duration_nanos = call.duration_nanos;
+        slot.spring = call.spring;
         try {
             slot.easing = MotionEasing(call.easing);
         } catch (const std::invalid_argument&) {
@@ -572,23 +719,40 @@ runtime::AnimateSample DescriptionBuilder::animate(const runtime::AnimateCall& c
     };
     auto& slots = current->instance->animations;
     auto found = slots.find(key);
-    if (found == slots.end()) {
+    if (found == slots.end() || found->second.shape != shape) {
         AnimationSlot slot;
-        slot.from = call.from.value_or(call.target);
-        slot.target = call.target;
+        slot.shape = shape;
+        slot.layout = call.target;
+        slot.target = target;
+        slot.from = target;
+        if (call.from.has_value()) {
+            std::string from_shape;
+            std::vector<double> from;
+            if (animated_parts(*call.from, from_shape, from) && from_shape == shape)
+                slot.from = std::move(from);
+        }
+        slot.velocity.assign(target.size(), 0.0);
         slot.start_nanos = frame_time_;
         timing(slot);
-        found = slots.emplace(std::move(key), std::move(slot)).first;
-    } else if (found->second.target != call.target) {
-        // A new target: it sets out from wherever it is now.
+        if (found == slots.end())
+            found = slots.emplace(std::move(key), std::move(slot)).first;
+        else
+            found->second = std::move(slot);
+    } else if (found->second.target != target) {
+        // A new target: it sets out from wherever it is now, at the speed it is moving.
         AnimationSlot& slot = found->second;
-        slot.from = sampled(slot, frame_time_).first;
-        slot.target = call.target;
+        AnimationState now = sampled(slot, frame_time_);
+        slot.from = std::move(now.position);
+        slot.velocity = std::move(now.velocity);
+        slot.target = std::move(target);
+        slot.layout = call.target;
         slot.start_nanos = frame_time_;
         timing(slot);
     }
-    const auto [value, running] = sampled(found->second, frame_time_);
-    return runtime::AnimateSample{value, running, frame_time_};
+    const AnimationState state = sampled(found->second, frame_time_);
+    std::size_t next = 0U;
+    return runtime::AnimateSample{animated_value(found->second.layout, state.position, next),
+                                  state.running, frame_time_};
 }
 
 DescriptionBuilder::~DescriptionBuilder() {

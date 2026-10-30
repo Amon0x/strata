@@ -49,8 +49,6 @@ std::string_view layout_kind_name(const LayoutKind value) noexcept {
         return "masonry";
     case LayoutKind::canvas:
         return "canvas";
-    case LayoutKind::radial:
-        return "radial";
     }
     return "panel";
 }

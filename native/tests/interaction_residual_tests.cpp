@@ -4600,16 +4600,20 @@ overlay Dial {
           "a settled animate() kept its readers being described");
 }
 
-void test_radial_layout_hit_shapes_and_hover(const std::filesystem::path& resources) {
+void test_placed_ring_hit_shapes_and_hover(const std::filesystem::path& resources) {
     const std::string source = R"(
-style Ring { kind: "RADIAL"; width: 200; height: 200; padding: 0; radialRadius: 50; }
+fn turn(index: number, share: number) = (-90 + share * (index + 0.5)) * 3.14159265 / 180
 overlay Wheel {
   state hovered = -1
   root Panel(key: "wheel.root", style: { kind: "OVERLAY"; width: 200; height: 200; padding: 0 }) {
+    // A ring dealt round by arithmetic: each child centred where its angle puts it.
     derived deal = animate(1, from: 0, duration: 1000ms, easing: "linear")
-    Panel(key: "wheel.ring", style: style(Ring, radialSweep: 360 * deal)) {
+    Panel(key: "wheel.ring", style: { kind: "OVERLAY"; width: 200; height: 200; padding: 0 }) {
       for n, index in [0, 1, 2, 3] {
-        Panel(key: `wheel.item.${index}`, style: { width: 20; height: 20 })
+        Panel(key: `wheel.item.${index}`, style: { width: 20; height: 20 },
+              layout: { placement: { x: { fraction: 0.5 + 0.25 * cos(turn(index, 90 * deal)) },
+                                     y: { fraction: 0.5 + 0.25 * sin(turn(index, 90 * deal)) },
+                                     anchorX: 0.5, anchorY: 0.5 } })
       }
     }
     for n, index in [0, 1] {
@@ -4641,7 +4645,7 @@ overlay Wheel {
     const double half_way = (-90.0 + 180.0 * 1.5 / 4.0) * std::numbers::pi / 180.0;
     check(std::abs(dealing.x - (100.0 + 50.0 * std::cos(half_way))) < 1.0 &&
               std::abs(dealing.y - (100.0 + 50.0 * std::sin(half_way))) < 1.0,
-          "half way through dealing, a RADIAL child was not in the middle of its share of the "
+          "half way through dealing, a placed child was not in the middle of its share of the "
           "sweep: " + std::to_string(dealing.x) + "," + std::to_string(dealing.y));
     for (int frame = 0; frame < 40; ++frame)
         static_cast<void>(surface->frame(now += 20'000'000));
@@ -4651,7 +4655,7 @@ overlay Wheel {
         const ui::Point at = centre(index);
         check(std::abs(at.x - (100.0 + 50.0 * std::cos(angle))) < 0.5 &&
                   std::abs(at.y - (100.0 + 50.0 * std::sin(angle))) < 0.5,
-              "a dealt RADIAL child was not centred in its share of the circle");
+              "a dealt placed child was not centred in its share of the circle");
     }
 
     const auto shown = [&] {
@@ -4677,6 +4681,79 @@ overlay Wheel {
     check(shown() == "-1", "the hole inside a ring hit shape still hovered it: " + shown());
     move(ui::Point{5.0, 5.0});
     check(shown() == "-1", "a corner outside every hit shape hovered one: " + shown());
+}
+
+void test_animate_moves_colours_springs_and_clips(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Motion {
+  state far = false
+  root Panel(key: "motion.root", layout: { kind: "COLUMN", width: 200, height: 200 }) {
+    derived tint = animate(far ? #FF0000 : #0000FF, duration: 1000ms, easing: "linear")
+    derived reach = animate(far ? 100 : 0, spring: { stiffness: 100, damping: 4 })
+    Panel(key: "motion.wipe", style: { width: 100; height: 100; background: tint;
+          clipShape: { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.5, innerRadius: 0.2, start: -90, sweep: 120 } })
+    Text(key: "motion.reach", text: `${round(reach)}`)
+    Panel(key: "motion.toggle", style: { width: 200; height: 40 },
+          behaviors: [{ id: "strata.pointer", action: e => { if e.phase == "press" { far = !far } } }])
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("motion", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Motion", 200.0, 200.0, false);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    // The sector clip goes out as one: its kind, and its start, sweep and inner radius.
+    bool sector = false;
+    for (const ui::RenderCommand& command : surface->render_commands().commands()) {
+        if (const auto* clip = std::get_if<ui::ClipPushRenderCommand>(&command);
+            clip != nullptr && clip->shape.kind == 4U)
+            sector = std::abs(clip->radii.top_left - 270.0) < 1.0e-9 &&
+                     std::abs(clip->radii.top_right - 120.0) < 1.0e-9 &&
+                     std::abs(clip->radii.bottom_right - 0.4) < 1.0e-9;
+    }
+    check(sector, "a sector clipShape did not clip with its start, sweep and inner radius");
+    const auto reach = [&] {
+        const auto found =
+            surface->tree().find_key("motion.reach")->description().properties.find("text");
+        return std::stod(*found->second.value()->string());
+    };
+    const auto tint = [&]() -> std::optional<runtime::ColorValue> {
+        for (const ui::RenderCommand& command : surface->render_commands().commands()) {
+            if (const auto* rect = std::get_if<ui::SolidRectRenderCommand>(&command);
+                rect != nullptr && rect->fill.color() != nullptr && rect->bounds.width == 100.0)
+                return *rect->fill.color();
+            if (const auto* rect = std::get_if<ui::RoundedRectRenderCommand>(&command);
+                rect != nullptr && rect->fill.color() != nullptr && rect->bounds.width == 100.0)
+                return *rect->fill.color();
+        }
+        return std::nullopt;
+    };
+    const ui::Point toggle =
+        center(surface->layout().find(surface->tree().find_key("motion.toggle")->identity())->bounds);
+    std::vector<ui::SurfaceInputEvent> events;
+    events.emplace_back(ui::PointerInputEvent{toggle, ui::PointerEventType::press, 4, 0});
+    events.emplace_back(ui::PointerInputEvent{toggle, ui::PointerEventType::release, 4, 0});
+    static_cast<void>(surface->input().enqueue(std::move(events)));
+    double most = 0.0;
+    std::optional<runtime::ColorValue> halfway;
+    for (int frame = 0; frame < 200; ++frame) {
+        static_cast<void>(surface->frame(now += 20'000'000));
+        most = std::max(most, reach());
+        if (frame == 25)
+            halfway = tint();
+    }
+    // A colour moves channel by channel: half way from blue to red is purple.
+    check(halfway.has_value() && halfway->red > 90U && halfway->red < 165U && halfway->blue > 90U &&
+              halfway->blue < 165U,
+          "an animate() between two colours did not move through the colours between them: " +
+              (halfway.has_value() ? std::to_string(halfway->red) + "," +
+                                         std::to_string(halfway->blue)
+                                   : std::string("no background drawn")));
+    // A lightly damped spring overshoots its target, then comes to rest on it.
+    check(most > 110.0 && reach() == 100.0,
+          "an animate() on a spring did not overshoot and settle on its target");
 }
 
 void test_chart_inspects_selects_and_hides_series(const std::filesystem::path& resources) {
@@ -5210,7 +5287,8 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_chart_inspects_selects_and_hides_series(resources);
         test_chart_draws_points_in_along_a_log_axis(resources);
         test_animate_follows_its_target(resources);
-        test_radial_layout_hit_shapes_and_hover(resources);
+        test_placed_ring_hit_shapes_and_hover(resources);
+        test_animate_moves_colours_springs_and_clips(resources);
         test_timers_fire_on_their_interval(resources);
         test_markdown_expands_blocks_and_follows_links(resources);
         test_modal_sides_open_drawers_and_sheets(resources);

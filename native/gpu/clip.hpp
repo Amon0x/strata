@@ -72,6 +72,35 @@ float roundedClipPolygonSdf(float2 p, float2 halfSize, float sides, bool star) {
     return distance * min(radii.x, radii.y);
 }
 
+/**
+ * Distance to a sector or ring of the ellipse filling halfSize: from `start` sweeping `sweep`
+ * degrees clockwise from right, its inner radius `inner` of the outer (worked in a unit circle).
+ */
+float roundedClipSectorSdf(float2 p, float2 halfSize, float3 sector) {
+    float2 radii = max(halfSize, 0.0001);
+    float2 q = p / radii;
+    float radius = length(q);
+    float distance = max(radius - 1.0, sector.z - radius);
+    if (sector.y < 359.999) {
+        float angle = degrees(atan2(q.y, q.x));
+        float into = fmod(angle - sector.x + 720.0, 360.0);
+        float fromStart = into;
+        float toEnd = sector.y - into;
+        float outside = 360.0 - into;
+        float wedge;
+        if (into <= sector.y) {
+            // Inside the wedge: as far as the nearer of its two edges.
+            float nearer = radians(min(fromStart, toEnd));
+            wedge = -(nearer < 1.5707963 ? radius * sin(nearer) : radius);
+        } else {
+            float nearer = radians(min(into - sector.y, outside));
+            wedge = nearer < 1.5707963 ? radius * sin(nearer) : radius;
+        }
+        distance = max(distance, wedge);
+    }
+    return distance * min(radii.x, radii.y);
+}
+
 float strataRoundedClipCoverage(float2 logicalPixel) {
     float coverage = 1.0;
     [loop]
@@ -91,6 +120,9 @@ float strataRoundedClipCoverage(float2 logicalPixel) {
         } else if (shape == 2 || shape == 3) {
             distance = roundedClipPolygonSdf(localPixel - center, halfSize,
                                              roundedClipInverseY[index].w, shape == 3);
+        } else if (shape == 4) {
+            distance = roundedClipSectorSdf(localPixel - center, halfSize,
+                                            roundedClipRadii[index].xyz);
         } else {
             distance = roundedClipBoxSdf(localPixel - center, halfSize, roundedClipRadii[index]);
         }

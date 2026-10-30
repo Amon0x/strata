@@ -56,6 +56,76 @@ namespace {
  * where layout put it, so the transform is cancelled; once something rotates, the clip turns with
  * the content it clips and becomes an exact clip mask in the planner.
  */
+/** A clip shape drawn as a shape record (`clipShape: { kind: "sector", ... }`), placed in its node. */
+struct DrawnClip final {
+    ClipShape shape;
+    Rect box;
+    CornerRadii radii;
+};
+
+[[nodiscard]] std::optional<DrawnClip> drawn_clip(const RetainedNode& node, const Rect bounds) {
+    const runtime::Value* value = visual_value(node, "clipShape");
+    if (value == nullptr || value->object() == nullptr)
+        return std::nullopt;
+    const runtime::Value* kind_value = value->field("kind");
+    if (kind_value == nullptr || kind_value->string() == nullptr)
+        return std::nullopt;
+    const std::string& kind = *kind_value->string();
+    const auto number = [value](const std::string_view name) -> std::optional<double> {
+        const runtime::Value* field = value->field(name);
+        return field != nullptr && field->number() != nullptr && std::isfinite(*field->number())
+                   ? std::optional<double>(*field->number())
+                   : std::nullopt;
+    };
+    DrawnClip clip;
+    if (kind == "rect") {
+        const double x = number("x").value_or(0.0);
+        const double y = number("y").value_or(0.0);
+        const double width = std::max(0.0, number("width").value_or(1.0));
+        const double height = std::max(0.0, number("height").value_or(1.0));
+        clip.box = Rect{bounds.x + x * bounds.width, bounds.y + y * bounds.height,
+                        width * bounds.width, height * bounds.height};
+        const double radius = std::max(0.0, number("radius").value_or(0.0)) *
+                              std::min(bounds.width, bounds.height);
+        clip.radii = CornerRadii::all(radius);
+        return clip;
+    }
+    if (kind != "circle" && kind != "ellipse" && kind != "sector" && kind != "ring")
+        return std::nullopt;
+    double center_x = 0.5;
+    double center_y = 0.5;
+    if (const runtime::Value* center = value->field("center"); center != nullptr) {
+        if (const runtime::Value* x = center->field("x"); x != nullptr && x->number() != nullptr)
+            center_x = *x->number();
+        if (const runtime::Value* y = center->field("y"); y != nullptr && y->number() != nullptr)
+            center_y = *y->number();
+    }
+    const std::optional<double> radius = number("radius");
+    const double radius_x = std::max(0.0, number("radiusX").value_or(radius.value_or(0.5)));
+    const double radius_y = std::max(0.0, number("radiusY").value_or(radius.value_or(0.5)));
+    clip.box = Rect{bounds.x + (center_x - radius_x) * bounds.width,
+                    bounds.y + (center_y - radius_y) * bounds.height,
+                    2.0 * radius_x * bounds.width, 2.0 * radius_y * bounds.height};
+    if (kind == "circle" || kind == "ellipse") {
+        clip.shape.kind = 1U;
+        return clip;
+    }
+    // A sector or ring: its angles and inner radius ride in the radii (see ClipShape).
+    clip.shape.kind = 4U;
+    const double outer = std::max({radius_x, radius_y, 1.0e-9});
+    const double inner =
+        std::clamp(number("innerRadius").value_or(kind == "ring" ? 0.3 : 0.0) / outer, 0.0, 0.999);
+    double start = kind == "ring" ? 0.0 : number("start").value_or(0.0);
+    double sweep = kind == "ring" ? 360.0 : number("sweep").value_or(360.0);
+    if (sweep < 0.0) {
+        start += sweep;
+        sweep = -sweep;
+    }
+    start = std::fmod(std::fmod(start, 360.0) + 360.0, 360.0);
+    clip.radii = CornerRadii{start, std::min(sweep, 360.0), inner, 0.0};
+    return clip;
+}
+
 [[nodiscard]] Rect layout_clip(const Rect clip, const MotionTransform& transform) noexcept {
     return transform.axis_aligned() ? inverse_presentation_bounds(clip, transform) : clip;
 }
@@ -877,10 +947,19 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         // border take the shape too, not only what it contains. Fading edges stay on content.
         ClipShape own_shape = clip_shape(node);
         own_shape.fade = {0.0, 0.0, 0.0, 0.0};
-        const bool shaped_self = own_shape.kind != 0U;
+        Rect own_box = record->bounds;
+        CornerRadii own_corners = corners;
+        // A drawn clip shape (a circle, rect, sector or ring record) places its own outline.
+        const std::optional<DrawnClip> drawn = drawn_clip(node, record->bounds);
+        if (drawn.has_value()) {
+            own_shape.kind = drawn->shape.kind;
+            own_box = drawn->box;
+            own_corners = drawn->radii;
+        }
+        const bool shaped_self = own_shape.kind != 0U || drawn.has_value();
         if (shaped_self) {
-            output.append(ClipPushRenderCommand{layout_clip(record->bounds, effective_transform),
-                                                corners, own_shape});
+            output.append(ClipPushRenderCommand{layout_clip(own_box, effective_transform),
+                                                own_corners, own_shape});
             ++counters.commands_emitted;
         }
         for (const StyleShadow& shadow : style_shadows(style_value("shadows"),

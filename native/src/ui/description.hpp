@@ -220,18 +220,31 @@ class DescriptionBuilder final : public runtime::AnimationHost {
         std::vector<ChildRef> children;
     };
 
-    /** One `animate` call site's tween: where it set out from, for where, when and how. */
+    /**
+     * One `animate` call site's motion, over the numbers its value is made of (a colour's four
+     * channels, a point's two coordinates): where it set out from and at what velocity, for
+     * where, when, and by a curve or a spring.
+     */
     struct AnimationSlot final {
-        double from = 0.0;
-        double target = 0.0;
+        /** The structure its values share; a value of another structure starts afresh. */
+        std::string shape;
+        runtime::Value layout;
+        std::vector<double> from;
+        std::vector<double> velocity;
+        std::vector<double> target;
         std::int64_t start_nanos = 0;
         std::int64_t delay_nanos = 0;
         std::int64_t duration_nanos = 0;
         MotionEasing easing;
+        std::optional<runtime::AnimateSpring> spring;
     };
-    /** Where a tween is at `now`, and whether it is still on its way. */
-    [[nodiscard]] static std::pair<double, bool> sampled(const AnimationSlot& slot,
-                                                         std::int64_t now);
+    /** Where a slot is at `now`, how fast each part moves, and whether it is still on its way. */
+    struct AnimationState final {
+        std::vector<double> position;
+        std::vector<double> velocity;
+        bool running = false;
+    };
+    [[nodiscard]] static AnimationState sampled(const AnimationSlot& slot, std::int64_t now);
 
     struct ComponentInstance final {
         InstanceId id = 0U;

@@ -461,6 +461,11 @@ struct ContentEffectPopRenderCommand final {
  * `sides` points, both filling it. `fade` (top, right, bottom, left, in logical pixels) ramps the
  * content out toward each edge: a list that fades at the top and bottom as it scrolls.
  */
+/**
+ * A clip's outline: 0 a rounded box, 1 an ellipse filling it, 2 a regular polygon and 3 a star of
+ * `sides`, 4 a sector or ring of the ellipse filling it, whose start and sweep (degrees, clockwise
+ * from right) and inner radius (a fraction of the outer) ride in the clip's corner radii.
+ */
 struct ClipShape final {
     std::uint32_t kind = 0U;
     double sides = 0.0;

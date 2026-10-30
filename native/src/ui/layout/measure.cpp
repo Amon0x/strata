@@ -538,19 +538,6 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         if (measured.style.kind == LayoutKind::masonry && measured.masonry.has_value()) {
             return measured.masonry->intrinsic_size;
         }
-        if (measured.style.kind == LayoutKind::radial) {
-            // A ring as wide as its radius twice over, plus the largest child sitting on it.
-            Size largest;
-            for (std::size_t index = 0U; index < measured.flow_child_count; ++index) {
-                const MeasuredNode& child = *measured.children[index];
-                if (attached_only && child.node->lifecycle() == RetainedLifecycle::exiting)
-                    continue;
-                largest.width = std::max(largest.width, child.measured_size.width);
-                largest.height = std::max(largest.height, child.measured_size.height);
-            }
-            const double across = 2.0 * measured.style.radial_radius.value_or(0.0);
-            return Size{across + largest.width, across + largest.height};
-        }
         if (measured.style.kind == LayoutKind::canvas) {
             // A canvas reaches as far as its furthest child, from where each is inset.
             Size extent;

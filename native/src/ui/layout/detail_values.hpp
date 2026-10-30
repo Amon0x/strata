@@ -165,8 +165,6 @@ constexpr double infinity = std::numeric_limits<double>::infinity();
         return LayoutKind::masonry;
     if (name == "CANVAS")
         return LayoutKind::canvas;
-    if (name == "RADIAL")
-        return LayoutKind::radial;
     return LayoutKind::panel;
 }
 

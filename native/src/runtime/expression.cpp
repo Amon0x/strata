@@ -324,6 +324,7 @@ struct Names final {
     Symbol easing = Symbol::intern("easing");
     Symbol delay = Symbol::intern("delay");
     Symbol from = Symbol::intern("from");
+    Symbol spring = Symbol::intern("spring");
 };
 
 [[nodiscard]] const Names& names() {
@@ -1807,21 +1808,33 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         return ExpressionValue(Value(result));
     }
     case HelperKind::animate: {
-        const Value target = argument_value(program, node, scope, known.target, 0U, reads);
-        const double heading = target.number() != nullptr ? *target.number() : 0.0;
+        Value target = argument_value(program, node, scope, known.target, 0U, reads);
         if (animation_host_ == nullptr)
-            return ExpressionValue(Value(heading));
+            return ExpressionValue(std::move(target));
         const Value duration = argument_value(program, node, scope, known.duration, 1U, reads);
         const Value easing = argument_value(program, node, scope, known.easing, 2U, reads);
         const Value delay = argument_value(program, node, scope, known.delay, 3U, reads);
         const Value from = argument_value(program, node, scope, known.from, 4U, reads);
+        const Value spring = argument_value(program, node, scope, known.spring, 5U, reads);
         AnimateCall call;
         call.instance_path = scope.component_path();
         call.program = program.serial();
         call.expression = expression;
-        call.target = heading;
-        if (from.number() != nullptr)
-            call.from = *from.number();
+        call.target = std::move(target);
+        if (from.kind() != ValueKind::null_value)
+            call.from = from;
+        if (spring.object() != nullptr) {
+            AnimateSpring physics;
+            const auto field = [&spring](const std::string_view name, double& destination) {
+                if (const Value* value = spring.field(name);
+                    value != nullptr && value->number() != nullptr && std::isfinite(*value->number()))
+                    destination = *value->number();
+            };
+            field("stiffness", physics.stiffness);
+            field("damping", physics.damping);
+            field("mass", physics.mass);
+            call.spring = physics;
+        }
         if (duration.duration() != nullptr)
             call.duration_nanos = std::max<std::int64_t>(0, duration.duration()->nanoseconds);
         if (delay.duration() != nullptr)
@@ -1835,7 +1848,7 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
                                                 frame_time_value(sample.time_nanos), std::nullopt,
                                                 0U});
         }
-        return ExpressionValue(Value(sample.value));
+        return ExpressionValue(std::move(sample.value));
     }
     case HelperKind::clamp: {
         const Value value_argument = argument_value(program, node, scope, known.value, 0U, reads);

@@ -76,9 +76,7 @@ enum class LayoutKind {
     scroll,
     portal,
     masonry,
-    canvas,
-    /** Children around a circle: each in the middle of its equal share of a sweep. */
-    radial
+    canvas
 };
 enum class LayoutAlign { start, center, end, stretch };
 enum class LayoutJustify { start, center, end, space_between, space_around, space_evenly };
@@ -185,14 +183,6 @@ struct LayoutStyle final {
     /** MASONRY: the column count, or the narrowest a column may be (columns follow the width). */
     std::optional<std::size_t> masonry_columns;
     std::optional<double> min_column_width;
-    /**
-     * RADIAL: how far children's centres sit from the content's centre (unset: as far as the
-     * content allows), and the arc they share, from `radial_start` degrees (clockwise from right;
-     * -90 is up) sweeping `radial_sweep` degrees clockwise.
-     */
-    std::optional<double> radial_radius;
-    double radial_start = -90.0;
-    double radial_sweep = 360.0;
     bool scroll_horizontal = false;
     bool scroll_vertical = true;
     ScrollSnap scroll_snap = ScrollSnap::none;

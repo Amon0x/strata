@@ -105,11 +105,18 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                                                           .nullable = false}},
                              .value = declared_type_reference("any")})},
         // circle, diamond, ellipse, hexagon, polygon, rect or star; any other draws the rectangle.
-        DeclaredNamedType{.id = "clipShapeEnum",
+        DeclaredNamedType{.id = "clipShapeName",
                           .definition = declared_type(DeclaredType{
                               .kind = DeclaredTypeKind::string,
                               .label = "clip shape: circle, diamond, ellipse, hexagon, polygon, "
                                        "rect or star"})},
+        DeclaredNamedType{.id = "clipShapeEnum",
+                          .definition = declared_type(DeclaredType{
+                              .kind = DeclaredTypeKind::union_value,
+                              .label = "clip shape: a name, or a circle, ellipse, rect, sector "
+                                       "or ring shape placed in the node",
+                              .options = {declared_type_reference("clipShapeName"),
+                                          declared_type_reference("shape")}})},
         DeclaredNamedType{
             .id = "fadeEdges",
             .definition = declared_type(
@@ -612,7 +619,7 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                               .kind = DeclaredTypeKind::enumeration,
                               .label = "one of",
                               .values = {"CANVAS", "COLUMN", "GRID", "MASONRY", "OVERLAY", "PANEL",
-                                         "PORTAL", "RADIAL", "ROW", "SCROLL", "SPACER", "STACK"}})},
+                                         "PORTAL", "ROW", "SCROLL", "SPACER", "STACK"}})},
         DeclaredNamedType{.id = "layoutSizeUnion",
                           .definition = declared_type(DeclaredType{
                               .kind = DeclaredTypeKind::union_value,
@@ -2391,6 +2398,24 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                               .kind = DeclaredTypeKind::enumeration,
                               .label = "chart axis scale",
                               .values = {"LINEAR", "LOG"}})},
+        DeclaredNamedType{
+            .id = "animateSpring",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "spring",
+                .fields = {DeclaredTypeField{.name = "damping",
+                                             .type = declared_type_reference("number"),
+                                             .required = false,
+                                             .nullable = false},
+                           DeclaredTypeField{.name = "mass",
+                                             .type = declared_type_reference("number"),
+                                             .required = false,
+                                             .nullable = false},
+                           DeclaredTypeField{.name = "stiffness",
+                                             .type = declared_type_reference("number"),
+                                             .required = false,
+                                             .nullable = false}},
+                .value = declared_type_reference("any")})},
         DeclaredNamedType{.id = "chartAxisMarks",
                           .definition = declared_type(DeclaredType{
                               .kind = DeclaredTypeKind::enumeration,
