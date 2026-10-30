@@ -581,6 +581,19 @@ class LayoutEngine final {
     std::uint64_t translation_frame_index_ = 0U;
     LayoutResult result_;
     const RetainedTree* last_tree_ = nullptr;
+    /**
+     * What the records and caches held after they were last pruned of removed nodes: while the
+     * tree's structure and their sizes are as they were, nothing in them is left to prune.
+     */
+    struct PrunedState final {
+        const RetainedTree* tree = nullptr;
+        std::uint64_t structure_generation = 0U;
+        std::size_t records = 0U;
+        std::size_t measurements = 0U;
+        std::size_t arrangements = 0U;
+        [[nodiscard]] friend bool operator==(const PrunedState&, const PrunedState&) = default;
+    };
+    std::optional<PrunedState> pruned_;
     std::uint64_t last_invalidation_generation_ = 0U;
     std::optional<LayoutEnvironment> last_environment_;
     std::uint64_t next_generation_ = 0U;

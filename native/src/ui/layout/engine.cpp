@@ -526,6 +526,9 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
     }
     pending_portals_.clear();
     const auto retain_exit_layout = [&](const auto& self, const RetainedNode& node) -> void {
+        // Nothing below an all-attached node is exiting.
+        if (node.subtree_all_attached())
+            return;
         if (node.lifecycle() == RetainedLifecycle::exiting) {
             if (next.records.contains(node.identity())) {
                 current_arranged_subtree_roots_.insert(node.identity());
@@ -536,8 +539,12 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
             self(self, *child);
     };
     retain_exit_layout(retain_exit_layout, *root);
+    // Walked from the root, a node is arranged in this pass when it was itself: a subtree kept
+    // whole is arranged throughout, so the walk does not go into it.
     const auto record_unarranged = [&](const auto& self, const RetainedNode& node) -> void {
-        if (!arranged_in_current_pass(node)) {
+        if (current_arranged_subtree_roots_.contains(node.identity()))
+            return;
+        if (!current_arranged_records_.contains(node.identity())) {
             const LayoutStyle style = resolved_style(node);
             LayoutRecord record;
             record.identity = node.identity();
@@ -579,16 +586,25 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
     }
     if (consume_dirty)
         tree.consume_layout_dirty();
-    std::erase_if(next.records, [&tree](const auto& entry) {
-        return tree.find_identity(entry.first) == nullptr;
-    });
-    std::erase_if(measurement_cache_,
-                  [&next](const auto& entry) { return !next.records.contains(entry.first); });
-    std::erase_if(arrangement_cache_,
-                  [&next](const auto& entry) { return !next.records.contains(entry.first); });
-    collection_virtualization_.retain(
-        [&next](const std::uint64_t identity) { return next.records.contains(identity); });
-    content_size_transitions_.retain(next.records);
+    // Records and caches of removed nodes go: a walk of them all, so only when something can
+    // have been removed since they were last pruned.
+    const auto state = [&] {
+        return PrunedState{&tree, tree.structure_generation(), next.records.size(),
+                           measurement_cache_.size(), arrangement_cache_.size()};
+    };
+    if (pruned_ != state()) {
+        std::erase_if(next.records, [&tree](const auto& entry) {
+            return tree.find_identity(entry.first) == nullptr;
+        });
+        std::erase_if(measurement_cache_,
+                      [&next](const auto& entry) { return !next.records.contains(entry.first); });
+        std::erase_if(arrangement_cache_,
+                      [&next](const auto& entry) { return !next.records.contains(entry.first); });
+        collection_virtualization_.retain(
+            [&next](const std::uint64_t identity) { return next.records.contains(identity); });
+        content_size_transitions_.retain(next.records);
+        pruned_ = state();
+    }
     next.maintenance_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                  std::chrono::steady_clock::now() - maintenance_started)
                                  .count();
@@ -779,6 +795,7 @@ void LayoutEngine::clear() {
     collection_virtualization_.clear();
     result_ = {};
     last_tree_ = nullptr;
+    pruned_.reset();
     last_invalidation_generation_ = 0U;
     last_environment_.reset();
     next_render_generation_ = 0U;

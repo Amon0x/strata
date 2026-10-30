@@ -432,6 +432,10 @@ std::uint64_t RetainedNode::presentation_generation() const noexcept {
 std::uint64_t RetainedNode::subtree_presentation_generation() const noexcept {
     return subtree_presentation_generation_;
 }
+bool RetainedNode::subtree_all_attached() const noexcept {
+    return subtree_all_attached_;
+}
+
 RetainedLifecycle RetainedNode::lifecycle() const noexcept {
     return lifecycle_;
 }

@@ -350,6 +350,8 @@ class RetainedNode final {
     [[nodiscard]] std::uint64_t presentation_generation() const noexcept;
     [[nodiscard]] std::uint64_t subtree_presentation_generation() const noexcept;
     [[nodiscard]] RetainedLifecycle lifecycle() const noexcept;
+    /** Whether this node and every one below it are attached: none of them is exiting. */
+    [[nodiscard]] bool subtree_all_attached() const noexcept;
     [[nodiscard]] const DirtySet& dirty() const noexcept;
     /** Exact source range currently attached by this virtual collection's local realizer. */
     [[nodiscard]] std::optional<MaterializationRange> realized_range() const noexcept;

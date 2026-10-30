@@ -576,166 +576,6 @@ void append_warmup_requests(const TextRunRenderCommand& text, const TextEngine& 
     }
 }
 
-/**
- * Each text command's group raster scale (one outside zoomed groups): the composed raster scale of
- * the innermost presentation group it is drawn in.
- */
-[[nodiscard]] std::vector<double>
-text_group_scales(const RenderCommandBuffer& commands,
-                  const std::span<const GroupRasterScale> group_scales) {
-    std::vector<double> result(commands.size(), 1.0);
-    std::vector<std::uint32_t> groups;
-    // A text run under a baked (static) scale rasterizes at that scale too, so `scale: 2` text is
-    // sharp, not a magnified bitmap, and `scale: 1.05` text is not resampled.
-    std::vector<double> baked{1.0};
-    for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
-        const RenderCommand& source = commands.commands()[index];
-        if (const auto* push = std::get_if<GroupPushRenderCommand>(&source); push != nullptr) {
-            groups.push_back(push->group);
-        } else if (std::holds_alternative<GroupPopRenderCommand>(source)) {
-            if (!groups.empty())
-                groups.pop_back();
-        } else if (const auto* transform = std::get_if<TransformPushRenderCommand>(&source);
-                   transform != nullptr) {
-            const double scale = std::max(std::hypot(transform->m00, transform->m10),
-                                          std::hypot(transform->m01, transform->m11));
-            baked.push_back(baked.back() * (std::isfinite(scale) && scale > 0.0 ? scale : 1.0));
-        } else if (std::holds_alternative<TransformPopRenderCommand>(source)) {
-            if (baked.size() > 1U)
-                baked.pop_back();
-        } else if (std::holds_alternative<TextRunRenderCommand>(source)) {
-            // A baked transform is static, so its scale is taken exactly and the run's texels land
-            // one to one; a group's is already exact at rest and stepped while it moves.
-            double scale = baked.back();
-            if (!groups.empty()) {
-                const auto found = std::ranges::lower_bound(group_scales, groups.back(), {},
-                                                            &GroupRasterScale::group);
-                if (found != group_scales.end() && found->group == groups.back())
-                    scale *= found->text;
-            }
-            result[index] = std::clamp(scale, 0.125, 8.0);
-        }
-    }
-    return result;
-}
-
-/**
- * The device pixels a logical pixel of each text run is laid out at, the display's scale times
- * any static transforms' (a group's presentation is not laid out); zero under a static transform
- * that turns or shears it, where no grid fits.
- */
-[[nodiscard]] std::vector<double> vector_text_scales(const RenderCommandBuffer& commands,
-                                                     const double display_scale) {
-    std::vector<double> result(commands.size(), 0.0);
-    std::vector<double> scales{display_scale};
-    for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
-        const RenderCommand& source = commands.commands()[index];
-        if (const auto* transform = std::get_if<TransformPushRenderCommand>(&source)) {
-            const bool upright = transform->m01 == 0.0 && transform->m10 == 0.0 &&
-                                 transform->m00 > 0.0 && transform->m11 > 0.0;
-            scales.push_back(upright ? scales.back() * transform->m11 : 0.0);
-        } else if (std::holds_alternative<TransformPopRenderCommand>(source)) {
-            if (scales.size() > 1U)
-                scales.pop_back();
-        } else if (std::holds_alternative<TextRunRenderCommand>(source)) {
-            result[index] = scales.back();
-        }
-    }
-    return result;
-}
-
-/**
- * Which text runs are in a group drawn scaled (a zoom): they rasterize without hinting, which would
- * move their stems and x-height a pixel at a time as the scale passes through sizes.
- */
-[[nodiscard]] std::vector<bool>
-zoomed_text_runs(const RenderCommandBuffer& commands,
-                 const std::span<const GroupRasterScale> group_scales) {
-    std::vector<bool> result(commands.size(), false);
-    std::vector<std::uint32_t> groups;
-    for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
-        const RenderCommand& source = commands.commands()[index];
-        if (const auto* push = std::get_if<GroupPushRenderCommand>(&source)) {
-            groups.push_back(push->group);
-        } else if (std::holds_alternative<GroupPopRenderCommand>(source)) {
-            if (!groups.empty())
-                groups.pop_back();
-        } else if (std::holds_alternative<TextRunRenderCommand>(source) && !groups.empty()) {
-            const auto found = std::ranges::lower_bound(group_scales, groups.back(), {},
-                                                        &GroupRasterScale::group);
-            result[index] = found != group_scales.end() && found->group == groups.back() &&
-                            found->text != 1.0;
-        }
-    }
-    return result;
-}
-
-/**
- * Which text runs are drawn per subpixel: coverage runs drawn straight onto the surface, where
- * each colour channel can blend over what is already there. Text into a content effect's layer
- * (translucent until composited), under an authored material, under a transform or in a group
- * that turns, shears or scales it, or rasterized at a zoomed scale stays gray: its subpixels would
- * not land on the display's.
- */
-struct SubpixelRuns final {
-    std::vector<bool> atlas;
-    /**
-     * The order vector glyphs are drawn per subpixel in, or none: they measure each subpixel
-     * where it is on the display under any transform, so only a layer composited later (an
-     * effect's, a material's) keeps them gray.
-     */
-    std::vector<font::SubpixelOrder> vector;
-};
-
-[[nodiscard]] SubpixelRuns
-subpixel_text_runs(const RenderCommandBuffer& commands, const std::span<const double> text_scales,
-                   const std::span<const std::uint32_t> turned_groups,
-                   const font::SubpixelOrder order) {
-    SubpixelRuns result{std::vector<bool>(commands.size(), false),
-                        std::vector<font::SubpixelOrder>(commands.size(),
-                                                         font::SubpixelOrder::none)};
-    if (order == font::SubpixelOrder::none)
-        return result;
-    std::size_t effects = 0U;
-    std::size_t materials = 0U;
-    std::vector<bool> transforms{false};
-    std::vector<std::uint32_t> groups;
-    for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
-        const RenderCommand& source = commands.commands()[index];
-        if (std::holds_alternative<ContentEffectPushRenderCommand>(source)) {
-            ++effects;
-        } else if (std::holds_alternative<ContentEffectPopRenderCommand>(source)) {
-            effects -= effects != 0U ? 1U : 0U;
-        } else if (std::holds_alternative<MaterialPushRenderCommand>(source)) {
-            ++materials;
-        } else if (std::holds_alternative<MaterialPopRenderCommand>(source)) {
-            materials -= materials != 0U ? 1U : 0U;
-        } else if (const auto* push = std::get_if<GroupPushRenderCommand>(&source)) {
-            groups.push_back(push->group);
-        } else if (std::holds_alternative<GroupPopRenderCommand>(source)) {
-            if (!groups.empty())
-                groups.pop_back();
-        } else if (const auto* transform = std::get_if<TransformPushRenderCommand>(&source)) {
-            const bool moves_only = transform->m00 == 1.0 && transform->m11 == 1.0 &&
-                                    transform->m01 == 0.0 && transform->m10 == 0.0;
-            transforms.push_back(transforms.back() || !moves_only);
-        } else if (std::holds_alternative<TransformPopRenderCommand>(source)) {
-            if (transforms.size() > 1U)
-                transforms.pop_back();
-        } else if (const auto* text = std::get_if<TextRunRenderCommand>(&source)) {
-            const bool turned =
-                !groups.empty() && std::ranges::binary_search(turned_groups, groups.back());
-            const bool coverage =
-                raster_mode(text->font_rasterization) == font::GlyphRasterMode::coverage;
-            result.atlas[index] = effects == 0U && materials == 0U && !transforms.back() &&
-                                  !turned && text_scales[index] == 1.0 && coverage;
-            if (effects == 0U && materials == 0U && coverage)
-                result.vector[index] = order;
-        }
-    }
-    return result;
-}
-
 bool retained_text(const std::optional<PreparedTextCacheEntry>& retained,
                    const TextRunRenderCommand& text, const TextEngine* const text_engine,
                    const std::uint64_t atlas_generation, const double display_scale,
@@ -747,64 +587,184 @@ bool retained_text(const std::optional<PreparedTextCacheEntry>& retained,
            retained->vector_subpixel == vector_subpixel && retained->vector_scale == vector_scale;
 }
 
-[[nodiscard]] std::vector<bool> visible_text_commands(
-    const RenderCommandBuffer& commands,
-    const SubmissionContext& context
-) {
-    std::vector<bool> result(commands.size(), false);
-    std::vector<Rect> clip_stack;
-    std::vector<Transform> transform_stack;
-    Rect clip{0.0, 0.0, context.logical_width, context.logical_height};
-    Transform transform;
-    // Grouped text moves on the GPU; its screen position is unknown here, so never cull it.
-    std::size_t group_depth = 0U;
-    for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
-        const RenderCommand& source = commands.commands()[index];
-        if (std::holds_alternative<GroupPushRenderCommand>(source)) {
-            ++group_depth;
-            continue;
-        }
-        if (std::holds_alternative<GroupPopRenderCommand>(source)) {
-            if (group_depth == 0U) throw std::logic_error("render group stack underflow");
-            --group_depth;
-            continue;
-        }
-        if (const auto* clip_push = std::get_if<ClipPushRenderCommand>(&source);
-            clip_push != nullptr) {
-            clip_stack.push_back(clip);
-            clip = intersect(clip, transform.bounds(clip_push->rect));
+/**
+ * Works out what the text runs from `first` to `last` see (TextContexts), starting from `scope`,
+ * the scope before `first`. False when the commands pop a scope opened before `first` or leave
+ * one open: a range walked again alone is a lone draw or a whole scope, so only a malformed
+ * stream does.
+ */
+[[nodiscard]] bool walk_text_contexts(const RenderCommandView& stream, const std::size_t first,
+                                      const std::size_t last, TextScope scope,
+                                      const std::span<const GroupRasterScale> group_scales,
+                                      const std::span<const std::uint32_t> turned_groups,
+                                      const SubmissionContext& context, TextContexts& out) {
+    struct TransformFrame final {
+        Transform transform;
+        double baked = 1.0;
+        double vector_factor = 1.0;
+        bool transformed = false;
+    };
+    std::vector<Rect> clips;
+    std::vector<TransformFrame> transforms;
+    std::vector<std::uint32_t> groups;
+    const auto group_scale = [&](const std::uint32_t group) -> const GroupRasterScale* {
+        const auto found =
+            std::ranges::lower_bound(group_scales, group, {}, &GroupRasterScale::group);
+        return found != group_scales.end() && found->group == group ? &*found : nullptr;
+    };
+    auto command = stream.begin() + static_cast<std::ptrdiff_t>(first);
+    for (std::size_t index = first; index <= last; ++index, ++command) {
+        out.scopes[index] = scope;
+        out.visible[index] = false;
+        out.scales[index] = 1.0;
+        out.vector_scales[index] = 0.0;
+        out.subpixel.atlas[index] = false;
+        out.subpixel.vector[index] = font::SubpixelOrder::none;
+        out.zoomed[index] = false;
+        const RenderCommand& source = *command;
+        if (const auto* push = std::get_if<GroupPushRenderCommand>(&source)) {
+            groups.push_back(scope.group);
+            scope.group = push->group;
+            ++scope.group_depth;
+        } else if (std::holds_alternative<GroupPopRenderCommand>(source)) {
+            if (groups.empty())
+                return false;
+            scope.group = groups.back();
+            groups.pop_back();
+            --scope.group_depth;
+        } else if (const auto* clip = std::get_if<ClipPushRenderCommand>(&source)) {
+            clips.push_back(scope.clip);
+            scope.clip = intersect(scope.clip, scope.transform.bounds(clip->rect));
         } else if (std::holds_alternative<ClipPopRenderCommand>(source)) {
-            if (clip_stack.empty()) throw std::logic_error("render clip stack underflow");
-            clip = clip_stack.back();
-            clip_stack.pop_back();
-        } else if (const auto* transform_push =
-                       std::get_if<TransformPushRenderCommand>(&source);
-                   transform_push != nullptr) {
-            transform_stack.push_back(transform);
-            transform = transform.concatenate(Transform{
-                transform_push->m00,
-                transform_push->m01,
-                transform_push->m02,
-                transform_push->m10,
-                transform_push->m11,
-                transform_push->m12,
+            if (clips.empty())
+                return false;
+            scope.clip = clips.back();
+            clips.pop_back();
+        } else if (const auto* transform = std::get_if<TransformPushRenderCommand>(&source)) {
+            transforms.push_back(TransformFrame{scope.transform, scope.baked,
+                                                scope.vector_factor, scope.transformed});
+            scope.transform = scope.transform.concatenate(Transform{
+                transform->m00,
+                transform->m01,
+                transform->m02,
+                transform->m10,
+                transform->m11,
+                transform->m12,
             });
+            // A text run under a baked (static) scale rasterizes at that scale too, so `scale: 2`
+            // text is sharp, not a magnified bitmap, and `scale: 1.05` text is not resampled.
+            const double scale = std::max(std::hypot(transform->m00, transform->m10),
+                                          std::hypot(transform->m01, transform->m11));
+            scope.baked *= std::isfinite(scale) && scale > 0.0 ? scale : 1.0;
+            // Vector glyphs lay out on the display's grid, which a turned or sheared run has none
+            // of.
+            const bool upright = transform->m01 == 0.0 && transform->m10 == 0.0 &&
+                                 transform->m00 > 0.0 && transform->m11 > 0.0;
+            scope.vector_factor = upright ? scope.vector_factor * transform->m11 : 0.0;
+            const bool moves_only = transform->m00 == 1.0 && transform->m11 == 1.0 &&
+                                    transform->m01 == 0.0 && transform->m10 == 0.0;
+            scope.transformed = scope.transformed || !moves_only;
         } else if (std::holds_alternative<TransformPopRenderCommand>(source)) {
-            if (transform_stack.empty()) {
-                throw std::logic_error("render transform stack underflow");
+            if (transforms.empty())
+                return false;
+            scope.transform = transforms.back().transform;
+            scope.baked = transforms.back().baked;
+            scope.vector_factor = transforms.back().vector_factor;
+            scope.transformed = transforms.back().transformed;
+            transforms.pop_back();
+        } else if (std::holds_alternative<ContentEffectPushRenderCommand>(source)) {
+            ++scope.effects;
+        } else if (std::holds_alternative<ContentEffectPopRenderCommand>(source)) {
+            scope.effects -= scope.effects != 0U ? 1U : 0U;
+        } else if (std::holds_alternative<MaterialPushRenderCommand>(source)) {
+            ++scope.materials;
+        } else if (std::holds_alternative<MaterialPopRenderCommand>(source)) {
+            scope.materials -= scope.materials != 0U ? 1U : 0U;
+        } else if (const auto* text = std::get_if<TextRunRenderCommand>(&source)) {
+            const bool grouped = scope.group_depth != 0U;
+            // Grouped text moves on the GPU; its screen position is unknown here, so never cull
+            // it.
+            out.visible[index] =
+                grouped || !text->cull_bounds.has_value() ||
+                !intersect(scope.clip, scope.transform.bounds(*text->cull_bounds)).empty();
+            // A baked transform is static, so its scale is taken exactly and the run's texels
+            // land one to one; a group's is already exact at rest and stepped while it moves.
+            const GroupRasterScale* zoom = grouped ? group_scale(scope.group) : nullptr;
+            const double scale =
+                std::clamp(scope.baked * (zoom != nullptr ? zoom->text : 1.0), 0.125, 8.0);
+            out.scales[index] = scale;
+            out.vector_scales[index] = context.scale * scope.vector_factor;
+            // In a group drawn scaled, text rasterizes without hinting, which would move its
+            // stems and x-height a pixel at a time as the scale passes through sizes.
+            out.zoomed[index] = zoom != nullptr && zoom->text != 1.0;
+            if (context.text_subpixel != font::SubpixelOrder::none) {
+                const bool turned =
+                    grouped && std::ranges::binary_search(turned_groups, scope.group);
+                const bool coverage =
+                    raster_mode(text->font_rasterization) == font::GlyphRasterMode::coverage;
+                const bool flat = scope.effects == 0U && scope.materials == 0U && coverage;
+                out.subpixel.atlas[index] = flat && !scope.transformed && !turned && scale == 1.0;
+                if (flat)
+                    out.subpixel.vector[index] = context.text_subpixel;
             }
-            transform = transform_stack.back();
-            transform_stack.pop_back();
-        } else if (const auto* text = std::get_if<TextRunRenderCommand>(&source);
-                   text != nullptr) {
-            result[index] = group_depth != 0U || !text->cull_bounds.has_value() ||
-                !intersect(clip, transform.bounds(*text->cull_bounds)).empty();
         }
     }
-    if (!clip_stack.empty() || !transform_stack.empty()) {
+    return clips.empty() && transforms.empty() && groups.empty();
+}
+
+/** What every text run of `commands` sees, worked out from the start. */
+void plan_text_contexts(const RenderCommandBuffer& commands, const SubmissionContext& context,
+                        PreparationCache& cache) {
+    TextContexts& out = cache.text_contexts;
+    const std::size_t size = commands.size();
+    out.visible.assign(size, false);
+    out.scales.assign(size, 1.0);
+    out.vector_scales.assign(size, 0.0);
+    out.subpixel.atlas.assign(size, false);
+    out.subpixel.vector.assign(size, font::SubpixelOrder::none);
+    out.zoomed.assign(size, false);
+    out.scopes.resize(size);
+    out.logical_width = context.logical_width;
+    out.logical_height = context.logical_height;
+    out.display_scale = context.scale;
+    out.order = context.text_subpixel;
+    out.valid = false;
+    TextScope root;
+    root.clip = Rect{0.0, 0.0, context.logical_width, context.logical_height};
+    if (size != 0U && !walk_text_contexts(commands.commands(), 0U, size - 1U, root,
+                                          cache.group_raster_scales, cache.turned_groups, context,
+                                          out)) {
         throw std::logic_error("render command state stacks are unbalanced");
     }
-    return result;
+    out.valid = true;
+}
+
+/**
+ * What the text runs of `ranges` see now, the rest as planned: each range is walked again from
+ * the scope before it. The whole stream is worked out again when the plan's contexts are for
+ * another surface or a range does not close what it opens.
+ */
+void update_text_contexts(const RenderCommandBuffer& commands,
+                          const std::span<const CommandRange> ranges,
+                          const SubmissionContext& context, PreparationCache& cache) {
+    TextContexts& contexts = cache.text_contexts;
+    const bool current = contexts.valid && contexts.scopes.size() == commands.size() &&
+                         contexts.logical_width == context.logical_width &&
+                         contexts.logical_height == context.logical_height &&
+                         contexts.display_scale == context.scale &&
+                         contexts.order == context.text_subpixel;
+    if (!current) {
+        plan_text_contexts(commands, context, cache);
+        return;
+    }
+    for (const CommandRange& range : ranges) {
+        if (!walk_text_contexts(commands.commands(), range.first, range.last,
+                                contexts.scopes[range.first], cache.group_raster_scales,
+                                cache.turned_groups, context, contexts)) {
+            plan_text_contexts(commands, context, cache);
+            return;
+        }
+    }
 }
 
 void append_draw(
@@ -2851,12 +2811,12 @@ std::vector<PlannedItem> plan(
     // current command buffer contains no text. Truly no-font submissions do not touch the atlas.
     if (text_engine != nullptr) glyph_atlas.adopt_display_scale(context.scale);
     align_text_cache(commands, cache);
-    const std::vector<bool> visible_text = visible_text_commands(commands, context);
-    const std::vector<double> text_scales = text_group_scales(commands, cache.group_raster_scales);
-    const std::vector<double> vector_scales = vector_text_scales(commands, context.scale);
-    const SubpixelRuns subpixel_runs =
-        subpixel_text_runs(commands, text_scales, cache.turned_groups, context.text_subpixel);
-    const std::vector<bool> zoomed_runs = zoomed_text_runs(commands, cache.group_raster_scales);
+    plan_text_contexts(commands, context, cache);
+    const std::vector<bool>& visible_text = cache.text_contexts.visible;
+    const std::vector<double>& text_scales = cache.text_contexts.scales;
+    const std::vector<double>& vector_scales = cache.text_contexts.vector_scales;
+    const SubpixelRuns& subpixel_runs = cache.text_contexts.subpixel;
+    const std::vector<bool>& zoomed_runs = cache.text_contexts.zoomed;
     // A run drawn before whose glyphs only want another raster scale may wait on the frame's
     // raster budget: until it is rasterized again it draws its last preparation, resampled.
     std::vector<std::size_t> rescaled;
@@ -3051,28 +3011,14 @@ std::optional<std::vector<std::size_t>> replan_ranges(
 ) {
     resized = false;
     const RenderCommandView& stream = commands.commands();
-    // What the stream's text sees (visibility, scales, subpixel and zoomed runs) is worked out by
-    // walking the whole stream: only when a changed range holds text, which is all it is for.
-    bool ranges_hold_text = false;
-    for (const CommandRange& range : ranges) {
-        for (std::size_t index = range.first; index <= range.last && !ranges_hold_text; ++index)
-            ranges_hold_text = std::holds_alternative<TextRunRenderCommand>(stream[index]);
-    }
-    const std::vector<bool> visible_text = ranges_hold_text
-                                               ? visible_text_commands(commands, context)
-                                               : std::vector<bool>(stream.size(), false);
-    const std::vector<double> text_scales =
-        ranges_hold_text ? text_group_scales(commands, cache.group_raster_scales)
-                         : std::vector<double>{};
-    const std::vector<double> vector_scales =
-        ranges_hold_text ? vector_text_scales(commands, context.scale) : std::vector<double>{};
-    const SubpixelRuns subpixel_runs =
-        ranges_hold_text
-            ? subpixel_text_runs(commands, text_scales, cache.turned_groups, context.text_subpixel)
-            : SubpixelRuns{};
-    const std::vector<bool> zoomed_runs = ranges_hold_text
-                                              ? zoomed_text_runs(commands, cache.group_raster_scales)
-                                              : std::vector<bool>{};
+    // What the ranges' text sees (visibility, scales, subpixel and zoomed runs), worked out for
+    // the ranges alone: nothing outside them sees anything new.
+    update_text_contexts(commands, ranges, context, cache);
+    const std::vector<bool>& visible_text = cache.text_contexts.visible;
+    const std::vector<double>& text_scales = cache.text_contexts.scales;
+    const std::vector<double>& vector_scales = cache.text_contexts.vector_scales;
+    const SubpixelRuns& subpixel_runs = cache.text_contexts.subpixel;
+    const std::vector<bool>& zoomed_runs = cache.text_contexts.zoomed;
     // Text in the ranges is prepared as the full plan would: a run keeps its prepared glyphs
     // while its content does, and a hidden run drops them. Entries are exact for their content,
     // so they stand even when this update gives way to a full plan.

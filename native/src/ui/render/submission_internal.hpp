@@ -213,6 +213,62 @@ struct EncodedDrawPlacement final {
  * The planner state before a command: enough to plan a balanced range of commands from it again.
  * Clip lists and material overrides are shared between the commands that see the same ones.
  */
+/**
+ * What a command sees of the stack commands before it, as far as text cares: the clip and
+ * transform it is drawn under, its innermost group and how deep in groups, the scales static
+ * transforms bake (and lay vector text out at, zero once one turns it), whether a transform does
+ * more than move it, and how deep it is in content effects and materials.
+ */
+struct TextScope final {
+    Rect clip;
+    Transform transform;
+    std::uint32_t group = 0U;
+    std::size_t group_depth = 0U;
+    double baked = 1.0;
+    double vector_factor = 1.0;
+    bool transformed = false;
+    std::size_t effects = 0U;
+    std::size_t materials = 0U;
+};
+
+/**
+ * Which text runs are drawn per subpixel: coverage runs drawn straight onto the surface, where
+ * each colour channel can blend over what is already there. Text into a content effect's layer
+ * (translucent until composited), under an authored material, under a transform or in a group
+ * that turns, shears or scales it, or rasterized at a zoomed scale stays gray: its subpixels would
+ * not land on the display's.
+ */
+struct SubpixelRuns final {
+    std::vector<bool> atlas;
+    /**
+     * The order vector glyphs are drawn per subpixel in, or none: they measure each subpixel
+     * where it is on the display under any transform, so only a layer composited later (an
+     * effect's, a material's) keeps them gray.
+     */
+    std::vector<font::SubpixelOrder> vector;
+};
+
+/**
+ * What each text run of the planned stream sees, by command index: whether it shows, the scale it
+ * rasterizes at, the scale vector glyphs lay it out at, whether it is drawn per subpixel, and
+ * whether it is zoomed. With each command's scope, so a changed range is worked out again alone:
+ * a range is a lone draw or a whole scope, so nothing outside it sees anything new.
+ */
+struct TextContexts final {
+    std::vector<bool> visible;
+    std::vector<double> scales;
+    std::vector<double> vector_scales;
+    SubpixelRuns subpixel;
+    std::vector<bool> zoomed;
+    std::vector<TextScope> scopes;
+    /** The surface they were worked out for. */
+    double logical_width = 0.0;
+    double logical_height = 0.0;
+    double display_scale = 0.0;
+    font::SubpixelOrder order = font::SubpixelOrder::none;
+    bool valid = false;
+};
+
 struct PlannerState final {
     Transform transform;
     Rect clip;
@@ -282,6 +338,7 @@ struct PreparationCache final {
     /** Groups presented turned, sheared or scaled (ordered): text in them stays gray. */
     std::vector<std::uint32_t> turned_groups;
     font::SubpixelOrder text_subpixel = font::SubpixelOrder::none;
+    TextContexts text_contexts;
     std::uint64_t planned_shape_generation = 0U;
     bool plan_current = false;
     /**
@@ -310,6 +367,7 @@ struct PreparationCache final {
         planned_shape_generation = 0U;
         shape_tile_classes.clear();
         volatile_shapes.clear();
+        text_contexts = TextContexts{};
         plan_current = false;
     }
 };
