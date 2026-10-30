@@ -695,6 +695,34 @@ class ExpressionRuntime final {
                                        std::size_t position, DependencyRecorder& reads);
     [[nodiscard]] Value evaluate_lambda(const LambdaValue& lambda, const Value& input,
                                         DependencyRecorder& upstream);
+    /**
+     * One item function applied to many items (a filter, a find, a map). The frame binding its
+     * parameters is made once and each item bound into it in place, unless something the last
+     * call made (a closure) still holds the frame; a function that is not a plain item function
+     * is evaluated as evaluate_lambda does.
+     */
+    class ItemCall final {
+      public:
+        ItemCall(ExpressionRuntime& runtime, const std::shared_ptr<const LambdaValue>* lambda,
+                 DependencyRecorder& upstream);
+        ItemCall(const ItemCall&) = delete;
+        ItemCall& operator=(const ItemCall&) = delete;
+        /** The function's value for `item` (and `second`, its next parameter); null when none. */
+        [[nodiscard]] Value operator()(const Value& item, const Value* second = nullptr);
+        [[nodiscard]] bool present() const noexcept { return lambda_ != nullptr; }
+        /** A plain item function, bound in place; else each call goes through evaluate_lambda. */
+        [[nodiscard]] bool fast() const noexcept { return fast_; }
+
+      private:
+        ExpressionRuntime& runtime_;
+        const LambdaValue* lambda_ = nullptr;
+        DependencyRecorder& upstream_;
+        /** The body's reads, its parameters hidden: the items are not what the caller read. */
+        DependencyRecorder reads_;
+        bool fast_ = false;
+        ExpressionScope scope_;
+        std::shared_ptr<ScopeFrame> frame_;
+    };
     /** A helper of StrataScript's library, by name (library.cpp). */
     [[nodiscard]] ExpressionValue evaluate_library(const Program& program,
                                                    const ProgramExpression& node,
@@ -784,6 +812,8 @@ class ExpressionRuntime final {
      * call gives the same value, so a rebuild reuses it instead of running the function again.
      */
     struct MemoizedCall final {
+        /** The owner and arguments hashed: a call whose hash differs is not compared further. */
+        std::size_t key = 0U;
         std::string owner;
         std::vector<ExpressionValue> positional;
         std::vector<std::pair<Symbol, ExpressionValue>> named;
@@ -791,8 +821,17 @@ class ExpressionRuntime final {
         DependencyRecorder::HostReads host;
         ExpressionValue result;
     };
-    std::unordered_map<ProgramNodeKey, std::vector<MemoizedCall>, ProgramNodeKeyHash>
-        memoized_calls_;
+    /**
+     * A function's kept calls, in a ring, and how it has fared: a function whose calls keep
+     * missing (it reads something that changes every time) stops paying to keep them for a while.
+     */
+    struct MemoTable final {
+        std::vector<MemoizedCall> calls;
+        std::size_t next = 0U;
+        std::uint32_t misses = 0U;
+        std::uint32_t bypassed = 0U;
+    };
+    std::unordered_map<ProgramNodeKey, MemoTable, ProgramNodeKeyHash> memoized_calls_;
     std::unordered_map<ProgramNodeKey, ExpressionValue, ProgramNodeKeyHash> constant_values_;
     /** Whether a declared function's value never changes: see constant_functions_. */
     [[nodiscard]] bool constant_function(const LambdaValue& function);

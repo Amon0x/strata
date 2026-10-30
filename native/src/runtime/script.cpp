@@ -777,10 +777,9 @@ ExpressionValue ExpressionRuntime::invoke(const LambdaValue& function,
             return known->second;
     }
     const ProgramFunction& declaration = function.declaration();
-    // A function with statements, called outside a handler, gives the same value while what it
-    // reads is unchanged: a rebuild reuses its last value instead of running it again.
-    if (!constant && active_run_ == nullptr && declaration.block != no_program_id &&
-        !declaration.asynchronous) {
+    // A function called outside a handler gives the same value while what it reads is unchanged:
+    // a rebuild reuses its last value instead of running it again.
+    if (!constant && active_run_ == nullptr && !declaration.asynchronous) {
         return memoized(function, std::move(positional), std::move(named), reads);
     }
     ExpressionValue value = invoke_once(function, std::move(positional), std::move(named), reads);
@@ -791,6 +790,41 @@ ExpressionValue ExpressionRuntime::invoke(const LambdaValue& function,
     return value;
 }
 
+namespace {
+
+/**
+ * A hash of a value that equal values share when they are the same object: scalars and text by
+ * content, lists, records and functions by identity. Two equal composites made apart hash apart,
+ * which only costs a memoized call its reuse.
+ */
+[[nodiscard]] std::size_t shallow_hash(const ExpressionValue& value) noexcept {
+    const auto mix = [](const std::size_t seed, const std::size_t part) {
+        return seed ^ (part + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U));
+    };
+    if (const auto* lambda = value.lambda())
+        return mix(1U, std::hash<const void*>{}(lambda->get()));
+    if (const auto* list = value.list())
+        return mix(2U, std::hash<const void*>{}(list->get()));
+    if (const auto* object = value.object())
+        return mix(3U, std::hash<const void*>{}(object->get()));
+    const Value* data = value.value();
+    if (data == nullptr)
+        return 4U;
+    if (const double* number = data->number())
+        return mix(5U, std::hash<double>{}(*number));
+    if (const std::string* text = data->string())
+        return mix(6U, std::hash<std::string_view>{}(*text));
+    if (const bool* flag = data->boolean())
+        return mix(7U, *flag ? 1U : 0U);
+    if (const ValueList* items = data->list())
+        return mix(8U, std::hash<const void*>{}(items));
+    if (const ValueObject* record = data->object())
+        return mix(9U, std::hash<const void*>{}(record));
+    return 10U;
+}
+
+} // namespace
+
 ExpressionValue ExpressionRuntime::memoized(const LambdaValue& function,
                                             std::vector<ExpressionValue> positional,
                                             std::vector<std::pair<Symbol, ExpressionValue>> named,
@@ -798,10 +832,24 @@ ExpressionValue ExpressionRuntime::memoized(const LambdaValue& function,
     const ExpressionScope& closure =
         function.group != nullptr ? function.group->scope : function.captured;
     const std::string& owner = closure.component_path();
-    std::vector<MemoizedCall>& calls =
+    MemoTable& table =
         memoized_calls_[ProgramNodeKey{function.program->serial(), function.function}];
+    // A function that missed every time lately is run directly for a while, then tried again.
+    constexpr std::uint32_t missing_streak = 32U;
+    constexpr std::uint32_t bypass_calls = 256U;
+    if (table.bypassed != 0U) {
+        --table.bypassed;
+        return invoke_once(function, std::move(positional), std::move(named), reads);
+    }
+    std::vector<MemoizedCall>& calls = table.calls;
+    std::size_t key = std::hash<std::string_view>{}(owner);
+    for (const ExpressionValue& argument : positional)
+        key = key * 31U + shallow_hash(argument);
+    for (const auto& [name, argument] : named)
+        key = key * 31U + (std::hash<std::string_view>{}(name.name()) ^ shallow_hash(argument));
     const auto same_arguments = [&](const MemoizedCall& call) {
-        return call.owner == owner && call.positional.size() == positional.size() &&
+        return call.key == key && call.owner == owner &&
+               call.positional.size() == positional.size() &&
                call.named.size() == named.size() &&
                std::ranges::equal(call.positional, positional, same_expression_value) &&
                std::ranges::equal(call.named, named, [](const auto& left, const auto& right) {
@@ -831,23 +879,35 @@ ExpressionValue ExpressionRuntime::memoized(const LambdaValue& function,
             static_cast<void>(path);
             reads.host(read);
         }
+        table.misses = 0U;
         return call->result;
+    }
+    if (++table.misses >= missing_streak) {
+        table.misses = 0U;
+        table.bypassed = bypass_calls;
+        table.calls.clear();
+        table.next = 0U;
+        return invoke_once(function, std::move(positional), std::move(named), reads);
     }
     // The function's own parameters and locals are not what it depends on.
     DependencyRecorder recorded(&reads, DependencyRecorder::Keep::first,
                                 DependencyRecorder::Keep::first);
     for (const Symbol name : function.program->declared(function.declaration()))
         recorded.hide(name);
-    MemoizedCall call{owner, positional, named, {}, {}, {}};
+    MemoizedCall call{key, owner, positional, named, {}, {}, {}};
     call.result = invoke_once(function, std::move(positional), std::move(named), recorded);
     call.lexical = std::move(recorded.lexical_reads());
     call.host = std::move(recorded.host_reads());
-    // A few calls per function and owner are kept, the newest last.
+    // A few calls per function are kept, the oldest replaced first.
     constexpr std::size_t kept_calls = 64U;
-    if (calls.size() >= kept_calls)
-        calls.erase(calls.begin());
-    calls.push_back(std::move(call));
-    return calls.back().result;
+    if (calls.size() < kept_calls) {
+        calls.push_back(std::move(call));
+        return calls.back().result;
+    }
+    MemoizedCall& replaced = calls[table.next];
+    table.next = (table.next + 1U) % kept_calls;
+    replaced = std::move(call);
+    return replaced.result;
 }
 
 ExpressionValue ExpressionRuntime::invoke_once(

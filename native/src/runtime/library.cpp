@@ -142,6 +142,15 @@ ExpressionValue ExpressionRuntime::evaluate_library(const Program& program,
         const ValueList* list = items(0U);
         if (list == nullptr)
             return fail("needs a list.");
+        // A plain item function binds each item (and its index) in place.
+        if (ItemCall predicate(*this, arguments[1].lambda(), reads); predicate.fast()) {
+            for (std::size_t index = 0U; index < list->values.size(); ++index) {
+                const Value at(static_cast<double>(index));
+                if (truthy(predicate(list->values[index], &at)))
+                    return ExpressionValue(Value(static_cast<double>(index)));
+            }
+            return ExpressionValue(Value(-1.0));
+        }
         for (std::size_t index = 0U; index < list->values.size(); ++index) {
             if (truthy(data(call(1U, {ExpressionValue(list->values[index]),
                                       ExpressionValue(Value(static_cast<double>(index)))})))) {

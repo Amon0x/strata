@@ -1763,10 +1763,10 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
             predicate_argument != nullptr
                 ? evaluate_node(program, predicate_argument->value, scope, reads)
                 : ExpressionValue{};
-        const auto* predicate = predicate_value.lambda();
+        ItemCall predicate(*this, predicate_value.lambda(), reads);
         std::size_t matches = 0U;
         for (const Value& item : items->values) {
-            if (predicate == nullptr || truthy(evaluate_lambda(**predicate, item, reads)))
+            if (!predicate.present() || truthy(predicate(item)))
                 ++matches;
             if (helper == HelperKind::any && matches != 0U)
                 break;
@@ -2171,18 +2171,17 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
             function_argument != nullptr
                 ? evaluate_node(program, function_argument->value, scope, reads)
                 : ExpressionValue{};
-        const auto* function = function_value.lambda();
+        ItemCall function(*this, function_value.lambda(), reads);
         if (node.helper == HelperKind::find) {
             for (const Value& item : items->values) {
-                if (function != nullptr && truthy(evaluate_lambda(**function, item, reads)))
+                if (function.present() && truthy(function(item)))
                     return ExpressionValue(item);
             }
             return ExpressionValue(Value{});
         }
         double total = 0.0;
         for (const Value& item : items->values) {
-            const Value selected =
-                function != nullptr ? evaluate_lambda(**function, item, reads) : item;
+            const Value selected = function.present() ? function(item) : item;
             if (selected.number() != nullptr && std::isfinite(*selected.number()))
                 total += *selected.number();
         }
@@ -2342,6 +2341,60 @@ Value ExpressionRuntime::require_value(const ExpressionValue& evaluated,
     report(node, scope, "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
            "Expression did not produce a scalar runtime value.");
     return Value{};
+}
+
+ExpressionRuntime::ItemCall::ItemCall(ExpressionRuntime& runtime,
+                                      const std::shared_ptr<const LambdaValue>* const lambda,
+                                      DependencyRecorder& upstream)
+    : runtime_(runtime), lambda_(lambda != nullptr ? lambda->get() : nullptr), upstream_(upstream),
+      reads_(&upstream, DependencyRecorder::Keep::none, DependencyRecorder::Keep::none) {
+    if (lambda_ == nullptr)
+        return;
+    const ProgramFunction& function = lambda_->declaration();
+    const std::span<const ProgramFunctionParameter> parameters =
+        lambda_->program->parameters(function);
+    fast_ = function.body != no_program_id && lambda_->group == nullptr && !parameters.empty() &&
+            std::ranges::all_of(parameters, [](const ProgramFunctionParameter& parameter) {
+                return parameter.default_value == no_program_id;
+            });
+    if (!fast_)
+        return;
+    scope_ = lambda_->captured;
+    frame_ = std::make_shared<ScopeFrame>();
+    frame_->parent = scope_.frame();
+    frame_->hides_parent_states = !function.script;
+    frame_->bindings.reserve(parameters.size());
+    for (const ProgramFunctionParameter& parameter : parameters) {
+        frame_->bindings.push_back(ScopeBinding{
+            parameter.name, true,
+            function.script ? ScopeStateBinding::cleared : ScopeStateBinding::inherit,
+            ExpressionValue{}, nullptr});
+        reads_.hide(parameter.name);
+    }
+    scope_.set_frame(frame_);
+    if (!function.script) {
+        scope_.set_component_path(lambda_->captured.component_path() + "/" +
+                                  std::string(parameters.front().name.name()));
+    }
+}
+
+Value ExpressionRuntime::ItemCall::operator()(const Value& item, const Value* const second) {
+    if (lambda_ == nullptr)
+        return Value{};
+    if (!fast_)
+        return runtime_.evaluate_lambda(*lambda_, item, upstream_);
+    // A closure made by the last call holds the frame: the next item gets a frame of its own.
+    if (frame_.use_count() > 2) {
+        frame_ = std::make_shared<ScopeFrame>(*frame_);
+        scope_.set_frame(frame_);
+    }
+    frame_->bindings.front().value = ExpressionValue(item);
+    if (second != nullptr && frame_->bindings.size() > 1U)
+        frame_->bindings[1].value = ExpressionValue(*second);
+    const Program& program = *lambda_->program;
+    const ExpressionId body = lambda_->declaration().body;
+    return runtime_.require_value(runtime_.evaluate_node(program, body, scope_, reads_),
+                                  program.expression(body), scope_);
 }
 
 Value ExpressionRuntime::evaluate_lambda(const LambdaValue& lambda, const Value& input,
@@ -2582,21 +2635,19 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
     const ExpressionValue lambda_value =
         lambda_argument != nullptr ? evaluate_node(program, lambda_argument->value, scope, reads)
                                    : ExpressionValue{};
-    const auto* lambda_pointer = lambda_value.lambda();
+    ItemCall call(*this, lambda_value.lambda(), reads);
+    const bool has_lambda = call.present();
 
     std::vector<Value> result;
     if (kind == HelperKind::filter) {
         for (const Value& value : source_items->values) {
-            if (lambda_pointer != nullptr &&
-                truthy(evaluate_lambda(**lambda_pointer, value, reads)))
+            if (has_lambda && truthy(call(value)))
                 result.push_back(value);
         }
     } else if (kind == HelperKind::map) {
         result.reserve(source_items->values.size());
         for (const Value& value : source_items->values) {
-            result.push_back(lambda_pointer != nullptr
-                                 ? evaluate_lambda(**lambda_pointer, value, reads)
-                                 : Value{});
+            result.push_back(has_lambda ? call(value) : Value{});
         }
     } else if (kind == HelperKind::sort_by) {
         const bool descending = !scalar_arguments.empty() &&
@@ -2605,9 +2656,7 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
         std::vector<std::pair<Value, Value>> decorated;
         decorated.reserve(source_items->values.size());
         for (const Value& value : source_items->values) {
-            decorated.emplace_back(value, lambda_pointer != nullptr
-                                              ? evaluate_lambda(**lambda_pointer, value, reads)
-                                              : Value{});
+            decorated.emplace_back(value, has_lambda ? call(value) : Value{});
         }
         std::stable_sort(decorated.begin(), decorated.end(),
                          [descending](const auto& left, const auto& right) {
@@ -2622,8 +2671,7 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
     } else if (kind == HelperKind::distinct_by) {
         std::vector<Value> seen;
         for (const Value& value : source_items->values) {
-            const Value distinct =
-                lambda_pointer != nullptr ? evaluate_lambda(**lambda_pointer, value, reads) : value;
+            const Value distinct = has_lambda ? call(value) : value;
             if (std::ranges::find(seen, distinct) == seen.end()) {
                 seen.push_back(distinct);
                 result.push_back(value);
@@ -2632,9 +2680,7 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
     } else if (kind == HelperKind::group_by) {
         std::vector<std::pair<Value, std::vector<Value>>> groups;
         for (const Value& value : source_items->values) {
-            const Value group_key = lambda_pointer != nullptr
-                                        ? evaluate_lambda(**lambda_pointer, value, reads)
-                                        : Value{};
+            const Value group_key = has_lambda ? call(value) : Value{};
             auto found = std::ranges::find_if(
                 groups, [&group_key](const auto& group) { return group.first == group_key; });
             if (found == groups.end()) {
@@ -2656,8 +2702,7 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
         }
     } else if (kind == HelperKind::take_while) {
         for (const Value& value : source_items->values) {
-            if (lambda_pointer == nullptr ||
-                !truthy(evaluate_lambda(**lambda_pointer, value, reads)))
+            if (!has_lambda || !truthy(call(value)))
                 break;
             result.push_back(value);
         }
