@@ -14,6 +14,8 @@ namespace {
 constexpr std::uint32_t maximum_bands = 32U;
 /** Segments a band holds on average when a glyph is split into bands. */
 constexpr std::size_t segments_per_band = 6U;
+/** The most pixel rows a fitted glyph is split into bands along (larger ones band as any). */
+constexpr std::uint32_t maximum_row_bands = 256U;
 
 void flatten(const GlyphSegment& segment, const double tolerance,
              std::vector<VectorSegment>& segments) {
@@ -50,37 +52,63 @@ void flatten(const GlyphSegment& segment, const double tolerance,
     }
 }
 
-/** Splits the glyph's height into bands of equal height, each holding the segments it meets. */
-void assign_bands(VectorGlyph& glyph) {
+/**
+ * Splits the glyph's height into bands of equal height (`count` of them, or as many as its
+ * segments call for), each holding the parts of the sloped segments within its heights. A
+ * segment crossing bands is cut where they meet, at one point both pieces share, so its pieces
+ * add up to it exactly.
+ */
+void assign_bands(VectorGlyph& glyph, const std::uint32_t count = 0U) {
     glyph.band_offsets.clear();
-    glyph.band_segments.clear();
+    glyph.band_pieces.clear();
     const auto sloped = static_cast<std::size_t>(
         std::count_if(glyph.segments.begin(), glyph.segments.end(),
                       [](const VectorSegment& segment) { return segment.y0 != segment.y1; }));
-    const auto bands = static_cast<std::uint32_t>(
-        std::clamp<std::size_t>(sloped / segments_per_band, 1U, maximum_bands));
-    const double height = static_cast<double>(glyph.top) - static_cast<double>(glyph.bottom);
+    const auto bands = count > 0U ? count
+                                  : static_cast<std::uint32_t>(std::clamp<std::size_t>(
+                                        sloped / segments_per_band, 1U, maximum_bands));
+    const double bottom = glyph.bottom;
+    const double height = static_cast<double>(glyph.top) - bottom;
     const double band_height = height > 0.0 ? height / static_cast<double>(bands) : 1.0;
-    std::vector<std::vector<std::uint32_t>> members(bands);
-    for (std::uint32_t index = 0U; index < glyph.segments.size(); ++index) {
-        const VectorSegment& segment = glyph.segments[index];
+    const auto band_of = [&](const double y) {
+        return static_cast<std::uint32_t>(std::clamp(std::floor((y - bottom) / band_height), 0.0,
+                                                     static_cast<double>(bands - 1U)));
+    };
+    std::vector<std::vector<VectorSegment>> members(bands);
+    for (const VectorSegment& segment : glyph.segments) {
         // A horizontal segment covers no area in a band; it serves only a turned glyph.
         if (segment.y0 == segment.y1)
             continue;
-        const double low = std::min(segment.y0, segment.y1) - static_cast<double>(glyph.bottom);
-        const double high = std::max(segment.y0, segment.y1) - static_cast<double>(glyph.bottom);
-        const auto first = static_cast<std::uint32_t>(
-            std::clamp(std::floor(low / band_height), 0.0, static_cast<double>(bands - 1U)));
-        const auto last = static_cast<std::uint32_t>(
-            std::clamp(std::floor(high / band_height), 0.0, static_cast<double>(bands - 1U)));
-        for (std::uint32_t band = first; band <= last; ++band)
-            members[band].push_back(index);
+        const bool upward = segment.y1 > segment.y0;
+        const std::uint32_t from = band_of(segment.y0);
+        const std::uint32_t to = band_of(segment.y1);
+        float x = segment.x0;
+        float y = segment.y0;
+        // Walk the bands in the segment's own direction, cutting where each pair meets.
+        for (std::uint32_t band = from;; band = upward ? band + 1U : band - 1U) {
+            float next_x = segment.x1;
+            float next_y = segment.y1;
+            if (band != to) {
+                const double boundary = bottom + band_height * (upward ? band + 1U : band);
+                next_x = static_cast<float>(segment.x0 +
+                                            (boundary - segment.y0) *
+                                                (static_cast<double>(segment.x1) - segment.x0) /
+                                                (static_cast<double>(segment.y1) - segment.y0));
+                next_y = static_cast<float>(boundary);
+            }
+            if (next_y != y)
+                members[band].push_back(VectorSegment{x, y, next_x, next_y});
+            x = next_x;
+            y = next_y;
+            if (band == to)
+                break;
+        }
     }
     glyph.band_offsets.reserve(bands + 1U);
     glyph.band_offsets.push_back(0U);
-    for (const std::vector<std::uint32_t>& band : members) {
-        glyph.band_segments.insert(glyph.band_segments.end(), band.begin(), band.end());
-        glyph.band_offsets.push_back(static_cast<std::uint32_t>(glyph.band_segments.size()));
+    for (const std::vector<VectorSegment>& band : members) {
+        glyph.band_pieces.insert(glyph.band_pieces.end(), band.begin(), band.end());
+        glyph.band_offsets.push_back(static_cast<std::uint32_t>(glyph.band_pieces.size()));
     }
 }
 
@@ -152,12 +180,29 @@ band_range(const VectorGlyph& glyph, const double font_low, const double font_hi
 }
 
 /**
- * The signed area of the outline in the device column [x0, x0 + width] x [low, high], each band
- * contributing only within its own heights, so a segment in several bands is counted once.
+ * The signed area of the outline in the device column [x0, x0 + width] x [low, high], from the
+ * pieces of the bands those heights meet.
  */
 [[nodiscard]] double column_area_between(const VectorGlyph& glyph, const VectorPlacement& placement,
                                          const double x0, const double width, const double row_low,
-                                         const double row_high);
+                                         const double row_high) {
+    const double font_low = (row_low - placement.pen_y) / placement.scale;
+    const double font_high = (row_high - placement.pen_y) / placement.scale;
+    const auto [first, last] = band_range(glyph, font_low, font_high);
+    double area = 0.0;
+    for (std::uint32_t band = first; band < last; ++band) {
+        for (std::uint32_t index = glyph.band_offsets[band]; index < glyph.band_offsets[band + 1U];
+             ++index) {
+            const VectorSegment& piece = glyph.band_pieces[index];
+            area += host::vector_segment_area(placement.pen_x + piece.x0 * placement.scale,
+                                              placement.pen_y + piece.y0 * placement.scale,
+                                              placement.pen_x + piece.x1 * placement.scale,
+                                              placement.pen_y + piece.y1 * placement.scale, x0,
+                                              width, row_low, row_high);
+        }
+    }
+    return area;
+}
 
 /**
  * The coverage of the device column [x0, x0 + width] x [y, y + 1]: the area of the outline within
@@ -167,52 +212,6 @@ band_range(const VectorGlyph& glyph, const double font_low, const double font_hi
                                      const double x0, const double width, const double y) {
     return std::min(std::abs(column_area_between(glyph, placement, x0, width, y, y + 1.0)) / width,
                     1.0);
-}
-
-double column_area_between(const VectorGlyph& glyph, const VectorPlacement& placement,
-                           const double x0, const double width, const double row_low,
-                           const double row_high) {
-    const double font_low = (row_low - placement.pen_y) / placement.scale;
-    const double font_high = (row_high - placement.pen_y) / placement.scale;
-    const auto [first, last] = band_range(glyph, font_low, font_high);
-    const double band_height =
-        (static_cast<double>(glyph.top) - static_cast<double>(glyph.bottom)) /
-        static_cast<double>(std::max(1U, glyph.band_count()));
-    double area = 0.0;
-    for (std::uint32_t band = first; band < last; ++band) {
-        // Each segment counts within its band's heights alone, cut there in font units: a cut
-        // segment's pieces add up to it under any transform, so one in several bands counts once.
-        const double band_bottom = band == 0U
-                                       ? -std::numeric_limits<double>::max()
-                                       : static_cast<double>(glyph.bottom) + band_height * band;
-        const double band_top = band == glyph.band_count() - 1U
-                                    ? std::numeric_limits<double>::max()
-                                    : static_cast<double>(glyph.bottom) + band_height * (band + 1U);
-        for (std::uint32_t index = glyph.band_offsets[band]; index < glyph.band_offsets[band + 1U];
-             ++index) {
-            const VectorSegment& segment = glyph.segments[glyph.band_segments[index]];
-            double ax = segment.x0;
-            double ay = segment.y0;
-            double bx = segment.x1;
-            double by = segment.y1;
-            const double low = std::max(std::min(ay, by), band_bottom);
-            const double high = std::min(std::max(ay, by), band_top);
-            if (high <= low)
-                continue;
-            const double slope = (bx - ax) / (by - ay);
-            const double cut_from = std::clamp(ay, low, high);
-            const double cut_to = std::clamp(by, low, high);
-            ax = ax + (cut_from - ay) * slope;
-            bx = segment.x0 + (cut_to - segment.y0) * slope;
-            ay = cut_from;
-            by = cut_to;
-            area += host::vector_segment_area(
-                placement.pen_x + ax * placement.scale, placement.pen_y + ay * placement.scale,
-                placement.pen_x + bx * placement.scale, placement.pen_y + by * placement.scale, x0,
-                width, row_low, row_high);
-        }
-    }
-    return area;
 }
 
 /** Where a segment is at height y, exactly its end at an end's height. */
@@ -487,7 +486,7 @@ VectorGlyph build_vector_glyph(const GlyphOutline& outline, const std::uint16_t 
     // Hint edges: the horizontal runs of the outline (stem and bar tops and bottoms, curve
     // extremes), an edge near one of the font's zones aligned with that zone so round letters
     // line up with flat ones, and the zones the glyph spans.
-    const double near_flat = std::max(tolerance * 2.0, em * 0.002);
+    const double near_flat = em * 0.002;
     const double long_enough = em * 0.03;
     const double zone_reach = em * 0.025;
     struct Edge final {
@@ -633,7 +632,18 @@ VectorGlyph fit_vector_glyph(const VectorGlyph& glyph, const double scale) {
         emit(segment.x1, segment.y1);
     }
     result.top = std::max(result.top, result.bottom);
-    assign_bands(result);
+    // Drawn at this size with its baseline on a whole pixel, a band a pixel row tall on the rows
+    // themselves: each pixel reads one band, holding only what crosses its row.
+    const double row_bottom = std::floor(static_cast<double>(result.bottom) * scale);
+    const double row_top = std::ceil(static_cast<double>(result.top) * scale);
+    const double rows = row_top - row_bottom;
+    if (rows >= 1.0 && rows <= static_cast<double>(maximum_row_bands)) {
+        result.bottom = static_cast<float>(row_bottom / scale);
+        result.top = static_cast<float>(row_top / scale);
+        assign_bands(result, static_cast<std::uint32_t>(rows));
+    } else {
+        assign_bands(result);
+    }
     return result;
 }
 

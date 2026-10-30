@@ -63,9 +63,10 @@ inline constexpr std::array<double, 5U> vector_lcd_filter{8.0 / 256.0, 77.0 / 25
 }
 
 /**
- * One glyph as the buffers hold it: its record's bounds and band count, and its parts of the
- * segment (x0 y0 x1 y1) and band (band_count + 1 offsets, then segment indices relative to its
- * first segment) buffers.
+ * One glyph as the buffers hold it: its record's bounds and band count, its whole segments
+ * (x0 y0 x1 y1), which a turned pixel reads, its bands (band_count + 1 offsets into its pieces)
+ * and the pieces themselves: each band's segments cut to its heights, which an upright pixel
+ * reads as they are.
  */
 struct VectorGlyphView final {
     float left = 0.0F;
@@ -75,6 +76,7 @@ struct VectorGlyphView final {
     std::uint32_t band_count = 0U;
     std::span<const float> segments;
     std::span<const std::uint32_t> bands;
+    std::span<const float> pieces;
 };
 
 /** Where a pixel is in a glyph's font units, and how far moving a device pixel goes there. */
@@ -110,52 +112,36 @@ struct VectorSample final {
         sample.along_y_y / determinant, -sample.along_y_x / determinant,
         -sample.along_x_y / determinant, sample.along_x_x / determinant};
     // The font-unit heights the pixel (and its neighbours' thirds) reaches.
-    const double reach = 0.5 * (std::abs(sample.along_x_y) + std::abs(sample.along_y_y));
+    const double reach = 0.5 * std::abs(sample.along_y_y) + 1.5 * std::abs(sample.along_x_y);
     const double height = static_cast<double>(glyph.top) - glyph.bottom;
     const std::uint32_t bands = glyph.band_count;
     const double band_height = height / static_cast<double>(bands);
-    const auto band_of = [&](const double y) {
-        return static_cast<int>(std::clamp(std::floor((y - glyph.bottom) / band_height), 0.0,
-                                           static_cast<double>(bands - 1U)));
+    const auto clamped = [bands](const double band) {
+        return static_cast<int>(std::clamp(band, 0.0, static_cast<double>(bands - 1U)));
     };
     // Bands serve when a device row is a range of glyph heights (moving right on the device does
     // not change the height); a turned glyph's row crosses every band, and reads every segment.
-    const bool banded = std::abs(sample.along_x_y) < 1.0e-9;
-    const int first_band = banded ? band_of(sample.glyph_y - reach) : 0;
-    const int last_band = banded ? band_of(sample.glyph_y + reach) : 0;
+    // A band whose bottom is the row's top holds nothing within the row: one a pixel row tall
+    // on the rows is the only band its row reads.
+    const bool banded = std::abs(sample.along_x_y) <= 1.0e-4 * std::abs(sample.along_y_y);
+    const int first_band =
+        banded ? clamped(std::floor((sample.glyph_y - reach - glyph.bottom) / band_height)) : 0;
+    const int last_band =
+        banded ? clamped(std::ceil((sample.glyph_y + reach - glyph.bottom) / band_height) - 1.0)
+               : 0;
     const int columns = subpixel != 0U ? 7 : 1;
     std::array<double, 7U> area{};
     for (int band = first_band; band <= last_band; ++band) {
-        const double band_bottom = !banded || band == 0 ? -std::numeric_limits<double>::max()
-                                                        : glyph.bottom + band_height * band;
-        const double band_top = !banded || band == static_cast<int>(bands) - 1
-                                    ? std::numeric_limits<double>::max()
-                                    : glyph.bottom + band_height * (band + 1);
+        // An upright pixel reads its bands' pieces; a turned one every whole segment.
+        const std::span<const float> source = banded ? glyph.pieces : glyph.segments;
         const std::uint32_t first = banded ? glyph.bands[static_cast<std::size_t>(band)] : 0U;
         const std::uint32_t last = banded ? glyph.bands[static_cast<std::size_t>(band) + 1U]
                                           : static_cast<std::uint32_t>(glyph.segments.size() / 4U);
         for (std::uint32_t entry = first; entry < last; ++entry) {
-            const std::size_t segment = banded ? glyph.bands[bands + 1U + entry] : entry;
-            const double x0 = glyph.segments[segment * 4U];
-            const double y0 = glyph.segments[segment * 4U + 1U];
-            const double x1 = glyph.segments[segment * 4U + 2U];
-            const double y1 = glyph.segments[segment * 4U + 3U];
-            // The part of the segment in its band (a turned pixel takes it whole).
-            double ax = x0;
-            double ay = y0;
-            double bx = x1;
-            double by = y1;
-            if (banded) {
-                const double low = std::max(std::min(y0, y1), band_bottom);
-                const double high = std::min(std::max(y0, y1), band_top);
-                if (high <= low)
-                    continue;
-                const double slope = (x1 - x0) / (y1 - y0);
-                ay = std::clamp(y0, low, high);
-                by = std::clamp(y1, low, high);
-                ax = x0 + (ay - y0) * slope;
-                bx = x0 + (by - y0) * slope;
-            }
+            const double ax = source[entry * 4U];
+            const double ay = source[entry * 4U + 1U];
+            const double bx = source[entry * 4U + 2U];
+            const double by = source[entry * 4U + 3U];
             // In pixel offsets from the pixel's centre, y down.
             const double dax =
                 inverse[0] * (ax - sample.glyph_x) + inverse[1] * (ay - sample.glyph_y);

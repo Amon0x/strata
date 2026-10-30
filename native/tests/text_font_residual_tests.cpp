@@ -2081,12 +2081,14 @@ void test_vector_text_formulation(const std::filesystem::path& resources) {
                 for (const font::VectorSegment& segment : glyph.segments)
                     segments.insert(segments.end(),
                                     {segment.x0, segment.y0, segment.x1, segment.y1});
-                std::vector<std::uint32_t> bands(glyph.band_offsets.begin(),
-                                                 glyph.band_offsets.end());
-                bands.insert(bands.end(), glyph.band_segments.begin(), glyph.band_segments.end());
+                const std::vector<std::uint32_t> bands(glyph.band_offsets.begin(),
+                                                       glyph.band_offsets.end());
+                std::vector<float> pieces;
+                for (const font::VectorSegment& piece : glyph.band_pieces)
+                    pieces.insert(pieces.end(), {piece.x0, piece.y0, piece.x1, piece.y1});
                 const host::VectorGlyphView view{glyph.left, glyph.bottom,       glyph.right,
                                                  glyph.top,  glyph.band_count(), segments,
-                                                 bands};
+                                                 bands,      pieces};
                 const font::VectorPlacement placement{scale, 0.37, 0.0};
                 for (int y = -static_cast<int>(size); y <= static_cast<int>(size * 0.5); ++y) {
                     for (int x = -2; x <= static_cast<int>(size); ++x) {

@@ -83,9 +83,9 @@ inline constexpr std::uint32_t texture_sampling_linear = 1U;
  * appended part starts, counted in the buffer's own elements, and the elements' little-endian
  * bytes. Records are 32 bytes (VectorGlyphRecord in gpu/shaders.hpp: bounds in font units, then
  * u32 segment base, band base, band count and segment count), segments 16 (float x0 y0 x1 y1,
- * font units) and band entries 4 (u32: per glyph, band count + 1 offsets, then each band's
- * segment indices relative to its segment base). A draw in mode 13 or 14 reads them
- * (vectorTextCoverage in gpu/shaders.hpp).
+ * font units: per glyph its segments, then each band's pieces, its segments cut to the band) and
+ * band entries 4 (u32: per glyph, band count + 1 offsets into its pieces). A draw in mode 13 or
+ * 14 reads them (vectorTextCoverage in gpu/shaders.hpp).
  */
 struct VectorGlyphBuffers final {
     std::uint32_t first_record = 0U;

@@ -1,6 +1,7 @@
 #include "ui/render/vector_glyphs.hpp"
 
 #include <algorithm>
+#include <memory>
 
 namespace strata::ui {
 
@@ -17,11 +18,11 @@ std::optional<std::uint32_t> VectorGlyphPool::glyph(const std::string_view font_
         auto zones = zones_.find(font_id);
         if (zones == zones_.end())
             zones = zones_.emplace(std::string(font_id), font::font_hint_zones(font)).first;
-        font::VectorGlyph vector =
+        const font::VectorGlyph vector =
             font::build_vector_glyph(*outline, font.units_per_em(), zones->second);
         if (!vector.empty()) {
             index = add(vector);
-            outlines_.emplace(*index, std::move(vector));
+            sources_.emplace(*index, Source{outline, font.units_per_em(), &zones->second});
         }
     }
     indices_.emplace(std::make_tuple(std::string(font_id), glyph), index);
@@ -29,13 +30,19 @@ std::optional<std::uint32_t> VectorGlyphPool::glyph(const std::string_view font_
 }
 
 std::uint32_t VectorGlyphPool::fitted(const std::uint32_t index, const double scale) {
-    const auto outline = outlines_.find(index);
-    if (outline == outlines_.end() || outline->second.hints.empty() || !(scale > 0.0))
+    const auto source = sources_.find(index);
+    if (source == sources_.end() || !(scale > 0.0))
         return index;
     const auto key = std::make_pair(index, scale);
     if (const auto found = fitted_.find(key); found != fitted_.end())
         return found->second;
-    const std::uint32_t result = add(font::fit_vector_glyph(outline->second, scale));
+    // Never finer than the outline drawn at any size already is.
+    const double em = std::max(1.0, static_cast<double>(source->second.units_per_em));
+    const double tolerance = std::max(em / 4096.0, 1.0 / (32.0 * scale));
+    const font::VectorGlyph vector = font::build_vector_glyph(
+        *source->second.outline, source->second.units_per_em, *source->second.zones, tolerance);
+    const std::uint32_t result =
+        vector.empty() ? index : add(font::fit_vector_glyph(vector, scale));
     fitted_.emplace(key, result);
     return result;
 }
@@ -50,11 +57,12 @@ std::uint32_t VectorGlyphPool::add(const font::VectorGlyph& vector) {
     record.band_base = static_cast<std::uint32_t>(bands_.size());
     record.band_count = vector.band_count();
     record.segment_count = static_cast<std::uint32_t>(vector.segments.size());
+    // Its whole segments, then its bands' pieces; the band offsets count from the first piece.
     for (const font::VectorSegment& segment : vector.segments)
         segments_.insert(segments_.end(), {segment.x0, segment.y0, segment.x1, segment.y1});
-    // Band offsets, then each band's segment indices (relative to segment_base).
+    for (const font::VectorSegment& piece : vector.band_pieces)
+        segments_.insert(segments_.end(), {piece.x0, piece.y0, piece.x1, piece.y1});
     bands_.insert(bands_.end(), vector.band_offsets.begin(), vector.band_offsets.end());
-    bands_.insert(bands_.end(), vector.band_segments.begin(), vector.band_segments.end());
     records_.push_back(record);
     return static_cast<std::uint32_t>(records_.size() - 1U);
 }
@@ -88,7 +96,7 @@ void VectorGlyphPool::clear() noexcept {
     indices_.clear();
     fitted_.clear();
     zones_.clear();
-    outlines_.clear();
+    sources_.clear();
     records_.clear();
     segments_.clear();
     bands_.clear();

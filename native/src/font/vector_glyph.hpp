@@ -47,12 +47,13 @@ struct VectorGlyph final {
     float top = 0.0F;
     std::vector<VectorSegment> segments;
     /**
-     * Bands of equal height from `bottom` to `top`: band b holds the segments
-     * band_segments[band_offsets[b]] to band_segments[band_offsets[b + 1] - 1], every segment
-     * whose vertical extent meets the band.
+     * Bands of equal height from `bottom` to `top`: band b holds band_pieces[band_offsets[b]] to
+     * band_pieces[band_offsets[b + 1] - 1], every sloped segment's part within the band's
+     * heights (the first band reaches down without end, the last up), cut where the bands meet
+     * so a pixel reads each piece as it is.
      */
     std::vector<std::uint32_t> band_offsets;
-    std::vector<std::uint32_t> band_segments;
+    std::vector<VectorSegment> band_pieces;
     /**
      * What the vertical grid fit lands on whole pixels, ascending: the glyph's horizontal stems
      * and strokes, each moved whole (FreeType's light hinting does the same, keeping a bar's

@@ -73,19 +73,20 @@ PixelInput main(VertexInput input) {
     float2 local = input.position.xy;
     float2 uv = input.uv;
     if (mode == 13 || mode == 14) {
-        // A vector glyph's quad is its outline's bounds (uv in font units). It grows here by two
-        // device pixels each way, at whatever scale and turn its group shows it, so the pixels
-        // its edge partly covers, and its subpixels' neighbours, are drawn too. drawData0.w says
-        // which corner this is (bit 0 right, bit 1 top), drawData1 the page's logical pixels a
-        // font unit spans along x and along y.
+        // A vector glyph's quad is its outline's bounds (uv in font units). It grows here by whole
+        // device distances at whatever scale and turn its group shows it, so the pixels its edge
+        // partly covers are drawn too: half a pixel reaches any pixel touching the outline, and
+        // per subpixel, a pixel's filter reads seven sixths of a pixel to either side. drawData0.w
+        // says which corner this is (bit 0 right, bit 1 top), drawData1 the page's logical pixels
+        // a font unit spans along x and along y.
         float corner = input.drawData0.w;
         float2 outward = float2(fmod(corner, 2.0) >= 0.5 ? 1.0 : -1.0, corner >= 1.5 ? 1.0 : -1.0);
         float2x2 groupLinear = float2x2(group.transform.x, group.opacity.z,
                                         group.opacity.w, group.transform.y);
         float2 deviceX = mul(groupLinear, input.drawData1.xy) * devicePixels;
         float2 deviceY = mul(groupLinear, input.drawData1.zw) * devicePixels;
-        float2 grow = outward * float2(2.0 / max(length(deviceX), 1.0e-6),
-                                       2.0 / max(length(deviceY), 1.0e-6));
+        float2 reach = float2(mode == 14 ? 1.25 : 0.75, 0.75);
+        float2 grow = outward * reach / max(float2(length(deviceX), length(deviceY)), 1.0e-6);
         local += grow.x * input.drawData1.xy + grow.y * input.drawData1.zw;
         uv += grow;
     }
@@ -403,8 +404,9 @@ float4 strataGlyphTexel(float2 uv) {
  * lands, every frame, with nothing rasterized ahead of drawing.
  *
  * Buffers (STRATA_RENDER_PACKET_VERSION_24, the batch's texture naming them): VectorGlyphs
- * (records), VectorSegments (x0 y0 x1 y1, font units), VectorBands (per glyph: band count + 1
- * offsets, then each band's segment indices relative to its segment base).
+ * (records), VectorSegments (x0 y0 x1 y1, font units: per glyph its segments, which a turned
+ * pixel reads, then each band's pieces, its segments cut to the band, which an upright pixel
+ * reads as they are) and VectorBands (per glyph: band count + 1 offsets into its pieces).
  */
 struct VectorGlyphRecord {
     float4 bounds;
@@ -463,48 +465,40 @@ float4 vectorTextCoverage(uint glyphIndex, float2 glyphPosition, float2 alongX, 
     // Bands serve when a device row is a range of glyph heights; a turned glyph's row crosses
     // every band, and reads every segment.
     bool banded = abs(alongX.y) <= 1.0e-4 * abs(alongY.y);
-    float reach = 0.5 * abs(alongY.y) + 1.5 * abs(alongX.y);
+    // The glyph heights the pixel (and its neighbours' thirds) reaches. A band whose bottom is the
+    // row's top holds nothing within the row: one a pixel row tall on the rows is the only band
+    // its row reads. Interpolated in single precision, a row on a band's edge lands a hair either
+    // side of it; a thousandth of a pixel short of its edges, it still reads that one band (a
+    // sliver that thin covers under a quarter of a coverage level).
+    float reach = 0.499 * abs(alongY.y) + 1.5 * abs(alongX.y);
     float height = glyph.bounds.w - glyph.bounds.y;
     uint bands = max(glyph.bandCount, 1u);
     float bandHeight = height / float(bands);
     int firstBand = banded ? clamp(int(floor((glyphPosition.y - reach - glyph.bounds.y) /
                                              bandHeight)), 0, int(bands) - 1)
                            : 0;
-    int lastBand = banded ? clamp(int(floor((glyphPosition.y + reach - glyph.bounds.y) /
-                                            bandHeight)), 0, int(bands) - 1)
+    int lastBand = banded ? clamp(int(ceil((glyphPosition.y + reach - glyph.bounds.y) /
+                                           bandHeight)) - 1, 0, int(bands) - 1)
                           : 0;
     // The pixel's area to the right of the outline, or its seven thirds' (two each side).
     float gray = 0.0;
     float4 thirdsLeft = 0.0;
     float3 thirdsRight = 0.0;
     const float third = 1.0 / 3.0;
+    // An upright pixel reads its bands' pieces, which follow the glyph's segments; a turned one
+    // every whole segment.
+    uint pieceBase = glyph.segmentBase + glyph.segmentCount;
+    // How far the columns it measures reach either side of its centre.
+    float reachX = subpixel == 0u ? 0.5 : 0.5 + 2.0 * third;
     for (int band = firstBand; band <= lastBand; ++band) {
-        float bandBottom = !banded || band == 0 ? -3.0e38 : glyph.bounds.y + bandHeight * float(band);
-        float bandTop = !banded || band == int(bands) - 1 ? 3.0e38
-                                                          : glyph.bounds.y + bandHeight * float(band + 1);
-        uint first = banded ? VectorBands[glyph.bandBase + uint(band)] : 0u;
-        uint last = banded ? VectorBands[glyph.bandBase + uint(band) + 1] : glyph.segmentCount;
-        uint indices = glyph.bandBase + bands + 1;
+        uint first = banded ? pieceBase + VectorBands[glyph.bandBase + uint(band)] : glyph.segmentBase;
+        uint last = banded ? pieceBase + VectorBands[glyph.bandBase + uint(band) + 1]
+                           : glyph.segmentBase + glyph.segmentCount;
         for (uint entry = first; entry < last; ++entry) {
-            uint index = banded ? VectorBands[indices + entry] : entry;
-            float4 segment = VectorSegments[glyph.segmentBase + index];
-            // The part of the segment in its band (a turned pixel takes it whole).
-            float2 a = segment.xy;
-            float2 b = segment.zw;
-            if (banded) {
-                float low = max(min(segment.y, segment.w), bandBottom);
-                float high = min(max(segment.y, segment.w), bandTop);
-                if (high <= low)
-                    continue;
-                float slope = (segment.z - segment.x) / (segment.w - segment.y);
-                a = float2(segment.x + (clamp(segment.y, low, high) - segment.y) * slope,
-                           clamp(segment.y, low, high));
-                b = float2(segment.x + (clamp(segment.w, low, high) - segment.y) * slope,
-                           clamp(segment.w, low, high));
-            }
+            float4 segment = VectorSegments[entry];
             // In pixel offsets, then the part crossing the pixel's row.
-            float2 da = mul(inverse, a - glyphPosition);
-            float2 db = mul(inverse, b - glyphPosition);
+            float2 da = mul(inverse, segment.xy - glyphPosition);
+            float2 db = mul(inverse, segment.zw - glyphPosition);
             if (da.y == db.y || max(da.y, db.y) <= -0.5 || min(da.y, db.y) >= 0.5)
                 continue;
             float yFrom = clamp(da.y, -0.5, 0.5);
@@ -514,6 +508,15 @@ float4 vectorTextCoverage(uint glyphIndex, float2 glyphPosition, float2 alongX, 
             float xTo = da.x + (yTo - da.y) * slope;
             float span = xTo - xFrom;
             float rise = yTo - yFrom;
+            // Right of every column it adds nothing; left of them all, its height to each.
+            if (min(xFrom, xTo) >= reachX)
+                continue;
+            if (max(xFrom, xTo) <= -reachX) {
+                gray += rise;
+                thirdsLeft += rise * third;
+                thirdsRight += rise * third;
+                continue;
+            }
             if (subpixel == 0u) {
                 gray += rise * vectorColumnShare(xFrom, xTo, span, -0.5, 1.0);
             } else {

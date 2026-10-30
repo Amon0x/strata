@@ -277,10 +277,23 @@ prepare_text(const TextRunRenderCommand& command, font::GlyphAtlas& atlas,
         if (const std::optional<std::uint32_t> vector =
                 vector_glyph(vectors, command, logical, face)) {
             // Drawn from its outline: placed exactly where it is laid out, at any subpixel.
-            const VectorGlyphRecord& record = vectors->record(*vector);
             const double scale =
                 command.pixel_size / static_cast<double>(std::max<std::uint16_t>(
                                          face.units_per_em(), std::uint16_t{1U}));
+            // Fitted for the device pixels a font unit spans where it is laid out.
+            const std::optional<std::uint32_t> fitted =
+                vector_scale > 0.0
+                    ? std::optional<std::uint32_t>(vectors->fitted(*vector, scale * vector_scale))
+                    : std::nullopt;
+            // Its quad covers the outline and the fitted variant, whichever a frame draws.
+            VectorGlyphRecord record = vectors->record(*vector);
+            if (fitted.has_value()) {
+                const VectorGlyphRecord& variant = vectors->record(*fitted);
+                record.left = std::min(record.left, variant.left);
+                record.bottom = std::min(record.bottom, variant.bottom);
+                record.right = std::max(record.right, variant.right);
+                record.top = std::max(record.top, variant.top);
+            }
             const double shear =
                 font::resolve_font_style_geometry(logical.font_style_flags,
                                                   face.metadata().style_flags)
@@ -303,10 +316,7 @@ prepare_text(const TextRunRenderCommand& command, font::GlyphAtlas& atlas,
                                   static_cast<double>(record.bottom) - record.top},
                     logical.baseline,
                     *vector,
-                    // Fitted for the device pixels a font unit spans where it is laid out.
-                    vector_scale > 0.0
-                        ? std::optional<std::uint32_t>(vectors->fitted(*vector, scale * vector_scale))
-                        : std::nullopt,
+                    fitted,
                     pen,
                     scale,
                     shear,

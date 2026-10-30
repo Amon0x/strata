@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -17,7 +18,8 @@ namespace strata::ui {
 /**
  * One glyph's record in the vector-text glyph buffer (32 bytes, as packets carry it and the GPU
  * reads it: VectorGlyphRecord in gpu/shaders.hpp matches it): its bounds in font units, where its
- * segments and bands start in their buffers, and how many bands and segments it has.
+ * segments and bands start in their buffers, and how many bands and segments it has. Its bands'
+ * pieces follow its segments.
  */
 struct VectorGlyphRecord final {
     float left = 0.0F;
@@ -72,8 +74,9 @@ class VectorGlyphPool final {
     glyph(std::string_view font_id, const font::OpenTypeFont& font, std::uint16_t glyph);
     /**
      * The record of glyph `index` fitted to the pixel grid at `scale` device pixels a font unit
-     * (font::fit_vector_glyph), made now if this size is new; the glyph itself when it has
-     * nothing to fit.
+     * (font::fit_vector_glyph), made now if this size is new. It is flattened for that size, its
+     * curves within a thirty-second of a pixel, so small text has a few segments where the
+     * outline drawn at any size has many: each pixel reads fewer.
      */
     [[nodiscard]] std::uint32_t fitted(std::uint32_t index, double scale);
     [[nodiscard]] const VectorGlyphRecord& record(std::uint32_t index) const {
@@ -103,8 +106,13 @@ class VectorGlyphPool final {
         indices_;
     std::map<std::pair<std::uint32_t, double>, std::uint32_t> fitted_;
     std::map<std::string, font::FontHintZones, std::less<>> zones_;
-    /** Each glyph's outline as built, by record index, which its fitted variants are made from. */
-    std::map<std::uint32_t, font::VectorGlyph> outlines_;
+    /** What each glyph's fitted variants are made from, by its record index. */
+    struct Source final {
+        std::shared_ptr<const font::GlyphOutline> outline;
+        std::uint16_t units_per_em = 0U;
+        const font::FontHintZones* zones = nullptr;
+    };
+    std::map<std::uint32_t, Source> sources_;
     std::vector<VectorGlyphRecord> records_;
     std::vector<float> segments_;
     std::vector<std::uint32_t> bands_;

@@ -110,10 +110,10 @@ struct PixelRect final {
     const int vertex_mode =
         static_cast<int>(std::floor(read_float(bytes, base + 24U + 14U * sizeof(float)) + 0.5F));
     if (vertex_mode == 13 || vertex_mode == 14) {
-        // A vector glyph's quad (its outline's bounds, uv in font units) grows by two device
-        // pixels each way at whatever scale its group shows it, as in the vertex stage: value 3
-        // is its corner (bit 0 right, bit 1 top), 4-5 and 6-7 the logical pixels a font unit
-        // spans along x and y.
+        // A vector glyph's quad (its outline's bounds, uv in font units) grows by whole device
+        // distances at whatever scale its group shows it, as in the vertex stage: value 3 is its
+        // corner (bit 0 right, bit 1 top), 4-5 and 6-7 the logical pixels a font unit spans along
+        // x and y.
         const auto value = [&](const std::size_t index) {
             return static_cast<double>(read_float(bytes, base + 24U + index * sizeof(float)));
         };
@@ -128,10 +128,10 @@ struct PixelRect final {
             return std::hypot((group.scale_x * dx + group.shear_x * dy) * scale_x,
                               (group.shear_y * dx + group.scale_y * dy) * scale_y);
         };
-        const double grow_x =
-            outward_x * 2.0 / std::max(device_length(along_x_x, along_x_y), 1.0e-6);
+        const double grow_x = outward_x * (vertex_mode == 14 ? 1.25 : 0.75) /
+                              std::max(device_length(along_x_x, along_x_y), 1.0e-6);
         const double grow_y =
-            outward_y * 2.0 / std::max(device_length(along_y_x, along_y_y), 1.0e-6);
+            outward_y * 0.75 / std::max(device_length(along_y_x, along_y_y), 1.0e-6);
         x += grow_x * along_x_x + grow_y * along_y_x;
         y += grow_x * along_x_y + grow_y * along_y_y;
         result.u = static_cast<float>(result.u + grow_x);
@@ -871,14 +871,14 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
         const std::span<const std::uint32_t> bands(vector_glyphs->bands);
         if (band_count == 0U || band_base + band_count >= bands.size())
             return view;
-        const std::size_t band_entries = band_count + 1U + bands[band_base + band_count];
-        if ((segment_base + segment_count) * 4U > segments.size() ||
-            band_base + band_entries > bands.size()) {
+        // Its bands' pieces follow its segments.
+        const std::size_t pieces = bands[band_base + band_count];
+        if ((segment_base + segment_count + pieces) * 4U > segments.size())
             return view;
-        }
         view.band_count = band_count;
         view.segments = segments.subspan(segment_base * 4U, segment_count * 4U);
-        view.bands = bands.subspan(band_base, band_entries);
+        view.bands = bands.subspan(band_base, band_count + 1U);
+        view.pieces = segments.subspan((segment_base + segment_count) * 4U, pieces * 4U);
         return view;
     };
     // `filtered` blends texels bilinearly even on a texel-exact page (glyphs drawn off one to one).
