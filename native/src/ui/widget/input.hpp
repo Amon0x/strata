@@ -119,6 +119,8 @@ class WidgetInputScope final {
     void number_changed(std::string_view action_property, double value);
     void value_changed(std::string_view action_property, std::string_view event_kind,
                        runtime::Value event_value);
+    /** Whether the node binds an action to `action_property`, for events sent only when asked. */
+    [[nodiscard]] bool has_action(std::string_view action_property) const;
     void dispatch_action(std::shared_ptr<const runtime::ActionValue> action,
                          std::string_view event_kind,
                          runtime::Value event_value = runtime::Value{});

@@ -971,6 +971,7 @@ void InputRouter::focus(const RetainedNode& node, const std::string_view reason,
         }
     }
     focused_ = node.identity();
+    focused_by_pointer_ = reason == "pointer";
     tree_->hold_on_detach(focused_);
     update_tooltip_disclosures();
     static_cast<void>(tree_->mark(node.identity(), DirtyReason::input));
@@ -1166,8 +1167,16 @@ bool InputRouter::focused(const std::uint64_t identity) const noexcept {
 std::optional<std::uint64_t> InputRouter::focused_identity() const noexcept {
     return focused_;
 }
+bool InputRouter::focus_indicated() const noexcept {
+    if (!focus_highlight_visible_ || !focused_.has_value())
+        return false;
+    if (!focused_by_pointer_ || tree_ == nullptr)
+        return true;
+    const RetainedNode* node = tree_->find_identity(*focused_);
+    return node == nullptr || !static_text_selectable(*node);
+}
 bool InputRouter::focus_visible(const std::uint64_t identity) const noexcept {
-    return focus_highlight_visible_ && focused_ == identity;
+    return focused_ == identity && focus_indicated();
 }
 bool InputRouter::hovered(const std::uint64_t identity) const noexcept {
     return hovered_.contains(identity);

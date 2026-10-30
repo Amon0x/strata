@@ -1083,18 +1083,30 @@ void append_identity_levels(std::vector<double>& values) {
     return {weight, italic};
 }
 
+/** A font found for a text layer, or that the system's font names are still being read. */
+struct ResolvedFont final {
+    std::optional<font::SystemFont> face;
+    bool pending = false;
+};
+
 /**
  * The system font a composition font names, found once per process and kept: by its name, else
- * its family and style, else the platform's interface font.
+ * its family and style, else the platform's interface font. Finding one by name needs every
+ * font's names, read on a worker the first time: until then it is pending, and the layer's text
+ * waits for it (as a page's text waits for a web font) rather than the frame.
  */
-[[nodiscard]] std::optional<font::SystemFont> resolve_font(const model::Font* const font) {
+[[nodiscard]] ResolvedFont resolve_font(const model::Font* const font) {
     static std::mutex mutex;
     static std::map<std::string, std::optional<font::SystemFont>, std::less<>> cache;
     const std::string key =
         font != nullptr ? font->name + "|" + font->family + "|" + font->style : std::string("|");
     const std::scoped_lock lock(mutex);
     if (const auto found = cache.find(key); found != cache.end())
-        return found->second;
+        return ResolvedFont{found->second, false};
+    if (font != nullptr && !font::system_font_names_ready()) {
+        font::prepare_system_font_names();
+        return ResolvedFont{std::nullopt, true};
+    }
     std::optional<font::SystemFont> result;
     if (font != nullptr) {
         const auto [weight, italic] = font_style(font->style);
@@ -1106,7 +1118,7 @@ void append_identity_levels(std::vector<double>& values) {
         result = font::system_font_named(fallback);
     }
     cache.emplace(key, result);
-    return result;
+    return ResolvedFont{result, false};
 }
 
 /** The code points of UTF-8 text; malformed bytes stand for themselves. */
@@ -1789,17 +1801,29 @@ class Renderer final {
             if (entry.name == document->font)
                 font = &entry;
         }
-        const std::optional<font::SystemFont> face = resolve_font(font);
         const double size = document->size;
+        // The system's font is looked up only for letters the file exports no outline of; while
+        // its names are still being read the layer draws nothing.
+        std::optional<font::SystemFont> face;
+        double font_scale = size / 1000.0;
+        bool resolved = false;
+        const auto find_face = [&]() -> bool {
+            if (resolved)
+                return true;
+            ResolvedFont found = resolve_font(font);
+            if (found.pending)
+                return false;
+            face = std::move(found.face);
+            if (face.has_value() && face->face.units_per_em() > 0U)
+                font_scale = size / static_cast<double>(face->face.units_per_em());
+            resolved = true;
+            return true;
+        };
         std::string content = document->text;
         if (document->caps != 0) {
             for (char& c : content)
                 c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         }
-        const double units = face.has_value() && face->face.units_per_em() > 0U
-                                 ? static_cast<double>(face->face.units_per_em())
-                                 : 1000.0;
-        const double font_scale = size / units;
         const double tracking = document->tracking / 1000.0 * size;
 
         // Letters with their advances, line by line.
@@ -1855,6 +1879,8 @@ class Renderer final {
                 letter.advance = exported->width * size / 100.0;
                 letter.path = exported_path(*exported, size / 100.0);
                 previous = 0U;
+            } else if (!find_face()) {
+                return result;
             } else if (face.has_value()) {
                 const font::OpenTypeFont* source = &face->face;
                 std::optional<font::SystemFont> fallback;
@@ -1922,6 +1948,8 @@ class Renderer final {
         }
 
         // Lines placed by justification, from the origin (point text) or in the box.
+        if ((font == nullptr || font->ascent <= 0.0) && !find_face())
+            return result;
         const double ascent = font != nullptr && font->ascent > 0.0 ? font->ascent / 100.0 * size
                               : face.has_value() ? face->face.ascender() * font_scale
                                                  : size * 0.75;

@@ -4,6 +4,7 @@
 // a cell is the area the frame covers there: a wrong keyframe, trim, mask or matte shows as area.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <exception>
@@ -17,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "../headless/application_host.hpp"
@@ -517,7 +519,7 @@ void measure_frames(const std::filesystem::path& root, const std::string& backen
         const std::string file = "assets/lottie-tests/case" + std::to_string(index) + ".json";
         write(root / file, all[index].json);
         module += "    Lottie(source: \"" + file +
-                  "\", progress: " + std::to_string(all[index].progress) +
+                  "\", playing: false, progress: " + std::to_string(all[index].progress) +
                   ", layout: { width: 200, height: 200, "
                   "placement: { x: " +
                   std::to_string(cell * static_cast<double>(index % columns)) +
@@ -529,6 +531,22 @@ void measure_frames(const std::filesystem::path& root, const std::string& backen
         scenario(backend, "assets/lottie-tests/frames.strata", cell * columns, cell * rows), root);
     host.frame(0);
     host.frame(16'666'667);
+    // Text in a system font is drawn once the system's font names are read, on a worker, as a
+    // page's text waits for a web font: frame until it shows (paused, nothing else moves).
+    const auto system_text = std::ranges::find(all, std::string_view("system font text"),
+                                               [](const Case& entry) { return entry.name; });
+    if (system_text != all.end()) {
+        const auto index = static_cast<std::size_t>(system_text - all.begin());
+        const double left = cell * static_cast<double>(index % columns);
+        const double top = cell * static_cast<double>(index / columns);
+        std::int64_t now = 16'666'667;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (covered(host, left, top, cell, cell) < 100.0 &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            host.frame(now += 16'666'667);
+        }
+    }
     std::string failures;
     std::vector<double> areas;
     for (std::size_t index = 0U; index < all.size(); ++index) {

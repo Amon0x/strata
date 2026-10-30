@@ -3603,6 +3603,165 @@ constexpr std::string_view long_code_lines =
 }
 
 /**
+ * A surface shows a runtime image while a node names it in an image property or a shape's image
+ * field, and not once that node is gone; text that merely spells the id does not count.
+ */
+void test_surface_shows_image(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay ShownImages {
+  state open = true;
+  root Panel(key: "shown.root", layout: { kind: "COLUMN", width: 300, height: 200 }) {
+    Text(text: "video:spelled")
+    Button(key: "shown.close", label: "Close", onClick: action("state.set", name: "open", value: false))
+    if open {
+      Image(key: "shown.video", image: "video:clip", layout: { width: 64, height: 36 })
+    }
+    Draw(layout: { width: 20, height: 20 }, shapes: [
+      { kind: "image", image: "video:shape", points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }] }
+    ])
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("shown-images", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "ShownImages", 300.0, 200.0);
+    std::int64_t now = 1'000'000;
+    const auto frames = [&](const int count) {
+        for (int frame = 0; frame < count; ++frame)
+            static_cast<void>(surface->frame(now += 16'000'000));
+    };
+    frames(2);
+    check(surface->shows_image("video:clip"), "an Image naming a video did not show it");
+    check(surface->shows_image("video:shape"), "an image shape did not show its image");
+    check(!surface->shows_image("video:spelled"), "text spelling an image id counted as showing it");
+    check(!surface->shows_image("video:none"), "an image no node names counted as shown");
+    const ui::RetainedNode* close = surface->tree().find_key("shown.close");
+    const ui::LayoutRecord* record =
+        close != nullptr ? surface->layout().find(close->identity()) : nullptr;
+    check(record != nullptr, "the close button was not laid out");
+    if (record == nullptr)
+        return;
+    const ui::Point middle{record->bounds.x + record->bounds.width * 0.5,
+                           record->bounds.y + record->bounds.height * 0.5};
+    static_cast<void>(surface->input().enqueue(
+        {ui::PointerInputEvent{middle, ui::PointerEventType::press, 5, 0},
+         ui::PointerInputEvent{middle, ui::PointerEventType::release, 5, 0}}));
+    frames(30);
+    check(!surface->shows_image("video:clip"),
+          "a video's image still counted as shown after the Image naming it went away");
+}
+
+/**
+ * A button on a ZoomView's canvas laid out past the view's edge clicks once it is panned into
+ * sight, inside a clipping card: the view's clip stays where the view is while the card's clip
+ * moves with the canvas.
+ */
+void test_zoom_view_panned_content_clicks(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay PannedCanvas {
+  state runs = 0;
+  root Panel(key: "pan.root", layout: { kind: "COLUMN", width: 600, height: 400 }) {
+    Text(key: "pan.count", text: format("{0}", runs))
+    ZoomView(key: "pan.view", view: { x: -500, y: 0, zoom: 1 }, layout: { width: 400, height: 300 }) {
+      Panel(layout: { kind: "CANVAS", width: 1200, height: 300 }) {
+        Panel(key: "pan.card", layout: { inset: { left: 700, top: 40 }, width: 200, height: 100, clip: true }) {
+          Button(key: "pan.far", label: "Run", onClick: action("state.set", name: "runs", value: runs + 1))
+        }
+      }
+    }
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("panned-canvas", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "PannedCanvas", 600.0, 400.0);
+    std::int64_t now = 1'000'000;
+    const auto frames = [&](const int count) {
+        for (int frame = 0; frame < count; ++frame)
+            static_cast<void>(surface->frame(now += 16'000'000));
+    };
+    frames(90);
+    const ui::RetainedNode* button = surface->tree().find_key("pan.far");
+    const ui::LayoutRecord* record =
+        button != nullptr ? surface->layout().find(button->identity()) : nullptr;
+    const ui::LayoutRecord* view = surface->tree().find_key("pan.view") != nullptr
+                                       ? surface->layout().find(
+                                             surface->tree().find_key("pan.view")->identity())
+                                       : nullptr;
+    check(record != nullptr && view != nullptr, "the panned canvas did not lay out its button");
+    if (record == nullptr || view == nullptr)
+        return;
+    check(record->bounds.x > view->bounds.right(),
+          "the button was not laid out past the view's edge, so this tests nothing");
+    const ui::Rect shown = surface->input().presented_bounds(*button, record->hit_bounds);
+    const ui::Point middle{shown.x + shown.width * 0.5, shown.y + shown.height * 0.5};
+    check(middle.x > view->bounds.x && middle.x < view->bounds.right(),
+          "the view did not pan the button into sight");
+    static_cast<void>(surface->input().enqueue(
+        {ui::PointerInputEvent{middle, ui::PointerEventType::press, 5, 0},
+         ui::PointerInputEvent{middle, ui::PointerEventType::release, 5, 0}}));
+    frames(3);
+    const ui::RetainedNode* count = surface->tree().find_key("pan.count");
+    const auto text = count != nullptr ? count->description().properties.find("text")
+                                       : ui::DescriptionNode::Properties::const_iterator{};
+    check(count != nullptr && text != count->description().properties.end() &&
+              text->second.value() != nullptr && text->second.value()->string() != nullptr &&
+              *text->second.value()->string() == "1",
+          "a button panned into sight from past a ZoomView's edge did not click");
+}
+
+/**
+ * Code clicked into takes focus for selecting and copying, and no key afterwards rings it (or the
+ * block of rows it is in): it is text, not a stop the keyboard reached, as a browser does not focus text.
+ */
+void test_code_view_focus_ring(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay CodeRing {
+  root Panel(key: "ring.root", layout: { kind: "COLUMN", width: 600, height: 400 }) {
+    CodeView(key: "ring.code", text: "fn main() {
+    let x = 42;
+}
+", language: "rust")
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("code-ring", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "CodeRing", 600.0, 400.0);
+    std::int64_t now = 1'000'000;
+    const auto frames = [&](const int count) {
+        for (int frame = 0; frame < count; ++frame)
+            static_cast<void>(surface->frame(now += 16'000'000));
+    };
+    const auto send = [&](std::vector<ui::SurfaceInputEvent> events) {
+        static_cast<void>(surface->input().enqueue(std::move(events)));
+        frames(2);
+    };
+    frames(4);
+    const ui::RetainedNode* view = surface->tree().find_key("ring.code");
+    const ui::RetainedNode* list = surface->tree().find_key("ring.code.scroll");
+    const ui::RetainedNode* text = surface->tree().find_key("ring.code.r0.t");
+    const ui::LayoutRecord* record =
+        text != nullptr ? surface->layout().find(text->identity()) : nullptr;
+    check(view != nullptr && list != nullptr && record != nullptr,
+          "the code view did not build its list and first row");
+    if (view == nullptr || list == nullptr || record == nullptr)
+        return;
+    const ui::Point inside{record->content_bounds.x + 4.0, record->content_bounds.y + 4.0};
+    send({ui::PointerInputEvent{inside, ui::PointerEventType::press, 5, 0},
+          ui::PointerInputEvent{inside, ui::PointerEventType::release, 5, 0}});
+    check(surface->input().focused(text->identity()),
+          "clicking code did not focus the text clicked");
+    send({ui::KeyInputEvent{"c", ui::KeyModifiers{false, true, false, false}},
+          ui::KeyInputEvent{"down"}, ui::KeyInputEvent{"right", ui::KeyModifiers{true}}});
+    check(!surface->input().focus_visible(text->identity()),
+          "keys pressed in code clicked into showed a focus ring");
+}
+
+/**
  * A code view with a height of its own realizes only the rows near its viewport, yet selecting
  * all of it copies the whole file, a shift-click selection reaches a row thousands of lines away
  * after the row it started in has gone, a drag past its edge scrolls and selects on, and the line
@@ -4776,6 +4935,9 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_paint_rotate_spins_a_gradient_border(resources);
         test_code_view_highlights_numbers_and_copies(resources);
         test_code_view_selection_spans_unrealized_rows(resources);
+        test_code_view_focus_ring(resources);
+        test_zoom_view_panned_content_clicks(resources);
+        test_surface_shows_image(resources);
         test_content_sized_code_view_realizes_what_the_page_shows(resources);
         test_rotation_draws_and_hits_the_turned_shape(resources);
         test_delayed_and_clipboard_actions(resources);

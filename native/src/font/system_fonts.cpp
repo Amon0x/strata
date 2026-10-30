@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <condition_variable>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -97,7 +98,42 @@ class Catalog final {
         });
     }
 
+    /**
+     * Reads every font's names on a worker, once; font_family waits for it, and a caller that
+     * must not wait asks names_ready first.
+     */
+    void prepare_names() {
+        const std::scoped_lock lock(mutex_);
+        if (naming_.joinable())
+            return;
+        enumerate();
+        naming_ = std::jthread([this, files = files_] {
+            std::vector<Named> named = read_names(files);
+            const std::scoped_lock held(names_mutex_);
+            named_ = std::move(named);
+            names_ready_ = true;
+            names_read_.notify_all();
+        });
+    }
+
+    [[nodiscard]] bool names_ready() {
+        const std::scoped_lock lock(names_mutex_);
+        return names_ready_;
+    }
+
     void set_directories(std::vector<std::filesystem::path> directories) {
+        // Names being read are of the old folders: let the reading finish, then forget them.
+        std::jthread naming;
+        {
+            const std::scoped_lock lock(mutex_);
+            naming = std::move(naming_);
+        }
+        naming = std::jthread{};
+        {
+            const std::scoped_lock held(names_mutex_);
+            named_.clear();
+            names_ready_ = false;
+        }
         const std::scoped_lock lock(mutex_);
         directories_ = std::move(directories);
         files_.clear();
@@ -162,9 +198,9 @@ class Catalog final {
     [[nodiscard]] std::optional<SystemFont> font_family(const std::string_view name,
                                                         const std::string_view family,
                                                         const int weight, const bool italic) {
-        const std::scoped_lock lock(mutex_);
-        enumerate();
-        index_names();
+        prepare_names();
+        std::unique_lock names(names_mutex_);
+        names_read_.wait(names, [this] { return names_ready_; });
         const std::string wanted_name = lower(std::string(name));
         const std::string wanted_family = lower(std::string(family));
         const Named* best = nullptr;
@@ -186,10 +222,13 @@ class Catalog final {
         }
         if (best == nullptr)
             return std::nullopt;
-        const std::optional<OpenTypeFont> face = load(best->path);
+        const std::filesystem::path path = best->path;
+        names.unlock();
+        const std::scoped_lock lock(mutex_);
+        const std::optional<OpenTypeFont> face = load(path);
         if (!face.has_value())
             return std::nullopt;
-        return SystemFont{id_of(best->path), *face};
+        return SystemFont{id_of(path), *face};
     }
 
   private:
@@ -205,19 +244,18 @@ class Catalog final {
         bool italic = false;
     };
 
-    /** Reads every font's names once, keeping the names rather than the fonts. */
-    void index_names() {
-        if (named_indexed_)
-            return;
-        named_indexed_ = true;
-        for (const std::filesystem::path& path : files_) {
+    /** Every font's names, keeping the names rather than the fonts. */
+    [[nodiscard]] static std::vector<Named>
+    read_names(const std::vector<std::filesystem::path>& files) {
+        std::vector<Named> named;
+        for (const std::filesystem::path& path : files) {
             try {
                 const std::optional<OpenTypeFont> face = map(path);
                 if (!face.has_value())
                     continue;
                 const FontMetadata& metadata = face->metadata();
                 const std::string subfamily = lower(metadata.subfamily);
-                named_.push_back(Named{
+                named.push_back(Named{
                     path,
                     lower(metadata.family),
                     lower(metadata.full_name),
@@ -232,6 +270,7 @@ class Catalog final {
             } catch (const std::exception&) {
             }
         }
+        return named;
     }
 
     [[nodiscard]] static std::string id_of(const std::filesystem::path& path) {
@@ -390,8 +429,13 @@ class Catalog final {
     std::map<std::filesystem::path, OpenTypeFont> loaded_;
     std::map<std::filesystem::path, Ranges> coverage_;
     std::set<std::uint32_t> missing_;
+    /** The names read so far, guarded apart so lookups by code point never wait on them. */
+    std::mutex names_mutex_;
+    std::condition_variable names_read_;
     std::vector<Named> named_;
-    bool named_indexed_ = false;
+    bool names_ready_ = false;
+    /** Last, so it is joined before what it writes goes. */
+    std::jthread naming_;
 };
 
 [[nodiscard]] Catalog& catalog() {
@@ -415,6 +459,14 @@ std::optional<SystemFont> system_font_for(const std::uint32_t code_point) {
 
 std::optional<SystemFont> system_font_named(const std::string_view file) {
     return catalog().font_named(file);
+}
+
+void prepare_system_font_names() {
+    catalog().prepare_names();
+}
+
+bool system_font_names_ready() {
+    return catalog().names_ready();
 }
 
 std::optional<SystemFont> system_font_family(const std::string_view name,

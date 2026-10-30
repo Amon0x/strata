@@ -372,6 +372,8 @@ void add_builtin_primitive_widgets(BuiltinCatalog& catalog) {
                      DeclaredParameter{.name = "onComplete",
                                        .type = declared_type_reference("action")},
                      DeclaredParameter{.name = "onPause",
+                                       .type = declared_type_reference("action")},
+                     DeclaredParameter{.name = "onProgress",
                                        .type = declared_type_reference("action")}},
                 .parameter_order = {"source",
                                     "key",
@@ -409,6 +411,7 @@ void add_builtin_primitive_widgets(BuiltinCatalog& catalog) {
                                     "animation",
                                     "onComplete",
                                     "onPause",
+                                    "onProgress",
                                     "behaviors"},
                 .bindings = {},
                 .events = {DeclaredWidgetEvent{
@@ -422,7 +425,13 @@ void add_builtin_primitive_widgets(BuiltinCatalog& catalog) {
                                .callback_parameter = "onPause",
                                .description =
                                    "Emitted when playing stops; carries { frame, progress } "
-                                   "where the playhead stopped."}},
+                                   "where the playhead stopped."},
+                           DeclaredWidgetEvent{
+                               .name = "progress",
+                               .callback_parameter = "onProgress",
+                               .description =
+                                   "Emitted each frame the playhead moves while playing; carries "
+                                   "{ frame, progress }, so a bound slider follows it."}},
                 .retained_state = {DeclaredRetainedState{
                     .name = "playhead",
                     .description = "Playback position within the segment, and whether it is "

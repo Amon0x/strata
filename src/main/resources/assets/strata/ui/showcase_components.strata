@@ -1725,10 +1725,49 @@ component LottieSample(source: string, note: string, sampleKey: string) {
   }
 }
 
-component LottiePage() {
+// The playhead moves the slider every frame, so its state lives here: a frame rebuilds this card,
+// not the page around it.
+component LottiePlaybackCard() {
   state playing = true;
   state scrub = 0.5;
   state speed = "1";
+  Card(title: "PLAYBACK: PAUSE, SCRUB, SPEED") {
+    Panel(style: style(ActionRow, gap: 18, alignItems: "CENTER")) {
+      Panel(style: LottieTile) {
+        Lottie(
+          key: "lottie.player",
+          source: "assets/strata/lottie/reveal.json",
+          playing: playing,
+          progress: scrub,
+          onPause: action("state.setFromEvent", name: "scrub", field: "progress"),
+          onProgress: action("state.setFromEvent", name: "scrub", field: "progress"),
+          speed: speed == "0.25" ? 0.25 : (speed == "0.5" ? 0.5 : (speed == "2" ? 2 : (speed == "-1" ? -1 : 1))),
+          layout: { width: 260, height: 260 }
+        )
+      }
+      Panel(style: style(PageColumn, width: 360, gap: 10)) {
+        Panel(style: ActionRow) {
+          Button(key: "lottie.play", label: playing ? "Pause" : "Play", onClick: action("state.toggle", name: "playing"))
+          Text(text: format(playing ? "Playing at {0}%" : "Paused at {0}%", round(scrub * 100)), style: CardNote)
+        }
+        Slider(key: "lottie.scrub", min: 0, max: 1, step: 0.005, bind: scrub, layout: { width: 340 })
+        Select(
+          key: "lottie.speed",
+          options: [
+            { id: "0.25", label: "Speed 0.25x" },
+            { id: "0.5", label: "Speed 0.5x" },
+            { id: "1", label: "Speed 1x" },
+            { id: "2", label: "Speed 2x" },
+            { id: "-1", label: "Backwards 1x" }
+          ],
+          bind: speed
+        )
+      }
+    }
+  }
+}
+
+component LottiePage() {
   state switchedOn = false;
   state flips = 0;
   state completions = 0;
@@ -1752,39 +1791,7 @@ component LottiePage() {
         LottieSample(source: "assets/strata/lottie/effects.json", note: "Shadow, blur, tint, levels", sampleKey: "lottie.effects")
       }
     }
-    Card(title: "PLAYBACK: PAUSE, SCRUB, SPEED") {
-      Panel(style: style(ActionRow, gap: 18, alignItems: "CENTER")) {
-        Panel(style: LottieTile) {
-          Lottie(
-            key: "lottie.player",
-            source: "assets/strata/lottie/reveal.json",
-            playing: playing,
-            progress: scrub,
-            onPause: action("state.setFromEvent", name: "scrub", field: "progress"),
-            speed: speed == "0.25" ? 0.25 : (speed == "0.5" ? 0.5 : (speed == "2" ? 2 : (speed == "-1" ? -1 : 1))),
-            layout: { width: 260, height: 260 }
-          )
-        }
-        Panel(style: style(PageColumn, width: 360, gap: 10)) {
-          Panel(style: ActionRow) {
-            Button(key: "lottie.play", label: playing ? "Pause" : "Play", onClick: action("state.toggle", name: "playing"))
-            Text(text: playing ? "Playing" : format("Paused at {0}%", round(scrub * 100)), style: CardNote)
-          }
-          Slider(key: "lottie.scrub", min: 0, max: 1, step: 0.005, bind: scrub, layout: { width: 340 })
-          Select(
-            key: "lottie.speed",
-            options: [
-              { id: "0.25", label: "Speed 0.25x" },
-              { id: "0.5", label: "Speed 0.5x" },
-              { id: "1", label: "Speed 1x" },
-              { id: "2", label: "Speed 2x" },
-              { id: "-1", label: "Backwards 1x" }
-            ],
-            bind: speed
-          )
-        }
-      }
-    }
+    LottiePlaybackCard()
     Card(title: "SEGMENTS: PLAY A PART ONCE") {
       Panel(style: style(ActionRow, gap: 18, alignItems: "CENTER")) {
         Panel(style: LottieTile) {

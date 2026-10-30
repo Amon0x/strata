@@ -39,10 +39,19 @@ void prepare_system_fonts();
 [[nodiscard]] std::optional<SystemFont> system_font_named(std::string_view file);
 
 /**
+ * Starts reading every system font's names on a worker, once, for system_font_family. Reading
+ * them takes a few hundred milliseconds, which a frame must not wait for.
+ */
+void prepare_system_font_names();
+
+/** Whether the names are read, so system_font_family answers without waiting. */
+[[nodiscard]] bool system_font_names_ready();
+
+/**
  * The system font a design names: by its PostScript or full name (`Arial-BoldMT`, `Arial Bold`),
  * else the face of `family` (any case) nearest `weight` (100-900) and slant. Nothing when no
  * installed font has that name or family. Every font is read for its names once, the first time
- * any is asked for.
+ * any is asked for (see prepare_system_font_names); this waits for that reading to finish.
  */
 [[nodiscard]] std::optional<SystemFont>
 system_font_family(std::string_view name, std::string_view family, int weight, bool italic);

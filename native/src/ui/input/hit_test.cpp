@@ -826,8 +826,10 @@ void InputRouter::prepare_pointer_geometry() const {
             child_clip = child_clip.has_value()
                              ? std::optional(child_clip->clip_intersection(turned))
                              : std::optional(turned);
-        } else if (record->clip.has_value()) {
-            clip_children(*record->clip);
+        } else if (record->local_clip.has_value()) {
+            // Only the node's own clip: `record->clip` already holds its ancestors' clips in
+            // layout space, which a zoomed or panned ancestor no longer draws them at.
+            clip_children(*record->local_clip);
         }
         // Descendants are hit only where they are drawn: a widget that clips them further than
         // its layout does (rows below a table's sticky header) clips their hits the same way.

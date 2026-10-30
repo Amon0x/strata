@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "font/system_fonts.hpp"
 #include "resource/svg_image.hpp"
 #include "ui/lottie/scene.hpp"
 #include "ui/tree.hpp"
@@ -83,7 +84,8 @@ void lottie_defaults(WidgetLayoutDefaultsScope& scope) {
 
 /**
  * Moves the playhead by the time since the last frame, at `speed` times the composition's frame
- * rate, looping or stopping at the segment's end (`onComplete`). A `progress` that changes seeks
+ * rate, looping or stopping at the segment's end (`onComplete`), and says where it is now
+ * (`onProgress`, only when bound). A `progress` that changes seeks
  * there, as scrubbing a video does, and play goes on from it; `playing` (or `autoplay` when
  * `playing` is not given) pauses it where it is and says where (`onPause`). Playing again after
  * the end starts over.
@@ -94,6 +96,12 @@ void lottie_advance(WidgetInputScope& scope, const WidgetFrameInfo& frame) {
         animation(scope.images(), source);
     if (parsed == nullptr)
         return;
+    // Text in a font named by family waits for the system's font names, read on a worker; it is
+    // drawn the frame they are ready, playing or not.
+    if (!parsed->fonts.empty() && !font::system_font_names_ready()) {
+        font::prepare_system_font_names();
+        static_cast<void>(scope.request_frame(WidgetFrameCost::paint));
+    }
     const LottieSegment segment = lottie_segment(*parsed, scope.property("segment"));
     const double speed = finite(scope.property("speed")).value_or(1.0);
     const bool loop = flag(scope.property("loop"), true);
@@ -166,6 +174,14 @@ void lottie_advance(WidgetInputScope& scope, const WidgetFrameInfo& frame) {
                             runtime::Value(lottie_frame(segment, state.position)));
     } else if (moving) {
         static_cast<void>(scope.request_frame(WidgetFrameCost::paint));
+    }
+    if (moving && scope.has_action("onProgress")) {
+        using Fields = std::vector<std::pair<std::string, runtime::Value>>;
+        scope.value_changed("onProgress", "progress",
+                            runtime::Value(Fields{
+                                {"frame", runtime::Value(lottie_frame(segment, state.position))},
+                                {"progress", runtime::Value(state.position)},
+                            }));
     }
 }
 

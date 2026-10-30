@@ -11819,6 +11819,11 @@
           "callbackParameter": "onPause",
           "description": "Emitted when playing stops; carries { frame, progress } where the playhead stopped.",
           "name": "pause"
+        },
+        {
+          "callbackParameter": "onProgress",
+          "description": "Emitted each frame the playhead moves while playing; carries { frame, progress }, so a bound slider follows it.",
+          "name": "progress"
         }
       ],
       "name": "Lottie",
@@ -12132,6 +12137,14 @@
           "aliases": [],
           "enumValues": [],
           "name": "onPause",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onProgress",
           "nullable": false,
           "required": false,
           "type": "action"

@@ -1177,4 +1177,24 @@ strata_result strata_surface_read_render_packet(const strata_surface* const surf
     });
 }
 
+strata_result strata_surface_shows_image(const strata_surface* const surface,
+                                        const strata_string_view image,
+                                        uint32_t* const out_shown) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
+    if (surface == nullptr || out_shown == nullptr)
+        return invalid_argument();
+    *out_shown = 0U;
+    if (!valid_view(image, false)) {
+        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
+                               "STRATA.ABI.INVALID_RUNTIME_IMAGE",
+                               "Asking whether a surface shows an image requires its id.");
+    }
+    return surface_call(surface, AbiCall{"Surface image use"}, [&] {
+        *out_shown = surface->core.shows_image(copied_string(image)) ? 1U : 0U;
+        return strata::abi_detail::result(STRATA_STATUS_OK);
+    });
+}
+
 } // extern "C"

@@ -128,6 +128,14 @@ class PlatformServices final {
     /** Each playing video's newest frame since the last call, for the session that plays it. */
     [[nodiscard]] std::vector<std::pair<std::string, PlatformImage>> video_frames();
     /**
+     * Pauses a playing video once nothing shows it any more (`shown` asks the session `client`
+     * whether a node names its image), as a browser pauses a video taken out of the page, and
+     * plays it on when something shows it again. A video never shown yet, or one the app paused
+     * itself, is left as it is.
+     */
+    void follow_video_use(
+        const std::function<bool(std::string_view client, std::string_view image)>& shown);
+    /**
      * Whether a modal loop (a window drag, a drag out) ran since the last call: the press it began
      * with never released, so the host cancels its interactions.
      */

@@ -742,6 +742,12 @@ Button(label: "Play", onClick: then(
 Image(image: "video:intro", layout: { width: 640, height: 360 }, fit: "CONTAIN")
 ```
 
+Once a node has shown a video, the video pauses when no node names its image any more (its page
+switched away, its dialog closed), as a browser pauses a video taken out of the page, and plays on
+when one does again; scrolling it out of sight does not pause it, and a video the app paused stays
+paused. Sounds from `audio.play` belong to the app rather than to a page, and play on until
+stopped, like a music player's.
+
 The Windows desktop host plays video through Media Foundation, in any format Windows can decode.
 
 ### Lottie
@@ -756,7 +762,8 @@ Lottie(source: "assets/app/success.json", loop: false, onComplete: action("state
 Lottie(source: "assets/app/spinner.json", speed: 1.5, fit: "COVER", layout: { width: 48, height: 48 })
 Lottie(source: "assets/app/toggle.json", segment: on ? [0, 30] : [30, 60], loop: false)
 Lottie(source: "assets/app/reveal.json", playing: playing, progress: scrub,
-       onPause: action("state.setFromEvent", name: "scrub", field: "progress"))
+       onProgress: action("state.setFromEvent", name: "scrub", field: "progress"))
+Slider(min: 0, max: 1, step: 0.005, bind: scrub)
 ```
 
 - `loop` (default `true`) plays the segment over and over; otherwise playback stops on its last
@@ -766,8 +773,12 @@ Lottie(source: "assets/app/reveal.json", playing: playing, progress: scrub,
   stopped. Playing again after the end starts over.
 - `speed` (default `1`) scales the composition's frame rate; a negative speed plays backwards.
 - `progress` (0-1) seeks: each new value moves the playhead there, as scrubbing a video does, and
-  playback (if playing) goes on from it. A `Slider` bound to it scrubs; `onPause` setting it to
-  where play stopped keeps the slider with the animation.
+  playback (if playing) goes on from it. A `Slider` bound to it scrubs; `onProgress`, which runs
+  with `{ frame, progress }` each frame the playhead moves, setting it keeps the slider moving with
+  the animation, as a video's seek bar does.
+- Text layers in a font the file names by family wait for the system's font names, read once on a
+  worker the first time any is needed, as a page's text waits for a web font, so the first frame
+  with text never stalls.
 - `segment: [first, last]` plays only those composition frames (`last` exclusive, as a layer's out
   point is); `first > last` plays them backwards. Changing the segment or `source` starts over.
 - `fit` (`CONTAIN` by default, `COVER`, `FILL`, `NONE`, `SCALE_DOWN`) and `alignX`/`alignY` place

@@ -432,6 +432,9 @@ struct PlatformServices::Impl final : PlatformOutbox {
         std::optional<Request> waiting;
         bool fresh = false;
         PlatformImage frame;
+        /** Whether a node has shown it, and whether it was paused because none does now. */
+        bool seen = false;
+        bool hidden = false;
     };
 
     /** An item of the tray icon's menu. */
@@ -1491,8 +1494,10 @@ struct PlatformServices::Impl final : PlatformOutbox {
                 }
             } else if (kind == "media.pause") {
                 playing->engine->Pause();
+                playing->hidden = false;
             } else if (kind == "media.resume") {
                 playing->engine->Play();
+                playing->hidden = false;
             } else if (kind == "media.seek") {
                 const JsonValue* seconds = request.payload.find("seconds");
                 if (seconds == nullptr)
@@ -1659,6 +1664,22 @@ std::vector<std::pair<std::string, PlatformImage>> PlatformServices::video_frame
         frames.emplace_back(video.client, video.frame);
     }
     return frames;
+}
+
+void PlatformServices::follow_video_use(
+    const std::function<bool(std::string_view client, std::string_view image)>& shown) {
+    for (auto& [id, video] : impl_->videos) {
+        const bool now = shown(video.client, video.image);
+        if (now && !video.seen) {
+            video.seen = true;
+        } else if (!now && video.seen && !video.hidden && video.engine->IsPaused() == FALSE) {
+            video.engine->Pause();
+            video.hidden = true;
+        } else if (now && video.hidden) {
+            video.engine->Play();
+            video.hidden = false;
+        }
+    }
 }
 
 PlatformServices::~PlatformServices() = default;

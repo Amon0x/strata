@@ -457,10 +457,11 @@ InputOperationResult InputRouter::key(KeyInputEvent event, const bool navigation
     else if (normalized_key == "page_down")
         normalized_key = "pagedown";
     const KeyModifiers modifiers = event.modifiers;
-    // OS window-switching and modifier-only events are not keyboard navigation.
+    // OS window-switching, modifier-only events and shortcuts (Ctrl+C, Ctrl+A) are not keyboard
+    // navigation, as browsers decide :focus-visible; Ctrl+Tab still moves between tabs.
     if (event.type != KeyEventType::release && !modifiers.alt && !modifiers.super_key &&
-        normalized_key != "alt" && normalized_key != "super" && normalized_key != "control" &&
-        normalized_key != "shift") {
+        (!modifiers.control || normalized_key == "tab") && normalized_key != "alt" &&
+        normalized_key != "super" && normalized_key != "control" && normalized_key != "shift") {
         set_focus_visibility(true);
     }
     RetainedNode* node =

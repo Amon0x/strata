@@ -338,6 +338,11 @@ class Surface final {
 
     [[nodiscard]] const RetainedTree& tree() const noexcept;
     [[nodiscard]] RetainedTree& tree() noexcept;
+    /**
+     * Whether a node in the tree names the image `id` in an `image` or `icon` property, or in an
+     * `image` field of one (a paint, a shape). A host pauses a video no node shows any more.
+     */
+    [[nodiscard]] bool shows_image(std::string_view id) const;
     [[nodiscard]] const LayoutResult& layout() const noexcept;
     [[nodiscard]] const SurfaceFrame& last_frame() const noexcept;
     [[nodiscard]] InputRouter& input() noexcept;
@@ -431,6 +436,8 @@ class Surface final {
     ThemeMaterializationCache theme_materialization_cache_;
     std::shared_ptr<const DescriptionNode> raw_description_;
     RetainedTree tree_;
+    /** shows_image's answers for the tree generation they were found in. */
+    mutable std::map<std::string, std::pair<std::uint64_t, bool>, std::less<>> shown_images_;
     std::shared_ptr<const TextEngine> text_engine_;
     std::shared_ptr<const resource::SvgImageRegistry> svg_images_;
     MotionRuntime motion_;

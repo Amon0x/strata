@@ -2066,6 +2066,63 @@ const RetainedTree& Surface::tree() const noexcept {
 RetainedTree& Surface::tree() noexcept {
     return tree_;
 }
+
+namespace {
+
+/** Whether `value` is the image `id`: an image value, or its id as text where one is expected. */
+bool is_image(const runtime::Value& value, const std::string_view id) {
+    if (const runtime::ImageValue* image = value.image(); image != nullptr)
+        return image->id == id;
+    const std::string* text = value.string();
+    return text != nullptr && *text == id;
+}
+
+/** Whether `value` names `id` under an `image` or `icon` field, at any depth. */
+bool names_image(const runtime::Value& value, const std::string_view id) {
+    if (const runtime::ValueList* list = value.list(); list != nullptr) {
+        return std::ranges::any_of(list->values,
+                                   [id](const runtime::Value& item) { return names_image(item, id); });
+    }
+    if (const runtime::ValueObject* object = value.object(); object != nullptr) {
+        return std::ranges::any_of(object->fields, [id](const auto& field) {
+            return ((field.first == "image" || field.first == "icon") &&
+                    is_image(field.second, id)) ||
+                   names_image(field.second, id);
+        });
+    }
+    return false;
+}
+
+} // namespace
+
+bool Surface::shows_image(const std::string_view id) const {
+    const std::uint64_t generation = tree_.generation();
+    if (const auto found = shown_images_.find(id);
+        found != shown_images_.end() && found->second.first == generation)
+        return found->second.second;
+    bool shown = false;
+    const auto visit = [id, &shown](const auto& self, const RetainedNode& node) -> void {
+        for (const auto& [name, property] : node.description().properties) {
+            const runtime::Value* value = property.value();
+            if (value == nullptr)
+                continue;
+            if (((name == "image" || name == "icon") && is_image(*value, id)) ||
+                names_image(*value, id)) {
+                shown = true;
+                return;
+            }
+        }
+        for (const auto& child : node.children()) {
+            if (shown)
+                return;
+            self(self, *child);
+        }
+    };
+    if (tree_.root() != nullptr)
+        visit(visit, *tree_.root());
+    shown_images_.insert_or_assign(std::string(id), std::pair{generation, shown});
+    return shown;
+}
 const LayoutResult& Surface::layout() const noexcept {
     return layout_engine_.result();
 }

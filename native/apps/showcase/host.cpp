@@ -1704,6 +1704,15 @@ struct Host::Impl final {
                     layer->runtime().publish_image(frame.id, frame.width, frame.height, frame.rgba);
             }
         }
+        // A video nothing shows any more (its page switched away) pauses until something does.
+        platform.follow_video_use([this](const std::string_view client,
+                                         const std::string_view image) {
+            for (Layer* const layer : layers()) {
+                if (layer->live() && layer->id == client)
+                    return layer->surface().shows_image(image);
+            }
+            return false;
+        });
         // The system's move loop swallowed the release of the press that began it.
         if (platform.take_window_moved()) {
             pending_pointer_move.reset();

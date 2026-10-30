@@ -460,6 +460,12 @@ class InputRouter final {
     [[nodiscard]] std::optional<std::uint64_t> focused_identity() const noexcept;
     /** True only for the focused node while keyboard/spatial focus indication is active. */
     [[nodiscard]] bool focus_visible(std::uint64_t identity) const noexcept;
+    /**
+     * Whether the focused node shows that it has focus: while keys were used last, unless it is
+     * selectable text clicked into, which is a place to select and copy rather than a stop the
+     * keyboard reached (a browser does not focus text at all).
+     */
+    [[nodiscard]] bool focus_indicated() const noexcept;
     [[nodiscard]] bool hovered(std::uint64_t identity) const noexcept;
     /**
      * The pointer shape for where the pointer rests: grabbing during a drag; else the nearest
@@ -918,6 +924,8 @@ class InputRouter final {
     const MotionRuntime* motion_ = nullptr;
     CommandIndex* commands_ = nullptr;
     std::optional<std::uint64_t> focused_;
+    /** Whether the focused node took focus from a press rather than the keyboard. */
+    bool focused_by_pointer_ = false;
     // Programmatic focus inherits the last real input modality. Initial focus remains visible.
     bool focus_highlight_visible_ = true;
     std::optional<std::uint64_t> synchronized_modal_;

@@ -393,6 +393,10 @@ WidgetInputScope::action(const std::string_view property_name) const {
     return router_.activation_action(node_, property_name);
 }
 
+bool WidgetInputScope::has_action(const std::string_view action_property) const {
+    return action(action_property) != nullptr;
+}
+
 void WidgetInputScope::activated(const std::string_view action_property) {
     if (router_.commands_ != nullptr) {
         const std::optional<CommandActivationBinding> binding =

@@ -1717,6 +1717,15 @@ class Surface final {
         return cursor;
     }
 
+    /** Whether a node on the surface names the runtime image `image` (see strata.h). */
+    [[nodiscard]] bool shows_image(const std::string_view image) const {
+        std::uint32_t shown = 0U;
+        require(strata_surface_shows_image(value_, strata_string_view{image.data(), image.size()},
+                                          &shown),
+                "surface image use");
+        return shown != 0U;
+    }
+
     [[nodiscard]] bool set_focus_containment(const std::optional<std::string_view> key) {
         std::uint32_t contained = 0U;
         const std::string_view value = key.value_or(std::string_view{});

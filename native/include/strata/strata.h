@@ -2402,6 +2402,12 @@ STRATA_API strata_result strata_surface_dispatch_action_json(
 #define STRATA_POINTER_CURSOR_NONE 15u
 STRATA_API strata_result strata_surface_pointer_cursor(strata_surface* surface,
                                                        uint32_t* out_cursor) STRATA_NOEXCEPT;
+/* Whether a node on the surface names the runtime image `image` (an `image` or `icon` property,
+ * or an `image` field of a paint or shape): a host pauses a video that nothing shows any more and
+ * plays it on when something does again. */
+STRATA_API strata_result strata_surface_shows_image(const strata_surface* surface,
+                                                    strata_string_view image,
+                                                    uint32_t* out_shown) STRATA_NOEXCEPT;
 /* Empty key clears the active focus containment scope. */
 STRATA_API strata_result strata_surface_set_focus_containment(
     strata_surface* surface, strata_string_view key, uint32_t* out_contained) STRATA_NOEXCEPT;

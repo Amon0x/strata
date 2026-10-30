@@ -358,6 +358,11 @@ struct ApplicationHost::Impl final {
         // Videos show their newest frame through the runtime image they play into.
         for (auto& [client, frame] : platform.video_frames())
             session->runtime().publish_image(frame.id, frame.width, frame.height, frame.rgba);
+        // A video nothing shows any more (its page closed) pauses until something does again.
+        platform.follow_video_use([this](std::string_view, const std::string_view image) {
+            return session.has_value() && session->has_surface() &&
+                   session->surface().shows_image(image);
+        });
         // The system's move loop swallowed the release of the press that began it.
         if (platform.take_window_moved()) {
             pending_pointer_move.reset();
