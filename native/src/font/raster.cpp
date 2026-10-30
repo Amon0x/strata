@@ -228,16 +228,21 @@ void validate(const CoverageRasterConfig& config) {
     throw FontError("coverage raster hinting mode is invalid");
 }
 
+/**
+ * Every glyph is rasterized from its outline. Fonts such as Calibri and MS Gothic also carry
+ * hand-drawn black-and-white bitmaps for small sizes (EBDT/CBDT strikes); FreeType would hand those
+ * back instead, unantialiased and in a format the atlas does not take.
+ */
 [[nodiscard]] FT_Int32 load_flags(const GlyphHinting hinting) noexcept {
     switch (hinting) {
     case GlyphHinting::none:
-        return FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_NO_AUTOHINT;
+        return FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING | FT_LOAD_NO_AUTOHINT;
     case GlyphHinting::light:
-        return FT_LOAD_DEFAULT | FT_LOAD_TARGET_LIGHT;
+        return FT_LOAD_NO_BITMAP | FT_LOAD_TARGET_LIGHT;
     case GlyphHinting::full:
-        return FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL;
+        return FT_LOAD_NO_BITMAP | FT_LOAD_TARGET_NORMAL;
     }
-    return FT_LOAD_DEFAULT;
+    return FT_LOAD_NO_BITMAP;
 }
 
 [[nodiscard]] double optical_stem_darkening(
