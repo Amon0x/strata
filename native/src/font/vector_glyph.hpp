@@ -23,8 +23,13 @@ struct VectorSegment final {
 struct VectorHint final {
     float low = 0.0F;
     float high = 0.0F;
-    /** Which edge lands on a pixel: whichever is nearer one (0), the low (1) or the high (2). */
+    /**
+     * Which edge lands on a pixel: whichever is nearer one (0), or the low (1) or the high (2),
+     * which is at one of the font's zones: it lands where the zone does, its overshoot past the
+     * zone kept as FreeType keeps it (none under half a pixel, half to three quarters, else one).
+     */
     std::uint8_t anchor = 0U;
+    float zone = 0.0F;
 };
 
 /**
@@ -55,6 +60,9 @@ struct VectorGlyph final {
      * descender) where they meet one.
      */
     std::vector<VectorHint> hints;
+    /** Its font's FontHintZones::x_overshoot and max_height, which the grid fit scales by. */
+    float x_overshoot = 0.0F;
+    float max_height = 0.0F;
 
     [[nodiscard]] bool empty() const noexcept {
         return segments.empty();
@@ -67,6 +75,14 @@ struct VectorGlyph final {
 /** The heights a font's text lines up on, font units: see font_hint_zones. */
 struct FontHintZones final {
     std::vector<float> heights;
+    /**
+     * The top of the round small letters ('o'): the grid fit scales a glyph's height so it lands
+     * on a whole pixel, as FreeType's light hinting does, rounding up from three eighths.
+     */
+    float x_overshoot = 0.0F;
+    /** How far any zone reaches from the baseline, at least an em: that scaling moves no height of
+     * it more than two pixels. */
+    float max_height = 0.0F;
 };
 
 /**

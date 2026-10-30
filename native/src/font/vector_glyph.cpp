@@ -99,10 +99,20 @@ void assign_bands(VectorGlyph& glyph) {
     for (const VectorHint& hint : hints) {
         const double low = static_cast<double>(hint.low) * scale;
         const double high = static_cast<double>(hint.high) * scale;
+        // An edge at a zone lands where the zone does, its overshoot kept in whole or half
+        // pixels; any other edge on the nearest pixel.
+        const auto zoned = [&](const double edge) {
+            const double zone = static_cast<double>(hint.zone) * scale;
+            const double overshoot = edge - zone;
+            const double kept = std::abs(overshoot) < 0.5    ? 0.0
+                                : std::abs(overshoot) < 0.75 ? 0.5
+                                                             : 1.0;
+            return std::round(zone) + std::copysign(kept, overshoot) - edge;
+        };
         const double low_shift = std::round(low) - low;
         const double high_shift = std::round(high) - high;
-        double shift = hint.anchor == 1U                             ? low_shift
-                       : hint.anchor == 2U                           ? high_shift
+        double shift = hint.anchor == 1U                             ? zoned(low)
+                       : hint.anchor == 2U                           ? zoned(high)
                        : std::abs(low_shift) <= std::abs(high_shift) ? low_shift
                                                                      : high_shift;
         if (!first && low + shift < previous_target)
@@ -429,6 +439,18 @@ FontHintZones font_hint_zones(const OpenTypeFont& font) {
     measure(U'p', false);
     std::ranges::sort(zones.heights);
     zones.heights.erase(std::ranges::unique(zones.heights).begin(), zones.heights.end());
+    zones.max_height = static_cast<float>(
+        std::max<double>(font.units_per_em(), std::max(std::abs(zones.heights.front()),
+                                                       std::abs(zones.heights.back()))));
+    // The round x-height: the top of 'o', else the flat one.
+    if (const std::uint16_t round = font.glyph_id(U'o'); round != 0U) {
+        if (const std::shared_ptr<const GlyphOutline> outline = font.glyph_outline(round);
+            outline != nullptr && outline->bounds.has_value()) {
+            zones.x_overshoot = static_cast<float>(outline->bounds->top);
+        }
+    }
+    if (zones.x_overshoot == 0.0F && zones.heights.size() > 1U)
+        zones.x_overshoot = zones.heights[1];
     return zones;
 }
 
@@ -460,45 +482,66 @@ VectorGlyph build_vector_glyph(const GlyphOutline& outline, const std::uint16_t 
 
     assign_bands(glyph);
 
+    glyph.x_overshoot = zones.x_overshoot;
+    glyph.max_height = zones.max_height;
     // Hint edges: the horizontal runs of the outline (stem and bar tops and bottoms, curve
-    // extremes), an edge near one of the font's zones taken as that zone so round letters line
-    // up with flat ones, and the zones the glyph spans.
+    // extremes), an edge near one of the font's zones aligned with that zone so round letters
+    // line up with flat ones, and the zones the glyph spans.
     const double near_flat = std::max(tolerance * 2.0, em * 0.002);
     const double long_enough = em * 0.03;
     const double zone_reach = em * 0.025;
     struct Edge final {
         double y = 0.0;
-        bool zone = false;
+        std::optional<double> zone;
     };
     std::vector<Edge> edges;
     const auto add_edge = [&](const double y) {
         for (const float zone : zones.heights) {
             if (std::abs(y - static_cast<double>(zone)) <= zone_reach) {
-                edges.push_back(Edge{zone, true});
+                edges.push_back(Edge{y, zone});
                 return;
             }
         }
-        edges.push_back(Edge{y, false});
+        edges.push_back(Edge{y, std::nullopt});
     };
-    const auto consider = [&](const VectorSegment& segment) {
-        const double dx = std::abs(static_cast<double>(segment.x1) - segment.x0);
-        const double dy = std::abs(static_cast<double>(segment.y1) - segment.y0);
-        if (dy <= near_flat && dx >= long_enough)
-            add_edge((static_cast<double>(segment.y0) + segment.y1) * 0.5);
-    };
-    for (const VectorSegment& segment : glyph.segments)
-        consider(segment);
+    // Read from the curves, not their flattened pieces: a round top (o, e, n, the dot of an i)
+    // is a curve's extreme, which flattening cuts into pieces too short to read as an edge.
+    for (const GlyphContour& contour : outline.contours) {
+        for (const GlyphSegment& segment : contour.segments) {
+            if (segment.kind == GlyphSegmentKind::line) {
+                if (std::abs(segment.to.y - segment.from.y) <= near_flat &&
+                    std::abs(segment.to.x - segment.from.x) >= long_enough) {
+                    add_edge((segment.from.y + segment.to.y) * 0.5);
+                }
+                continue;
+            }
+            // A quadratic's vertical extreme: inside it, or at an end its tangent runs flat at.
+            const double bend = segment.from.y - 2.0 * segment.control.y + segment.to.y;
+            if (bend != 0.0) {
+                const double t = (segment.from.y - segment.control.y) / bend;
+                if (t > 0.0 && t < 1.0) {
+                    const double u = 1.0 - t;
+                    add_edge(u * u * segment.from.y + 2.0 * u * t * segment.control.y +
+                             t * t * segment.to.y);
+                }
+            }
+            if (segment.control.y == segment.from.y)
+                add_edge(segment.from.y);
+            if (segment.control.y == segment.to.y)
+                add_edge(segment.to.y);
+        }
+    }
     for (const float zone : zones.heights) {
         if (zone >= glyph.bottom - zone_reach && zone <= glyph.top + zone_reach)
-            edges.push_back(Edge{zone, true});
+            edges.push_back(Edge{zone, zone});
     }
     std::ranges::sort(edges, {}, &Edge::y);
-    // Edges closer than a small fraction of the em are one edge, a zone if either is.
+    // Edges closer than a small fraction of the em are one edge, at a zone if either is.
     const double merge = em * 0.006;
     std::vector<Edge> merged;
     for (const Edge& edge : edges) {
         if (!merged.empty() && edge.y - merged.back().y <= merge) {
-            if (edge.zone)
+            if (edge.zone.has_value() && !merged.back().zone.has_value())
                 merged.back() = edge;
             continue;
         }
@@ -510,15 +553,18 @@ VectorGlyph build_vector_glyph(const GlyphOutline& outline, const std::uint16_t 
         const Edge& low = merged[index];
         if (index + 1U < merged.size() && merged[index + 1U].y - low.y <= stem) {
             const Edge& high = merged[index + 1U];
+            const std::uint8_t anchor = low.zone.has_value() ? 1U : high.zone.has_value() ? 2U : 0U;
             glyph.hints.push_back(VectorHint{static_cast<float>(low.y), static_cast<float>(high.y),
-                                             static_cast<std::uint8_t>(low.zone    ? 1U
-                                                                       : high.zone ? 2U
-                                                                                   : 0U)});
+                                             anchor,
+                                             static_cast<float>(anchor == 1U   ? *low.zone
+                                                                : anchor == 2U ? *high.zone
+                                                                               : 0.0)});
             ++index;
             continue;
         }
         glyph.hints.push_back(VectorHint{static_cast<float>(low.y), static_cast<float>(low.y),
-                                         static_cast<std::uint8_t>(low.zone ? 1U : 0U)});
+                                         static_cast<std::uint8_t>(low.zone ? 1U : 0U),
+                                         static_cast<float>(low.zone.value_or(0.0))});
     }
     return glyph;
 }
@@ -526,6 +572,18 @@ VectorGlyph build_vector_glyph(const GlyphOutline& outline, const std::uint16_t 
 VectorGlyph fit_vector_glyph(const VectorGlyph& glyph, const double scale) {
     if (glyph.empty() || glyph.hints.empty() || !(scale > 0.0))
         return glyph;
+    // FreeType's light hinting first scales the glyph's height so the round x-height lands on a
+    // whole pixel, rounding up from three eighths of one, unless that moves a height by two.
+    double fit_scale = scale;
+    if (glyph.x_overshoot > 0.0F) {
+        const double scaled = static_cast<double>(glyph.x_overshoot) * scale;
+        const double fitted = std::floor(scaled + 40.0 / 64.0);
+        if (fitted > 0.0 && fitted != scaled) {
+            const double adjusted = scale * fitted / scaled;
+            if (std::abs(static_cast<double>(glyph.max_height) * (adjusted - scale)) < 2.0)
+                fit_scale = adjusted;
+        }
+    }
     // The fit is linear between the hints' edges: a segment crossing one is cut there, and each
     // piece moves exactly.
     std::vector<double> knots;
@@ -534,7 +592,7 @@ VectorGlyph fit_vector_glyph(const VectorGlyph& glyph, const double scale) {
     std::ranges::sort(knots);
     knots.erase(std::ranges::unique(knots).begin(), knots.end());
     const auto fitted = [&](const double y) {
-        return fitted_height(glyph.hints, scale, y) / scale;
+        return fitted_height(glyph.hints, fit_scale, y) / scale;
     };
     VectorGlyph result;
     result.left = glyph.left;

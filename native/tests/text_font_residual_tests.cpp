@@ -2029,7 +2029,7 @@ void test_vector_glyph_parity(const std::filesystem::path& resources) {
     const std::u32string text = U"Hamburgefontsiv0123456789@&%Qgjy";
     VectorParity unhinted;
     VectorParity hinted;
-    for (const double size : {9.0, 11.0, 13.0, 16.0, 20.0, 28.0, 48.0, 96.0}) {
+    for (const double size : {9.0, 11.0, 12.0, 13.0, 16.0, 20.0, 28.0, 48.0, 96.0}) {
         for (const std::uint16_t index : {std::uint16_t{0U}, std::uint16_t{1U}, std::uint16_t{2U}}) {
             const font::SubpixelPhase phase{index, std::uint16_t{3U}};
             for (const char32_t code_point : text) {
@@ -2050,6 +2050,11 @@ void test_vector_glyph_parity(const std::filesystem::path& resources) {
     check(unhinted.pixels > 1000U, "vector glyph parity compared too few pixels");
     check(mean(unhinted) < 1.0 && unhinted.largest < 48.0,
           "vector glyphs differ from FreeType's coverage of the same unhinted outline");
+    // Fitted to the grid, they stay close to FreeType's light hinting: the x-height scaled onto a
+    // pixel, round tops and bottoms on the zones, stems moved whole.
+    check(mean(hinted) < 10.0,
+          "vector glyphs fitted to the grid drifted from FreeType's light hinting: " +
+              std::to_string(mean(hinted)));
 }
 
 /**
