@@ -26,8 +26,13 @@ namespace {
 constexpr double chart_padding = 6.0;
 constexpr double legend_row_height = 18.0;
 constexpr double legend_swatch = 10.0;
-constexpr double legend_gap = 14.0;
+constexpr double legend_gap = 22.0;
+constexpr double legend_label_gap = 9.0;
 constexpr double x_label_height = 18.0;
+/** A numeric chart's spacing: plot to tick labels, tick labels to axis titles. */
+constexpr double axis_label_gap = 12.0;
+constexpr double x_title_gap = 15.0;
+constexpr double y_title_gap = 20.0;
 /** Degrees between the points of a slice outline. */
 constexpr double outline_step = 6.0;
 
@@ -58,6 +63,40 @@ constexpr double outline_step = 6.0;
     if (*text == "PIE") return ChartKind::pie;
     if (*text == "DONUT") return ChartKind::donut;
     return ChartKind::line;
+}
+
+/** A numeric axis as a chart's xAxis or yAxis property gives it. */
+[[nodiscard]] ChartAxisSpec axis_of(const runtime::Value* value) {
+    ChartAxisSpec spec;
+    if (value == nullptr || value->object() == nullptr)
+        return spec;
+    if (const runtime::Value* scale = value->field("scale");
+        scale != nullptr && scale->string() != nullptr && *scale->string() == "LOG")
+        spec.scale = ChartAxisScale::log;
+    spec.minimum = finite(value->field("min"));
+    spec.maximum = finite(value->field("max"));
+    if (const runtime::Value* ticks = value->field("ticks");
+        ticks != nullptr && ticks->list() != nullptr) {
+        for (const runtime::Value& entry : ticks->list()->values) {
+            if (const std::optional<double> tick = finite(&entry); tick.has_value())
+                spec.ticks.push_back(*tick);
+        }
+    }
+    if (const runtime::Value* title = value->field("title");
+        title != nullptr && title->string() != nullptr)
+        spec.title = *title->string();
+    return spec;
+}
+
+/** A style field (from `style`, merged into `$layout`) or the node's own property. */
+[[nodiscard]] const runtime::Value* styled(const RetainedNode& node,
+                                           const std::string_view name) noexcept {
+    if (const runtime::Value* layout = property(node, "$layout");
+        layout != nullptr && layout->object() != nullptr) {
+        if (const runtime::Value* value = layout->field(name); value != nullptr)
+            return value;
+    }
+    return property(node, name);
 }
 
 [[nodiscard]] std::vector<std::optional<double>> values_of(const runtime::Value* value) {
@@ -180,6 +219,7 @@ constexpr RenderColor fallback_series[] = {
 [[nodiscard]] double estimated_width(const std::string_view text) noexcept {
     return static_cast<double>(text.size()) * 7.0;
 }
+
 
 /**
  * The numbers a chart animates, led by a signature of their structure: for a pie, each slice's
@@ -329,6 +369,20 @@ ChartState chart_state(const RetainedNode& node) {
                 name != nullptr && name->string() != nullptr)
                 item.name = *name->string();
             item.values = values_of(entry.field("values"));
+            if (const runtime::Value* points = entry.field("points");
+                points != nullptr && points->list() != nullptr) {
+                for (const runtime::Value& point : points->list()->values) {
+                    const std::optional<double> x = finite(point.field("x"));
+                    const std::optional<double> y = finite(point.field("y"));
+                    if (!x.has_value() || !y.has_value())
+                        continue;
+                    const runtime::Value* label = point.field("label");
+                    item.points.push_back(ChartXYPoint{
+                        *x, *y,
+                        label != nullptr && label->string() != nullptr ? *label->string() : ""});
+                }
+                state.numeric = true;
+            }
             item.color = color_of(entry.field("color"))
                              .value_or(fallback_series[state.series.size() %
                                                        std::size(fallback_series)]);
@@ -342,7 +396,7 @@ ChartState chart_state(const RetainedNode& node) {
     }
     state.count = state.labels.size();
     for (const ChartSeries& series : state.series)
-        state.count = std::max(state.count, series.values.size());
+        state.count = std::max({state.count, series.values.size(), series.points.size()});
 
     const auto flag = [&node](const std::string_view name, const bool fallback) {
         const runtime::Value* value = property(node, name);
@@ -360,6 +414,42 @@ ChartState chart_state(const RetainedNode& node) {
     if (const std::optional<double> decimals = finite(property(node, "decimals"));
         decimals.has_value())
         state.decimals = static_cast<int>(std::clamp(std::floor(*decimals), 0.0, 9.0));
+    state.x_axis = axis_of(property(node, "xAxis"));
+    state.y_axis = axis_of(property(node, "yAxis"));
+    if (!state.y_axis.minimum.has_value())
+        state.y_axis.minimum = state.minimum;
+    if (!state.y_axis.maximum.has_value())
+        state.y_axis.maximum = state.maximum;
+    if (const runtime::Value* place = property(node, "legendPosition");
+        place != nullptr && place->string() != nullptr) {
+        if (*place->string() == "TOP_END")
+            state.legend_place = ChartLegendPlace::top_end;
+        else if (*place->string() == "TOP_START")
+            state.legend_place = ChartLegendPlace::top_start;
+    }
+    state.axes = flag("showAxes", false);
+    if (const std::optional<double> width = finite(property(node, "lineWidth"));
+        width.has_value() && *width > 0.0)
+        state.line_width = *width;
+    if (const std::optional<double> radius = finite(property(node, "markerRadius"));
+        radius.has_value() && *radius >= 0.0)
+        state.marker_radius = *radius;
+    state.marker_outline = color_of(property(node, "markerOutline"));
+    state.grid_color = color_of(property(node, "gridColor"));
+    state.axis_color = color_of(property(node, "axisColor"));
+    if (const std::optional<double> gap = finite(property(node, "legendGap"));
+        gap.has_value() && *gap >= 0.0)
+        state.legend_gap = *gap;
+    const auto part_style = [&node](const std::string_view name) -> const runtime::Value* {
+        const runtime::Value* style = property(node, name);
+        return style != nullptr && style->object() != nullptr ? style : nullptr;
+    };
+    state.tick_style = part_style("tickStyle");
+    state.title_style = part_style("titleStyle");
+    state.label_style = part_style("labelStyle");
+    state.legend_style = part_style("legendStyle");
+    if (const std::optional<double> reveal = finite(styled(node, "reveal")); reveal.has_value())
+        state.reveal = std::clamp(*reveal, 0.0, 1.0);
 
     std::vector<bool> hidden;
     if (const runtime::Value* value = node.retained_value("$hidden");
@@ -401,21 +491,159 @@ std::string ChartScale::tick_label(const double value, const ChartState& state) 
     return trimmed(value, std::clamp(decimals, 0, 6)) + state.suffix;
 }
 
+double ChartNumericAxis::fraction(const double value) const noexcept {
+    if (scale == ChartAxisScale::log) {
+        if (!(value > 0.0) || !(minimum > 0.0) || !(maximum > minimum))
+            return 0.0;
+        return (std::log(value) - std::log(minimum)) / (std::log(maximum) - std::log(minimum));
+    }
+    return maximum > minimum ? (value - minimum) / (maximum - minimum) : 0.0;
+}
+
 double ChartProjection::x(const std::size_t index) const noexcept {
     return index < bands.size() ? bands[index].x + bands[index].width * 0.5 : plot.x;
 }
 
+namespace {
+
+/** A numeric axis' range and ticks: the authored ones, else the data's, padded, with even ticks. */
+[[nodiscard]] ChartNumericAxis numeric_axis(const ChartAxisSpec& spec, double low, double high,
+                                            const double length, const bool zero_based) {
+    ChartNumericAxis axis;
+    axis.scale = spec.scale;
+    const bool log = spec.scale == ChartAxisScale::log;
+    for (const double tick : spec.ticks) {
+        if (!log || tick > 0.0) {
+            low = std::min(low, tick);
+            high = std::max(high, tick);
+        }
+    }
+    if (!std::isfinite(low) || !std::isfinite(high)) {
+        low = log ? 1.0 : 0.0;
+        high = log ? 10.0 : 1.0;
+    }
+    if (log) {
+        low = std::max(low, 1.0e-12);
+        high = std::max(high, low * 1.0001);
+        if (!spec.minimum.has_value())
+            low /= 1.15;
+        if (!spec.maximum.has_value())
+            high *= 1.15;
+    } else if (zero_based) {
+        low = std::min(low, 0.0);
+    }
+    if (spec.minimum.has_value() && (!log || *spec.minimum > 0.0))
+        low = *spec.minimum;
+    if (spec.maximum.has_value() && (!log || *spec.maximum > low))
+        high = *spec.maximum;
+    if (high <= low)
+        high = log ? low * 10.0 : low + 1.0;
+    axis.minimum = low;
+    axis.maximum = high;
+    if (!spec.ticks.empty()) {
+        for (const double tick : spec.ticks) {
+            if (tick >= low - 1.0e-9 && tick <= high + 1.0e-9 && (!log || tick > 0.0))
+                axis.ticks.push_back(tick);
+        }
+        return axis;
+    }
+    if (log) {
+        // 1, 2 and 5 times each power of ten in range.
+        for (int power = static_cast<int>(std::floor(std::log10(low)));
+             power <= static_cast<int>(std::ceil(std::log10(high))) && axis.ticks.size() < 60U;
+             ++power) {
+            for (const double step : {1.0, 2.0, 5.0}) {
+                const double tick = step * std::pow(10.0, power);
+                if (tick >= low * (1.0 - 1.0e-9) && tick <= high * (1.0 + 1.0e-9))
+                    axis.ticks.push_back(tick);
+            }
+        }
+        return axis;
+    }
+    const double target = std::clamp(std::floor(length / 64.0), 2.0, 10.0);
+    const double step = nice_step((high - low) / target);
+    if (!spec.minimum.has_value())
+        axis.minimum = std::floor(low / step + 1.0e-9) * step;
+    if (!spec.maximum.has_value())
+        axis.maximum = std::ceil(high / step - 1.0e-9) * step;
+    for (double tick = std::ceil(axis.minimum / step - 1.0e-9) * step;
+         tick <= axis.maximum + step * 1.0e-6 && axis.ticks.size() < 50U; tick += step)
+        axis.ticks.push_back(std::abs(tick) < step * 1.0e-9 ? 0.0 : tick);
+    return axis;
+}
+
+/** A tick's label: on the y axis with the chart's decimals and suffix. */
+[[nodiscard]] std::string chart_axis_label(const double value, const ChartState& state,
+                                           const bool vertical) {
+    if (vertical && state.decimals.has_value())
+        return trimmed(value, *state.decimals) + state.suffix;
+    return trimmed(value, std::abs(value) < 10.0 ? 2 : 1) + (vertical ? state.suffix : "");
+}
+
+void numeric_projection(const ChartState& state, const Rect area, const ChartTextMeasure& measure,
+                        ChartProjection& projection) {
+    const double tick_height = measure("0", state.tick_style).height;
+    const double title_height = measure("0", state.title_style).height;
+    double x_low = std::numeric_limits<double>::infinity();
+    double x_high = -std::numeric_limits<double>::infinity();
+    double y_low = std::numeric_limits<double>::infinity();
+    double y_high = -std::numeric_limits<double>::infinity();
+    for (const ChartSeries& series : state.series) {
+        if (series.hidden)
+            continue;
+        for (const ChartXYPoint& point : series.points) {
+            if (state.x_axis.scale != ChartAxisScale::log || point.x > 0.0) {
+                x_low = std::min(x_low, point.x);
+                x_high = std::max(x_high, point.x);
+            }
+            y_low = std::min(y_low, point.y);
+            y_high = std::max(y_high, point.y);
+        }
+    }
+    // Room for the axis titles, the x labels and the y labels' gutter, then the plot.
+    double left = area.x;
+    double bottom = area.bottom();
+    if (!state.y_axis.title.empty())
+        left += title_height + y_title_gap;
+    if (!state.x_axis.title.empty())
+        bottom -= title_height + x_title_gap;
+    bottom -= tick_height + axis_label_gap;
+    const double top = area.y;
+    projection.y_axis =
+        numeric_axis(state.y_axis, y_low, y_high, std::max(1.0, bottom - top), true);
+    double gutter = 0.0;
+    for (const double tick : projection.y_axis.ticks)
+        gutter = std::max(gutter, measure(chart_axis_label(tick, state, true), state.tick_style).width);
+    projection.gutter = gutter + axis_label_gap;
+    left += projection.gutter;
+    // The right keeps room for half a label centred under a tick at the plot's end.
+    projection.plot = Rect{left, top, std::max(1.0, area.right() - 14.0 - left),
+                           std::max(1.0, bottom - top)};
+    projection.x_axis =
+        numeric_axis(state.x_axis, x_low, x_high, projection.plot.width, false);
+}
+
+} // namespace
+
 ChartProjection chart_projection(const ChartState& state, const Rect bounds,
-                                 const ChartTextWidth& width) {
+                                 const ChartTextMeasure& text) {
     ChartProjection projection;
-    const auto measure = [&width](const std::string_view text) {
-        return width ? width(text) : estimated_width(text);
+    const ChartTextMeasure measure = [&text](const std::string_view value,
+                                             const runtime::Value* style) {
+        return text ? text(value, style) : Size{estimated_width(value), 14.0};
     };
     Rect area{bounds.x + chart_padding, bounds.y + chart_padding,
               std::max(0.0, bounds.width - 2.0 * chart_padding),
               std::max(0.0, bounds.height - 2.0 * chart_padding)};
 
-    // The legend wraps its entries into centred rows along the bottom.
+    // The legend wraps its entries into rows: centred along the bottom, or above the plot at its
+    // start or end.
+    projection.round_swatches =
+        state.numeric && (state.marker_radius.has_value() || state.points ||
+                          state.kind == ChartKind::scatter);
+    const double swatch = projection.round_swatches
+                              ? std::max(legend_swatch, 2.0 * state.marker_radius.value_or(5.0))
+                              : legend_swatch;
     if (state.legend) {
         std::vector<ChartLegendEntry> entries;
         if (state.circular()) {
@@ -438,7 +666,8 @@ ChartProjection chart_projection(const ChartState& state, const Rect bounds,
         std::vector<std::vector<ChartLegendEntry>> rows(1U);
         double row_width = 0.0;
         for (ChartLegendEntry& entry : entries) {
-            const double entry_width = legend_swatch + 6.0 + measure(entry.label);
+            const double entry_width =
+                swatch + legend_label_gap + measure(entry.label, state.legend_style).width;
             const double needed = row_width == 0.0 ? entry_width : row_width + legend_gap + entry_width;
             if (needed > area.width && !rows.back().empty()) {
                 rows.emplace_back();
@@ -449,23 +678,31 @@ ChartProjection chart_projection(const ChartState& state, const Rect bounds,
             entry.bounds.width = entry_width;
             rows.back().push_back(std::move(entry));
         }
-        const double legend_height = static_cast<double>(rows.size()) * legend_row_height;
-        double y = area.bottom() - legend_height;
+        const double row_height =
+            std::max({legend_row_height, swatch + 4.0, measure("0", state.legend_style).height});
+        const double legend_height = static_cast<double>(rows.size()) * row_height;
+        const bool top = state.legend_place != ChartLegendPlace::bottom;
+        double y = top ? area.y : area.bottom() - legend_height;
         for (std::vector<ChartLegendEntry>& row : rows) {
             double total = 0.0;
             for (const ChartLegendEntry& entry : row)
                 total += entry.bounds.width + (total > 0.0 ? legend_gap : 0.0);
-            double x = area.x + std::max(0.0, (area.width - total) * 0.5);
+            double x = state.legend_place == ChartLegendPlace::top_start ? area.x
+                       : state.legend_place == ChartLegendPlace::top_end
+                           ? area.right() - total
+                           : area.x + std::max(0.0, (area.width - total) * 0.5);
             for (ChartLegendEntry& entry : row) {
-                entry.bounds = Rect{x, y, entry.bounds.width, legend_row_height};
-                entry.swatch = Rect{x, y + (legend_row_height - legend_swatch) * 0.5,
-                                    legend_swatch, legend_swatch};
+                entry.bounds = Rect{x, y, entry.bounds.width, row_height};
+                entry.swatch = Rect{x, y + (row_height - swatch) * 0.5, swatch, swatch};
                 x += entry.bounds.width + legend_gap;
                 projection.legend.push_back(std::move(entry));
             }
-            y += legend_row_height;
+            y += row_height;
         }
-        area.height = std::max(0.0, area.height - legend_height - 6.0);
+        const double gap = state.legend_gap.value_or(top ? 12.0 : 6.0);
+        if (top)
+            area.y += legend_height + gap;
+        area.height = std::max(0.0, area.height - legend_height - gap);
     }
 
     if (state.circular()) {
@@ -497,6 +734,11 @@ ChartProjection chart_projection(const ChartState& state, const Rect bounds,
             start += slice.sweep;
             projection.slices.push_back(std::move(slice));
         }
+        return projection;
+    }
+
+    if (state.numeric) {
+        numeric_projection(state, area, measure, projection);
         return projection;
     }
 
@@ -542,7 +784,9 @@ ChartProjection chart_projection(const ChartState& state, const Rect bounds,
     }
 
     projection.plot.y = area.y + 6.0;
-    projection.plot.height = std::max(1.0, area.bottom() - x_label_height - projection.plot.y);
+    projection.plot.height = std::max(
+        1.0, area.bottom() - std::max(x_label_height, measure("0", state.tick_style).height) -
+                 projection.plot.y);
     const double target = std::clamp(std::floor(projection.plot.height / 44.0), 2.0, 8.0);
     ChartScale& scale = projection.scale;
     scale.step = nice_step((high - low) / target);
@@ -558,7 +802,7 @@ ChartProjection chart_projection(const ChartState& state, const Rect bounds,
 
     double gutter = 0.0;
     for (const double tick : scale.ticks)
-        gutter = std::max(gutter, measure(scale.tick_label(tick, state)));
+        gutter = std::max(gutter, measure(scale.tick_label(tick, state), state.tick_style).width);
     projection.gutter = gutter + 8.0;
     projection.plot.x = area.x + projection.gutter;
     projection.plot.width = std::max(1.0, area.right() - 4.0 - projection.plot.x);
@@ -570,7 +814,7 @@ ChartProjection chart_projection(const ChartState& state, const Rect bounds,
     }
     double widest = 0.0;
     for (std::size_t index = 0U; index < state.count; ++index)
-        widest = std::max(widest, measure(state.label(index)));
+        widest = std::max(widest, measure(state.label(index), state.tick_style).width);
     projection.x_label_step =
         band > 0.0 ? std::max<std::size_t>(1U, static_cast<std::size_t>(
                                                    std::ceil((widest + 8.0) / band)))
@@ -662,14 +906,52 @@ void dot(WidgetRenderScope& scope, const Point center, const double radius,
     return scope.text_engine()->shape(scope.node(), "0").metrics.height;
 }
 
+/** A text's size in one of the chart's parts' styles, or its own when `style` is null. */
+[[nodiscard]] Size chart_text_size(const WidgetRenderScope& scope, const std::string_view text,
+                                   const runtime::Value* style) {
+    if (scope.text_engine() == nullptr)
+        return Size{estimated_width(text), 14.0};
+    if (style == nullptr) {
+        const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), text);
+        return Size{shaped.metrics.width, shaped.metrics.height};
+    }
+    const TextLayout layout =
+        scope.text_engine()->layout(scope.node(), text, TextLayoutOptions{.style = style});
+    return Size{layout.shaped.metrics.width, layout.shaped.metrics.height};
+}
+
+/** A part style's own colour, if it sets one. */
+[[nodiscard]] std::optional<RenderColor> style_color(const runtime::Value* style) {
+    return style != nullptr ? color_of(style->field("color")) : std::nullopt;
+}
+
+/** Text in one of the chart's parts' styles (its own when `style` is null), aligned in `width`. */
+void chart_text(WidgetRenderScope& scope, const std::string_view text, const runtime::Value* style,
+                const Point origin, const RenderColor color, const double width = 0.0,
+                const WidgetTextAlignment alignment = WidgetTextAlignment::start) {
+    if (style == nullptr || scope.text_engine() == nullptr) {
+        scope.text(text, origin, color, width, alignment);
+        return;
+    }
+    if (text.empty())
+        return;
+    const TextLayout layout =
+        scope.text_engine()->layout(scope.node(), text, TextLayoutOptions{.style = style});
+    const double extent = layout.shaped.metrics.width;
+    const double offset = alignment == WidgetTextAlignment::center ? std::max(0.0, (width - extent) * 0.5)
+                          : alignment == WidgetTextAlignment::end ? std::max(0.0, width - extent)
+                                                                  : 0.0;
+    scope.text(layout, Point{origin.x + offset, origin.y}, color);
+}
+
 /** A floating box listing `lines`, beside `anchor` and kept inside `limits`. */
-void tooltip(WidgetRenderScope& scope, const ChartTextWidth& measure, const Point anchor,
+void tooltip(WidgetRenderScope& scope, const ChartTextMeasure& measure, const Point anchor,
              const Rect limits, const std::string& title,
              const std::vector<std::pair<RenderColor, std::string>>& lines) {
     const double line_height = text_height(scope) + 4.0;
-    double width = measure(title);
+    double width = measure(title, nullptr).width;
     for (const auto& [color, text] : lines)
-        width = std::max(width, measure(text) + 14.0);
+        width = std::max(width, measure(text, nullptr).width + 14.0);
     width += 16.0;
     const double height = line_height * static_cast<double>(lines.size() + 1U) + 10.0;
     double x = anchor.x + 12.0;
@@ -693,23 +975,38 @@ void tooltip(WidgetRenderScope& scope, const ChartTextWidth& measure, const Poin
     }
 }
 
-void legend(WidgetRenderScope& scope, const ChartProjection& projection) {
-    const RenderColor ink = scope.visual().foreground;
-    const double height = text_height(scope);
+void legend(WidgetRenderScope& scope, const ChartProjection& projection, const ChartState& state,
+            const std::optional<RenderColor> outline = std::nullopt) {
+    const RenderColor ink = style_color(state.legend_style).value_or(with_alpha(scope.visual().foreground, 0.85));
+    const double height = chart_text_size(scope, "0", state.legend_style).height;
     for (const ChartLegendEntry& entry : projection.legend) {
         const std::string id = "legend:" + std::to_string(entry.index);
         scope.interaction(entry.bounds, id);
         const double alpha = entry.hidden ? 0.35 : 1.0;
-        scope.rounded_rect(entry.swatch, Paint(with_alpha(entry.color, alpha)), std::nullopt, 2.0);
-        scope.text(entry.label,
-                   Point{entry.swatch.right() + 6.0,
+        if (projection.round_swatches) {
+            StrokeStyle ring;
+            ring.width = 1.0;
+            scope.circle(Point{entry.swatch.x + entry.swatch.width * 0.5,
+                               entry.swatch.y + entry.swatch.height * 0.5},
+                         entry.swatch.width * 0.5 - (outline.has_value() ? 0.5 : 0.0),
+                         Paint(with_alpha(entry.color, alpha)),
+                         outline.has_value()
+                             ? std::optional<Paint>(Paint(with_alpha(*outline, alpha)))
+                             : std::nullopt,
+                         ring);
+        } else {
+            scope.rounded_rect(entry.swatch, Paint(with_alpha(entry.color, alpha)), std::nullopt,
+                               2.0);
+        }
+        chart_text(scope, entry.label, state.legend_style,
+                   Point{entry.swatch.right() + legend_label_gap,
                          entry.bounds.y + (entry.bounds.height - height) * 0.5},
-                   with_alpha(ink, entry.hidden ? 0.45 : 0.85));
+                   with_alpha(ink, entry.hidden ? 0.5 : 1.0));
     }
 }
 
 void circular_content(WidgetRenderScope& scope, ChartState& state, ChartProjection& projection,
-                      const ChartTextWidth& measure) {
+                      const ChartTextMeasure& measure) {
     for (ChartLegendEntry& entry : projection.legend)
         entry.color = slice_color(scope, entry.index);
     const std::optional<std::size_t> focus = inspected(scope, state);
@@ -766,11 +1063,164 @@ void circular_content(WidgetRenderScope& scope, ChartState& state, ChartProjecti
                     {{found->color, state.format(found->value) + "  (" + percent + ")"}});
         }
     }
-    legend(scope, projection);
+    legend(scope, projection, state);
+}
+
+/**
+ * A chart of points at numeric x: gridlines and axis lines, tick labels and axis titles, then
+ * each series' line drawn along itself as far as `reveal` has it, and its points (with their
+ * labels) appearing as the line reaches them.
+ */
+void numeric_content(WidgetRenderScope& scope, ChartState& state, ChartProjection& projection,
+                     const ChartTextMeasure& measure) {
+    themed_colors(scope, state, scope.node());
+    for (ChartLegendEntry& entry : projection.legend)
+        entry.color = state.series[entry.index].color;
+    const Rect plot = projection.plot;
+    const RenderColor ink = scope.visual().foreground;
+    const RenderColor ticks = style_color(state.tick_style).value_or(with_alpha(ink, 0.55));
+    const RenderColor titles = style_color(state.title_style).value_or(ink);
+    const RenderColor labels = style_color(state.label_style).value_or(ink);
+    const RenderColor grid = state.grid_color.value_or(scope.palette("chartGrid"));
+    const RenderColor axis = state.axis_color.value_or(with_alpha(ink, 0.6));
+    const double tick_height = measure("0", state.tick_style).height;
+    const double title_height = measure("0", state.title_style).height;
+    const double label_height = measure("0", state.label_style).height;
+    const ChartNumericAxis& x_axis = projection.x_axis;
+    const ChartNumericAxis& y_axis = projection.y_axis;
+    const auto x_of = [&](const double value) {
+        return plot.x + x_axis.fraction(value) * plot.width;
+    };
+    const auto y_of = [&](const double value) {
+        return plot.bottom() - y_axis.fraction(value) * plot.height;
+    };
+
+    for (const double tick : y_axis.ticks) {
+        // A line at y lights the pixel row it falls in.
+        const double y = std::floor(y_of(tick));
+        if (state.grid && !(state.axes && std::abs(y - std::floor(plot.bottom())) < 0.5))
+            scope.solid_rect(Rect{plot.x, y, plot.width, 1.0}, Paint(grid));
+        chart_text(scope, chart_axis_label(tick, state, true), state.tick_style,
+                   Point{plot.x - projection.gutter, y + 0.5 - tick_height * 0.5}, ticks,
+                   projection.gutter - axis_label_gap, WidgetTextAlignment::end);
+    }
+    if (state.axes) {
+        scope.solid_rect(Rect{std::floor(plot.x), plot.y, 1.0, plot.height + 1.0}, Paint(axis));
+        scope.solid_rect(Rect{plot.x, std::floor(plot.bottom()), plot.width, 1.0}, Paint(axis));
+    }
+    for (const double tick : x_axis.ticks) {
+        const std::string text = chart_axis_label(tick, state, false);
+        const double width = measure(text, state.tick_style).width + 8.0;
+        chart_text(scope, text, state.tick_style,
+                   Point{x_of(tick) - width * 0.5, plot.bottom() + axis_label_gap}, ticks, width,
+                   WidgetTextAlignment::center);
+    }
+    if (!state.x_axis.title.empty()) {
+        chart_text(scope, state.x_axis.title, state.title_style,
+                   Point{plot.x, plot.bottom() + axis_label_gap + tick_height + x_title_gap},
+                   titles, plot.width, WidgetTextAlignment::center);
+    }
+    if (!state.y_axis.title.empty()) {
+        // Turned a quarter to read upward, centred on the plot's height left of the labels.
+        const Point centre{plot.x - projection.gutter - y_title_gap - title_height * 0.5,
+                           plot.y + plot.height * 0.5};
+        scope.push_transform(TransformPushRenderCommand{0.0, 1.0, centre.x - centre.y, -1.0, 0.0,
+                                                        centre.y + centre.x});
+        chart_text(scope, state.y_axis.title, state.title_style,
+                   Point{centre.x - plot.height * 0.5, centre.y - title_height * 0.5}, titles,
+                   plot.height, WidgetTextAlignment::center);
+        scope.pop_transform();
+    }
+
+    // Each line as far along itself as the reveal has drawn it.
+    const double reveal = std::clamp(state.reveal, 0.0, 1.0);
+    const bool markers = state.marker_radius.has_value() || state.points ||
+                         state.kind == ChartKind::scatter;
+    const double radius = state.marker_radius.value_or(state.kind == ChartKind::scatter ? 4.0 : 3.5);
+    struct Drawn final {
+        std::vector<Point> points;
+        std::vector<double> arrivals;
+        double drawn = 0.0;
+    };
+    std::vector<Drawn> drawn(state.series.size());
+    // The first series is the one to read: it draws last, over the others.
+    for (std::size_t index = state.series.size(); index-- > 0U;) {
+        const ChartSeries& series = state.series[index];
+        if (series.hidden)
+            continue;
+        Drawn& line = drawn[index];
+        double length = 0.0;
+        for (const ChartXYPoint& point : series.points) {
+            const Point at{x_of(point.x), y_of(point.y)};
+            if (!line.points.empty()) {
+                length += std::hypot(at.x - line.points.back().x, at.y - line.points.back().y);
+            }
+            line.points.push_back(at);
+            line.arrivals.push_back(length);
+        }
+        line.drawn = length * reveal;
+        if (state.kind == ChartKind::scatter || line.points.size() < 2U || line.drawn <= 0.0)
+            continue;
+        std::vector<Point> partial{line.points.front()};
+        for (std::size_t point = 1U; point < line.points.size(); ++point) {
+            if (line.arrivals[point] <= line.drawn) {
+                partial.push_back(line.points[point]);
+                continue;
+            }
+            const double span = line.arrivals[point] - line.arrivals[point - 1U];
+            const double t = span > 0.0 ? (line.drawn - line.arrivals[point - 1U]) / span : 0.0;
+            const Point from = line.points[point - 1U];
+            const Point to = line.points[point];
+            partial.push_back(Point{from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t});
+            break;
+        }
+        stroke_polyline(scope, partial, with_alpha(series.color, series.weight), state.line_width);
+    }
+    // Points over every line, each growing in as its line comes within a few radii of it.
+    const double ramp = std::max(1.0, radius * 3.0);
+    for (std::size_t index = state.series.size(); index-- > 0U;) {
+        const ChartSeries& series = state.series[index];
+        const Drawn& line = drawn[index];
+        if (series.hidden)
+            continue;
+        for (std::size_t point = 0U; point < line.points.size(); ++point) {
+            const double appear =
+                reveal >= 1.0 ? 1.0
+                              : std::clamp((line.drawn - line.arrivals[point]) / ramp + 1.0, 0.0,
+                                           1.0) * (reveal > 0.0 ? 1.0 : 0.0);
+            if (appear <= 0.0)
+                continue;
+            const double eased = appear * appear * (3.0 - 2.0 * appear);
+            if (markers && radius > 0.0) {
+                StrokeStyle ring;
+                ring.width = 1.0;
+                const double shown = radius * eased;
+                scope.circle(line.points[point],
+                             std::max(0.0, shown - (state.marker_outline.has_value() ? 0.5 : 0.0)),
+                             Paint(with_alpha(series.color, series.weight)),
+                             state.marker_outline.has_value()
+                                 ? std::optional<Paint>(Paint(
+                                       with_alpha(*state.marker_outline, series.weight * eased)))
+                                 : std::nullopt,
+                             ring);
+            }
+            const std::string& label = series.points[point].label;
+            if (!label.empty()) {
+                const double width = measure(label, state.label_style).width + 8.0;
+                chart_text(scope, label, state.label_style,
+                           Point{line.points[point].x - width * 0.5,
+                                 line.points[point].y - (markers ? radius : 2.0) - 3.0 -
+                                     label_height},
+                           with_alpha(labels, eased * series.weight), width,
+                           WidgetTextAlignment::center);
+            }
+        }
+    }
+    legend(scope, projection, state, state.marker_outline);
 }
 
 void cartesian_content(WidgetRenderScope& scope, ChartState& state, ChartProjection& projection,
-                       const ChartTextWidth& measure) {
+                       const ChartTextMeasure& measure) {
     themed_colors(scope, state, scope.node());
     for (ChartLegendEntry& entry : projection.legend)
         entry.color = state.series[entry.index].color;
@@ -780,8 +1230,8 @@ void cartesian_content(WidgetRenderScope& scope, ChartState& state, ChartProject
     }
     const Rect plot = projection.plot;
     const RenderColor ink = scope.visual().foreground;
-    const RenderColor muted = with_alpha(ink, 0.55);
-    const double label_height = text_height(scope);
+    const RenderColor muted = style_color(state.tick_style).value_or(with_alpha(ink, 0.55));
+    const double label_height = chart_text_size(scope, "0", state.tick_style).height;
     const ChartScale& scale = projection.scale;
 
     for (const double tick : scale.ticks) {
@@ -790,15 +1240,16 @@ void cartesian_content(WidgetRenderScope& scope, ChartState& state, ChartProject
             scope.solid_rect(Rect{plot.x, std::round(y), plot.width, 1.0},
                              Paint(tick == 0.0 ? with_alpha(ink, 0.3) : scope.palette("chartGrid")));
         }
-        scope.text(scale.tick_label(tick, state),
+        chart_text(scope, scale.tick_label(tick, state), state.tick_style,
                    Point{plot.x - projection.gutter, y - label_height * 0.5}, muted,
                    projection.gutter - 8.0, WidgetTextAlignment::end);
     }
     for (std::size_t index = 0U; index < state.count; index += projection.x_label_step) {
         const Rect band = projection.bands[index];
         const double span = band.width * static_cast<double>(projection.x_label_step);
-        scope.text(state.label(index), Point{band.x + band.width * 0.5 - span * 0.5, plot.bottom() + 4.0},
-                   muted, span, WidgetTextAlignment::center);
+        chart_text(scope, state.label(index), state.tick_style,
+                   Point{band.x + band.width * 0.5 - span * 0.5, plot.bottom() + 4.0}, muted, span,
+                   WidgetTextAlignment::center);
     }
 
     const std::optional<std::size_t> focus = inspected(scope, state);
@@ -914,13 +1365,16 @@ void cartesian_content(WidgetRenderScope& scope, ChartState& state, ChartProject
                     state.label(*focus), lines);
         }
     }
-    legend(scope, projection);
+    legend(scope, projection, state);
 }
 
 void chart_content(WidgetRenderScope& scope) {
     ChartState state = chart_state(scope.node());
     // Animated data: values morph, and series and slices fade or sweep as the legend toggles them.
     if (const MotionComputedValues* computed = scope.motion_values(); computed != nullptr) {
+        if (const std::optional<double> reveal = computed->number(MotionProperty::reveal);
+            reveal.has_value())
+            state.reveal = std::clamp(*reveal, 0.0, 1.0);
         if (const MotionNumbers* animated = computed->numbers(MotionProperty::data);
             animated != nullptr && animated->values != nullptr) {
             const RetainedNode& node = scope.node();
@@ -931,10 +1385,9 @@ void chart_content(WidgetRenderScope& scope) {
                 apply_chart_motion(state, *animated->values);
         }
     }
-    const ChartTextWidth measure = [&scope](const std::string_view text) {
-        return scope.text_engine() != nullptr
-                   ? scope.text_engine()->shape(scope.node(), text).metrics.width
-                   : estimated_width(text);
+    const ChartTextMeasure measure = [&scope](const std::string_view text,
+                                              const runtime::Value* style) {
+        return chart_text_size(scope, text, style);
     };
     ChartProjection projection = chart_projection(state, scope.layout().bounds, measure);
     if (scope.visual().background.has_value()) {
@@ -943,6 +1396,8 @@ void chart_content(WidgetRenderScope& scope) {
     }
     if (state.circular())
         circular_content(scope, state, projection, measure);
+    else if (state.numeric)
+        numeric_content(scope, state, projection, measure);
     else
         cartesian_content(scope, state, projection, measure);
     scope.focus(scope.layout().bounds);
@@ -1127,10 +1582,17 @@ std::vector<WidgetSubtarget> chart_subtargets(const WidgetSubtargetContext& cont
         return result;
     const RetainedNode& node = context.node;
     const ChartState state = chart_state(node);
-    const ChartTextWidth measure = [&context](const std::string_view text) {
-        return context.text_width != nullptr && *context.text_width
-                   ? (*context.text_width)(context.node, text)
-                   : estimated_width(text);
+    const ChartTextMeasure measure = [&context](const std::string_view text,
+                                                const runtime::Value* style) {
+        Size size{estimated_width(text), 14.0};
+        if (context.text_layout != nullptr && *context.text_layout) {
+            const TextLayout layout =
+                (*context.text_layout)(context.node, text, TextLayoutOptions{.style = style});
+            size = Size{layout.shaped.metrics.width, layout.shaped.metrics.height};
+        }
+        if (style == nullptr && context.text_width != nullptr && *context.text_width)
+            size.width = (*context.text_width)(context.node, text);
+        return size;
     };
     const ChartProjection projection = chart_projection(state, context.record.bounds, measure);
     const int z = context.record.z_index;

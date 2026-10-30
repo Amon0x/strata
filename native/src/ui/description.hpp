@@ -442,6 +442,13 @@ class DescriptionBuilder final {
                                                      std::set<std::string, std::less<>>& resolving);
     [[nodiscard]] bool style_current(ResolvedStyle& style) const;
     void normalize_layout(DescriptionNode::Properties& properties);
+    /**
+     * Resolves the styles a node's parts are drawn in (a style's name, or a style written in
+     * place, with what it extends) into their fields, as its own style is resolved: each rich
+     * text span's `style`, under `$spanStyles`, and a chart's tick, title, label and legend
+     * styles in place.
+     */
+    void normalize_part_styles(DescriptionNode::Properties& properties);
     [[nodiscard]] bool
     same_contextual_host_roots(const std::shared_ptr<const runtime::HostRoots>& roots) const;
     /** Whether a host read would read the same now. */

@@ -254,12 +254,17 @@ enum class Joining : std::uint8_t { none, transparent, right, dual, causing };
 }
 
 /**
- * A description's style containers found once (textStyle, $layout, style, in that order), so
- * reading many style fields of one node does not search its properties for them each time.
+ * A description's style containers found once (a part's style when one is given, then textStyle,
+ * $layout, style, in that order), so reading many style fields of one node does not search its
+ * properties for them each time.
  */
 class StyleSource final {
   public:
-    explicit StyleSource(const DescriptionNode& description) noexcept : description_(description) {
+    explicit StyleSource(const DescriptionNode& description,
+                         const runtime::Value* const part = nullptr) noexcept
+        : description_(description) {
+        if (part != nullptr && part->object() != nullptr)
+            containers_[count_++] = part;
         for (const std::string_view container : {"textStyle", "$layout", "style"}) {
             if (const runtime::Value* style = property(description, container);
                 style != nullptr && style->object() != nullptr) {
@@ -279,7 +284,7 @@ class StyleSource final {
 
   private:
     const DescriptionNode& description_;
-    std::array<const runtime::Value*, 3U> containers_{};
+    std::array<const runtime::Value*, 4U> containers_{};
     std::size_t count_ = 0U;
 };
 
@@ -768,7 +773,7 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
                                              const std::optional<double> measured_wrap_width,
                                              const TextLayoutOptions* const overrides) const {
     const DescriptionNode& description = node.description();
-    const StyleSource style(description);
+    const StyleSource style(description, overrides != nullptr ? overrides->style : nullptr);
     const std::optional<double> authored_wrap = positive_number(style.field("wrapWidth"));
     std::optional<double> resolved_wrap =
         authored_wrap.has_value() ? authored_wrap : measured_wrap_width;
@@ -824,7 +829,8 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
         if (span_text == nullptr || span_text->string() == nullptr)
             continue;
         const std::size_t end = offset + utf16_length(*span_text->string());
-        const runtime::Value* span_style = span.field("style");
+        // The span's style resolved to its fields (a style's name alone has none).
+        const runtime::Value* span_style = ui::span_style(description, span_index);
         const auto run_field = [&span, span_style](const std::string_view name) {
             if (const runtime::Value* value = object_field(span_style, name); value != nullptr) {
                 return value;

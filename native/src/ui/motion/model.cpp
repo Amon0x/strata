@@ -63,6 +63,7 @@ constexpr std::array property_names{
     PropertyName{MotionProperty::perspective, "perspective"},
     PropertyName{MotionProperty::shapes, "shapes"},
     PropertyName{MotionProperty::data, "data"},
+    PropertyName{MotionProperty::reveal, "reveal"},
     PropertyName{MotionProperty::paint_rotate, "paintRotate"},
 };
 

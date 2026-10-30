@@ -2574,6 +2574,11 @@
       "type": "number"
     },
     {
+      "name": "reveal",
+      "nullable": false,
+      "type": "number"
+    },
+    {
       "name": "scale",
       "nullable": false,
       "type": "number"
@@ -5708,6 +5713,11 @@
       "type": "number | { all?: number, bottom?: number, bottomLeft?: number, bottomRight?: number, left?: number, right?: number, top?: number, topLeft?: number, topRight?: number }"
     },
     {
+      "name": "reveal",
+      "nullable": false,
+      "type": "number"
+    },
+    {
       "name": "rowSpan",
       "nullable": false,
       "type": "number"
@@ -7102,7 +7112,7 @@
           "name": "series",
           "nullable": false,
           "required": false,
-          "type": "list of { color?: color, name?: string, values: list of number }"
+          "type": "list of { color?: color, name?: string, points?: list of { label?: string, x: number, y: number }, values?: list of number }"
         },
         {
           "aliases": [],
@@ -7206,6 +7216,122 @@
           "nullable": false,
           "required": false,
           "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "xAxis",
+          "nullable": false,
+          "required": false,
+          "type": "{ max?: number, min?: number, scale?: \"LINEAR\" | \"LOG\", ticks?: list of number, title?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "yAxis",
+          "nullable": false,
+          "required": false,
+          "type": "{ max?: number, min?: number, scale?: \"LINEAR\" | \"LOG\", ticks?: list of number, title?: string }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "BOTTOM",
+            "TOP_END",
+            "TOP_START"
+          ],
+          "name": "legendPosition",
+          "nullable": false,
+          "required": false,
+          "type": "\"BOTTOM\" | \"TOP_END\" | \"TOP_START\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "showAxes",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "lineWidth",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "markerRadius",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "markerOutline",
+          "nullable": true,
+          "required": false,
+          "type": "color"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "gridColor",
+          "nullable": true,
+          "required": false,
+          "type": "color"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "axisColor",
+          "nullable": true,
+          "required": false,
+          "type": "color"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "legendGap",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "tickStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "titleStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "labelStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "legendStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
         },
         {
           "aliases": [],

@@ -128,6 +128,11 @@ struct TextLayoutOptions final {
     std::optional<std::string> alignment;
     /** Wrap width used only when neither the owner style nor wrap_width supplies one. */
     std::optional<double> fallback_wrap_width;
+    /**
+     * Style fields that win over the owner's (a resolved style object): text a widget draws in
+     * one of its parts' styles, such as a chart's tick labels. Read only during the call.
+     */
+    const runtime::Value* style = nullptr;
 
     [[nodiscard]] friend auto operator<=>(const TextLayoutOptions&,
                                           const TextLayoutOptions&) = default;

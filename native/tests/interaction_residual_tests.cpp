@@ -4416,6 +4416,68 @@ overlay Ticks {
     check(shown("ticks.count") == "11", "a stalled frame fired a burst of timer actions");
 }
 
+void test_chart_draws_points_in_along_a_log_axis(const std::filesystem::path& resources) {
+    const std::string source = R"(
+animation DrawIn { from { reveal: 0 } to { reveal: 1 } duration: 1000ms; easing: "linear"; fillMode: "FORWARDS"; }
+overlay Cost {
+  root Panel(key: "cost.root", layout: { kind: "COLUMN", width: 480, height: 320 }) {
+    Chart(key: "cost.chart", enter: DrawIn, markerRadius: 5, showLegend: false,
+          xAxis: { scale: "LOG", min: 0.5, max: 200, title: "Cost" }, yAxis: { title: "Score" },
+          series: [{ name: "Model", color: #FF0000,
+                     points: [{ x: 1, y: 1, label: "Low" }, { x: 10, y: 2 }, { x: 100, y: 3 }] }],
+          layout: { width: 480, height: 320 })
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("xy-chart", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Cost", 480.0, 320.0, false);
+    std::int64_t now = 1'000'000;
+    const auto red = [](const std::optional<ui::Paint>& paint) {
+        const runtime::ColorValue* color = paint.has_value() ? paint->color() : nullptr;
+        return color != nullptr && color->red == 255U && color->green == 0U && color->alpha > 0U;
+    };
+    // The series' line (its right end) and the centres of its points drawn so far.
+    struct Drawn final {
+        std::optional<double> line_end;
+        std::vector<double> points;
+    };
+    const auto drawn = [&] {
+        Drawn result;
+        for (const ui::RenderCommand& command : surface->render_commands().commands()) {
+            const auto* path = std::get_if<ui::PathRenderCommand>(&command);
+            if (path == nullptr)
+                continue;
+            if (red(path->shape.stroke))
+                result.line_end = path->bounds.right();
+            else if (red(path->shape.fill) && path->bounds.width > 0.0)
+                result.points.push_back(path->bounds.x + path->bounds.width * 0.5);
+        }
+        std::ranges::sort(result.points);
+        return result;
+    };
+    static_cast<void>(surface->frame(now));
+    const Drawn start = drawn();
+    check(!start.line_end.has_value() && start.points.empty(),
+          "a Chart drawing in showed its line or points before the reveal began");
+    for (int frame = 0; frame < 25; ++frame)
+        static_cast<void>(surface->frame(now += 20'000'000));
+    const Drawn middle = drawn();
+    for (int frame = 0; frame < 60; ++frame)
+        static_cast<void>(surface->frame(now += 20'000'000));
+    const Drawn end = drawn();
+    check(end.points.size() == 3U && end.line_end.has_value(),
+          "a Chart that had drawn in did not show its line and all three points");
+    // On a log axis 1, 10 and 100 are evenly spaced.
+    check(std::abs((end.points[1] - end.points[0]) - (end.points[2] - end.points[1])) < 0.5,
+          "a log x axis did not space 1, 10 and 100 evenly");
+    check(middle.line_end.has_value() && *middle.line_end < end.points[2] &&
+              !middle.points.empty() && middle.points.size() < 3U,
+          "half way through drawing in, a Chart's line had not drawn part way with only its "
+          "first points");
+}
+
 void test_chart_inspects_selects_and_hides_series(const std::filesystem::path& resources) {
     const std::string source = R"(
 overlay Sales {
@@ -4945,6 +5007,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_image_fit_keeps_the_aspect_ratio();
         test_calendar_picks_days_by_pointer_and_keyboard(resources);
         test_chart_inspects_selects_and_hides_series(resources);
+        test_chart_draws_points_in_along_a_log_axis(resources);
         test_timers_fire_on_their_interval(resources);
         test_markdown_expands_blocks_and_follows_links(resources);
         test_modal_sides_open_drawers_and_sheets(resources);

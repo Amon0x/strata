@@ -189,7 +189,7 @@ Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
-| `series` | list of { color?: color, name?: string, values: list of number } | false | false | — |
+| `series` | list of { color?: color, name?: string, points?: list of { label?: string, x: number, y: number }, values?: list of number } | false | false | — |
 | `key` | key | false | false | — |
 | `kind` | "AREA" \| "BAR" \| "DONUT" \| "LINE" \| "PIE" \| "SCATTER" | false | false | — |
 | `labels` | list of any | false | false | — |
@@ -202,6 +202,20 @@ Children: `false` · Capabilities: —
 | `showPoints` | boolean | false | false | — |
 | `valueSuffix` | string | false | false | — |
 | `decimals` | number | false | false | — |
+| `xAxis` | { max?: number, min?: number, scale?: "LINEAR" \| "LOG", ticks?: list of number, title?: string } | false | false | — |
+| `yAxis` | { max?: number, min?: number, scale?: "LINEAR" \| "LOG", ticks?: list of number, title?: string } | false | false | — |
+| `legendPosition` | "BOTTOM" \| "TOP_END" \| "TOP_START" | false | false | — |
+| `showAxes` | boolean | false | false | — |
+| `lineWidth` | number | false | false | — |
+| `markerRadius` | number | false | false | — |
+| `markerOutline` | color | false | true | — |
+| `gridColor` | color | false | true | — |
+| `axisColor` | color | false | true | — |
+| `legendGap` | number | false | false | — |
+| `tickStyle` | style | false | false | — |
+| `titleStyle` | style | false | false | — |
+| `labelStyle` | style | false | false | — |
+| `legendStyle` | style | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
 | `style` | style | false | false | — |
@@ -3555,6 +3569,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `portalTarget` | string |
 | `position` | "ABSOLUTE" \| "FLOW" \| "STICKY" |
 | `radius` | number \| { all?: number, bottom?: number, bottomLeft?: number, bottomRight?: number, left?: number, right?: number, top?: number, topLeft?: number, topRight?: number } |
+| `reveal` | number |
 | `rowSpan` | number |
 | `stackBelow` | number |
 | `syntax` | { attribute?: color, builtin?: color, comment?: color, constant?: color, emphasis?: color, function?: color, gutter?: color, heading?: color, keyword?: color, lineHighlight?: color, lineNumber?: color, link?: color, meta?: color, number?: color, operator?: color, plain?: color, property?: color, punctuation?: color, string?: color, tag?: color, type?: color, variable?: color } |
@@ -3688,6 +3703,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `placementX` | number |
 | `placementY` | number |
 | `radius` | number |
+| `reveal` | number |
 | `scale` | number |
 | `scaleX` | number |
 | `scaleY` | number |

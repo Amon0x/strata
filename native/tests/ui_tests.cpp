@@ -4598,6 +4598,48 @@ void test_portable_description_and_declaration_state(const std::filesystem::path
           "InputRouter teardown did not release its private host-service owner");
 }
 
+/**
+ * A rich text span's style named by its name resolves to its fields, what it extends included,
+ * as a node's style does; a span naming none has none.
+ */
+void test_rich_text_span_styles_resolve() {
+    using namespace strata;
+    runtime::ApplicationContext application("span-styles", runtime::ApplicationBundle::create());
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    const std::string source = R"(
+style Caption { pixelSize: 14; fontStyle: "ITALIC"; }
+style CaptionLink extends Caption { color: #FF0000; textDecoration: "UNDERLINE"; }
+overlay SpanStyles {
+  root RichText(key: "span.styles", spans: [{ text: "In " }, { text: "a link", style: CaptionLink }])
+}
+)";
+    const runtime::ActivationResult activation = application.compile_and_activate(
+        compiler::ModuleSource{"span-styles.strata", source}, no_imports, 0U);
+    check(activation.activated(), "span style fixture did not activate");
+    ui::DescriptionBuilder builder(application);
+    const ui::DescriptionBuildResult built =
+        builder.build(runtime::LayerRole::overlay, "SpanStyles");
+    check(built.diagnostics.empty() && built.root != nullptr && built.root->children != nullptr &&
+              built.root->children->size() == 1U,
+          "span style fixture produced diagnostics");
+    // The overlay's root is the RichText.
+    const std::shared_ptr<const ui::DescriptionNode> rich = built.root->children->at(0U);
+    const runtime::Value* plain = ui::span_style(*rich, 0U);
+    const runtime::Value* link = ui::span_style(*rich, 1U);
+    check(plain == nullptr && link != nullptr,
+          "a rich text span's named style did not resolve, or an unstyled span gained one");
+    const runtime::Value* decoration = link->field("textDecoration");
+    check(link->field("color") != nullptr && decoration != nullptr &&
+              decoration->string() != nullptr && *decoration->string() == "UNDERLINE",
+          "a rich text span's named style lost its own fields");
+    const runtime::Value* inherited = link->field("pixelSize");
+    check(inherited != nullptr && inherited->number() != nullptr && *inherited->number() == 14.0,
+          "a rich text span's named style lost the fields of the style it extends");
+}
+
 void test_repeater_description_is_data_backed() {
     using namespace strata;
     const auto collection_property = [](const std::uint64_t rebuilds,
@@ -9409,6 +9451,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_phased_input_dispatch_and_gesture_claim();
             test_portable_description_and_declaration_state(arguments[1], arguments[2]);
             test_repeater_description_is_data_backed();
+            test_rich_text_span_styles_resolve();
             test_surface_contextual_environment(arguments[1]);
             test_async_collection_key_isolation_and_lazy_tree_publication(arguments[1]);
             test_native_collection_interaction_and_templates(arguments[1]);

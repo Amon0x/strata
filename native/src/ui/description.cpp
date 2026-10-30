@@ -1205,6 +1205,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_widget_call(con
         }
     }
     normalize_layout(properties);
+    normalize_part_styles(properties);
     const auto key_property = properties.find("key");
     std::optional<std::string> key =
         key_property != properties.end() ? key_from_value(key_property->second) : std::nullopt;
@@ -2031,6 +2032,60 @@ DescriptionBuilder::resolve_named_style(const std::string_view name,
                                                         contextual_host_roots_,
                                                     });
     return replay(stored.first->second);
+}
+
+void DescriptionBuilder::normalize_part_styles(DescriptionNode::Properties& properties) {
+    for (const std::string_view name : {"tickStyle", "titleStyle", "labelStyle", "legendStyle"}) {
+        const auto part = properties.find(name);
+        if (part == properties.end() || part->second.value() == nullptr ||
+            (part->second.value()->string() == nullptr && part->second.value()->object() == nullptr))
+            continue;
+        std::set<std::string, std::less<>> resolving;
+        part->second = ExpressionValue(resolve_style(*part->second.value(), resolving));
+    }
+    const auto spans = properties.find("spans");
+    if (spans == properties.end() || spans->second.value() == nullptr ||
+        spans->second.value()->list() == nullptr) {
+        properties.erase("$spanStyles");
+        return;
+    }
+    std::vector<runtime::Value> resolved;
+    resolved.reserve(spans->second.value()->list()->values.size());
+    bool styled = false;
+    std::set<std::string, std::less<>> resolving;
+    for (const runtime::Value& span : spans->second.value()->list()->values) {
+        const runtime::Value* style = span.field("style");
+        if (style != nullptr && (style->string() != nullptr || style->object() != nullptr)) {
+            resolved.push_back(resolve_style(*style, resolving));
+            styled = true;
+        } else {
+            resolved.emplace_back();
+        }
+    }
+    if (styled)
+        properties.insert_or_assign("$spanStyles", ExpressionValue(runtime::Value(std::move(resolved))));
+    else
+        properties.erase("$spanStyles");
+}
+
+const runtime::Value* span_style(const DescriptionNode& description, const std::size_t index) {
+    if (const auto found = description.properties.find("$spanStyles");
+        found != description.properties.end() && found->second.value() != nullptr &&
+        found->second.value()->list() != nullptr) {
+        if (index >= found->second.value()->list()->values.size())
+            return nullptr;
+        const runtime::Value& style = found->second.value()->list()->values[index];
+        return style.object() != nullptr ? &style : nullptr;
+    }
+    // Spans no builder resolved (a widget's own nodes) carry their styles written in place.
+    const auto spans = description.properties.find("spans");
+    if (spans == description.properties.end() || spans->second.value() == nullptr ||
+        spans->second.value()->list() == nullptr ||
+        index >= spans->second.value()->list()->values.size()) {
+        return nullptr;
+    }
+    const runtime::Value* style = spans->second.value()->list()->values[index].field("style");
+    return style != nullptr && style->object() != nullptr ? style : nullptr;
 }
 
 void DescriptionBuilder::normalize_layout(DescriptionNode::Properties& properties) {

@@ -126,7 +126,7 @@ struct TextDecoration final {
     if (span_index.has_value() && spans != nullptr && spans->list() != nullptr &&
         *span_index < spans->list()->values.size()) {
         const runtime::Value& span = spans->list()->values[*span_index];
-        const runtime::Value* style = span.field("style");
+        const runtime::Value* style = span_style(description, *span_index);
         const auto span_field = [&span, style](const std::string_view name) {
             const runtime::Value* styled =
                 style != nullptr && style->object() != nullptr ? style->field(name) : nullptr;

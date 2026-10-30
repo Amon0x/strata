@@ -238,6 +238,13 @@ struct DescriptionNode final {
            std::vector<DescriptionBehavior> behaviors = {});
 };
 
+/**
+ * The resolved style of rich text span `index` (DescriptionBuilder::normalize_span_styles): its
+ * fields with what its style extends, or null when the span names no style.
+ */
+[[nodiscard]] const runtime::Value* span_style(const DescriptionNode& description,
+                                               std::size_t index);
+
 enum class DirtyReason : std::uint32_t {
     structure = UINT32_C(1) << 0U,
     properties = UINT32_C(1) << 1U,
