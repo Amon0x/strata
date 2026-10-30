@@ -70,9 +70,11 @@ struct Symbol final {
     std::size_t parameter_index = 0U;
     /**
      * The symbol a READY when branch narrows: inside the branch an async value reads as its loaded
-     * value under the same name.
+     * value under the same name. With `non_null`, a test against null narrows it instead: past
+     * `x != null` it is not null.
      */
     SymbolId narrows = no_symbol;
+    bool non_null = false;
     /** The module a component, style or animation was declared in. */
     std::string source_id;
 };

@@ -389,7 +389,8 @@ void TypeChecker::validate_expected(const Expression& expression, const Semantic
     }
     if (const auto* literal = std::get_if<LiteralExpression>(&expression.node);
         literal != nullptr && std::holds_alternative<NullLiteral>(literal->value)) {
-        if (!nullable)
+        if (!nullable && expected.kind != SemanticTypeKind::any &&
+            expected.kind != SemanticTypeKind::unknown)
             type_mismatch(expected, *simple(SemanticTypeKind::null_value), expression,
                           component_path);
         return;
@@ -477,7 +478,14 @@ void TypeChecker::validate_expected(const Expression& expression, const Semantic
         }
         return;
     }
-    if (const auto* map = std::get_if<MapExpression>(&expression.node); map != nullptr) {
+    const auto* map = std::get_if<MapExpression>(&expression.node);
+    // A record built from spreads is checked as the record it builds, below.
+    if (map != nullptr && std::ranges::any_of(map->entries, [](const MapEntry& entry) {
+            return std::holds_alternative<SpreadMapKey>(entry.key);
+        })) {
+        map = nullptr;
+    }
+    if (map != nullptr) {
         std::vector<const SemanticType*> options;
         collect_object_options(expected, options);
         if (!options.empty()) {

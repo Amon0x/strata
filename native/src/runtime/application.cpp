@@ -621,12 +621,17 @@ std::optional<std::string> ApplicationContext::commit_script(
             static_cast<void>(durability_.erase_application_value(*declaration->persistence_key));
         }
     }
-    undo_.invalidate_other_scopes(effective_undo_scope, "script.run");
     if (undo_label.has_value()) {
+        undo_.invalidate_other_scopes(effective_undo_scope, "script.run");
         undo_.record(effective_undo_scope, before, state_.snapshot(),
                      UndoRecordOptions{*undo_label, undo_coalesce, timestamp_nanos});
     } else {
-        undo_.invalidate(effective_undo_scope, "script.run");
+        // Writes no undo step names (a selection, a pointer's place) are forgotten by the
+        // history, so undoing never overwrites them; the rest of it stays.
+        std::vector<StateAddress> written;
+        written.reserve(writes.size());
+        for (const ScriptStateWrite& write : writes) written.push_back(write.binding.address);
+        undo_.forget(written);
     }
     return std::nullopt;
 }

@@ -1282,6 +1282,8 @@ component PageViewport(selectedPage: string, chrome: Binding<string>) {
       Scroll(key: "targets.page.scroll.layout", persistenceKey: "showcase.page.scroll.layout", vertical: true, horizontal: false, style: PageScroll) { LayoutPage() }
     } else if selectedPage == "INTERACT" {
       Scroll(key: "targets.page.scroll.interact", persistenceKey: "showcase.page.scroll.interact", vertical: true, horizontal: false, style: PageScroll) { InteractPage() }
+    } else if selectedPage == "BLUEPRINT" {
+      BlueprintPage()
     } else if selectedPage == "DRAW" {
       Scroll(key: "targets.page.scroll.draw", persistenceKey: "showcase.page.scroll.draw", vertical: true, horizontal: false, style: PageScroll) { DrawPage() }
     } else if selectedPage == "MEDIA" {
@@ -1316,6 +1318,7 @@ component ShowcaseHeader(selectedPage: Binding<string>, chrome: Binding<string>)
       key: "targets.navigation",
       tabs: [
         { id: "MENU", label: "MENU" },
+        { id: "BLUEPRINT", label: "BLUEPRINT" },
         { id: "INTERACT", label: "INTERACT" },
         { id: "TYPE", label: "TYPE" },
         { id: "LAYOUT", label: "LAYOUT" },
@@ -3629,6 +3632,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "Emoji, Arabic, Hebrew, Han, kana, Hangul and Devanagari draw from the system's own fonts, Arabic joined and right-to-left runs ordered inside left-to-right lines. Bahnschrift and Segoe UI Variable change weight and width from one file (fontWeight, fontVariation); drag the sliders. Shapes clip their content to circles, hexagons, stars, diamonds, ellipses and polygons (clipShape), the star turning as it goes. The list fades out at its top and bottom as it scrolls (fadeEdges). The headings are drawn with a gradient, an outline, a neon glow and a soft shadow (textGradient, textOutline, textGlow, textShadow).", wrapMode: "WORD")
   } else if selectedPage == "LAYOUT" {
     Text(text: "Scroll the reading pane: the header shrinks, the bar fills and the hero art lags at half speed (strata.scroll). Drag the slider: the card switches between stacked and side-by-side by its own width (strata.size). Open a thumbnail: it flies into the detail view and back (sharedKey). Flick the sheet between its snap points and fling cards off the deck (strata.movable fling, snapY, snapPoints, rubber-band bounds). The masonry wall fills its shortest column. Zoom the canvas with the wheel (or click it and use + - 0, Shift+1 and the arrows), pan by dragging the paper; Fit and Reset ease the view, buttons on the cards still click, and the text stays sharp at every zoom.", wrapMode: "WORD")
+  } else if selectedPage == "BLUEPRINT" {
+    Text(text: "A node graph editor written in .strata alone (StrataScript). Drag a node's header to move it; the wires follow. Drag from a pin to another to wire them: exec to exec, data to a matching type. Right-click or double-click the grid for the palette. Drag the grid to marquee-select, Shift adds; click a wire to pick it. Delete removes the selection; Undo brings it back in one step. Alt-click a pin breaks its wires. Right-drag pans, the wheel zooms. Run executes the graph: the loop prints four steps, then the branch reads the variable it set.", wrapMode: "WORD")
   } else if selectedPage == "INTERACT" {
     Text(text: "Spotlight cards light up under the pointer, and their rims glow from across the grid: the material reads the pointer on the GPU (materialPointer). Tilt cards turn in 3D toward it (strata.pointer drives rotateX and rotateY, perspective is real). The carousel springs between cards, the race compares easings from linear to bouncy springs, and the heart beats on a five-keyframe animation.", wrapMode: "WORD")
   } else if selectedPage == "MENU" {

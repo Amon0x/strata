@@ -22436,6 +22436,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "panButton",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "layout",
           "nullable": false,
           "required": false,

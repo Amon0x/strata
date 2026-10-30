@@ -214,7 +214,16 @@ private:
             if (local_in_block(function.name, mark) == no_symbol)
                 scope_.push_back(Binding{function.name, id});
         }
-        for (const StatementPtr& statement : body.statements) this->statement(*statement);
+        for (const StatementPtr& statement : body.statements) {
+            this->statement(*statement);
+            // Past `if x == null { return }` x is not null for the rest of the block.
+            if (const auto* guard = std::get_if<IfStatement>(&statement->node);
+                guard != nullptr && guard->else_block == nullptr && exits(*guard->then_block)) {
+                std::vector<std::string_view> absent;
+                present_names(*guard->condition, true, absent);
+                narrow(absent);
+            }
+        }
         for (const FunctionDeclaration* function : functions) function_body(*function);
         scope_.resize(mark);
     }
@@ -254,8 +263,19 @@ private:
             widget_call(*call);
         } else if (const auto* conditional = std::get_if<IfStatement>(&statement.node)) {
             expression(*conditional->condition);
+            const std::size_t mark = scope_.size();
+            std::vector<std::string_view> present;
+            present_names(*conditional->condition, false, present);
+            narrow(present);
             block(*conditional->then_block);
-            if (conditional->else_block != nullptr) block(*conditional->else_block);
+            scope_.resize(mark);
+            if (conditional->else_block != nullptr) {
+                std::vector<std::string_view> absent;
+                present_names(*conditional->condition, true, absent);
+                narrow(absent);
+                block(*conditional->else_block);
+                scope_.resize(mark);
+            }
         } else if (const auto* when = std::get_if<WhenStatement>(&statement.node)) {
             when_statement(*when);
         } else if (const auto* loop = std::get_if<ForStatement>(&statement.node)) {
@@ -347,6 +367,59 @@ private:
             block(*branch.block);
             scope_.resize(mark);
         }
+    }
+
+    /**
+     * The names a condition proves are not null where it holds: `x != null`, `null != x`, and
+     * either side of `&&`. With `negated`, where it does not hold: `x == null`, either side of `||`.
+     */
+    static void present_names(const Expression& condition, const bool negated,
+                              std::vector<std::string_view>& names) {
+        const Expression& bare = ungrouped(condition);
+        const auto* binary = std::get_if<BinaryExpression>(&bare.node);
+        if (binary == nullptr) return;
+        if (binary->operation == (negated ? BinaryOperator::logical_or : BinaryOperator::logical_and)) {
+            present_names(*binary->left, negated, names);
+            present_names(*binary->right, negated, names);
+            return;
+        }
+        if (binary->operation != (negated ? BinaryOperator::equal : BinaryOperator::not_equal))
+            return;
+        const auto null_literal = [](const Expression& side) {
+            const auto* literal = std::get_if<LiteralExpression>(&ungrouped(side).node);
+            return literal != nullptr && std::holds_alternative<NullLiteral>(literal->value);
+        };
+        const Expression* named = null_literal(*binary->right) ? binary->left.get()
+                                  : null_literal(*binary->left) ? binary->right.get()
+                                                                : nullptr;
+        if (named == nullptr) return;
+        if (const auto* identifier = std::get_if<IdentifierExpression>(&ungrouped(*named).node))
+            names.push_back(identifier->name);
+    }
+
+    /**
+     * Binds each name as itself, known not to be null; the caller restores the scope. The names
+     * are the condition's identifiers, which outlive the scope.
+     */
+    void narrow(const std::vector<std::string_view>& names) {
+        for (const std::string_view name : names) {
+            const SymbolId id = local(name);
+            if (id == no_symbol) continue;
+            Symbol narrowed = model_.symbols[id];
+            narrowed.narrows = id;
+            narrowed.non_null = true;
+            scope_.push_back(Binding{name, analysis_.add_symbol(std::move(narrowed))});
+        }
+    }
+
+    /** Whether a block always leaves what follows it: it ends in return, throw, break or continue. */
+    [[nodiscard]] static bool exits(const Block& block) {
+        if (block.statements.empty()) return false;
+        const StatementNode& last = block.statements.back()->node;
+        return std::holds_alternative<ReturnStatement>(last) ||
+               std::holds_alternative<ThrowStatement>(last) ||
+               std::holds_alternative<BreakStatement>(last) ||
+               std::holds_alternative<ContinueStatement>(last);
     }
 
     [[nodiscard]] SymbolId local_or_host(const std::string& name) {
@@ -492,13 +565,31 @@ private:
 
     void expression_node(const Expression&, const BinaryExpression& binary) {
         expression(*binary.left);
+        // `x != null && x.y`: the right reads x only where it is not null.
+        const std::size_t mark = scope_.size();
+        if (binary.operation == BinaryOperator::logical_and ||
+            binary.operation == BinaryOperator::logical_or) {
+            std::vector<std::string_view> present;
+            present_names(*binary.left, binary.operation == BinaryOperator::logical_or, present);
+            narrow(present);
+        }
         expression(*binary.right);
+        scope_.resize(mark);
     }
 
     void expression_node(const Expression&, const ConditionalExpression& conditional) {
         expression(*conditional.condition);
+        const std::size_t mark = scope_.size();
+        std::vector<std::string_view> present;
+        present_names(*conditional.condition, false, present);
+        narrow(present);
         expression(*conditional.then_expression);
+        scope_.resize(mark);
+        std::vector<std::string_view> absent;
+        present_names(*conditional.condition, true, absent);
+        narrow(absent);
         expression(*conditional.else_expression);
+        scope_.resize(mark);
     }
 
     void expression_node(const Expression&, const PropertyAccessExpression& property) {

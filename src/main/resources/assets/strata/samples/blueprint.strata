@@ -1,0 +1,8 @@
+// The BLUEPRINT page of the showcase on its own, for headless runs.
+import "../ui/blueprint.strata";
+
+overlay Blueprint {
+  root Panel(key: "blueprint.root", style: style(kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 }, background: #101216FF)) {
+    BlueprintPage()
+  }
+}

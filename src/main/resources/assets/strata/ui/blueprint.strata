@@ -1,0 +1,747 @@
+// A node graph editor in the manner of a visual scripting tool, written in .strata alone: nodes
+// with typed exec and data pins, wires drawn from data, dragging, marquee and wire selection, a
+// palette, inline pin values, undo, and an interpreter that runs the graph.
+
+type PinKind = "exec" | "data"
+type PinSpec = { name: string, label: string, kind: PinKind, type: string, value?: any }
+type NodeSpec = { kind: string, title: string, category: string, inputs: List<PinSpec>, outputs: List<PinSpec> }
+type GraphNode = { id: string, kind: string, x: number, y: number, values: Map<any> }
+type Link = { id: string, from: string, fromPin: string, to: string, toPin: string }
+type Wire = { node: string, pin: string, side: string, x: number, y: number }
+type Box = { x0: number, y0: number, x1: number, y1: number }
+type Spot = { x: number, y: number, surfaceX: number, surfaceY: number }
+
+// Panels draw a frame and pad their content unless told otherwise.
+style BpPlain {
+  background: null;
+  border: null;
+  padding: 0;
+}
+
+style BpPage extends BpPlain {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 12;
+  gap: 10;
+}
+
+style BpToolbar extends BpPlain {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: "content";
+  gap: 8;
+  alignItems: "CENTER";
+}
+
+style BpBody extends BpPlain {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  gap: 10;
+}
+
+style BpCanvasFrame {
+  width: { weight: 1 };
+  height: { weight: 1 };
+  radius: 10;
+  background: #14161AFF;
+  border: { width: 1, color: #2A2F38FF };
+}
+
+style BpWorld {
+  kind: "CANVAS";
+  width: 4000;
+  height: 3000;
+  background: #1B1D22FF;
+}
+
+style BpSide extends BpPlain {
+  kind: "COLUMN";
+  width: 300;
+  height: { weight: 1 };
+  gap: 10;
+}
+
+style BpPanel {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  padding: 12;
+  gap: 6;
+  radius: 10;
+  background: #1A1D24FF;
+  border: { width: 1, color: #2A2F38FF };
+}
+
+style BpHeading {
+  font: "strata:fonts/default-medium";
+  pixelSize: 12;
+  color: #9AA3B2FF;
+}
+
+style BpText {
+  pixelSize: 13;
+  color: #D8DCE3FF;
+}
+
+style BpMuted {
+  pixelSize: 12;
+  color: #7C8494FF;
+}
+
+style BpNodeTitle {
+  font: "strata:fonts/default-medium";
+  pixelSize: 13;
+  color: #FFFFFFFF;
+}
+
+style BpPinLabel {
+  pixelSize: 12;
+  color: #C9CED8FF;
+}
+
+// The graph's geometry: every pin's place follows from its node's position and its index.
+fn bpNodeWidth() = 230
+fn bpHeaderHeight() = 30
+fn bpRowHeight() = 28
+fn bpWorldWidth() = 4000
+fn bpWorldHeight() = 3000
+
+fn bpExecIn() = { name: "exec", label: "", kind: "exec", type: "exec", value: null }
+fn bpExecOut(name: string, label: string) =
+  { name: name, label: label, kind: "exec", type: "exec", value: null }
+fn bpData(name: string, label: string, type: string, value: any) =
+  { name: name, label: label, kind: "data", type: type, value: value }
+
+fn bpSpecs(): List<NodeSpec> = [
+  { kind: "begin", title: "Event BeginPlay", category: "event", inputs: [],
+    outputs: [bpExecOut("then", "")] },
+  { kind: "print", title: "Print String", category: "function",
+    inputs: [bpExecIn(), bpData("text", "Text", "string", "Hello")],
+    outputs: [bpExecOut("then", "")] },
+  { kind: "branch", title: "Branch", category: "flow",
+    inputs: [bpExecIn(), bpData("condition", "Condition", "bool", true)],
+    outputs: [bpExecOut("true", "True"), bpExecOut("false", "False")] },
+  { kind: "sequence", title: "Sequence", category: "flow", inputs: [bpExecIn()],
+    outputs: [bpExecOut("then0", "Then 0"), bpExecOut("then1", "Then 1")] },
+  { kind: "forLoop", title: "For Loop", category: "flow",
+    inputs: [bpExecIn(), bpData("first", "First", "number", 0), bpData("last", "Last", "number", 3)],
+    outputs: [bpExecOut("body", "Loop Body"), bpData("index", "Index", "number", 0),
+              bpExecOut("completed", "Completed")] },
+  { kind: "add", title: "Add", category: "math",
+    inputs: [bpData("a", "A", "number", 0), bpData("b", "B", "number", 1)],
+    outputs: [bpData("result", "Result", "number", 0)] },
+  { kind: "multiply", title: "Multiply", category: "math",
+    inputs: [bpData("a", "A", "number", 1), bpData("b", "B", "number", 2)],
+    outputs: [bpData("result", "Result", "number", 0)] },
+  { kind: "greater", title: "Greater", category: "math",
+    inputs: [bpData("a", "A", "number", 0), bpData("b", "B", "number", 0)],
+    outputs: [bpData("result", "Result", "bool", false)] },
+  { kind: "append", title: "Append", category: "text",
+    inputs: [bpData("a", "A", "string", ""), bpData("b", "B", "string", "")],
+    outputs: [bpData("result", "Result", "string", "")] },
+  { kind: "toText", title: "To Text", category: "text",
+    inputs: [bpData("value", "Value", "any", 0)],
+    outputs: [bpData("result", "Text", "string", "")] },
+  { kind: "setVar", title: "Set Variable", category: "variable",
+    inputs: [bpExecIn(), bpData("name", "Name", "string", "Score"), bpData("value", "Value", "any", 0)],
+    outputs: [bpExecOut("then", ""), bpData("value", "Value", "any", 0)] },
+  { kind: "getVar", title: "Get Variable", category: "variable",
+    inputs: [bpData("name", "Name", "string", "Score")],
+    outputs: [bpData("value", "Value", "any", 0)] }
+]
+
+fn bpSpec(kind: string) = find(bpSpecs(), s => s.kind == kind)
+
+fn bpCategoryColor(category: string): color {
+  when category {
+    "event" -> { return #9B2C2CFF }
+    "flow" -> { return #4A5060FF }
+    "function" -> { return #1F5FA8FF }
+    "math" -> { return #2E6E3FFF }
+    "text" -> { return #A0337DFF }
+    else -> { return #6D3FB0FF }
+  }
+}
+
+fn bpPinColor(type: string): color {
+  when type {
+    "exec" -> { return #F2F2F2FF }
+    "bool" -> { return #C0392BFF }
+    "number" -> { return #8FD14FFF }
+    "string" -> { return #F062C8FF }
+    else -> { return #9AA3B2FF }
+  }
+}
+
+// A node is its header, then rows of pins inside 4 units of padding.
+fn bpPinY(index: number) = bpHeaderHeight() + 4 + index * bpRowHeight() + bpRowHeight() / 2
+
+fn bpNodeHeight(spec: NodeSpec) =
+  bpHeaderHeight() + 8 + max(length(spec.inputs), length(spec.outputs)) * bpRowHeight()
+
+/** Where a pin's glyph is in the world: at the left edge for an input, the right for an output. */
+fn bpPinAt(node: GraphNode, side: string, pin: string) {
+  let spec = bpSpec(node.kind)
+  let pins = side == "in" ? spec.inputs : spec.outputs
+  let index = findIndex(pins, p => p.name == pin)
+  return { x: side == "in" ? node.x + 12 : node.x + bpNodeWidth() - 12, y: node.y + bpPinY(index) }
+}
+
+/** A wire's curve, in the 0-1 space of the world-sized drawing it is part of. */
+fn bpWirePath(x1: number, y1: number, x2: number, y2: number): string {
+  let w = bpWorldWidth()
+  let h = bpWorldHeight()
+  let reach = max(50, abs(x2 - x1) * 0.5)
+  return `M ${x1 / w} ${y1 / h} C ${(x1 + reach) / w} ${y1 / h}, ${(x2 - reach) / w} ${y2 / h}, ${x2 / w} ${y2 / h}`
+}
+
+/** How far a point is from a wire's curve, sampled along it. */
+fn bpWireDistance(x1: number, y1: number, x2: number, y2: number, px: number, py: number): number {
+  let reach = max(50, abs(x2 - x1) * 0.5)
+  var best = 1000000
+  var step = 0
+  while step <= 32 {
+    let t = step / 32
+    let u = 1 - t
+    let x = u * u * u * x1 + 3 * u * u * t * (x1 + reach) + 3 * u * t * t * (x2 - reach) + t * t * t * x2
+    let y = u * u * u * y1 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y2
+    best = min(best, hypot(x - px, y - py))
+    step += 1
+  }
+  return best
+}
+
+/** The background grid, one path of lines every 64 units. */
+fn bpGridPath(): string {
+  var path = ""
+  var x = 0
+  while x <= bpWorldWidth() {
+    path += `M ${x / bpWorldWidth()} 0 L ${x / bpWorldWidth()} 1 `
+    x += 64
+  }
+  var y = 0
+  while y <= bpWorldHeight() {
+    path += `M 0 ${y / bpWorldHeight()} L 1 ${y / bpWorldHeight()} `
+    y += 64
+  }
+  return path
+}
+
+fn bpStarterNodes(): List<GraphNode> = [
+  { id: "n1", kind: "begin", x: 120, y: 160, values: {} },
+  { id: "n2", kind: "forLoop", x: 420, y: 140, values: { first: 1, last: 4 } },
+  { id: "n3", kind: "print", x: 820, y: 120, values: {} },
+  { id: "n4", kind: "append", x: 520, y: 360, values: { a: "Step " } },
+  { id: "n5", kind: "toText", x: 180, y: 420, values: {} },
+  { id: "n6", kind: "setVar", x: 1120, y: 120, values: { name: "Score" } },
+  { id: "n7", kind: "multiply", x: 820, y: 360, values: { b: 10 } },
+  { id: "n8", kind: "branch", x: 820, y: 560, values: {} },
+  { id: "n9", kind: "greater", x: 520, y: 640, values: { b: 25 } },
+  { id: "n10", kind: "getVar", x: 180, y: 640, values: { name: "Score" } },
+  { id: "n11", kind: "print", x: 1120, y: 520, values: { text: "High score!" } },
+  { id: "n12", kind: "print", x: 1120, y: 700, values: { text: "Keep trying" } }
+]
+
+fn bpStarterLinks(): List<Link> = [
+  { id: "l1", from: "n1", fromPin: "then", to: "n2", toPin: "exec" },
+  { id: "l2", from: "n2", fromPin: "body", to: "n3", toPin: "exec" },
+  { id: "l3", from: "n2", fromPin: "index", to: "n5", toPin: "value" },
+  { id: "l4", from: "n5", fromPin: "result", to: "n4", toPin: "b" },
+  { id: "l5", from: "n4", fromPin: "result", to: "n3", toPin: "text" },
+  { id: "l6", from: "n3", fromPin: "then", to: "n6", toPin: "exec" },
+  { id: "l7", from: "n2", fromPin: "index", to: "n7", toPin: "a" },
+  { id: "l8", from: "n7", fromPin: "result", to: "n6", toPin: "value" },
+  { id: "l9", from: "n2", fromPin: "completed", to: "n8", toPin: "exec" },
+  { id: "l10", from: "n10", fromPin: "value", to: "n9", toPin: "a" },
+  { id: "l11", from: "n9", fromPin: "result", to: "n8", toPin: "condition" },
+  { id: "l12", from: "n8", fromPin: "true", to: "n11", toPin: "exec" },
+  { id: "l13", from: "n8", fromPin: "false", to: "n12", toPin: "exec" }
+]
+
+component BlueprintPage() {
+  state nodes: List<GraphNode> = bpStarterNodes()
+  state links: List<Link> = bpStarterLinks()
+  state selection: List<string> = []
+  state selectedLink = ""
+  state wire: Wire? = null
+  state marquee: Box? = null
+  state press: Spot? = null
+  state palette: Spot? = null
+  state query = ""
+  state console: List<string> = []
+  state view = { x: 0, y: 0, zoom: 1 }
+  state counter = 12
+
+  fn node(id: string) = find(nodes, n => n.id == id)
+  fn selected(id: string) = findIndex(selection, s => s == id) >= 0
+  fn linked(id: string, side: string, pin: string) =
+    findIndex(links, l => side == "in" ? l.to == id && l.toPin == pin : l.from == id && l.fromPin == pin) >= 0
+
+  fn pick(id: string, additive: boolean) {
+    selectedLink = ""
+    if additive {
+      selection = selected(id) ? filter(selection, s => s != id) : [...selection, id]
+    } else if !selected(id) {
+      selection = [id]
+    }
+  }
+
+  fn moveSelection(dx: number, dy: number) {
+    undoStep("Move nodes", "move")
+    nodes = map(nodes, n => selected(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n)
+  }
+
+  fn addNode(kind: string, x: number, y: number) {
+    undoStep("Add node")
+    counter += 1
+    let id = `n${counter}`
+    nodes = [...nodes, { id: id, kind: kind, x: x, y: y, values: {} }]
+    selection = [id]
+    palette = null
+    query = ""
+  }
+
+  fn deleteSelection() {
+    undoStep("Delete")
+    if selectedLink != "" {
+      links = filter(links, l => l.id != selectedLink)
+      selectedLink = ""
+      return
+    }
+    links = filter(links, l => !selected(l.from) && !selected(l.to))
+    nodes = filter(nodes, n => !selected(n.id))
+    selection = []
+  }
+
+  fn setValue(id: string, pin: string, value: any) {
+    undoStep("Edit value", `${id}.${pin}`)
+    let index = findIndex(nodes, n => n.id == id)
+    nodes[index].values[pin] = value
+  }
+
+  fn breakPin(id: string, side: string, pin: string) {
+    undoStep("Break links")
+    links = filter(links, l => side == "in" ? !(l.to == id && l.toPin == pin)
+                                              : !(l.from == id && l.fromPin == pin))
+  }
+
+  /** Joins an output to an input: an input takes one wire, and so does an exec output. */
+  fn connect(from: string, fromPin: string, to: string, toPin: string, exec: boolean) {
+    undoStep("Connect")
+    counter += 1
+    links = filter(links, l => !(l.to == to && l.toPin == toPin) &&
+                               !(exec && l.from == from && l.fromPin == fromPin))
+    links = [...links, { id: `l${counter}`, from: from, fromPin: fromPin, to: to, toPin: toPin }]
+  }
+
+  /** Every wire's curve, then the one being drawn. */
+  fn wireShapes() {
+    var shapes = []
+    for link in links {
+      let a = node(link.from)
+      let b = node(link.to)
+      if a == null || b == null { continue }
+      let from = bpPinAt(a, "out", link.fromPin)
+      let to = bpPinAt(b, "in", link.toPin)
+      let type = find(bpSpec(a.kind).outputs, p => p.name == link.fromPin).type
+      let picked = link.id == selectedLink
+      shapes += [{
+        kind: "path",
+        commands: bpWirePath(from.x, from.y, to.x, to.y),
+        stroke: picked ? #FFD54AFF : bpPinColor(type),
+        strokeStyle: { width: picked ? 4 : (type == "exec" ? 3 : 2.5), cap: "round" }
+      }]
+    }
+    if wire != null {
+      let at = bpPinAt(node(wire.node), wire.side, wire.pin)
+      let commands = wire.side == "out" ? bpWirePath(at.x, at.y, wire.x, wire.y)
+                                        : bpWirePath(wire.x, wire.y, at.x, at.y)
+      shapes += [{ kind: "path", commands: commands, stroke: #FFFFFFAA, strokeStyle: { width: 2, cap: "round" } }]
+    }
+    return shapes
+  }
+
+  fn compatible(a: PinSpec, b: PinSpec) =
+    a.kind == b.kind && (a.kind == "exec" || a.type == b.type || a.type == "any" || b.type == "any")
+
+  /** Where a wire was let go: the nearest pin on the other side that takes it. */
+  fn drop(dragged: Wire) {
+    let source = node(dragged.node)
+    let sourcePins = dragged.side == "out" ? bpSpec(source.kind).outputs : bpSpec(source.kind).inputs
+    let sourcePin = find(sourcePins, p => p.name == dragged.pin)
+    let targetSide = dragged.side == "out" ? "in" : "out"
+    var best = 22
+    var target = null
+    for candidate in nodes {
+      if candidate.id == dragged.node { continue }
+      let pins = targetSide == "in" ? bpSpec(candidate.kind).inputs : bpSpec(candidate.kind).outputs
+      for pin in pins {
+        if !compatible(sourcePin, pin) { continue }
+        let at = bpPinAt(candidate, targetSide, pin.name)
+        let distance = hypot(at.x - dragged.x, at.y - dragged.y)
+        if distance < best {
+          best = distance
+          target = { node: candidate.id, pin: pin.name }
+        }
+      }
+    }
+    if target == null { return }
+    if dragged.side == "out" {
+      connect(dragged.node, dragged.pin, target.node, target.pin, sourcePin.kind == "exec")
+    } else {
+      connect(target.node, target.pin, dragged.node, dragged.pin, sourcePin.kind == "exec")
+    }
+  }
+
+  fn dragWire(id: string, side: string, pin: string, e) {
+    if e.phase == "move" {
+      let at = bpPinAt(node(id), side, pin)
+      wire = { node: id, pin: pin, side: side, x: at.x + e.x, y: at.y + e.y }
+    } else if e.phase == "end" {
+      if wire != null { drop(wire) }
+      wire = null
+    } else if e.phase == "cancel" {
+      wire = null
+    }
+  }
+
+  /** The wire nearest a point, within a few pixels at the current zoom. */
+  fn linkNear(x: number, y: number): string {
+    var best = 8 / view.zoom
+    var found = ""
+    for link in links {
+      let a = node(link.from)
+      let b = node(link.to)
+      if a == null || b == null { continue }
+      let from = bpPinAt(a, "out", link.fromPin)
+      let to = bpPinAt(b, "in", link.toPin)
+      let distance = bpWireDistance(from.x, from.y, to.x, to.y, x, y)
+      if distance < best {
+        best = distance
+        found = link.id
+      }
+    }
+    return found
+  }
+
+  /** The canvas's own pointer: marquee and wire picking with the primary button, the palette
+      on a secondary click or a double click. */
+  fn canvasPointer(e) {
+    if e.phase == "press" && e.button == 0 {
+      palette = null
+      if e.clickCount >= 2 {
+        palette = { x: e.x, y: e.y, surfaceX: e.surfaceX, surfaceY: e.surfaceY }
+        return
+      }
+      let link = linkNear(e.x, e.y)
+      if link != "" {
+        selectedLink = link
+        selection = []
+        return
+      }
+      selectedLink = ""
+      if !e.shift { selection = [] }
+      marquee = { x0: e.x, y0: e.y, x1: e.x, y1: e.y }
+    } else if e.phase == "press" && e.button == 1 {
+      press = { x: e.x, y: e.y, surfaceX: e.surfaceX, surfaceY: e.surfaceY }
+    } else if e.phase == "move" && marquee != null {
+      marquee = { ...marquee, x1: e.x, y1: e.y }
+    } else if e.phase == "release" && e.button == 0 && marquee != null {
+      let left = min(marquee.x0, marquee.x1)
+      let right = max(marquee.x0, marquee.x1)
+      let top = min(marquee.y0, marquee.y1)
+      let bottom = max(marquee.y0, marquee.y1)
+      if right - left > 2 || bottom - top > 2 {
+        for candidate in nodes {
+          let height = bpNodeHeight(bpSpec(candidate.kind))
+          let inside = candidate.x < right && candidate.x + bpNodeWidth() > left &&
+                       candidate.y < bottom && candidate.y + height > top
+          if inside && !selected(candidate.id) { selection = [...selection, candidate.id] }
+        }
+      }
+      marquee = null
+    } else if e.phase == "release" && e.button == 1 && press != null {
+      // A secondary press that did not pan opens the palette where it was pressed.
+      if hypot(e.surfaceX - press.surfaceX, e.surfaceY - press.surfaceY) < 4 {
+        palette = press
+      }
+      press = null
+    }
+  }
+
+  /** Runs the graph from each BeginPlay: exec wires say what runs next, data wires what a
+      node's inputs read. */
+  fn run() {
+    var lines = []
+    var variables = {}
+    var steps = 0
+    fn input(id: string, pin: string) {
+      let link = find(links, l => l.to == id && l.toPin == pin)
+      if link != null { return output(link.from, link.fromPin) }
+      let n = node(id)
+      let spec = find(bpSpec(n.kind).inputs, p => p.name == pin)
+      return n.values[pin] ?? spec.value
+    }
+    fn output(id: string, pin: string) {
+      let n = node(id)
+      when n.kind {
+        "add" -> { return input(id, "a") + input(id, "b") }
+        "multiply" -> { return input(id, "a") * input(id, "b") }
+        "greater" -> { return input(id, "a") > input(id, "b") }
+        "append" -> { return toText(input(id, "a")) + toText(input(id, "b")) }
+        "toText" -> { return toText(input(id, "value")) }
+        "getVar" -> { return variables[toText(input(id, "name"))] ?? 0 }
+        "setVar" -> { return variables[toText(input(id, "name"))] ?? 0 }
+        "forLoop" -> { return variables[`#${id}`] ?? 0 }
+        else -> { return null }
+      }
+    }
+    fn follow(id: string, pin: string) {
+      let link = find(links, l => l.from == id && l.fromPin == pin)
+      if link != null { execute(link.to) }
+    }
+    fn execute(id: string) {
+      steps += 1
+      if steps > 5000 { throw { code: "GRAPH.STEPS", message: "The graph ran more than 5000 steps." } }
+      let n = node(id)
+      when n.kind {
+        "print" -> {
+          lines = [...lines, toText(input(id, "text"))]
+          follow(id, "then")
+        }
+        "branch" -> {
+          if input(id, "condition") { follow(id, "true") } else { follow(id, "false") }
+        }
+        "sequence" -> {
+          follow(id, "then0")
+          follow(id, "then1")
+        }
+        "forLoop" -> {
+          var index = input(id, "first")
+          let last = input(id, "last")
+          while index <= last {
+            variables[`#${id}`] = index
+            follow(id, "body")
+            index += 1
+          }
+          follow(id, "completed")
+        }
+        "setVar" -> {
+          variables[toText(input(id, "name"))] = input(id, "value")
+          follow(id, "then")
+        }
+        else -> { follow(id, "then") }
+      }
+    }
+    try {
+      for start in nodes {
+        if start.kind == "begin" { follow(start.id, "then") }
+      }
+      if length(lines) == 0 { lines = ["Nothing printed: connect a Print String to an event."] }
+    } catch error {
+      lines = [...lines, `Error: ${error.message ?? error}`]
+    }
+    console = lines
+  }
+
+  fn reset() {
+    undoStep("Reset graph")
+    nodes = bpStarterNodes()
+    links = bpStarterLinks()
+    selection = []
+    selectedLink = ""
+    console = []
+  }
+
+  Panel(key: "blueprint.page", style: BpPage) {
+    Command(id: "blueprint.delete", label: "Delete selection", category: "Blueprint",
+            shortcut: "Delete", action: () => deleteSelection())
+    Command(id: "blueprint.run", label: "Run graph", category: "Blueprint",
+            shortcut: "F5", action: () => run())
+    Panel(style: BpToolbar) {
+      Button(key: "blueprint.run", label: "Run", onClick: () => run())
+      Button(key: "blueprint.fit", label: "Fit", onClick: action("zoom.fit", key: "blueprint.canvas", padding: 48))
+      Button(key: "blueprint.delete", label: "Delete", onClick: () => deleteSelection(),
+             enabled: length(selection) > 0 || selectedLink != "")
+      Button(key: "blueprint.undo", label: "Undo", onClick: action("application.undo"))
+      Button(key: "blueprint.reset", label: "Reset", onClick: () => reset())
+      Text(text: "Drag from a pin to wire it  ·  right-click or double-click the grid to add a node  ·  drag the grid to select  ·  right-drag pans  ·  Alt-click a pin to break its wires",
+           style: BpMuted, wrapMode: "WORD", layout: { width: { weight: 1 } })
+    }
+    Panel(style: BpBody) {
+      ZoomView(key: "blueprint.canvas", bind: view, minZoom: 0.2, maxZoom: 2.5, panButton: "secondary",
+               style: BpCanvasFrame) {
+        Panel(key: "blueprint.world", style: BpWorld) {
+          // The grid takes the canvas's own pointer; the wires are drawn on it, so a press on a
+          // wire is the grid's to pick.
+          Panel(
+            key: "blueprint.grid",
+            layout: { position: "ABSOLUTE", inset: { left: 0, top: 0 }, width: 4000, height: 3000 },
+            style: style(BpPlain, kind: "CANVAS", background: #1B1D22FF),
+            behaviors: [{ id: "strata.pointer", action: e => canvasPointer(e) }]
+          ) {
+            Draw(layout: { position: "ABSOLUTE", inset: { left: 0, top: 0 }, width: 4000, height: 3000 },
+                 shapes: [{ kind: "path", commands: bpGridPath(), stroke: #262A31FF, strokeStyle: { width: 1 } }])
+            if length(links) > 0 || wire != null {
+              Draw(key: "blueprint.wires",
+                   layout: { position: "ABSOLUTE", inset: { left: 0, top: 0 }, width: 4000, height: 3000 },
+                   shapes: wireShapes())
+            }
+          }
+          for item in nodes {
+            BlueprintNode(
+              node: item,
+              selected: selected(item.id),
+              linkedIn: map(filter(links, l => l.to == item.id), l => l.toPin),
+              linkedOut: map(filter(links, l => l.from == item.id), l => l.fromPin),
+              onPick: e => pick(item.id, e.shift),
+              onMove: e => {
+                if !selected(item.id) { pick(item.id, false) }
+                moveSelection(e.dx, e.dy)
+              },
+              onWire: (side, pin, e) => dragWire(item.id, side, pin, e),
+              onBreak: (side, pin) => breakPin(item.id, side, pin),
+              onValue: (pin, value) => setValue(item.id, pin, value)
+            )
+          }
+          if marquee != null {
+            Panel(
+              key: "blueprint.marquee",
+              layout: { position: "ABSOLUTE",
+                        inset: { left: min(marquee.x0, marquee.x1), top: min(marquee.y0, marquee.y1) },
+                        width: abs(marquee.x1 - marquee.x0), height: abs(marquee.y1 - marquee.y0) },
+              style: style(background: #4A90E222, border: { width: 1, color: #4A90E2CC })
+            )
+          }
+          if palette != null {
+            Panel(
+              key: "blueprint.palette",
+              layout: { position: "ABSOLUTE", inset: { left: palette.x, top: palette.y }, width: 230 },
+              style: style(BpPlain, kind: "COLUMN", padding: 8, gap: 4, radius: 8, background: #22262EFF,
+                           border: { width: 1, color: #3A404CFF })
+            ) {
+              Text(text: "ADD NODE", style: BpHeading)
+              TextBox(key: "blueprint.palette.search", text: query, hint: "Search",
+                      onChange: text => { query = text }, layout: { width: { weight: 1 } })
+              for entry in filter(bpSpecs(), s => contains(lower(s.title), lower(query))) {
+                Button(key: `blueprint.add.${entry.kind}`, label: entry.title, layout: { width: { weight: 1 } },
+                       onClick: () => addNode(entry.kind, palette.x, palette.y))
+              }
+            }
+          }
+        }
+      }
+      Panel(style: BpSide) {
+        Panel(style: BpPanel) {
+          Text(text: "DETAILS", style: BpHeading)
+          if length(selection) == 1 && node(selection[0]) != null {
+            Text(text: bpSpec(node(selection[0]).kind).title, style: BpNodeTitle)
+            Text(text: `id ${selection[0]} at ${round(node(selection[0]).x)}, ${round(node(selection[0]).y)}`, style: BpMuted)
+            Text(text: `values ${toJson(node(selection[0]).values)}`, style: BpMuted, wrapMode: "WORD")
+          } else if length(selection) > 1 {
+            Text(text: `${length(selection)} nodes selected`, style: BpText)
+          } else if selectedLink != "" {
+            Text(text: `Wire ${selectedLink} selected: Delete removes it`, style: BpText, wrapMode: "WORD")
+          } else {
+            Text(text: `${length(nodes)} nodes, ${length(links)} wires. Select a node to see it here.`, style: BpMuted, wrapMode: "WORD")
+          }
+        }
+        Panel(style: style(BpPanel, height: { weight: 1 })) {
+          Text(text: "OUTPUT", style: BpHeading)
+          if length(console) == 0 {
+            Text(text: "Run the graph to see what it prints.", style: BpMuted, wrapMode: "WORD")
+          }
+          for line, index in console {
+            Text(key: `blueprint.output.${index}`, text: line, style: BpText, wrapMode: "WORD")
+          }
+        }
+      }
+    }
+  }
+}
+
+/** One node: a header to drag it by, then its inputs on the left and outputs on the right. */
+component BlueprintNode(node: GraphNode, selected: boolean, linkedIn: List<string>, linkedOut: List<string>,
+                        onPick: action, onMove: action, onWire: action, onBreak: action, onValue: action) {
+  derived spec = bpSpec(node.kind)
+  Panel(
+    key: `blueprint.node.${node.id}`,
+    layout: { position: "ABSOLUTE", inset: { left: node.x, top: node.y }, width: bpNodeWidth(),
+              height: bpNodeHeight(spec) },
+    style: style(BpPlain, kind: "COLUMN", radius: 8, background: #262A33F2,
+                 border: { width: selected ? 2 : 1, color: selected ? #FFB547FF : #11131AFF }),
+    behaviors: [{ id: "strata.pointer", action: e => { if e.phase == "press" && e.button == 0 { onPick(e) } } }]
+  ) {
+    Panel(
+      key: `blueprint.node.${node.id}.header`,
+      layout: { width: { weight: 1 }, height: bpHeaderHeight() },
+      style: style(BpPlain, kind: "ROW", alignItems: "CENTER", padding: 10, radius: 8,
+                   background: bpCategoryColor(spec.category)),
+      behaviors: [{ id: "strata.movable", options: { controlled: true, bounds: "none" }, action: e => onMove(e) }]
+    ) {
+      Text(text: spec.title, style: BpNodeTitle)
+    }
+    Panel(style: style(BpPlain, kind: "ROW", width: { weight: 1 }, padding: 4)) {
+      Panel(style: style(BpPlain, kind: "COLUMN", width: { weight: 1 })) {
+        for pin in spec.inputs {
+          BlueprintPin(owner: node.id, pin: pin, side: "in", linked: contains(linkedIn, pin.name),
+                       value: node.values[pin.name] ?? pin.value,
+                       onWire: (side, name, e) => onWire(side, name, e),
+                       onBreak: (side, name) => onBreak(side, name),
+                       onValue: (name, value) => onValue(name, value))
+        }
+      }
+      Panel(style: style(BpPlain, kind: "COLUMN", width: "content")) {
+        for pin in spec.outputs {
+          BlueprintPin(owner: node.id, pin: pin, side: "out", linked: contains(linkedOut, pin.name),
+                       value: null,
+                       onWire: (side, name, e) => onWire(side, name, e),
+                       onBreak: (side, name) => onBreak(side, name),
+                       onValue: (name, value) => onValue(name, value))
+        }
+      }
+    }
+  }
+}
+
+/** A pin: its glyph (drag from it to wire it, Alt-click to break its wires), its label, and an
+    unwired data input's value. */
+component BlueprintPin(owner: string, pin: PinSpec, side: string, linked: boolean, value: any,
+                       onWire: action, onBreak: action, onValue: action) {
+  Panel(style: style(BpPlain, kind: "ROW", height: bpRowHeight(), gap: 6, alignItems: "CENTER",
+                     justifyContent: side == "in" ? "START" : "END", width: side == "in" ? { weight: 1 } : "content")) {
+    if side == "out" {
+      Text(text: pin.label, style: BpPinLabel)
+    }
+    Panel(
+      key: `blueprint.pin.${owner}.${side}.${pin.name}`,
+      layout: { width: 16, height: 16 },
+      style: BpPlain,
+      behaviors: [
+        { id: "strata.movable", options: { controlled: true, bounds: "none" }, action: e => onWire(side, pin.name, e) },
+        { id: "strata.pointer", action: e => { if e.phase == "press" && e.alt { onBreak(side, pin.name) } } }
+      ]
+    ) {
+      Draw(layout: { width: 16, height: 16 }, shapes: [
+        pin.kind == "exec"
+          ? { kind: "path", commands: "M 0.2 0.12 L 0.88 0.5 L 0.2 0.88 Z",
+              fill: linked ? #F2F2F2FF : #00000000, stroke: #F2F2F2FF, strokeStyle: { width: 1.5, join: "round" } }
+          : { kind: "circle", center: { x: 0.5, y: 0.5 }, radius: 0.32,
+              fill: linked ? bpPinColor(pin.type) : #00000000, stroke: bpPinColor(pin.type), strokeStyle: { width: 1.5 } }
+      ])
+    }
+    if side == "in" {
+      Text(text: pin.label, style: BpPinLabel)
+      if pin.kind == "data" && !linked && pin.type == "bool" {
+        Checkbox(key: `blueprint.value.${owner}.${pin.name}`, checked: value == true, onChange: v => onValue(pin.name, v))
+      } else if pin.kind == "data" && !linked && pin.type == "number" {
+        NumberField(key: `blueprint.value.${owner}.${pin.name}`, value: value ?? 0, layout: { width: 80 },
+                    onChange: v => onValue(pin.name, v))
+      } else if pin.kind == "data" && !linked && pin.type != "any" {
+        TextBox(key: `blueprint.value.${owner}.${pin.name}`, text: toText(value ?? ""), layout: { width: 110 },
+                onChange: v => onValue(pin.name, v))
+      }
+    }
+  }
+}

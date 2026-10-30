@@ -130,6 +130,17 @@ SemanticTypePtr TypeOracle::symbol_type(const SymbolId symbol) {
 
 SemanticTypePtr TypeOracle::compute_symbol(const SymbolId id) {
     const Symbol& symbol = analysis_.model.symbols[id];
+    if (symbol.narrows != no_symbol && symbol.non_null) {
+        SemanticTypePtr narrowed = symbol_type(symbol.narrows);
+        if (narrowed->kind != SemanticTypeKind::union_value) return narrowed;
+        auto present = std::make_shared<SemanticType>(*narrowed);
+        std::erase_if(present->options, [](const SemanticTypePtr& option) {
+            return option == nullptr || option->kind == SemanticTypeKind::null_value;
+        });
+        if (present->options.size() == 1U) return present->options.front();
+        if (present->options.empty()) return simple(SemanticTypeKind::unknown);
+        return present;
+    }
     if (symbol.narrows != no_symbol) {
         SemanticTypePtr narrowed = symbol_type(symbol.narrows);
         if (narrowed->kind != SemanticTypeKind::async_value) return narrowed;
@@ -199,7 +210,10 @@ SemanticTypePtr TypeOracle::compute_symbol(const SymbolId id) {
                                          initial->kind == SemanticTypeKind::map)) {
                 auto widened = std::make_shared<SemanticType>(*initial);
                 widened->minimum_items.reset();
-                widened->maximum_items.reset();
+                if (widened->kind == SemanticTypeKind::list)
+                    widened->maximum_items = maximum_eager_loop_items;
+                else
+                    widened->maximum_items.reset();
                 if (widened->kind == SemanticTypeKind::list && widened->element != nullptr &&
                     widened->element->kind == SemanticTypeKind::any) {
                     widened->element = simple(SemanticTypeKind::any);
@@ -540,6 +554,8 @@ SemanticTypePtr TypeOracle::compute_call(const Expression& expression, const Cal
                                  : nullptr;
         if (lambda != nullptr && lambda->body != nullptr)
             projected->element = type_of(*lambda->body);
+        else if (lambda != nullptr)
+            projected->element = simple(SemanticTypeKind::any);
     }
     const std::string_view bound_name = implementation == "window" ? std::string_view("limit")
                                         : implementation == "page" ? std::string_view("size")

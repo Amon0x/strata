@@ -349,6 +349,12 @@ bool SemanticType::accepts(const SemanticType& actual) const {
         actual.kind == SemanticTypeKind::unknown || actual.kind == SemanticTypeKind::any) {
         return true;
     }
+    // A value that may be any of several types fits where each of them does.
+    if (actual.kind == SemanticTypeKind::union_value && !actual.options.empty()) {
+        return std::ranges::all_of(actual.options, [this](const SemanticTypePtr& option) {
+            return option != nullptr && accepts(*option);
+        });
+    }
     if (kind == SemanticTypeKind::union_value) {
         return std::ranges::any_of(
             options, [&actual](const SemanticTypePtr& option) { return option->accepts(actual); });

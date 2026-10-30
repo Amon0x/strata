@@ -1,0 +1,188 @@
+{
+  "version": 1,
+  "application": {
+    "id": "blueprint.headless",
+    "module": "assets/strata/samples/blueprint.strata",
+    "root": "Blueprint",
+    "actions": []
+  },
+  "surface": {
+    "id": "blueprint.headless",
+    "role": "overlay",
+    "backend": "reference",
+    "width": 1100,
+    "height": 820,
+    "scale": 1,
+    "reducedMotion": true,
+    "clearColor": "#090b0fff",
+    "fonts": [
+      {
+        "id": "strata:fonts/default-medium",
+        "resource": "assets/strata/fonts/medium.ttf"
+      },
+      {
+        "id": "strata:fonts/default",
+        "resource": "assets/strata/fonts/default.ttf"
+      }
+    ],
+    "images": []
+  },
+  "snapshots": [],
+  "steps": [
+    {
+      "advance": {
+        "milliseconds": 0,
+        "frames": 1
+      }
+    },
+    {
+      "click": {
+        "key": "blueprint.run"
+      }
+    },
+    {
+      "advance": {
+        "milliseconds": 16,
+        "frames": 1
+      }
+    },
+    {
+      "capture": "ran"
+    },
+    {
+      "pointerDrag": {
+        "from": {
+          "key": "blueprint.node.n1.header"
+        },
+        "to": {
+          "x": 260,
+          "y": 420
+        },
+        "milliseconds": 200,
+        "steps": 4
+      }
+    },
+    {
+      "advance": {
+        "milliseconds": 50,
+        "frames": 1
+      }
+    },
+    {
+      "capture": "dragged"
+    },
+    {
+      "click": {
+        "x": 330,
+        "y": 120,
+        "button": "secondary"
+      }
+    },
+    {
+      "advance": {
+        "milliseconds": 16,
+        "frames": 1
+      }
+    },
+    {
+      "capture": "palette"
+    },
+    {
+      "click": {
+        "key": "blueprint.add.print"
+      }
+    },
+    {
+      "advance": {
+        "milliseconds": 16,
+        "frames": 1
+      }
+    },
+    {
+      "capture": "added"
+    },
+    {
+      "pointerDrag": {
+        "from": {
+          "key": "blueprint.pin.n13.in.exec"
+        },
+        "to": {
+          "key": "blueprint.pin.n2.out.body"
+        },
+        "milliseconds": 200,
+        "steps": 4
+      }
+    },
+    {
+      "advance": {
+        "milliseconds": 50,
+        "frames": 1
+      }
+    },
+    {
+      "capture": "wired"
+    },
+    {
+      "pointerDrag": {
+        "from": {
+          "x": 30,
+          "y": 590
+        },
+        "to": {
+          "x": 780,
+          "y": 800
+        },
+        "milliseconds": 200,
+        "steps": 4
+      }
+    },
+    {
+      "advance": {
+        "milliseconds": 50,
+        "frames": 1
+      }
+    },
+    {
+      "capture": "marquee"
+    },
+    {
+      "key": {
+        "name": "delete"
+      }
+    },
+    {
+      "advance": {
+        "milliseconds": 16,
+        "frames": 1
+      }
+    },
+    {
+      "capture": "deleted"
+    },
+    {
+      "click": {
+        "key": "blueprint.undo"
+      }
+    },
+    {
+      "advance": {
+        "milliseconds": 16,
+        "frames": 1
+      }
+    },
+    {
+      "click": {
+        "key": "blueprint.run"
+      }
+    },
+    {
+      "advance": {
+        "milliseconds": 16,
+        "frames": 1
+      }
+    },
+    {
+      "capture": "final"
+    }
+  ]
+}

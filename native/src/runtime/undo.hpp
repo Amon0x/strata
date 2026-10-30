@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -48,6 +49,12 @@ public:
     [[nodiscard]] bool undo(std::string_view scope, StateStore& state);
     [[nodiscard]] bool redo(std::string_view scope, StateStore& state);
     void invalidate(std::string_view scope, std::string_view action_id);
+    /**
+     * Makes every step forget `addresses`, written outside the undo model: undoing never
+     * overwrites them, and a step that changed nothing else is dropped. The rest of the history
+     * stays.
+     */
+    void forget(const std::vector<StateAddress>& addresses);
     void invalidate_other_scopes(std::string_view preserved_scope, std::string_view action_id);
     void clear(std::string_view scope);
     void clear_all() noexcept;
@@ -61,6 +68,8 @@ private:
         std::string label;
         std::optional<std::string> coalesce_key;
         std::int64_t timestamp_nanos = 0;
+        /** The addresses whose values differ between `before` and `after`. */
+        std::set<StateAddress> changed = {};
     };
     struct Stack final {
         std::vector<Entry> undo;

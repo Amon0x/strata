@@ -498,9 +498,9 @@ StatementPtr Parser::parse_statement(const BodyKind kind) {
         if (match(TokenType::if_keyword)) return parse_if_statement(previous_token());
         if (match(TokenType::when_keyword)) return parse_when_statement(previous_token());
         if (match(TokenType::for_keyword)) return parse_for_statement(previous_token());
-        if (kind == BodyKind::animation &&
-            (match(TokenType::from) || match(TokenType::to))) {
-            return parse_animation_frame_statement(previous_token());
+        if (kind == BodyKind::animation && (contextual("from") || contextual("to")) &&
+            peek_at(1U).type == TokenType::left_brace) {
+            return parse_animation_frame_statement(advance());
         }
         if (kind == BodyKind::animation && check(TokenType::number) &&
             check_next(TokenType::left_brace)) {
@@ -695,8 +695,8 @@ StatementPtr Parser::parse_for_statement(const Token& keyword) {
 
 StatementPtr Parser::parse_animation_frame_statement(const Token& keyword) {
     auto [properties, body_span] = parse_property_block();
-    const AnimationFramePhase phase = keyword.type == TokenType::from ? AnimationFramePhase::from
-                                      : keyword.type == TokenType::to ? AnimationFramePhase::to
+    const AnimationFramePhase phase = keyword.lexeme == "from" ? AnimationFramePhase::from
+                                      : keyword.lexeme == "to" ? AnimationFramePhase::to
                                                                       : AnimationFramePhase::at;
     // A keyframe between `from` and `to` is introduced by its offset, a plain number.
     double offset = -1.0;
@@ -1515,8 +1515,6 @@ void Parser::synchronize_block() {
         case TokenType::if_keyword:
         case TokenType::when_keyword:
         case TokenType::for_keyword:
-        case TokenType::from:
-        case TokenType::to:
         case TokenType::right_brace: return;
         default: static_cast<void>(advance()); break;
         }
@@ -1538,8 +1536,6 @@ bool Parser::name_token() const noexcept {
     // Statement keywords only start statements, so where a name is expected they are names.
     switch (peek().type) {
     case TokenType::when_keyword:
-    case TokenType::from:
-    case TokenType::to:
     case TokenType::state:
     case TokenType::derived:
     case TokenType::root:

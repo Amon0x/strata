@@ -1514,6 +1514,15 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_scripting.cmake
         )
         add_test(
+            NAME strata.headless.blueprint
+            COMMAND ${CMAKE_COMMAND}
+                -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>
+                -DSTRATA_RESOURCES=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
+                -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/blueprint.json
+                -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-blueprint
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_blueprint.cmake
+        )
+        add_test(
             NAME strata.headless.surface_limits
             COMMAND ${CMAKE_COMMAND}
                 -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>

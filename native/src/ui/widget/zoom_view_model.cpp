@@ -136,6 +136,9 @@ void zoom_defaults(WidgetLayoutDefaultsScope& scope) {
 /**
  * A press on the canvas itself, or on content that does not take the pointer (a card's body, not
  * its buttons), pans once it moves past the slop; a middle-button press pans from anywhere.
+ * `panButton: "secondary"` pans with the secondary button from anywhere instead, and leaves a
+ * primary press on the canvas to the content (a marquee, say); `"middle"` pans with the middle
+ * button alone.
  */
 bool zoom_view_pointer(WidgetInputScope& scope) {
     const PointerInputEvent* pointer = scope.pointer();
@@ -145,8 +148,17 @@ bool zoom_view_pointer(WidgetInputScope& scope) {
     const bool panning = pan != nullptr && pan->object() != nullptr &&
                          finite(pan->field("pointerId"), -1.0) == pointer->pointer_id;
     if (pointer->type == PointerEventType::press) {
-        const bool middle = pointer->button == 2;
-        if (panning || !(middle || (pointer->button == 0 && scope.passive_pointer_target())))
+        const runtime::Value* button_value = scope.property("panButton");
+        const std::string_view pan_button =
+            button_value != nullptr && button_value->string() != nullptr
+                ? std::string_view(*button_value->string())
+                : std::string_view("primary");
+        // A press that pans from anywhere: the middle button, or the secondary when asked.
+        const bool middle =
+            pointer->button == 2 || (pan_button == "secondary" && pointer->button == 1);
+        const bool from_canvas =
+            pan_button == "primary" && pointer->button == 0 && scope.passive_pointer_target();
+        if (panning || !(middle || from_canvas))
             return false;
         const ZoomViewport view = zoom_view_current(scope.node());
         scope.set_retained(

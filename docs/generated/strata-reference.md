@@ -2475,6 +2475,7 @@ Children: `true` · Capabilities: —
 | `maxZoom` | number | false | false | — |
 | `onViewChange` | action | false | false | — |
 | `bind` | any | false | false | — |
+| `panButton` | string | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
 | `style` | style | false | false | — |

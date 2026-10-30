@@ -219,8 +219,9 @@ tree first, the handler is dropped.
 
 `undoStep("Move node")` makes what the handler commits one undo step with that label;
 `undoStep("Move node", "drag")` merges it with the previous step of the same key, as a drag's steps
-merge. A handler that names no step makes the history forget what came before, as an unlabeled
-state change does.
+merge. What a handler writes without naming a step (a selection, where the pointer is) the
+history forgets: undoing never overwrites it, a step that changed nothing else is dropped, and the
+rest of the history stays.
 
 ## Errors
 

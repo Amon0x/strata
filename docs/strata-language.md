@@ -437,7 +437,10 @@ magnified.
 its scale) with `onViewChange`, or `bind` to a state, lets the app read and restore it; a `view` the
 app sets is eased to. `zoom.fit {key, padding}` eases to show all of the content (padding 24 by
 default) and `zoom.reset {key}` back to its own size; with no key they act on the first ZoomView.
-`persistenceKey` keeps an uncontrolled view across runs.
+`persistenceKey` keeps an uncontrolled view across runs. `panButton` chooses what drags the view:
+`"primary"` (the default) on the canvas itself or content that does not take the pointer;
+`"secondary"` from anywhere, leaving a primary drag on the canvas to the content (a marquee
+selection in a node editor); `"middle"` alone. The middle button always pans.
 
 ```strata
 state view = { x: 0, y: 0, zoom: 1 };
@@ -1064,13 +1067,14 @@ afterwards. The Windows desktop host provides it through WinHTTP, the shell and 
 The `strata.pointer` behavior tells a node where the pointer is over it. Its action receives an
 object as the pointer moves over the node or any of its descendants: `inside`, `x` and `y` in
 the node's own logical coordinates, `u` and `v` as fractions of its box, and its `width` and
-`height`; once the pointer leaves, `{ inside: false }`. Kept in state, it drives anything an
+`height`; once the pointer leaves, `{ inside: false, phase: "leave", pressed: false }`. Kept in state, it drives anything an
 expression can: a card that tilts toward the pointer, a button that leans in.
 
 Each report also says what the pointer did: `phase` is `press`, `release` or `move`, `pressed`
-whether a press is held, `button` which (0 primary, 1 middle, 2 secondary), `clickCount` how many
-quick presses in one place this is (2 on a double click), and `shift`, `control`, `alt` and `meta`
-which keys were down. A press begun over the node is reported until it is released wherever the
+whether a press is held, `button` which (0 primary, 1 secondary, 2 middle), `clickCount` how many
+quick presses in one place this is (2 on a double click), `shift`, `control`, `alt` and `meta`
+which keys were down, and `surfaceX`/`surfaceY` where the pointer is on the surface, which a pan
+or zoom under it does not change. A press begun over the node is reported until it is released wherever the
 pointer goes, with `inside` false and `x`/`y` outside the box while it is out: enough for a marquee
 selection, or for a wire drawn from a node.
 

@@ -55,6 +55,24 @@ constexpr std::int64_t coalescing_window_nanos = 600'000'000;
     return result;
 }
 
+/** The addresses whose values differ between two snapshots, present in either. */
+[[nodiscard]] std::set<StateAddress> changed_addresses(const StateSnapshot& before,
+                                                      const StateSnapshot& after) {
+    std::map<StateAddress, const StateSnapshotEntry*> earlier;
+    for (const StateSnapshotEntry& entry : before.entries) earlier.emplace(entry.address, &entry);
+    std::set<StateAddress> changed;
+    for (const StateSnapshotEntry& entry : after.entries) {
+        const auto found = earlier.find(entry.address);
+        if (found == earlier.end() || *found->second != entry) changed.insert(entry.address);
+        if (found != earlier.end()) earlier.erase(found);
+    }
+    for (const auto& [address, entry] : earlier) {
+        static_cast<void>(entry);
+        changed.insert(address);
+    }
+    return changed;
+}
+
 } // namespace
 
 UndoManager::UndoManager(InvalidationDiagnostic invalidation_diagnostic)
@@ -83,8 +101,11 @@ void UndoManager::record(
             stack.pending_group->after = std::move(entry.after);
             stack.pending_group->timestamp_nanos = entry.timestamp_nanos;
         }
+        stack.pending_group->changed =
+            changed_addresses(stack.pending_group->before, stack.pending_group->after);
         return;
     }
+    entry.changed = changed_addresses(entry.before, entry.after);
     append(stack, std::move(entry));
 }
 
@@ -155,6 +176,34 @@ void UndoManager::invalidate(
     if (populated && invalidation_diagnostic_) invalidation_diagnostic_(scope, action_id);
 }
 
+void UndoManager::forget(const std::vector<StateAddress>& addresses) {
+    bool changed = false;
+    // Drops the addresses from a step; true when the step has nothing left to undo.
+    const auto forget_in = [&addresses, &changed](Entry& entry) {
+        if (std::ranges::none_of(addresses, [&entry](const StateAddress& address) {
+                return entry.changed.contains(address);
+            })) {
+            return false;
+        }
+        const auto written = [&addresses](const StateSnapshotEntry& value) {
+            return std::ranges::find(addresses, value.address) != addresses.end();
+        };
+        std::erase_if(entry.before.entries, written);
+        std::erase_if(entry.after.entries, written);
+        for (const StateAddress& address : addresses) entry.changed.erase(address);
+        changed = true;
+        return entry.changed.empty();
+    };
+    for (auto& [scope, stack] : stacks_) {
+        static_cast<void>(scope);
+        std::erase_if(stack.undo, forget_in);
+        std::erase_if(stack.redo, forget_in);
+        if (stack.pending_group.has_value() && forget_in(*stack.pending_group))
+            stack.pending_group.reset();
+    }
+    if (changed) ++generation_;
+}
+
 void UndoManager::invalidate_other_scopes(
     const std::string_view preserved_scope,
     const std::string_view action_id
@@ -202,6 +251,7 @@ void UndoManager::append(Stack& stack, Entry entry) {
             previous.after = std::move(entry.after);
             previous.label = std::move(entry.label);
             previous.timestamp_nanos = entry.timestamp_nanos;
+            previous.changed = changed_addresses(previous.before, previous.after);
             if (previous.before == previous.after) stack.undo.pop_back();
             stack.redo.clear();
             ++generation_;

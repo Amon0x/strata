@@ -108,8 +108,7 @@ constexpr std::array symbols{
     if (value == "true") return TokenType::true_keyword;
     if (value == "false") return TokenType::false_keyword;
     if (value == "null") return TokenType::null_keyword;
-    if (value == "from") return TokenType::from;
-    if (value == "to") return TokenType::to;
+    // `from` and `to` open an animation's frames, and are names everywhere else (parser.cpp).
     return TokenType::identifier;
 }
 

@@ -86,7 +86,9 @@ void InputRouter::track_pointer(const PointerInputEvent& event, InputOperationRe
             continue;
         BehaviorInputScope scope(*this, *node, *behavior, InputEventPhase::target, result);
         static_cast<void>(
-            scope.emit("pointer-left", runtime::Value(Fields{{"inside", runtime::Value(false)}})));
+            scope.emit("pointer-left", runtime::Value(Fields{{"inside", runtime::Value(false)},
+                                                             {"phase", runtime::Value("leave")},
+                                                             {"pressed", runtime::Value(false)}})));
     }
     if (!present || layout_ == nullptr) {
         pointer_captures_.erase(event.pointer_id);
@@ -128,6 +130,8 @@ void InputRouter::track_pointer(const PointerInputEvent& event, InputOperationRe
                       {"v", runtime::Value(v)},
                       {"width", runtime::Value(hit.local_bounds.width)},
                       {"height", runtime::Value(hit.local_bounds.height)},
+                      {"surfaceX", runtime::Value(event.position.x)},
+                      {"surfaceY", runtime::Value(event.position.y)},
                       {"phase", runtime::Value(std::string(phase))},
                       {"pressed", runtime::Value(held)},
                       {"button", runtime::Value(static_cast<double>(event.button))},
