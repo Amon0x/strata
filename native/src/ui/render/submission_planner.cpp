@@ -784,6 +784,22 @@ constexpr double art_tile = 960.0;
 constexpr std::uint32_t mask_tile = 256U;
 /** Past this many tiles (or this extent), a shape draws as geometry instead. */
 constexpr double maximum_mask_tiles = 1024.0;
+
+/**
+ * How many texels one drawing's masks may take: half the atlas. A drawing needing more would
+ * evict itself, and the text with it, and be rasterized again on every frame; it draws as
+ * geometry instead, which costs nothing to keep.
+ */
+[[nodiscard]] double mask_texel_budget(const font::GlyphAtlas& atlas) {
+    const font::GlyphAtlasConfig& config = atlas.config();
+    const double page = static_cast<double>(config.page_size);
+    return page * page * static_cast<double>(config.maximum_pages) * 0.5;
+}
+
+/** Whether `tiles` mask tiles of `side` texels a side fit one drawing's share of the atlas. */
+[[nodiscard]] bool masks_fit(const font::GlyphAtlas& atlas, const double tiles, const double side) {
+    return tiles <= maximum_mask_tiles && tiles * side * side <= mask_texel_budget(atlas);
+}
 constexpr double maximum_tiled_extent = 16384.0;
 /** Tile classes kept before the record starts over. */
 constexpr std::size_t maximum_tile_classes = 16384U;
@@ -1401,8 +1417,10 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
     const auto first_y = static_cast<std::int64_t>(std::floor(box_top / tile));
     const auto last_y = static_cast<std::int64_t>(std::floor(box_bottom / tile));
     if (box_right - box_left > maximum_tiled_extent || box_bottom - box_top > maximum_tiled_extent ||
-        static_cast<double>(last_x - first_x + 1) * static_cast<double>(last_y - first_y + 1) >
-            maximum_mask_tiles) {
+        !masks_fit(*atlas,
+                   static_cast<double>(last_x - first_x + 1) *
+                       static_cast<double>(last_y - first_y + 1),
+                   static_cast<double>(mask_tile + 2U))) {
         return false;
     }
     if (tile_classes.size() > maximum_tile_classes)
@@ -1594,6 +1612,11 @@ append_art_masks(std::vector<PlannedItem>& output, const PathRenderCommand& comm
             right - left <= maximum_mask_extent && bottom - top <= maximum_mask_extent;
         const double step = whole ? std::max(right - left, bottom - top) : art_tile;
         const double apron = whole ? 0.0 : 1.0;
+        if (!masks_fit(*atlas,
+                       std::ceil((right - left) / step) * std::ceil((bottom - top) / step),
+                       step + 2.0 * apron)) {
+            return false;
+        }
         for (double tile_top = top; tile_top < bottom; tile_top += step) {
             for (double tile_left = left; tile_left < right; tile_left += step) {
                 const double core_right = std::min(tile_left + step, right);
@@ -1966,8 +1989,10 @@ append_art_masks(std::vector<PlannedItem>& output, const PathRenderCommand& comm
         const auto first_y = static_cast<std::int64_t>(std::floor(top / tile));
         const auto last_y = static_cast<std::int64_t>(std::floor(bottom / tile));
         if (right - left > maximum_tiled_extent || bottom - top > maximum_tiled_extent ||
-            static_cast<double>(last_x - first_x + 1) * static_cast<double>(last_y - first_y + 1) >
-                maximum_mask_tiles) {
+            !masks_fit(*atlas,
+                       static_cast<double>(last_x - first_x + 1) *
+                           static_cast<double>(last_y - first_y + 1),
+                       static_cast<double>(mask_tile + 2U))) {
             return false;
         }
         if (tile_classes.size() > maximum_tile_classes)

@@ -1625,6 +1625,7 @@ struct Host::Impl final {
             sample->batches = packet.batches.size();
             sample->vertices = packet.vertices.size() / host::packet_vertex_bytes;
             sample->blur_passes = rendered.blur_passes;
+            sample->gpu_nanos = static_cast<std::int64_t>(rendered.gpu_nanos);
         }
         ProfilerHostFrame backend;
         backend.blur_passes = rendered.blur_passes;

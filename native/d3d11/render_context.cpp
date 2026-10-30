@@ -763,7 +763,77 @@ struct RenderContext::Impl final {
         if (found != geometry.end())
             geometry.erase(found);
         effects->release_layer(id);
+        gpu_layer_nanos.erase(std::string(id));
     }
+
+    /** Timestamps around one layer's draw, read back once the GPU has passed them. */
+    struct GpuTiming final {
+        ComPtr<ID3D11Query> disjoint;
+        ComPtr<ID3D11Query> start;
+        ComPtr<ID3D11Query> end;
+        std::string layer;
+        bool pending = false;
+    };
+
+    /** Starts timing a layer in a free slot; none when every slot is still in flight. */
+    [[nodiscard]] GpuTiming* begin_gpu_timing(const std::string_view id) {
+        const auto free = std::ranges::find_if(gpu_timings, [](const GpuTiming& timing) {
+            return !timing.pending;
+        });
+        if (free == gpu_timings.end())
+            return nullptr;
+        if (free->disjoint == nullptr) {
+            D3D11_QUERY_DESC description{D3D11_QUERY_TIMESTAMP_DISJOINT, 0U};
+            if (FAILED(device->CreateQuery(&description, &free->disjoint)))
+                return nullptr;
+            description.Query = D3D11_QUERY_TIMESTAMP;
+            if (FAILED(device->CreateQuery(&description, &free->start)) ||
+                FAILED(device->CreateQuery(&description, &free->end))) {
+                free->disjoint.Reset();
+                return nullptr;
+            }
+        }
+        context->Begin(free->disjoint.Get());
+        context->End(free->start.Get());
+        free->layer = std::string(id);
+        return &*free;
+    }
+
+    void end_gpu_timing(GpuTiming* const timing) {
+        if (timing == nullptr)
+            return;
+        context->End(timing->end.Get());
+        context->End(timing->disjoint.Get());
+        timing->pending = true;
+    }
+
+    /** Reads every timing the GPU has finished, without waiting on one it has not. */
+    void collect_gpu_timings() {
+        for (GpuTiming& timing : gpu_timings) {
+            if (!timing.pending)
+                continue;
+            D3D11_QUERY_DATA_TIMESTAMP_DISJOINT disjoint{};
+            if (context->GetData(timing.disjoint.Get(), &disjoint, sizeof(disjoint),
+                                 D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) {
+                continue;
+            }
+            UINT64 start = 0U;
+            UINT64 end = 0U;
+            const bool read =
+                context->GetData(timing.start.Get(), &start, sizeof(start),
+                                 D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK &&
+                context->GetData(timing.end.Get(), &end, sizeof(end),
+                                 D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK;
+            timing.pending = false;
+            if (!read || disjoint.Disjoint || disjoint.Frequency == 0U || end < start)
+                continue;
+            gpu_layer_nanos[timing.layer] = static_cast<std::uint64_t>(
+                static_cast<double>(end - start) * 1.0e9 / static_cast<double>(disjoint.Frequency));
+        }
+    }
+
+    std::array<GpuTiming, 6U> gpu_timings;
+    std::map<std::string, std::uint64_t, std::less<>> gpu_layer_nanos;
 
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
@@ -859,8 +929,13 @@ void RenderContext::set_pointer(
 
 RenderLayerTelemetry RenderContext::render_layer(const std::string_view id,
                                                  const host::RenderPacket& packet) {
-    const RenderLayerTelemetry telemetry = impl_->render_layer(id, packet);
+    Impl::GpuTiming* const timing = impl_->begin_gpu_timing(id);
+    RenderLayerTelemetry telemetry = impl_->render_layer(id, packet);
     impl_->effects->end_layer(id);
+    impl_->end_gpu_timing(timing);
+    impl_->collect_gpu_timings();
+    if (const auto found = impl_->gpu_layer_nanos.find(id); found != impl_->gpu_layer_nanos.end())
+        telemetry.gpu_nanos = found->second;
     return telemetry;
 }
 

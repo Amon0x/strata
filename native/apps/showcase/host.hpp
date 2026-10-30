@@ -26,6 +26,8 @@ struct DesktopFrameSample final {
     std::int64_t submit_nanos = 0;
     std::int64_t tooling_nanos = 0;
     std::int64_t present_nanos = 0;
+    /** The GPU's time for the layer, as last measured (a few frames behind). */
+    std::int64_t gpu_nanos = 0;
     std::uint64_t input_events = 0U;
     std::uint64_t emitted_events = 0U;
     std::uint64_t render_commands = 0U;

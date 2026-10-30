@@ -133,6 +133,10 @@ class GlyphAtlas final {
     explicit GlyphAtlas(std::string_view owner_id, GlyphAtlasConfig config = {});
     ~GlyphAtlas();
 
+    [[nodiscard]] const GlyphAtlasConfig& config() const noexcept {
+        return config_;
+    }
+
     GlyphAtlas(const GlyphAtlas&) = delete;
     GlyphAtlas& operator=(const GlyphAtlas&) = delete;
     GlyphAtlas(GlyphAtlas&&) = delete;

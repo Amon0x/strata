@@ -79,6 +79,11 @@ struct RenderLayerTelemetry final {
     std::uint32_t effect_target_width = 0U;
     std::uint32_t effect_target_height = 0U;
     std::uint64_t effect_nanos = 0U;
+    /**
+     * How long the GPU took to draw this layer, the last time it finished: timestamps are read
+     * back without waiting, so this trails the frame by a few. Zero until one is known.
+     */
+    std::uint64_t gpu_nanos = 0U;
 };
 
 struct PresentedFrame final {
