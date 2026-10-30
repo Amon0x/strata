@@ -790,7 +790,9 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
         if (found != textures_.end())
             texture = &found->second;
     }
-    const auto texture_sample = [texture](const float u, const float v) noexcept {
+    // `filtered` blends texels bilinearly even on a texel-exact page (glyphs drawn off one to one).
+    const auto texture_sample = [texture](const float u, const float v,
+                                          const bool filtered = false) noexcept {
         if (texture == nullptr || texture->pixels.empty())
             return Color{};
         const auto texel = [texture](const std::int64_t x, const std::int64_t y) noexcept {
@@ -812,7 +814,7 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                 static_cast<float>(texture->pixels[offset + 3U]) / 255.0F,
             };
         };
-        if (texture->sampling == 0U) {
+        if (texture->sampling == 0U && !filtered) {
             return texel(
                 static_cast<std::int64_t>(std::floor(u * static_cast<float>(texture->width))),
                 static_cast<std::int64_t>(std::floor(v * static_cast<float>(texture->height))));
@@ -907,6 +909,12 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
         const float dv_dy = (dx1 * dv2 - dx2 * dv1) * inverse_area;
         const float fwidth_u = std::abs(du_dx) + std::abs(du_dy);
         const float fwidth_v = std::abs(dv_dx) + std::abs(dv_dy);
+        // Whether a glyph's texels land one to one on pixels (strataGlyphTexel): exactly sampled
+        // then, blended bilinearly otherwise.
+        const bool glyph_one_to_one =
+            texture == nullptr ||
+            (std::abs(fwidth_u * static_cast<float>(texture->width) - 1.0F) < 0.01F &&
+             std::abs(fwidth_v * static_cast<float>(texture->height) - 1.0F) < 0.01F);
         const bool include_ab = top_left(a, b);
         const bool include_bc = top_left(b, c);
         const bool include_ca = top_left(c, a);
@@ -1026,10 +1034,10 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         source.alpha *= outside * falloff;
                     }
                 } else if (mode == 4) {
-                    source.alpha *= host::text_coverage(texture_sample(u, v).red, source.red,
-                                                        source.green, source.blue);
+                    source.alpha *= host::text_coverage(texture_sample(u, v, !glyph_one_to_one).red,
+                                                        source.red, source.green, source.blue);
                 } else if (mode == 12) {
-                    const Color sampled = texture_sample(u, v);
+                    const Color sampled = texture_sample(u, v, !glyph_one_to_one);
                     subpixel = {
                         host::text_coverage(sampled.red, source.red, source.green, source.blue),
                         host::text_coverage(sampled.green, source.red, source.green, source.blue),

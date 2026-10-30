@@ -462,13 +462,8 @@ text_group_scales(const RenderCommandBuffer& commands,
     std::vector<double> result(commands.size(), 1.0);
     std::vector<std::uint32_t> groups;
     // A text run under a baked (static) scale rasterizes at that scale too, so `scale: 2` text is
-    // sharp, not a magnified bitmap: the scale each transform adds, stepped to quarter octaves
-    // like a group's and left at one within a tenth of it.
+    // sharp, not a magnified bitmap, and `scale: 1.05` text is not resampled.
     std::vector<double> baked{1.0};
-    const auto stepped = [](const double value) {
-        const double step = std::exp2(std::round(std::log2(value) * 4.0) / 4.0);
-        return std::abs(step - 1.0) < 0.1 ? 1.0 : std::clamp(step, 0.125, 8.0);
-    };
     for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
         const RenderCommand& source = commands.commands()[index];
         if (const auto* push = std::get_if<GroupPushRenderCommand>(&source); push != nullptr) {
@@ -485,6 +480,8 @@ text_group_scales(const RenderCommandBuffer& commands,
             if (baked.size() > 1U)
                 baked.pop_back();
         } else if (std::holds_alternative<TextRunRenderCommand>(source)) {
+            // A baked transform is static, so its scale is taken exactly and the run's texels land
+            // one to one; a group's is already exact at rest and stepped while it moves.
             double scale = baked.back();
             if (!groups.empty()) {
                 const auto found = std::ranges::lower_bound(group_scales, groups.back(), {},
@@ -492,7 +489,7 @@ text_group_scales(const RenderCommandBuffer& commands,
                 if (found != group_scales.end() && found->group == groups.back())
                     scale *= std::max(found->x, found->y);
             }
-            result[index] = scale == 1.0 ? 1.0 : stepped(scale);
+            result[index] = std::clamp(scale, 0.125, 8.0);
         }
     }
     return result;

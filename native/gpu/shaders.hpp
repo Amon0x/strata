@@ -352,6 +352,32 @@ float3 strataTexelTone(float3 color, float tone) {
 }
 
 /**
+ * A glyph page's texel at `uv`. Glyph pages are sampled texel-exact, which is faithful while each
+ * texel lands on one pixel; in a group drawn at a scale its glyphs were not rasterized for (a zoom
+ * on its way, a turn), an exact sample would drop and repeat whole columns, so the texels are
+ * blended bilinearly there instead.
+ */
+float4 strataGlyphTexel(float2 uv) {
+    uint width;
+    uint height;
+    Texture0.GetDimensions(width, height);
+    float2 size = float2(width, height);
+    float2 footprint = fwidth(uv) * size;
+    if (all(abs(footprint - 1.0) < 0.01))
+        return Texture0.Sample(Sampler0, uv);
+    float2 texel = uv * size - 0.5;
+    float2 corner = floor(texel);
+    float2 blend = texel - corner;
+    int2 last = int2(width, height) - 1;
+    int2 base = int2(corner);
+    float4 topLeft = Texture0.Load(int3(clamp(base, int2(0, 0), last), 0));
+    float4 topRight = Texture0.Load(int3(clamp(base + int2(1, 0), int2(0, 0), last), 0));
+    float4 bottomLeft = Texture0.Load(int3(clamp(base + int2(0, 1), int2(0, 0), last), 0));
+    float4 bottomRight = Texture0.Load(int3(clamp(base + int2(1, 1), int2(0, 0), last), 0));
+    return lerp(lerp(topLeft, topRight, blend.x), lerp(bottomLeft, bottomRight, blend.x), blend.y);
+}
+
+/**
  * Subpixel text's coverage per colour channel, set by strataShade for mode 12; every other draw
  * leaves it white. The entry point turns it into the draw's per-channel alpha (strataOutput).
  */
@@ -395,11 +421,11 @@ float4 strataShade(PixelInput input) {
         float inner = strataRoundedEdge(distance + width, footprint, softness);
         color.a *= saturate(outer - inner);
     } else if (mode == 4) {
-        color.a *= strataTextCoverage(Texture0.Sample(Sampler0, input.uv).r, color.rgb);
+        color.a *= strataTextCoverage(strataGlyphTexel(input.uv).r, color.rgb);
     } else if (mode == 12) {
         // Subpixel text: each colour channel's coverage weighted as gray coverage is; alpha
         // carries the strongest, and strataOutput hands the rest to the blend.
-        float3 sampled = Texture0.Sample(Sampler0, input.uv).rgb;
+        float3 sampled = strataGlyphTexel(input.uv).rgb;
         strataSubpixelCoverage = float3(strataTextCoverage(sampled.r, color.rgb),
                                         strataTextCoverage(sampled.g, color.rgb),
                                         strataTextCoverage(sampled.b, color.rgb));

@@ -520,7 +520,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     // Masks in a scaled group rasterize at the group's density, so a zoomed group's shapes stay
     // sharp rather than magnified. A new group, or one whose scale held since the last frame, is
     // exact; one whose scale is moving takes the nearest quarter octave, so a zoom replans only a
-    // few times on its way. Scales within a tenth of one are left at one.
+    // few times on its way, and steps within a tenth of one are left at one.
     {
         std::vector<RenderGroup> composed;
         static_cast<void>(compose_groups(commands.groups(), composed));
@@ -547,7 +547,9 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                                  previous->scale_y != group.scale_y);
             const double x = moving ? stepped(group.scale_x) : group.scale_x;
             const double y = moving ? stepped(group.scale_y) : group.scale_y;
-            if (std::abs(x - 1.0) > 0.1 || std::abs(y - 1.0) > 0.1)
+            // A resting group rasterizes at its exact scale, however close to one, so its text's
+            // texels land one to one; a moving one only once its step leaves one.
+            if (x != 1.0 || y != 1.0)
                 scales.push_back(GroupRasterScale{group.index, x, y});
         }
         submission_cache_.set_group_raster_scales(std::move(scales));
