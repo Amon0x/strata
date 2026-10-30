@@ -174,6 +174,10 @@ class ApplicationHost final {
 
     [[nodiscard]] bool active() const noexcept;
     [[nodiscard]] bool has_frame() const noexcept;
+    /** The last frame showed something new: its present already waited for the display. */
+    [[nodiscard]] bool presented() const noexcept;
+    /** The last frame left nothing to do until input or a host change. */
+    [[nodiscard]] bool idle() const noexcept;
     [[nodiscard]] double scale() const noexcept;
     [[nodiscard]] const std::vector<Diagnostic>& diagnostics() const noexcept;
 

@@ -306,10 +306,10 @@ std::optional<FrameCapture> Renderer::take_capture() {
     return std::exchange(impl_->capture, std::nullopt);
 }
 
-void Renderer::render(const host::RenderPacket& packet) {
+bool Renderer::render(const host::RenderPacket& packet) {
     begin_frame();
     static_cast<void>(render_layer("default", packet));
-    static_cast<void>(end_frame());
+    return end_frame();
 }
 
 RendererInfo Renderer::info() const {

@@ -22,6 +22,7 @@
 
 #include <strata/strata.hpp>
 
+#include "frame_clock.hpp"
 #include "host/session.hpp"
 #include "host_services.hpp"
 #include "ime.hpp"
@@ -111,11 +112,7 @@ struct ApplicationHost::Impl final {
         }
     }
 
-    [[nodiscard]] std::int64_t now() const noexcept {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(
-                   std::chrono::steady_clock::now() - epoch)
-            .count();
-    }
+    [[nodiscard]] std::int64_t now() const noexcept { return clock.now(); }
 
     [[nodiscard]] double logical_width() const noexcept {
         return static_cast<double>(framebuffer_width) / scale;
@@ -391,12 +388,16 @@ struct ApplicationHost::Impl final {
     void frame() {
         if (!session.has_value() || !session->has_surface())
             throw std::logic_error("desktop application must be activated before framing");
+        clock.begin_frame();
         answer_platform_requests();
         flush_pointer_move();
         frame_time = now();
         const host::SurfacePacketFrame framed = session->frame(frame_time);
         const host::RenderPacket& packet = *framed.packet;
-        renderer.render(packet);
+        const bool changed =
+            !frame_available || framed.surface.unchanged == 0U || platform_capture;
+        last_frame_idle = framed.surface.idle != 0U;
+        last_frame_presented = renderer.render(packet) && changed;
         frame_available = true;
         if (platform_capture) {
             platform_capture = false;
@@ -411,6 +412,7 @@ struct ApplicationHost::Impl final {
         if (!backdrop.empty())
             session->surface().report_backdrop(backdrop);
         session->record_host_frame(packet);
+        clock.end_frame();
     }
 
     void close() {
@@ -443,7 +445,7 @@ struct ApplicationHost::Impl final {
     std::vector<std::string> program_resources;
     std::string source;
     std::optional<strata_input_event> pending_pointer_move;
-    std::chrono::steady_clock::time_point epoch = std::chrono::steady_clock::now();
+    FrameClock clock;
     std::int64_t frame_time = 0;
     std::uint64_t environment_generation = 1U;
     std::uint64_t activation_generation = 0U;
@@ -451,6 +453,9 @@ struct ApplicationHost::Impl final {
     std::uint32_t framebuffer_height = 1U;
     double scale = 1.0;
     bool frame_available = false;
+    /** The last frame showed something new; and it left nothing to do until input. */
+    bool last_frame_presented = false;
+    bool last_frame_idle = false;
     /** A node capture waits for the frame being drawn. */
     bool platform_capture = false;
     win32::WindowInputState input;
@@ -647,6 +652,8 @@ bool ApplicationHost::active() const noexcept {
 bool ApplicationHost::has_frame() const noexcept {
     return impl_->frame_available;
 }
+bool ApplicationHost::presented() const noexcept { return impl_->last_frame_presented; }
+bool ApplicationHost::idle() const noexcept { return impl_->last_frame_idle; }
 double ApplicationHost::scale() const noexcept {
     return impl_->scale;
 }

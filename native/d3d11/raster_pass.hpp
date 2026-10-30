@@ -30,12 +30,6 @@ class RasterPass final {
     RasterPass& operator=(const RasterPass&) = delete;
 
     /**
-     * Starts compiling the kernels on a background thread, once per process, so the first frame
-     * that rasterizes does not compile them. A pass made before it finishes waits for it.
-     */
-    static void prepare();
-
-    /**
      * One job of a batch: the region at (`x`, `y`) of the atlas behind `target`, whose size the
      * job was decoded against: R8 coverage, or RGBA8 when `rgba`.
      */

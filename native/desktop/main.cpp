@@ -90,6 +90,20 @@ struct WindowApplication final {
         return host != nullptr || application_host != nullptr;
     }
 
+    /** The last frame showed something new: its present already waited for the display. */
+    [[nodiscard]] bool presented() const noexcept {
+        if (host != nullptr)
+            return host->presented();
+        return application_host != nullptr && application_host->presented();
+    }
+
+    /** The last frame left nothing to do until input or a host change. */
+    [[nodiscard]] bool idle() const noexcept {
+        if (host != nullptr)
+            return host->idle();
+        return application_host == nullptr || application_host->idle();
+    }
+
     void failed(const std::exception& error) noexcept {
         try {
             failure = error.what();
@@ -867,13 +881,19 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                 running = false;
             }
             if (!headless && !uncapped) {
-                // A window whose frame changed nothing waits for input; one with nothing left to
-                // do at all waits longer, waking only to notice timers and async completions.
-                const bool idle = std::ranges::all_of(applications, [](const auto& app) {
-                    return app->host != nullptr && app->host->idle() && !app->host->presented();
-                });
-                static_cast<void>(MsgWaitForMultipleObjectsEx(0U, nullptr, idle ? 50U : 16U,
-                                                              QS_ALLINPUT, MWMO_INPUTAVAILABLE));
+                // A window that drew waited for the display in its present, which paces what
+                // moves; waiting here as well would hold every frame for a second refresh. Only
+                // when no window drew does the loop wait, for input: a frame's length while
+                // something is still to do, longer when nothing is, waking for timers and async
+                // completions.
+                const bool drew = std::ranges::any_of(
+                    applications, [](const auto& app) { return app->presented(); });
+                if (!drew) {
+                    const bool idle = std::ranges::all_of(
+                        applications, [](const auto& app) { return app->idle(); });
+                    static_cast<void>(MsgWaitForMultipleObjectsEx(
+                        0U, nullptr, idle ? 50U : 16U, QS_ALLINPUT, MWMO_INPUTAVAILABLE));
+                }
             }
         }
         // The windows documents opened go first: they share their opener's model.

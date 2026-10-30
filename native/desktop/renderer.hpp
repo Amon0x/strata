@@ -81,7 +81,7 @@ class Renderer final {
     /** Frames clear to transparent, so a system backdrop (Mica) shows where nothing draws. */
     void set_transparent(bool transparent) noexcept;
     [[nodiscard]] std::optional<FrameCapture> take_capture();
-    void render(const host::RenderPacket& packet);
+    bool render(const host::RenderPacket& packet);
     [[nodiscard]] RendererInfo info() const;
 
   private:

@@ -40,6 +40,7 @@
 #include <strata/render_packet.hpp>
 
 #include "durable_writer.hpp"
+#include "frame_clock.hpp"
 #include "host/session.hpp"
 #include "host_services.hpp"
 #include "platform.hpp"
@@ -334,11 +335,7 @@ struct Host::Impl final {
         return static_cast<double>(framebuffer_height) / display_scale;
     }
 
-    [[nodiscard]] std::int64_t now() const noexcept {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - epoch
-        ).count();
-    }
+    [[nodiscard]] std::int64_t now() const noexcept { return clock.now(); }
 
     [[nodiscard]] std::filesystem::path durable_path(
         const std::string_view application_id
@@ -1790,6 +1787,7 @@ struct Host::Impl final {
 
     void frame() {
         const auto host_frame_started = std::chrono::steady_clock::now();
+        clock.begin_frame();
         answer_platform_requests();
         Layer* const interactive = interactive_layer();
         std::int64_t tooling_nanos = 0;
@@ -1897,6 +1895,7 @@ struct Host::Impl final {
         const std::int64_t total_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - host_frame_started
         ).count();
+        clock.end_frame();
         host_total_timings.add(total_nanos);
         frame_history.push_back(static_cast<double>(total_nanos) / 1'000'000.0);
         while (frame_history.size() > 48U) frame_history.pop_front();
@@ -1983,7 +1982,7 @@ struct Host::Impl final {
     std::optional<strata_input_event> pending_pointer_move;
     contracts::debug_overlay::StrataDebugSelectModeActionMode debug_mode =
         contracts::debug_overlay::StrataDebugSelectModeActionMode::diagnostics;
-    std::chrono::steady_clock::time_point epoch = std::chrono::steady_clock::now();
+    FrameClock clock;
     std::int64_t frame_time = 0;
     std::int64_t last_total_nanos = 0;
     std::int64_t last_native_nanos = 0;

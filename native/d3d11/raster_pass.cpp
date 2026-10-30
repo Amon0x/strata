@@ -13,6 +13,7 @@
 #include <future>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -27,6 +28,7 @@
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 
+#include "d3d11/raster_bytecode.hpp"
 #include "gpu/raster_shaders.hpp"
 #include <strata/d3d11.hpp>
 #include <strata/raster_job.hpp>
@@ -44,13 +46,10 @@ void require_hresult(const HRESULT result, const std::string_view operation) {
     }
 }
 
-using shaders::entries;
-using Bytecode = std::array<ComPtr<ID3DBlob>, entries.size()>;
-
 /**
  * Art compiles without fxc's optimizer: it is compiled the first time a page draws it, and the
  * driver optimizes the bytecode itself, so the program runs as fast and appears several times
- * sooner. The raster kernels, compiled at startup where nothing waits, keep it.
+ * sooner. The raster kernels keep it: they compile at build time (raster_bake.cpp).
  */
 constexpr UINT art_optimization = D3DCOMPILE_SKIP_OPTIMIZATION;
 
@@ -115,15 +114,13 @@ void cache_art(const std::filesystem::path& file, ID3DBlob* const code) noexcept
     }
 }
 
-[[nodiscard]] ComPtr<ID3DBlob> compile(const char* const entry, const bool rgba,
-                                       const std::string_view text = shaders::source,
-                                       const UINT optimization = D3DCOMPILE_OPTIMIZATION_LEVEL3) {
-    const D3D_SHADER_MACRO rgba_macros[]{{"STRATA_RASTER_RGBA", "1"}, {nullptr, nullptr}};
+[[nodiscard]] ComPtr<ID3DBlob> compile(const char* const entry, const std::string_view text,
+                                       const UINT optimization) {
     ComPtr<ID3DBlob> code;
     ComPtr<ID3DBlob> diagnostics;
     const HRESULT status = D3DCompile(
-        text.data(), text.size(), "strata.d3d11.raster.hlsl", rgba ? rgba_macros : nullptr, nullptr,
-        entry, "cs_5_0", D3DCOMPILE_ENABLE_STRICTNESS | optimization, 0U, &code, &diagnostics);
+        text.data(), text.size(), "strata.d3d11.raster.hlsl", nullptr, nullptr, entry, "cs_5_0",
+        D3DCOMPILE_ENABLE_STRICTNESS | optimization, 0U, &code, &diagnostics);
     if (FAILED(status)) {
         const std::string detail =
             diagnostics == nullptr
@@ -135,29 +132,24 @@ void cache_art(const std::filesystem::path& file, ID3DBlob* const code) noexcept
     return code;
 }
 
-/** The kernels' bytecode, compiled once per process; it needs no device. */
-[[nodiscard]] std::shared_future<Bytecode>& bytecode() {
-    static std::once_flag started;
-    static std::shared_future<Bytecode> result;
-    std::call_once(started, [] {
-        result = std::async(std::launch::async, [] {
-                     Bytecode code;
-                     for (std::size_t index = 0U; index < entries.size(); ++index)
-                         code[index] =
-                             compile(entries[index], std::string_view(entries[index]) == "finish");
-                     return code;
-                 }).share();
-    });
-    return result;
+[[nodiscard]] ComPtr<ID3D11ComputeShader> create(ID3D11Device* const device, const void* const code,
+                                                 const std::size_t size) {
+    ComPtr<ID3D11ComputeShader> shader;
+    require_hresult(device->CreateComputeShader(code, size, nullptr, &shader),
+                    "raster compute shader creation");
+    return shader;
+}
+
+/** A raster kernel, from the bytecode compiled at build time. */
+[[nodiscard]] ComPtr<ID3D11ComputeShader> create(ID3D11Device* const device,
+                                                 const std::size_t kernel) {
+    const std::span<const std::uint8_t> code = raster_bytecode::kernels[kernel];
+    return create(device, code.data(), code.size());
 }
 
 [[nodiscard]] ComPtr<ID3D11ComputeShader> create(ID3D11Device* const device,
                                                  const ComPtr<ID3DBlob>& code) {
-    ComPtr<ID3D11ComputeShader> shader;
-    require_hresult(device->CreateComputeShader(code->GetBufferPointer(), code->GetBufferSize(),
-                                                nullptr, &shader),
-                    "raster compute shader creation");
-    return shader;
+    return create(device, code->GetBufferPointer(), code->GetBufferSize());
 }
 
 [[nodiscard]] std::uint32_t groups(const std::uint32_t threads) noexcept {
@@ -260,14 +252,13 @@ struct RasterPass::Impl final {
         }
         if ((support & D3D11_FORMAT_SUPPORT2_UAV_TYPED_STORE) == 0U)
             throw std::runtime_error("D3D11 device cannot store R8 coverage from compute shaders");
-        const Bytecode& code = bytecode().get();
-        accumulate = create(device, code[0]);
-        stroke = create(device, code[1]);
-        resolve_coverage = create(device, code[2]);
-        resolve_composite = create(device, code[3]);
-        finish = create(device, code[4]);
-        art_stroke = create(device, code[5]);
-        art_fill = create(device, code[6]);
+        accumulate = create(device, 0U);
+        stroke = create(device, 1U);
+        resolve_coverage = create(device, 2U);
+        resolve_composite = create(device, 3U);
+        finish = create(device, 4U);
+        art_stroke = create(device, 5U);
+        art_fill = create(device, 6U);
         positions.stride = sizeof(float) * 4U;
         D3D11_BUFFER_DESC descriptor{};
         descriptor.ByteWidth = sizeof(shaders::Dispatch);
@@ -299,7 +290,7 @@ struct RasterPass::Impl final {
                 }
             }
             kernel.code = std::async(std::launch::async, [text = std::move(text), entry, file] {
-                              ComPtr<ID3DBlob> code = compile(entry, false, text, art_optimization);
+                              ComPtr<ID3DBlob> code = compile(entry, text, art_optimization);
                               cache_art(file, code.Get());
                               return code;
                           }).share();
@@ -642,10 +633,6 @@ struct RasterPass::Impl final {
 void set_art_cache_directory(std::filesystem::path directory) {
     const std::lock_guard lock(art_cache_mutex);
     art_cache_directory = std::move(directory);
-}
-
-void RasterPass::prepare() {
-    static_cast<void>(bytecode());
 }
 
 RasterPass::RasterPass(ID3D11Device* const device, ID3D11DeviceContext* const context)

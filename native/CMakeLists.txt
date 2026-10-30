@@ -618,6 +618,20 @@ if(STRATA_BUILD_VULKAN)
 endif()
 
 if(WIN32)
+    # The raster kernels compile once, here, rather than in every run that draws a path.
+    add_executable(strata_d3d11_raster_bake d3d11/raster_bake.cpp)
+    target_include_directories(strata_d3d11_raster_bake PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(strata_d3d11_raster_bake PRIVATE d3dcompiler)
+    strata_target_defaults(strata_d3d11_raster_bake)
+    set(STRATA_D3D11_RASTER_BYTECODE ${CMAKE_CURRENT_BINARY_DIR}/generated/d3d11/raster_bytecode.hpp)
+    add_custom_command(
+        OUTPUT ${STRATA_D3D11_RASTER_BYTECODE}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/generated/d3d11
+        COMMAND strata_d3d11_raster_bake ${STRATA_D3D11_RASTER_BYTECODE}
+        DEPENDS strata_d3d11_raster_bake ${CMAKE_CURRENT_SOURCE_DIR}/gpu/raster_shaders.hpp
+        COMMENT "Compiling the D3D11 raster kernels"
+        VERBATIM
+    )
     add_library(
         strata_d3d11
         STATIC
@@ -629,6 +643,7 @@ if(WIN32)
             d3d11/render_context.cpp
             d3d11/renderer.cpp
             d3d11/texture_store.cpp
+            ${STRATA_D3D11_RASTER_BYTECODE}
     )
     add_library(Strata::d3d11 ALIAS strata_d3d11)
     target_link_libraries(
@@ -645,7 +660,7 @@ if(WIN32)
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/generated
     )
     set_target_properties(
         strata_d3d11
