@@ -3051,12 +3051,28 @@ std::optional<std::vector<std::size_t>> replan_ranges(
 ) {
     resized = false;
     const std::vector<RenderCommand>& stream = commands.commands();
-    const std::vector<bool> visible_text = visible_text_commands(commands, context);
-    const std::vector<double> text_scales = text_group_scales(commands, cache.group_raster_scales);
-    const std::vector<double> vector_scales = vector_text_scales(commands, context.scale);
+    // What the stream's text sees (visibility, scales, subpixel and zoomed runs) is worked out by
+    // walking the whole stream: only when a changed range holds text, which is all it is for.
+    bool ranges_hold_text = false;
+    for (const CommandRange& range : ranges) {
+        for (std::size_t index = range.first; index <= range.last && !ranges_hold_text; ++index)
+            ranges_hold_text = std::holds_alternative<TextRunRenderCommand>(stream[index]);
+    }
+    const std::vector<bool> visible_text = ranges_hold_text
+                                               ? visible_text_commands(commands, context)
+                                               : std::vector<bool>(stream.size(), false);
+    const std::vector<double> text_scales =
+        ranges_hold_text ? text_group_scales(commands, cache.group_raster_scales)
+                         : std::vector<double>{};
+    const std::vector<double> vector_scales =
+        ranges_hold_text ? vector_text_scales(commands, context.scale) : std::vector<double>{};
     const SubpixelRuns subpixel_runs =
-        subpixel_text_runs(commands, text_scales, cache.turned_groups, context.text_subpixel);
-    const std::vector<bool> zoomed_runs = zoomed_text_runs(commands, cache.group_raster_scales);
+        ranges_hold_text
+            ? subpixel_text_runs(commands, text_scales, cache.turned_groups, context.text_subpixel)
+            : SubpixelRuns{};
+    const std::vector<bool> zoomed_runs = ranges_hold_text
+                                              ? zoomed_text_runs(commands, cache.group_raster_scales)
+                                              : std::vector<bool>{};
     // Text in the ranges is prepared as the full plan would: a run keeps its prepared glyphs
     // while its content does, and a hidden run drops them. Entries are exact for their content,
     // so they stand even when this update gives way to a full plan.

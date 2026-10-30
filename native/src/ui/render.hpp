@@ -570,7 +570,16 @@ class RenderCommandBuffer final {
   public:
     void append(RenderCommand command);
     void append(const std::vector<RenderCommand>& commands);
+    /** Commands `begin` to `end` of another stream. */
+    void append(const std::vector<RenderCommand>& commands, std::size_t begin, std::size_t end);
     void clear() noexcept;
+    /**
+     * The stream's storage, shared. Whoever holds it keeps this frame's commands as they are:
+     * the next frame's stream gets storage of its own.
+     */
+    [[nodiscard]] std::shared_ptr<const std::vector<RenderCommand>> storage() const noexcept {
+        return commands_;
+    }
     [[nodiscard]] const std::vector<RenderCommand>& commands() const noexcept;
     [[nodiscard]] std::size_t size() const noexcept;
     /**

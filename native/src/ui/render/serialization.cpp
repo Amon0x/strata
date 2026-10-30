@@ -298,6 +298,15 @@ void RenderCommandBuffer::append(const std::vector<RenderCommand>& commands) {
     commands_->insert(commands_->end(), commands.begin(), commands.end());
 }
 
+void RenderCommandBuffer::append(const std::vector<RenderCommand>& commands,
+                                 const std::size_t begin, const std::size_t end) {
+    if (begin >= end)
+        return;
+    make_unique_storage();
+    commands_->insert(commands_->end(), commands.begin() + static_cast<std::ptrdiff_t>(begin),
+                      commands.begin() + static_cast<std::ptrdiff_t>(end));
+}
+
 void RenderCommandBuffer::clear() noexcept {
     if (commands_ != nullptr && commands_.use_count() == 1L) {
         commands_->clear();

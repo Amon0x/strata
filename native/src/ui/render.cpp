@@ -558,7 +558,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         if (!compose_fresh && found != implementation_->fragments.end() &&
             found->second.composition.has_value()) {
             Impl::CachedFragment::CompositionPlan& retained = *found->second.composition;
-            const auto append_retained_subtree = [&output, &counters](const auto& plan) {
+            const auto append_retained_subtree = [&output, &counters, &node,
+                                                  this](const auto& plan) {
                 if (plan.subtree_translation != Point{}) {
                     output.append(TransformPushRenderCommand{
                         1.0,
@@ -570,7 +571,12 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                     });
                     ++counters.commands_emitted;
                 }
-                append_fragment(output, *plan.subtree_commands, counters);
+                const Impl::CommandSlice& slice = *plan.subtree_commands;
+                const std::size_t begin = output.size();
+                output.append(*slice.storage, slice.begin, slice.end);
+                counters.commands_emitted += slice.end - slice.begin;
+                implementation_->pending_slices.push_back(
+                    Impl::PendingSlice{node.identity(), begin, output.size(), slice});
                 if (plan.subtree_translation != Point{}) {
                     output.append(TransformPopRenderCommand{});
                     ++counters.commands_emitted;
@@ -591,7 +597,9 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 retained.inherited_opacity == inherited_opacity &&
                 retained.inherited_group == inherited_group &&
                 retained.render_portals == render_portals;
-            if (retained.subtree_commands.has_value() && subtree_generations_match &&
+            const bool subtree_drawn = retained.subtree_commands.has_value() &&
+                                       retained.subtree_commands->storage != nullptr;
+            if (subtree_drawn && subtree_generations_match &&
                 subtree_node_matches && subtree_presentation_matches && subtree_layout_matches &&
                 subtree_status_matches && subtree_context_matches) {
                 found->second.visited = true;
@@ -611,7 +619,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 (inherited_transform.scale_x == 1.0 && inherited_transform.scale_y == 1.0 &&
                  inherited_transform.axis_aligned());
             const bool translation_candidate =
-                retained.subtree_commands.has_value() && record->translated_subtree.has_value() &&
+                subtree_drawn && record->translated_subtree.has_value() &&
                 record->kind != LayoutKind::scroll && record->kind != LayoutKind::portal &&
                 !record->virtual_axis.has_value() && !record->virtual_item_extents.has_value() &&
                 !record->visible_range.has_value() && retained.subtree_translation_safe &&
@@ -1250,12 +1258,12 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         // transform stack and their table entries would not see the translation.
         if (composition.subtree_contains_group)
             composition.subtree_translation_safe = false;
-        constexpr std::size_t maximum_retained_subtree_commands = 256U;
-        if (composition_suffix_end - composition_prefix_begin <=
-            maximum_retained_subtree_commands) {
-            composition.subtree_commands =
-                command_slice(output, composition_prefix_begin, composition_suffix_end);
-        }
+        // The whole subtree is this frame's stream from its prefix to its suffix: kept as a slice
+        // of it, whatever its size, and bound when the frame is done.
+        composition.subtree_commands =
+            Impl::CommandSlice{nullptr, composition_prefix_begin, composition_suffix_end};
+        implementation_->pending_slices.push_back(Impl::PendingSlice{
+            node.identity(), composition_prefix_begin, composition_suffix_end, std::nullopt});
     };
     if (tree.root() != nullptr) {
         visit(visit, *tree.root(), false, std::nullopt, MotionTransform{}, 1.0, 0U);
@@ -1283,11 +1291,48 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     // Cache the presentation table with its commands; cache hits must retain tone and motion.
     implementation_->publish_groups(output);
     implementation_->retain_base(tree, layout, input, generations, output);
+    implementation_->bind_slices(output);
     implementation_->retained_composed_commands.clear();
     implementation_->retained_overlay_commands.clear();
     append_detached_overlays(overlays);
     counters.commands_emitted = output.size();
     return counters;
+}
+
+void RenderEngine::Impl::bind_slices(const RenderCommandBuffer& output) {
+    const std::shared_ptr<const std::vector<RenderCommand>> storage = output.storage();
+    for (const PendingSlice& pending : pending_slices) {
+        const auto found = fragments.find(pending.identity);
+        if (found == fragments.end() || !found->second.composition.has_value())
+            continue;
+        CachedFragment::CompositionPlan& plan = *found->second.composition;
+        // A subtree reused whole moved: so did every subtree drawn within it.
+        if (pending.previous.has_value())
+            move_nested_slices(plan.ordered_children, *pending.previous, pending.begin, storage);
+        plan.subtree_commands = CommandSlice{storage, pending.begin, pending.end};
+    }
+    pending_slices.clear();
+}
+
+void RenderEngine::Impl::move_nested_slices(
+    const std::vector<std::uint64_t>& children, const CommandSlice& from, const std::size_t to_begin,
+    const std::shared_ptr<const std::vector<RenderCommand>>& storage) {
+    for (const std::uint64_t child : children) {
+        const auto found = fragments.find(child);
+        if (found == fragments.end() || !found->second.composition.has_value())
+            continue;
+        CachedFragment::CompositionPlan& plan = *found->second.composition;
+        if (!plan.subtree_commands.has_value())
+            continue;
+        const CommandSlice previous = *plan.subtree_commands;
+        // Only a slice drawn within the one that moved moves with it.
+        if (previous.storage != from.storage || previous.begin < from.begin ||
+            previous.end > from.end)
+            continue;
+        const std::size_t begin = to_begin + (previous.begin - from.begin);
+        move_nested_slices(plan.ordered_children, previous, begin, storage);
+        plan.subtree_commands = CommandSlice{storage, begin, begin + (previous.end - previous.begin)};
+    }
 }
 
 std::uint32_t RenderEngine::Impl::acquire_group(const std::uint64_t identity) {
@@ -1338,6 +1383,7 @@ void RenderEngine::clear() {
     implementation_->retained_composed_commands.clear();
     implementation_->retained_overlay_commands.clear();
     implementation_->retained_base_generations.reset();
+    implementation_->pending_slices.clear();
     implementation_->fragment_tree_generation = 0U;
 }
 
