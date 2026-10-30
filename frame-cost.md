@@ -51,6 +51,35 @@ space and move it on the compositor; a scroll step changes one transform.
   than from translated records.
 - [ ] Measure: a scroll step on the 2,000-row page costs well under 0.1 ms in core and packet both.
 
+Who reads record positions as surface positions today (surveyed October 2026; paths under
+`native/`):
+
+- Already composing a transform, so they take the scroll transform with the presentation one: hit
+  geometry (`ui/input/hit_test.cpp` `prepare_pointer_geometry`, `presented_bounds`), spatial
+  focus navigation, input injection and capture rectangles, IME and text hit offsets
+  (`ui/surface.cpp`), render's command emission and the planner's culling (both under a transform
+  stack).
+- Reading raw positions against the raw pointer, to be given a localized pointer: scrollbars
+  (`ui/scroll_geometry.cpp`), drag and drop targets, previews and edge auto-scroll
+  (`ui/input/drag*.cpp`), and widgets comparing `event.position` with their bounds (slider, range
+  slider, colour picker, zoom view, table header in `ui/widget/`).
+- Undoing the baked-in scroll, which flips to doing nothing: `reveal_rect` (`ui/input/scroll.cpp`),
+  scroll snapping (`ui/surface.cpp`), the collection marquee (adds the root's `scroll_offset` back),
+  and move animations (`scroll_influence` in `ui/motion/move.cpp`).
+- Hard:
+  - `LayoutRecord::clip` is every ancestor's clip already intersected in surface space. It is read
+    by render, static text selection, inspection and `host/browser_model.cpp`, so it needs a
+    definition in one space.
+  - Portals and popups place against their anchor's surface position (`ui/layout/engine.cpp`,
+    `ui/widget/menu_model.cpp`, `ui/widget/subtarget_projections.cpp`), while their nodes sit under
+    scroll views.
+  - Windowed virtual lists find their window from the surface-space `inherited_clip`
+    (`ui/layout/arrange.cpp`).
+  - Sticky boxes and pins are counter-scroll offsets.
+- Unaffected: semantics (it reads no geometry) and virtual realization windows (local sizes and
+  offsets). Inspection JSON reports raw `bounds` and `clip` but presented `hitBounds`; decide what
+  it reports.
+
 ## Phase 2: recompose a parent from the children that changed
 
 When one child of a large parent changes (a hovered cell among 2,000 siblings), the parent's
