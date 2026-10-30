@@ -7019,7 +7019,7 @@ overlay Figure {
         figure != nullptr ? surface.layout().find(figure->identity()) : nullptr;
     check(record != nullptr, "image shape fixture lost its layout");
     const ui::Rect bounds = record->bounds;
-    const std::vector<ui::RenderCommand>& commands = surface.render_commands().commands();
+    const auto& commands = surface.render_commands().commands();
     const auto push = std::ranges::find_if(commands, [](const ui::RenderCommand& command) {
         return std::holds_alternative<ui::TransformPushRenderCommand>(command);
     });

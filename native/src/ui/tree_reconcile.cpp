@@ -733,6 +733,9 @@ std::size_t RetainedTree::prune_exiting(const ExitCompletion& exit_completion) {
         return 0U;
     std::size_t detached = 0U;
     const auto prune = [&](auto&& self, RetainedNode& parent) -> void {
+        // Nothing exits in a subtree that is all attached: nothing in it to prune.
+        if (parent.subtree_all_attached_)
+            return;
         // An EXITING child is one retained lifecycle boundary. Do not prune eligible
         // descendants first: doing so can erase the only exit attachment that justified
         // retaining the ancestor and strand a hollow EXITING subtree forever.

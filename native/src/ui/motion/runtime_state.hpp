@@ -45,6 +45,8 @@ struct MotionRuntime::Impl final {
     std::shared_ptr<const runtime::RuntimeUnit> unit;
     std::map<std::uint64_t, NodeState> nodes;
     std::set<std::uint64_t> active_nodes;
+    /** The tree structure the per-node tables were last pruned against. */
+    std::optional<std::uint64_t> pruned_structure_generation;
     std::map<std::uint64_t, motion_detail::TargetPlayer> disclosure_players;
     std::map<std::uint64_t, NormalizedMotionSample> disclosure_samples;
     /** Where each shared element last showed on screen, and which node showed it. */

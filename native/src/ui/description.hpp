@@ -206,6 +206,11 @@ class DescriptionBuilder final : public runtime::AnimationHost {
     struct ChildRef final {
         InstanceId id = 0U;
         std::shared_ptr<const DescriptionNode> seen;
+        /**
+         * Where the body holds `seen`: child indices from its root, valid while the body's root
+         * is ComponentInstance::paths_root. A patch rebuilds only the nodes along it.
+         */
+        std::vector<std::uint32_t> path{};
     };
 
     struct RowSource;
@@ -282,6 +287,8 @@ class DescriptionBuilder final : public runtime::AnimationHost {
         std::shared_ptr<const Scope::WidgetDefaults> argument_widget_defaults;
         /** The body's output, and the output as the caller places it. */
         std::shared_ptr<const DescriptionNode> root;
+        /** The root its children's paths were found in (see ChildRef::path). */
+        const DescriptionNode* paths_root = nullptr;
         CallSite call_site;
         std::shared_ptr<const DescriptionNode> emitted;
         /** The slots `root` declares itself, for the root they were collected from. */

@@ -1,11 +1,14 @@
 #pragma once
 
 #include <array>
+#include <compare>
 #include <cstdint>
 #include <initializer_list>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -571,43 +574,196 @@ using RenderCommand =
 /** Returns a backend-independent command with every opacity-bearing payload multiplied. */
 [[nodiscard]] RenderCommand render_command_with_opacity(RenderCommand command, double opacity);
 
+/**
+ * A command stream as runs of shared, immutable storage: what a frame drew anew, and runs of
+ * earlier frames' storage it reuses as they were (a retained subtree), so reusing drawing never
+ * copies it. Read as a vector: by index, in order, and compared.
+ */
+class RenderCommandView final {
+  public:
+    struct Segment final {
+        std::shared_ptr<const std::vector<RenderCommand>> storage;
+        std::size_t begin = 0U;
+        std::size_t end = 0U;
+        [[nodiscard]] std::size_t size() const noexcept {
+            return end - begin;
+        }
+        [[nodiscard]] friend bool operator==(const Segment&, const Segment&) = default;
+    };
+
+    class const_iterator final {
+      public:
+        using iterator_category = std::random_access_iterator_tag;
+        using iterator_concept = std::random_access_iterator_tag;
+        using value_type = RenderCommand;
+        using difference_type = std::ptrdiff_t;
+        using pointer = const RenderCommand*;
+        using reference = const RenderCommand&;
+
+        const_iterator() = default;
+        const_iterator(const RenderCommandView* view, const std::size_t index) noexcept
+            : view_(view), index_(index) {}
+
+        [[nodiscard]] reference operator*() const noexcept {
+            return view_->locate(index_, run_);
+        }
+        [[nodiscard]] pointer operator->() const noexcept {
+            return &view_->locate(index_, run_);
+        }
+        [[nodiscard]] reference operator[](const difference_type offset) const noexcept {
+            return (*view_)[static_cast<std::size_t>(static_cast<difference_type>(index_) + offset)];
+        }
+        const_iterator& operator++() noexcept {
+            ++index_;
+            return *this;
+        }
+        const_iterator operator++(int) noexcept {
+            const_iterator previous = *this;
+            ++index_;
+            return previous;
+        }
+        const_iterator& operator--() noexcept {
+            --index_;
+            return *this;
+        }
+        const_iterator operator--(int) noexcept {
+            const_iterator previous = *this;
+            --index_;
+            return previous;
+        }
+        const_iterator& operator+=(const difference_type offset) noexcept {
+            index_ = static_cast<std::size_t>(static_cast<difference_type>(index_) + offset);
+            return *this;
+        }
+        const_iterator& operator-=(const difference_type offset) noexcept {
+            return *this += -offset;
+        }
+        [[nodiscard]] friend const_iterator operator+(const_iterator at,
+                                                      const difference_type offset) noexcept {
+            return at += offset;
+        }
+        [[nodiscard]] friend const_iterator operator+(const difference_type offset,
+                                                      const_iterator at) noexcept {
+            return at += offset;
+        }
+        [[nodiscard]] friend const_iterator operator-(const_iterator at,
+                                                      const difference_type offset) noexcept {
+            return at -= offset;
+        }
+        [[nodiscard]] friend difference_type operator-(const const_iterator& left,
+                                                       const const_iterator& right) noexcept {
+            return static_cast<difference_type>(left.index_) -
+                   static_cast<difference_type>(right.index_);
+        }
+        [[nodiscard]] friend bool operator==(const const_iterator& left,
+                                             const const_iterator& right) noexcept {
+            return left.index_ == right.index_;
+        }
+        [[nodiscard]] friend auto operator<=>(const const_iterator& left,
+                                              const const_iterator& right) noexcept {
+            return left.index_ <=> right.index_;
+        }
+
+      private:
+        const RenderCommandView* view_ = nullptr;
+        std::size_t index_ = 0U;
+        /** The run the last read found: iteration walks the runs in order. */
+        mutable std::size_t run_ = 0U;
+    };
+    using iterator = const_iterator;
+    using value_type = RenderCommand;
+    using size_type = std::size_t;
+
+    [[nodiscard]] std::size_t size() const noexcept {
+        return size_;
+    }
+    [[nodiscard]] bool empty() const noexcept {
+        return size_ == 0U;
+    }
+    /** The command at `index`: a search of the runs. */
+    [[nodiscard]] const RenderCommand& operator[](std::size_t index) const noexcept {
+        std::size_t run = 0U;
+        return locate(index, run);
+    }
+    [[nodiscard]] const RenderCommand& front() const noexcept {
+        return (*this)[0U];
+    }
+    [[nodiscard]] const RenderCommand& back() const noexcept {
+        return (*this)[size_ - 1U];
+    }
+    [[nodiscard]] const_iterator begin() const noexcept {
+        return const_iterator(this, 0U);
+    }
+    [[nodiscard]] const_iterator end() const noexcept {
+        return const_iterator(this, size_);
+    }
+    [[nodiscard]] const std::vector<Segment>& segments() const noexcept {
+        return segments_;
+    }
+    /** Commands `begin` to `end` as the runs of storage they are in. */
+    [[nodiscard]] std::vector<Segment> slice(std::size_t begin, std::size_t end) const;
+    [[nodiscard]] std::vector<RenderCommand> to_vector() const;
+    /**
+     * The indices whose commands differ between two streams of one length, in order: runs both
+     * read from the same storage at the same place are equal without comparing them.
+     */
+    [[nodiscard]] std::vector<std::size_t> differences(const RenderCommandView& other) const;
+
+    friend bool operator==(const RenderCommandView& left, const RenderCommandView& right);
+    friend bool operator==(const RenderCommandView& left, const std::vector<RenderCommand>& right);
+
+  private:
+    friend class RenderCommandBuffer;
+    void push(Segment segment);
+    /** The command at `index`, looking in `run` and the one after it before searching. */
+    [[nodiscard]] const RenderCommand& locate(std::size_t index, std::size_t& run) const noexcept;
+
+    std::vector<Segment> segments_;
+    /** Each run's first index in the stream. */
+    std::vector<std::size_t> offsets_;
+    std::size_t size_ = 0U;
+};
+
 class RenderCommandBuffer final {
   public:
+    RenderCommandBuffer() = default;
+    /** A copy reads the same runs; it appends into storage of its own, never into these. */
+    RenderCommandBuffer(const RenderCommandBuffer& other);
+    RenderCommandBuffer& operator=(const RenderCommandBuffer& other);
+    RenderCommandBuffer(RenderCommandBuffer&&) noexcept = default;
+    RenderCommandBuffer& operator=(RenderCommandBuffer&&) noexcept = default;
+
     void append(RenderCommand command);
     void append(const std::vector<RenderCommand>& commands);
-    /** Commands `begin` to `end` of another stream. */
-    void append(const std::vector<RenderCommand>& commands, std::size_t begin, std::size_t end);
+    /** Runs of commands drawn before, read where they are: nothing is copied. */
+    void append(std::span<const RenderCommandView::Segment> segments);
     void clear() noexcept;
-    /**
-     * The stream's storage, shared. Whoever holds it keeps this frame's commands as they are:
-     * the next frame's stream gets storage of its own.
-     */
-    [[nodiscard]] std::shared_ptr<const std::vector<RenderCommand>> storage() const noexcept {
-        return commands_;
+    [[nodiscard]] const RenderCommandView& commands() const noexcept {
+        return view_;
     }
-    [[nodiscard]] const std::vector<RenderCommand>& commands() const noexcept;
-    [[nodiscard]] std::size_t size() const noexcept;
-    /**
-     * Whether both buffers view one stream. Storage is copy-on-write, so shared storage means
-     * equal commands without comparing them.
-     */
+    [[nodiscard]] std::size_t size() const noexcept {
+        return view_.size();
+    }
+    /** Whether both buffers read the same runs: equal commands without comparing them. */
     [[nodiscard]] bool shares_storage(const RenderCommandBuffer& other) const noexcept {
-        return commands_ == other.commands_;
+        return view_.segments_ == other.view_.segments_;
     }
     /** This frame's presentation groups, ordered by index. Not part of command equality. */
     void set_groups(std::vector<RenderGroup> groups);
     [[nodiscard]] const std::vector<RenderGroup>& groups() const noexcept;
 
   private:
-    void make_unique_storage();
+    /** Makes the stream's last run one this buffer may append to. */
+    void open_tail();
 
+    RenderCommandView view_;
     /**
-     * Command streams are immutable once handed to submission planning. Copy-on-write storage
-     * lets the renderer, its settled-frame cache, and the packet cache retain the same stream
-     * without cloning every variant, string, and glyph run at each ownership boundary.
+     * The storage this buffer appends to. Only this buffer appends, and only past what any run
+     * reads, so every run anyone holds stays as it was.
      */
-    std::shared_ptr<std::vector<RenderCommand>> commands_ =
-        std::make_shared<std::vector<RenderCommand>>();
+    std::shared_ptr<std::vector<RenderCommand>> tail_;
+    /** The last run is `tail_`'s, ending where it does. */
+    bool tail_open_ = false;
     std::shared_ptr<const std::vector<RenderGroup>> groups_;
     /** Length of the stream last released to a retainer; sizes the next stream's storage. */
     std::size_t reserve_hint_ = 0U;

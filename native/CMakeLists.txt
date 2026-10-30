@@ -1433,6 +1433,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                 ${CMAKE_CURRENT_BINARY_DIR}/render-differential
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/portable.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/paints.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/clips.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/code.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/subpixel.json
         )

@@ -23,50 +23,6 @@ using runtime::ExpressionValue;
 /** Instances kept although nothing shows them, before the least recently used are dropped. */
 constexpr std::size_t maximum_unreached_instances = 512U;
 
-using SubtreeReplacements =
-    std::unordered_map<const DescriptionNode*, std::shared_ptr<const DescriptionNode>>;
-
-/**
- * A body's output with the given subtrees replaced. The walk stays within the body's own nodes:
- * it stops at the outputs of the instances the body calls (`boundaries`) and at generated rows.
- * Null when a subtree to replace is not where the body holds it.
- */
-[[nodiscard]] std::shared_ptr<const DescriptionNode>
-replace_subtrees(const std::shared_ptr<const DescriptionNode>& root,
-                 const SubtreeReplacements& replacements,
-                 const std::unordered_set<const DescriptionNode*>& boundaries) {
-    std::size_t applied = 0U;
-    const auto replace = [&](const auto& self, const std::shared_ptr<const DescriptionNode>& node)
-        -> std::shared_ptr<const DescriptionNode> {
-        if (const auto replacement = replacements.find(node.get());
-            replacement != replacements.end()) {
-            ++applied;
-            return replacement->second;
-        }
-        if (boundaries.contains(node.get()) || node->materialization.has_value() ||
-            dynamic_cast<const EagerDescriptionChildren*>(node->children.get()) == nullptr) {
-            return node;
-        }
-        bool changed = false;
-        std::vector<std::shared_ptr<const DescriptionNode>> children;
-        children.reserve(node->children->size());
-        for (std::size_t index = 0U; index < node->children->size(); ++index) {
-            const std::shared_ptr<const DescriptionNode> child = node->children->at(index);
-            std::shared_ptr<const DescriptionNode> next = self(self, child);
-            changed = changed || next != child;
-            children.push_back(std::move(next));
-        }
-        if (!changed)
-            return node;
-        auto result = std::make_shared<DescriptionNode>(*node);
-        result->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
-        result->children_replaced_from = node;
-        return result;
-    };
-    std::shared_ptr<const DescriptionNode> result = replace(replace, root);
-    return applied == replacements.size() ? result : nullptr;
-}
-
 [[nodiscard]] bool same_roots(const std::shared_ptr<const runtime::HostRoots>& left,
                               const std::shared_ptr<const runtime::HostRoots>& right) {
     if (left == right)
@@ -714,26 +670,77 @@ void DescriptionBuilder::reprovision(ComponentInstance& generator) {
 }
 
 bool DescriptionBuilder::patch(ComponentInstance& instance) {
-    SubtreeReplacements replacements;
-    std::unordered_set<const DescriptionNode*> boundaries;
-    boundaries.reserve(instance.children.size());
-    for (const ChildRef& child : instance.children) {
-        boundaries.insert(child.seen.get());
-        const ComponentInstance* const called = find_instance(child.id);
-        if (called != nullptr && called->emitted != child.seen)
-            replacements.emplace(child.seen.get(), called->emitted);
+    // Where the body holds each output it called: found by one walk of the body, after which a
+    // patch rebuilds only the nodes on the way to what changed, however large the body.
+    if (instance.paths_root != instance.root.get()) {
+        std::unordered_map<const DescriptionNode*, ChildRef*> wanted;
+        wanted.reserve(instance.children.size());
+        for (ChildRef& child : instance.children) {
+            child.path.clear();
+            wanted.emplace(child.seen.get(), &child);
+        }
+        std::vector<std::uint32_t> path;
+        std::size_t found = 0U;
+        const auto find = [&](const auto& self, const DescriptionNode& node) -> void {
+            if (const auto child = wanted.find(&node); child != wanted.end()) {
+                child->second->path = path;
+                ++found;
+                return;
+            }
+            if (node.materialization.has_value() ||
+                dynamic_cast<const EagerDescriptionChildren*>(node.children.get()) == nullptr)
+                return;
+            for (std::size_t index = 0U; index < node.children->size() && found < wanted.size();
+                 ++index) {
+                path.push_back(static_cast<std::uint32_t>(index));
+                self(self, *node.children->at(index));
+                path.pop_back();
+            }
+        };
+        if (instance.root != nullptr)
+            find(find, *instance.root);
+        if (found != wanted.size())
+            return false;
+        instance.paths_root = instance.root.get();
     }
-    if (replacements.empty())
-        return true;
-    std::shared_ptr<const DescriptionNode> patched =
-        replace_subtrees(instance.root, replacements, boundaries);
-    if (patched == nullptr)
-        return false;
+    std::shared_ptr<const DescriptionNode> patched = instance.root;
+    bool changed = false;
     for (ChildRef& child : instance.children) {
-        if (const ComponentInstance* const called = find_instance(child.id); called != nullptr)
-            child.seen = called->emitted;
+        const ComponentInstance* const called = find_instance(child.id);
+        if (called == nullptr || called->emitted == child.seen)
+            continue;
+        // The nodes on the way down, then each rebuilt holding the next.
+        std::vector<std::shared_ptr<const DescriptionNode>> way{patched};
+        for (const std::uint32_t index : child.path) {
+            const auto* children =
+                dynamic_cast<const EagerDescriptionChildren*>(way.back()->children.get());
+            if (children == nullptr || index >= children->size())
+                return false;
+            way.push_back(children->at(index));
+        }
+        if (way.back() != child.seen)
+            return false;
+        std::shared_ptr<const DescriptionNode> next = called->emitted;
+        for (std::size_t depth = child.path.size(); depth > 0U; --depth) {
+            const DescriptionNode& parent = *way[depth - 1U];
+            std::vector<std::shared_ptr<const DescriptionNode>> children;
+            children.reserve(parent.children->size());
+            for (std::size_t index = 0U; index < parent.children->size(); ++index)
+                children.push_back(index == child.path[depth - 1U] ? next
+                                                                   : parent.children->at(index));
+            auto rebuilt = std::make_shared<DescriptionNode>(parent);
+            rebuilt->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
+            rebuilt->children_replaced_from = way[depth - 1U];
+            next = std::move(rebuilt);
+        }
+        patched = std::move(next);
+        child.seen = called->emitted;
+        changed = true;
     }
+    if (!changed)
+        return true;
     instance.root = std::move(patched);
+    instance.paths_root = instance.root.get();
     ++telemetry_.patched_instances;
     emit(instance);
     return true;

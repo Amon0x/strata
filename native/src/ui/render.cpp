@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -61,7 +63,68 @@ struct DrawnClip final {
     ClipShape shape;
     Rect box;
     CornerRadii radii;
+    /**
+     * Any other shape (a path, polygon, star, arc...) cuts as a mask: the node draws into a layer
+     * of its own, which keeps only what the shape covers (see clip_layer). `box` is then the
+     * layer's bounds.
+     */
+    std::optional<PathShape> mask;
 };
+
+/** The id clip layers draw under: no host declares it, so it runs no passes of its own. */
+constexpr std::string_view clip_layer_id = "strata:clip-layer";
+
+[[nodiscard]] EffectState clip_layer(const LayerComposite composite) {
+    EffectState effect;
+    effect.id = std::string(clip_layer_id);
+    effect.input = EffectInput::content;
+    effect.composite = composite;
+    return effect;
+}
+
+/**
+ * A clip shape that has no analytic form, as the mask it cuts: filled, or only stroked when it is
+ * an outline with a stroke and no fill, so content can be cut to a line as well as to an area.
+ */
+[[nodiscard]] std::optional<DrawnClip> mask_clip(const runtime::Value& value, const Rect bounds) {
+    std::optional<PathShape> shape;
+    try {
+        shape = path_shape_from_value(&value, false);
+    } catch (const std::invalid_argument&) {
+        return std::nullopt;
+    }
+    if (!shape.has_value() || bounds.width <= 0.0 || bounds.height <= 0.0)
+        return std::nullopt;
+    const runtime::ColorValue white{255U, 255U, 255U, 255U};
+    const bool stroked = shape->stroke.has_value() && !shape->fill.has_value();
+    shape->fill = stroked ? std::nullopt : std::optional<Paint>(Paint(white));
+    shape->stroke = stroked ? std::optional<Paint>(Paint(white)) : std::nullopt;
+    if (stroked && !shape->stroke_style.has_value())
+        shape->stroke_style = StrokeStyle{};
+    // The layer covers the shape, and its stroke and antialiased edge past it.
+    double left = std::numeric_limits<double>::infinity();
+    double top = left;
+    double right = -left;
+    double bottom = -left;
+    for (const PathContour& contour :
+         flatten_path(shape->path, Size{bounds.width, bounds.height}, 0.5)) {
+        for (const Point point : contour.points) {
+            left = std::min(left, point.x);
+            top = std::min(top, point.y);
+            right = std::max(right, point.x);
+            bottom = std::max(bottom, point.y);
+        }
+    }
+    if (!(left <= right && top <= bottom))
+        return std::nullopt;
+    const double margin = 2.0 + (stroked ? shape->stroke_style->width : 0.0);
+    DrawnClip clip;
+    clip.box = Rect{bounds.x + left * bounds.width - margin, bounds.y + top * bounds.height - margin,
+                    (right - left) * bounds.width + 2.0 * margin,
+                    (bottom - top) * bounds.height + 2.0 * margin};
+    clip.mask = std::move(shape);
+    return clip;
+}
 
 [[nodiscard]] std::optional<DrawnClip> drawn_clip(const RetainedNode& node, const Rect bounds) {
     const runtime::Value* value = visual_value(node, "clipShape");
@@ -91,7 +154,7 @@ struct DrawnClip final {
         return clip;
     }
     if (kind != "circle" && kind != "ellipse" && kind != "sector" && kind != "ring")
-        return std::nullopt;
+        return mask_clip(*value, bounds);
     double center_x = 0.5;
     double center_y = 0.5;
     if (const runtime::Value* center = value->field("center"); center != nullptr) {
@@ -279,7 +342,7 @@ void append_fragment(RenderCommandBuffer& output, const std::vector<RenderComman
 
 [[nodiscard]] std::vector<RenderCommand>
 command_slice(const RenderCommandBuffer& commands, const std::size_t begin, const std::size_t end) {
-    const std::vector<RenderCommand>& source = commands.commands();
+    const RenderCommandView& source = commands.commands();
     return std::vector<RenderCommand>(source.begin() + static_cast<std::ptrdiff_t>(begin),
                                       source.begin() + static_cast<std::ptrdiff_t>(end));
 }
@@ -548,15 +611,16 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         // composed stream is shared rather than the whole base copied again.
         output = RenderCommandBuffer{};
         append_detached_overlays(collect_overlays());
-        std::vector<RenderCommand>& retained_overlays = implementation_->retained_overlay_commands;
+        RenderCommandBuffer& retained_overlays = implementation_->retained_overlay_commands;
         // Composition is cleared whenever the base is retained again, so its size tells whether
         // it was composed over the current base.
         if (implementation_->retained_composed_commands.size() !=
                 implementation_->retained_base_commands.size() + retained_overlays.size() ||
-            output.commands() != retained_overlays) {
-            std::vector<RenderCommand> overlays = output.commands();
+            output.commands() != retained_overlays.commands()) {
+            // The base is read where it is, its overlays after it: nothing is copied.
+            RenderCommandBuffer overlays = std::move(output);
             output = implementation_->retained_base_commands;
-            output.append(overlays);
+            output.append(overlays.commands().segments());
             implementation_->retained_composed_commands = output;
             retained_overlays = std::move(overlays);
         } else {
@@ -566,16 +630,21 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         return counters;
     }
 
-    if (implementation_->fragment_tree_generation != tree.generation()) {
+    // Only a change of structure removes nodes: property changes leave every cache entry live.
+    if (implementation_->fragment_tree_generation != tree.structure_generation()) {
         std::erase_if(implementation_->fragments, [&tree](const auto& entry) {
             return tree.find_identity(entry.first) == nullptr;
         });
         std::erase_if(implementation_->presented, [&tree](const auto& entry) {
             return tree.find_identity(entry.first) == nullptr;
         });
-        implementation_->fragment_tree_generation = tree.generation();
+        implementation_->fragment_tree_generation = tree.structure_generation();
     }
-    std::vector<const RetainedNode*> portals;
+    // Finding the portals is a walk of the whole tree: done again only when its structure or
+    // something laid out (a node's kind among it) changed.
+    std::vector<const RetainedNode*>& portals = implementation_->portals;
+    const std::pair<std::uint64_t, std::uint64_t> portal_generations{
+        tree.structure_generation(), tree.layout_invalidation_generation()};
     const auto collect_portals = [&ports = portals, &layout](const auto& self,
                                                              const RetainedNode& node,
                                                              const bool inside_portal) -> void {
@@ -588,8 +657,12 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         for (const auto& child : node.children())
             self(self, *child, inside_portal || portal);
     };
-    if (tree.root() != nullptr)
-        collect_portals(collect_portals, *tree.root(), false);
+    if (implementation_->portals_generations != portal_generations) {
+        portals.clear();
+        if (tree.root() != nullptr)
+            collect_portals(collect_portals, *tree.root(), false);
+        implementation_->portals_generations = portal_generations;
+    }
     const std::vector<DetachedOverlayRoot> overlays = collect_overlays();
 
     // A node in a shared-element flight paints above everything, unclipped by its ancestors: it
@@ -628,8 +701,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         if (!compose_fresh && found != implementation_->fragments.end() &&
             found->second.composition.has_value()) {
             Impl::CachedFragment::CompositionPlan& retained = *found->second.composition;
-            const auto append_retained_subtree = [&output, &counters, &node,
-                                                  this](const auto& plan) {
+            const auto append_retained_subtree = [&output, &counters](const auto& plan) {
                 if (plan.subtree_translation != Point{}) {
                     output.append(TransformPushRenderCommand{
                         1.0,
@@ -641,12 +713,9 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                     });
                     ++counters.commands_emitted;
                 }
-                const Impl::CommandSlice& slice = *plan.subtree_commands;
                 const std::size_t begin = output.size();
-                output.append(*slice.storage, slice.begin, slice.end);
-                counters.commands_emitted += slice.end - slice.begin;
-                implementation_->pending_slices.push_back(
-                    Impl::PendingSlice{node.identity(), begin, output.size(), slice});
+                output.append(*plan.subtree_commands);
+                counters.commands_emitted += output.size() - begin;
                 if (plan.subtree_translation != Point{}) {
                     output.append(TransformPopRenderCommand{});
                     ++counters.commands_emitted;
@@ -667,8 +736,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 retained.inherited_opacity == inherited_opacity &&
                 retained.inherited_group == inherited_group &&
                 retained.render_portals == render_portals;
-            const bool subtree_drawn = retained.subtree_commands.has_value() &&
-                                       retained.subtree_commands->storage != nullptr;
+            const bool subtree_drawn = retained.subtree_commands.has_value();
             if (subtree_drawn && subtree_generations_match &&
                 subtree_node_matches && subtree_presentation_matches && subtree_layout_matches &&
                 subtree_status_matches && subtree_context_matches) {
@@ -956,7 +1024,14 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             own_box = drawn->box;
             own_corners = drawn->radii;
         }
-        const bool shaped_self = own_shape.kind != 0U || drawn.has_value();
+        // A mask clip draws the node into a layer; its suffix cuts the layer to the shape.
+        const bool masked_self = drawn.has_value() && drawn->mask.has_value();
+        if (masked_self) {
+            output.append(ContentEffectPushRenderCommand{
+                own_box, CornerRadii{}, clip_layer(LayerComposite::source_over)});
+            ++counters.commands_emitted;
+        }
+        const bool shaped_self = !masked_self && (own_shape.kind != 0U || drawn.has_value());
         if (shaped_self) {
             output.append(ClipPushRenderCommand{layout_clip(own_box, effective_transform),
                                                 own_corners, own_shape});
@@ -1256,6 +1331,20 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             output.append(ClipPopRenderCommand{});
             ++counters.commands_emitted;
         }
+        if (masked_self) {
+            // Keeps only what the shape covers, as clip-path and mask do on the web. A layer
+            // composites with a soft edge at its bounds: the mask's reaches past the content's,
+            // so none of that edge keeps content the shape does not cover.
+            constexpr double mask_margin = 4.0;
+            output.append(ContentEffectPushRenderCommand{
+                Rect{own_box.x - mask_margin, own_box.y - mask_margin,
+                     own_box.width + 2.0 * mask_margin, own_box.height + 2.0 * mask_margin},
+                CornerRadii{}, clip_layer(LayerComposite::destination_in)});
+            output.append(PathRenderCommand{record->bounds, *drawn->mask});
+            output.append(ContentEffectPopRenderCommand{});
+            output.append(ContentEffectPopRenderCommand{});
+            counters.commands_emitted += 4U;
+        }
         if (group == 0U && !transform.identity()) {
             output.append(TransformPopRenderCommand{});
             ++counters.commands_emitted;
@@ -1337,12 +1426,10 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         // transform stack and their table entries would not see the translation.
         if (composition.subtree_contains_group)
             composition.subtree_translation_safe = false;
-        // The whole subtree is this frame's stream from its prefix to its suffix: kept as a slice
-        // of it, whatever its size, and bound when the frame is done.
+        // The whole subtree is this frame's stream from its prefix to its suffix: kept as the
+        // runs of storage it is in, whatever its size.
         composition.subtree_commands =
-            Impl::CommandSlice{nullptr, composition_prefix_begin, composition_suffix_end};
-        implementation_->pending_slices.push_back(Impl::PendingSlice{
-            node.identity(), composition_prefix_begin, composition_suffix_end, std::nullopt});
+            output.commands().slice(composition_prefix_begin, composition_suffix_end);
     };
     if (tree.root() != nullptr) {
         visit(visit, *tree.root(), false, std::nullopt, MotionTransform{}, 1.0, 0U);
@@ -1370,48 +1457,11 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     // Cache the presentation table with its commands; cache hits must retain tone and motion.
     implementation_->publish_groups(output);
     implementation_->retain_base(tree, layout, input, generations, output);
-    implementation_->bind_slices(output);
     implementation_->retained_composed_commands.clear();
     implementation_->retained_overlay_commands.clear();
     append_detached_overlays(overlays);
     counters.commands_emitted = output.size();
     return counters;
-}
-
-void RenderEngine::Impl::bind_slices(const RenderCommandBuffer& output) {
-    const std::shared_ptr<const std::vector<RenderCommand>> storage = output.storage();
-    for (const PendingSlice& pending : pending_slices) {
-        const auto found = fragments.find(pending.identity);
-        if (found == fragments.end() || !found->second.composition.has_value())
-            continue;
-        CachedFragment::CompositionPlan& plan = *found->second.composition;
-        // A subtree reused whole moved: so did every subtree drawn within it.
-        if (pending.previous.has_value())
-            move_nested_slices(plan.ordered_children, *pending.previous, pending.begin, storage);
-        plan.subtree_commands = CommandSlice{storage, pending.begin, pending.end};
-    }
-    pending_slices.clear();
-}
-
-void RenderEngine::Impl::move_nested_slices(
-    const std::vector<std::uint64_t>& children, const CommandSlice& from, const std::size_t to_begin,
-    const std::shared_ptr<const std::vector<RenderCommand>>& storage) {
-    for (const std::uint64_t child : children) {
-        const auto found = fragments.find(child);
-        if (found == fragments.end() || !found->second.composition.has_value())
-            continue;
-        CachedFragment::CompositionPlan& plan = *found->second.composition;
-        if (!plan.subtree_commands.has_value())
-            continue;
-        const CommandSlice previous = *plan.subtree_commands;
-        // Only a slice drawn within the one that moved moves with it.
-        if (previous.storage != from.storage || previous.begin < from.begin ||
-            previous.end > from.end)
-            continue;
-        const std::size_t begin = to_begin + (previous.begin - from.begin);
-        move_nested_slices(plan.ordered_children, previous, begin, storage);
-        plan.subtree_commands = CommandSlice{storage, begin, begin + (previous.end - previous.begin)};
-    }
 }
 
 std::uint32_t RenderEngine::Impl::acquire_group(const std::uint64_t identity) {
@@ -1462,8 +1512,9 @@ void RenderEngine::clear() {
     implementation_->retained_composed_commands.clear();
     implementation_->retained_overlay_commands.clear();
     implementation_->retained_base_generations.reset();
-    implementation_->pending_slices.clear();
     implementation_->fragment_tree_generation = 0U;
+    implementation_->portals.clear();
+    implementation_->portals_generations.reset();
 }
 
 } // namespace strata::ui

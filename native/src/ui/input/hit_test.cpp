@@ -46,22 +46,36 @@ namespace {
 }
 
 /**
- * A node's `hitShape` (a Draw shape, normalized to its bounds) as outlines over `bounds`; none
- * when it has no shape or a malformed one, which leaves the whole box hittable.
+ * A node's `hitShape` (a Draw shape, normalized to its bounds) as outlines over `bounds`; without
+ * one, the area its `clipShape` cuts it to, as clip-path cuts what a pointer hits on the web. None
+ * when it has neither, a malformed one, or a clip only a stroke draws, which leaves the whole box
+ * hittable.
  */
 [[nodiscard]] std::vector<std::vector<Point>> hit_outlines(const RetainedNode& node,
                                                           const Rect bounds) {
+    if (bounds.width <= 0.0 || bounds.height <= 0.0)
+        return {};
     const auto found = node.description().properties.find("hitShape");
-    if (found == node.description().properties.end() || found->second.value() == nullptr ||
-        found->second.value()->object() == nullptr || bounds.width <= 0.0 || bounds.height <= 0.0)
+    const runtime::Value* value =
+        found != node.description().properties.end() ? found->second.value() : nullptr;
+    const bool clipped = value == nullptr;
+    if (clipped)
+        value = visual_value(node, "clipShape");
+    if (value == nullptr)
         return {};
     std::optional<PathShape> shape;
-    try {
-        shape = path_shape_from_value(found->second.value(), false);
-    } catch (const std::invalid_argument&) {
-        return {};
+    if (clipped && value->string() != nullptr) {
+        // The named outlines that fill the box round.
+        if (*value->string() == "circle" || *value->string() == "ellipse")
+            shape = ellipse_shape(Point{0.5, 0.5}, 0.5, 0.5, std::nullopt);
+    } else if (value->object() != nullptr) {
+        try {
+            shape = path_shape_from_value(value, false);
+        } catch (const std::invalid_argument&) {
+            return {};
+        }
     }
-    if (!shape.has_value())
+    if (!shape.has_value() || (clipped && shape->stroke.has_value() && !shape->fill.has_value()))
         return {};
     std::vector<std::vector<Point>> outlines;
     for (const PathContour& contour :

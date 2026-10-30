@@ -138,8 +138,9 @@ struct RoundedClip final {
     std::array<double, 6U> inverse_transform{1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
     /**
      * 0 the rounded rectangle, 1 an ellipse, 2 a regular polygon and 3 a star of `sides`, each
-     * filling the rectangle; `fade` ramps coverage out over that many logical pixels toward the
-     * top, right, bottom and left edges.
+     * filling the rectangle, and 4 a sector or ring of that ellipse (its start and sweep in degrees
+     * and inner radius fraction in `radii`); `fade` ramps coverage out over that many logical
+     * pixels toward the top, right, bottom and left edges.
      */
     std::uint32_t shape = 0U;
     double sides = 0.0;

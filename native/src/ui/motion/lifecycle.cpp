@@ -35,6 +35,7 @@ void MotionRuntime::bind(const std::shared_ptr<const runtime::RuntimeUnit>& unit
     implementation_->nodes.clear();
     implementation_->configs.clear();
     implementation_->active_nodes.clear();
+    implementation_->pruned_structure_generation.reset();
     implementation_->disclosure_players.clear();
     implementation_->disclosure_samples.clear();
     implementation_->reduced_motion.reset();
@@ -45,6 +46,7 @@ void MotionRuntime::set_supplemental(std::map<std::string, CompiledMotion, std::
     implementation_->nodes.clear();
     implementation_->configs.clear();
     implementation_->active_nodes.clear();
+    implementation_->pruned_structure_generation.reset();
     implementation_->disclosure_players.clear();
     implementation_->disclosure_samples.clear();
     implementation_->reduced_motion.reset();
@@ -115,6 +117,7 @@ void MotionRuntime::clear() noexcept {
     implementation_->nodes.clear();
     implementation_->configs.clear();
     implementation_->active_nodes.clear();
+    implementation_->pruned_structure_generation.reset();
     implementation_->disclosure_players.clear();
     implementation_->disclosure_samples.clear();
     implementation_->shared_places.clear();

@@ -51,16 +51,6 @@ struct RenderEngine::Impl final {
                                              const LayoutSnapshot&) = default;
     };
 
-    /**
-     * A run of a frame's command stream. Its storage is bound when the frame that drew it is
-     * done (until then, `storage` is empty and it cannot be reused).
-     */
-    struct CommandSlice final {
-        std::shared_ptr<const std::vector<RenderCommand>> storage;
-        std::size_t begin = 0U;
-        std::size_t end = 0U;
-    };
-
     struct CachedFragment final {
         struct MotionSnapshot final {
             std::vector<std::pair<MotionProperty, MotionValue>> values;
@@ -98,10 +88,10 @@ struct RenderEngine::Impl final {
             std::uint64_t subtree_layout_render_generation = 0U;
             std::uint64_t subtree_status_generation = 0U;
             /**
-             * The whole subtree's commands, as a slice of the stream of the frame that last drew
-             * them: any size of subtree is kept without a copy of its own (see bind_slices).
+             * The whole subtree's commands, as the runs of storage they were drawn into: any size
+             * of subtree is kept, and drawn again, without a copy.
              */
-            std::optional<CommandSlice> subtree_commands = std::nullopt;
+            std::optional<std::vector<RenderCommandView::Segment>> subtree_commands = std::nullopt;
             std::size_t subtree_node_count = 1U;
             std::size_t subtree_overlay_count = 0U;
             LayoutSnapshot subtree_layout{};
@@ -154,21 +144,6 @@ struct RenderEngine::Impl final {
 
     std::unordered_map<std::uint64_t, CachedFragment> fragments;
     /**
-     * Subtree slices this frame drew, by node: bound to the frame's storage when it is done. A
-     * subtree reused whole carries its previous slice, so the slices nested in it move with it.
-     */
-    struct PendingSlice final {
-        std::uint64_t identity = 0U;
-        std::size_t begin = 0U;
-        std::size_t end = 0U;
-        std::optional<CommandSlice> previous;
-    };
-    std::vector<PendingSlice> pending_slices;
-    void bind_slices(const RenderCommandBuffer& output);
-    void move_nested_slices(const std::vector<std::uint64_t>& children, const CommandSlice& from,
-                            std::size_t to_begin,
-                            const std::shared_ptr<const std::vector<RenderCommand>>& storage);
-    /**
      * What a node's presentation was drawn from: its own transform, opacity and tone, its group,
      * and what it inherited. A frame that changes only presentation recomputes group entries from
      * these instead of drawing the tree again (see presentation_frame).
@@ -194,6 +169,9 @@ struct RenderEngine::Impl final {
     /** Drops groups no longer referenced by the frame and attaches the table to its commands. */
     void publish_groups(RenderCommandBuffer& output);
     std::uint64_t fragment_tree_generation = 0U;
+    /** The portals outside portals, in tree order, as of a structure and layout generation. */
+    std::vector<const RetainedNode*> portals;
+    std::optional<std::pair<std::uint64_t, std::uint64_t>> portals_generations;
     RenderCommandBuffer retained_base_commands;
     /**
      * The base stream plus the detached overlays last appended to it, and those overlays. A
@@ -201,7 +179,7 @@ struct RenderEngine::Impl final {
      * the base into a new one.
      */
     RenderCommandBuffer retained_composed_commands;
-    std::vector<RenderCommand> retained_overlay_commands;
+    RenderCommandBuffer retained_overlay_commands;
     std::optional<RenderGenerationToken> retained_base_generations;
     std::uint64_t retained_tree_generation = 0U;
     std::uint64_t retained_layout_generation = 0U;

@@ -275,56 +275,214 @@ std::optional<CornerRadii> corner_radii_value(const runtime::Value* value) noexc
     };
 }
 
-void RenderCommandBuffer::make_unique_storage() {
-    if (commands_ == nullptr) {
+const RenderCommand& RenderCommandView::locate(const std::size_t index,
+                                               std::size_t& run) const noexcept {
+    const auto holds = [this, index](const std::size_t at) {
+        return at < segments_.size() && index >= offsets_[at] &&
+               index < offsets_[at] + segments_[at].size();
+    };
+    if (!holds(run)) {
+        if (holds(run + 1U)) {
+            ++run;
+        } else {
+            run = static_cast<std::size_t>(
+                std::upper_bound(offsets_.begin(), offsets_.end(), index) - offsets_.begin() - 1);
+        }
+    }
+    const Segment& segment = segments_[run];
+    return (*segment.storage)[segment.begin + (index - offsets_[run])];
+}
+
+void RenderCommandView::push(Segment segment) {
+    const std::size_t added = segment.size();
+    if (added == 0U)
+        return;
+    // Continuing the last run where it ends extends it.
+    if (!segments_.empty() && segments_.back().storage == segment.storage &&
+        segments_.back().end == segment.begin) {
+        segments_.back().end = segment.end;
+    } else {
+        offsets_.push_back(size_);
+        segments_.push_back(std::move(segment));
+    }
+    size_ += added;
+}
+
+std::vector<RenderCommandView::Segment> RenderCommandView::slice(const std::size_t begin,
+                                                                 const std::size_t end) const {
+    std::vector<Segment> result;
+    if (begin >= end)
+        return result;
+    std::size_t run = static_cast<std::size_t>(
+        std::upper_bound(offsets_.begin(), offsets_.end(), begin) - offsets_.begin() - 1);
+    for (; run < segments_.size() && offsets_[run] < end; ++run) {
+        const Segment& segment = segments_[run];
+        const std::size_t from = std::max(begin, offsets_[run]) - offsets_[run];
+        const std::size_t to = std::min(end, offsets_[run] + segment.size()) - offsets_[run];
+        if (from < to)
+            result.push_back(Segment{segment.storage, segment.begin + from, segment.begin + to});
+    }
+    return result;
+}
+
+std::vector<RenderCommand> RenderCommandView::to_vector() const {
+    std::vector<RenderCommand> result;
+    result.reserve(size_);
+    for (const Segment& segment : segments_) {
+        result.insert(result.end(),
+                      segment.storage->begin() + static_cast<std::ptrdiff_t>(segment.begin),
+                      segment.storage->begin() + static_cast<std::ptrdiff_t>(segment.end));
+    }
+    return result;
+}
+
+namespace {
+
+/** Walks two streams of one length run by run, calling `visit(index, run length, same)`. */
+template <typename Visit>
+void walk_runs(const RenderCommandView& left, const RenderCommandView& right, Visit&& visit) {
+    const auto& a = left.segments();
+    const auto& b = right.segments();
+    std::size_t index = 0U;
+    std::size_t sa = 0U;
+    std::size_t sb = 0U;
+    std::size_t ia = 0U;
+    std::size_t ib = 0U;
+    while (sa < a.size() && sb < b.size()) {
+        const std::size_t run = std::min(a[sa].size() - ia, b[sb].size() - ib);
+        const bool same = a[sa].storage == b[sb].storage && a[sa].begin + ia == b[sb].begin + ib;
+        if (!visit(index, run, same, a[sa].begin + ia, *a[sa].storage, b[sb].begin + ib,
+                   *b[sb].storage))
+            return;
+        index += run;
+        ia += run;
+        ib += run;
+        if (ia == a[sa].size()) {
+            ++sa;
+            ia = 0U;
+        }
+        if (ib == b[sb].size()) {
+            ++sb;
+            ib = 0U;
+        }
+    }
+}
+
+} // namespace
+
+std::vector<std::size_t> RenderCommandView::differences(const RenderCommandView& other) const {
+    std::vector<std::size_t> result;
+    if (size_ != other.size_)
+        return result;
+    walk_runs(*this, other, [&](const std::size_t index, const std::size_t run, const bool same,
+                                const std::size_t from_a, const std::vector<RenderCommand>& a,
+                                const std::size_t from_b, const std::vector<RenderCommand>& b) {
+        if (same)
+            return true;
+        for (std::size_t offset = 0U; offset < run; ++offset) {
+            if (!(a[from_a + offset] == b[from_b + offset]))
+                result.push_back(index + offset);
+        }
+        return true;
+    });
+    return result;
+}
+
+bool operator==(const RenderCommandView& left, const RenderCommandView& right) {
+    if (left.size_ != right.size_)
+        return false;
+    bool equal = true;
+    walk_runs(left, right, [&](const std::size_t, const std::size_t run, const bool same,
+                               const std::size_t from_a, const std::vector<RenderCommand>& a,
+                               const std::size_t from_b, const std::vector<RenderCommand>& b) {
+        if (same)
+            return true;
+        for (std::size_t offset = 0U; offset < run; ++offset) {
+            if (!(a[from_a + offset] == b[from_b + offset])) {
+                equal = false;
+                return false;
+            }
+        }
+        return true;
+    });
+    return equal;
+}
+
+bool operator==(const RenderCommandView& left, const std::vector<RenderCommand>& right) {
+    if (left.size() != right.size())
+        return false;
+    for (std::size_t index = 0U; index < right.size(); ++index) {
+        if (!(left[index] == right[index]))
+            return false;
+    }
+    return true;
+}
+
+RenderCommandBuffer::RenderCommandBuffer(const RenderCommandBuffer& other)
+    : view_(other.view_), groups_(other.groups_), reserve_hint_(other.size()) {}
+
+RenderCommandBuffer& RenderCommandBuffer::operator=(const RenderCommandBuffer& other) {
+    if (this == &other)
+        return *this;
+    view_ = other.view_;
+    tail_.reset();
+    tail_open_ = false;
+    groups_ = other.groups_;
+    reserve_hint_ = other.size();
+    return *this;
+}
+
+void RenderCommandBuffer::open_tail() {
+    if (tail_ == nullptr) {
         // A frame's stream is usually as long as the last one, so start at that size rather than
         // regrowing a vector of large variants from empty.
-        commands_ = std::make_shared<std::vector<RenderCommand>>();
-        commands_->reserve(reserve_hint_);
-    } else if (commands_.use_count() != 1L) {
-        commands_ = std::make_shared<std::vector<RenderCommand>>(*commands_);
+        tail_ = std::make_shared<std::vector<RenderCommand>>();
+        tail_->reserve(reserve_hint_);
+    }
+    if (!tail_open_) {
+        view_.offsets_.push_back(view_.size_);
+        view_.segments_.push_back(
+            RenderCommandView::Segment{tail_, tail_->size(), tail_->size()});
+        tail_open_ = true;
     }
 }
 
 void RenderCommandBuffer::append(RenderCommand command) {
-    make_unique_storage();
-    commands_->push_back(std::move(command));
+    open_tail();
+    tail_->push_back(std::move(command));
+    ++view_.segments_.back().end;
+    ++view_.size_;
 }
 
 void RenderCommandBuffer::append(const std::vector<RenderCommand>& commands) {
     if (commands.empty())
         return;
-    make_unique_storage();
-    commands_->insert(commands_->end(), commands.begin(), commands.end());
+    open_tail();
+    tail_->insert(tail_->end(), commands.begin(), commands.end());
+    view_.segments_.back().end += commands.size();
+    view_.size_ += commands.size();
 }
 
-void RenderCommandBuffer::append(const std::vector<RenderCommand>& commands,
-                                 const std::size_t begin, const std::size_t end) {
-    if (begin >= end)
-        return;
-    make_unique_storage();
-    commands_->insert(commands_->end(), commands.begin() + static_cast<std::ptrdiff_t>(begin),
-                      commands.begin() + static_cast<std::ptrdiff_t>(end));
+void RenderCommandBuffer::append(const std::span<const RenderCommandView::Segment> segments) {
+    for (const RenderCommandView::Segment& segment : segments) {
+        if (segment.size() == 0U)
+            continue;
+        tail_open_ = false;
+        view_.push(segment);
+    }
 }
 
 void RenderCommandBuffer::clear() noexcept {
-    if (commands_ != nullptr && commands_.use_count() == 1L) {
-        commands_->clear();
+    view_ = RenderCommandView{};
+    tail_open_ = false;
+    if (tail_ != nullptr && tail_.use_count() == 1L) {
+        tail_->clear();
     } else {
-        // Shared with a retained frame, so the next stream needs storage of its own.
-        reserve_hint_ = commands_ != nullptr ? commands_->size() : 0U;
-        commands_.reset();
+        // Read by a retained frame or subtree, so the next stream needs storage of its own.
+        reserve_hint_ = tail_ != nullptr ? tail_->size() : reserve_hint_;
+        tail_.reset();
     }
     groups_.reset();
-}
-
-const std::vector<RenderCommand>& RenderCommandBuffer::commands() const noexcept {
-    static const std::vector<RenderCommand> empty;
-    return commands_ != nullptr ? *commands_ : empty;
-}
-
-std::size_t RenderCommandBuffer::size() const noexcept {
-    return commands_ != nullptr ? commands_->size() : 0U;
 }
 
 void RenderCommandBuffer::set_groups(std::vector<RenderGroup> groups) {

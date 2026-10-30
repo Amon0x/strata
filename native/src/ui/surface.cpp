@@ -963,7 +963,9 @@ bool Surface::idle() const {
                                    !pending_lifecycle_input_.action_outcomes.empty() ||
                                    pending_lifecycle_input_.injected_events != 0U ||
                                    pending_lifecycle_input_.processed_events != 0U;
+    // Expressions on their way (`animate`) want every frame until they arrive.
     return !frame_invalidated_ && tree_.root() != nullptr && input_.queued_event_count() == 0U &&
+           !descriptions_.reads_frame_time() &&
            observe_dirty(last_frame_.frame_time_nanos, false, pending_lifecycle).settled();
 }
 
@@ -1519,9 +1521,12 @@ FrameDirtyModel Surface::observe_dirty(const std::int64_t frame_time_nanos, cons
                                        const bool pending_lifecycle) const {
     return FrameDirtyModel{
         .requested = requested,
+        // Reading the frame's time dirties the description until that time is published: once
+        // it is, the description built from it is current for the rest of the frame.
         .description = description_invalidated_ ||
                        application_.dirty_generation() != observed_application_generation_ ||
-                       descriptions_.reads_frame_time(),
+                       (descriptions_.reads_frame_time() &&
+                        published_frame_time_ != frame_time_nanos),
         .retained = tree_.dirty_count() != 0U,
         // Work raised after the frame's last layout (a post-layout reveal scrolling) only bumps
         // the layout generation: its dirty marks were cleared with the frame that raised it.

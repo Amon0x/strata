@@ -85,12 +85,24 @@ struct Difference final {
     return result;
 }
 
-/** A frame is compared across backends only when it uses nothing backend-specific. */
+/**
+ * A frame is compared across backends only when it uses nothing backend-specific. Layers that run
+ * no passes or filters (a clip's mask layers, a Lottie layer) only composite, which every backend
+ * does alike (see the nested layers compared below), so they are compared too.
+ */
 [[nodiscard]] bool portable(const host::RenderPacket& packet) {
+    const auto plain_layer = [&packet](const host::EffectBatch& effect) {
+        if (effect.kind != host::EffectBatchKind::content_begin || !effect.filters.empty() ||
+            effect.effect >= packet.effects.size())
+            return false;
+        const std::string& id = packet.effects[effect.effect];
+        return id == "strata:clip-layer" || id == "strata:lottie-layer";
+    };
     return std::ranges::all_of(packet.materials,
                                [](const std::string& id) { return id == "strata:unified_ui"; }) &&
-           std::ranges::none_of(packet.batches, [](const host::SubmissionBatch& batch) {
-               return std::holds_alternative<host::EffectBatch>(batch);
+           std::ranges::all_of(packet.batches, [&](const host::SubmissionBatch& batch) {
+               const auto* effect = std::get_if<host::EffectBatch>(&batch);
+               return effect == nullptr || plain_layer(*effect);
            });
 }
 

@@ -3050,7 +3050,7 @@ std::optional<std::vector<std::size_t>> replan_ranges(
     bool& resized
 ) {
     resized = false;
-    const std::vector<RenderCommand>& stream = commands.commands();
+    const RenderCommandView& stream = commands.commands();
     // What the stream's text sees (visibility, scales, subpixel and zoomed runs) is worked out by
     // walking the whole stream: only when a changed range holds text, which is all it is for.
     bool ranges_hold_text = false;

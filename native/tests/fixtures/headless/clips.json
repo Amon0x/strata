@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "application": {
+    "id": "clips.headless",
+    "module": "assets/strata/samples/clips.strata",
+    "root": "ClipGallery",
+    "actions": []
+  },
+  "surface": {
+    "id": "clips.headless",
+    "role": "overlay",
+    "backend": "reference",
+    "width": 560,
+    "height": 152,
+    "scale": 1,
+    "reducedMotion": false,
+    "clearColor": "#090b0fff",
+    "fonts": [
+      {
+        "id": "strata:fonts/default-medium",
+        "resource": "assets/strata/fonts/medium.ttf"
+      },
+      {
+        "id": "strata:fonts/default",
+        "resource": "assets/strata/fonts/default.ttf"
+      }
+    ],
+    "images": []
+  },
+  "snapshots": [],
+  "steps": [
+    {
+      "advance": {
+        "milliseconds": 0,
+        "frames": 1
+      }
+    },
+    {
+      "capture": "clips"
+    }
+  ]
+}

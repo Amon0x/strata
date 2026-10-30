@@ -4013,7 +4013,7 @@ overlay Rotated {
     check(turned, "a 45 degree rotation did not emit a rotating transform");
     // The turned blur is masked to its shape: a clip of its own bounds wraps the effect.
     bool masked_effect = false;
-    const std::vector<ui::RenderCommand>& stream = surface->render_commands().commands();
+    const auto& stream = surface->render_commands().commands();
     for (std::size_t index = 1U; index + 1U < stream.size(); ++index) {
         const auto* clip = std::get_if<ui::ClipPushRenderCommand>(&stream[index - 1U]);
         const bool effect = std::holds_alternative<ui::BackdropEffectRenderCommand>(stream[index]) ||
@@ -4756,6 +4756,58 @@ overlay Motion {
           "an animate() on a spring did not overshoot and settle on its target");
 }
 
+void test_clip_shapes_cut_as_masks_and_hits(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Cut {
+  state presses = 0
+  root Panel(key: "cut.root", style: { kind: "OVERLAY"; width: 200; height: 200; padding: 0 }) {
+    // A triangle has no analytic outline: it cuts as a mask, and cuts what is hit as well.
+    Panel(key: "cut.triangle", style: { width: 200; height: 200; background: #FF0000;
+          clipShape: { kind: "polygon", points: [{ x: 0.5, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] } },
+          behaviors: [{ id: "strata.pointer", action: e => { if e.phase == "press" { presses = presses + 1 } } }])
+    Text(key: "cut.presses", text: `${presses}`, layout: { position: "ABSOLUTE", inset: { left: 0, top: 0 } })
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("cut", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Cut", 200.0, 200.0, false);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    // The node draws into a layer that a second, destination-in layer cuts to the filled shape.
+    const auto& stream = surface->render_commands().commands();
+    std::vector<std::size_t> layers;
+    bool cut = false;
+    for (std::size_t index = 0U; index < stream.size(); ++index) {
+        if (const auto* push = std::get_if<ui::ContentEffectPushRenderCommand>(&stream[index]);
+            push != nullptr && push->effect.composite == ui::LayerComposite::destination_in &&
+            index + 1U < stream.size()) {
+            const auto* mask = std::get_if<ui::PathRenderCommand>(&stream[index + 1U]);
+            cut = mask != nullptr && mask->shape.fill.has_value() && !mask->shape.stroke.has_value();
+        }
+    }
+    check(cut, "a polygon clipShape did not cut its node through a filled mask layer");
+    const auto presses = [&] {
+        const auto found =
+            surface->tree().find_key("cut.presses")->description().properties.find("text");
+        return *found->second.value()->string();
+    };
+    const auto press = [&](const ui::Point at) {
+        std::vector<ui::SurfaceInputEvent> events;
+        events.emplace_back(ui::PointerInputEvent{at, ui::PointerEventType::press, 4, 0});
+        events.emplace_back(ui::PointerInputEvent{at, ui::PointerEventType::release, 4, 0});
+        static_cast<void>(surface->input().enqueue(std::move(events)));
+        static_cast<void>(surface->frame(now += 16'000'000));
+        static_cast<void>(surface->frame(now += 16'000'000));
+    };
+    // A top corner is in the box but outside the triangle; its foot is inside both.
+    press(ui::Point{10.0, 10.0});
+    check(presses() == "0", "a press outside a clipShape still hit the node it cuts");
+    press(ui::Point{100.0, 180.0});
+    check(presses() == "1", "a press inside a clipShape did not hit its node: " + presses());
+}
+
 void test_chart_inspects_selects_and_hides_series(const std::filesystem::path& resources) {
     const std::string source = R"(
 overlay Sales {
@@ -5289,6 +5341,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_animate_follows_its_target(resources);
         test_placed_ring_hit_shapes_and_hover(resources);
         test_animate_moves_colours_springs_and_clips(resources);
+        test_clip_shapes_cut_as_masks_and_hits(resources);
         test_timers_fire_on_their_interval(resources);
         test_markdown_expands_blocks_and_follows_links(resources);
         test_modal_sides_open_drawers_and_sheets(resources);

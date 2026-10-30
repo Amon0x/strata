@@ -1,0 +1,38 @@
+// Every way a node is cut to a shape: the analytic outlines a clip draws exactly (a circle, a
+// sector) and any other shape, which cuts as a mask (a polygon, a path, a stroked arc), so the
+// reference renderer and each GPU backend can be compared on both.
+
+style Root {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 16;
+  gap: 12;
+  background: #10131AFF;
+}
+
+style Tile {
+  width: 120;
+  height: 120;
+  padding: 10;
+  background: { kind: "linear", angle: 135, stops: [ { color: #6366F1FF }, { color: #EC4899FF } ] };
+}
+
+overlay ClipGallery {
+  root Panel(key: "clips.root", style: Root) {
+    Panel(key: "clips.circle", style: style(Tile, clipShape: { kind: "circle" }))
+    Panel(key: "clips.sector", style: style(Tile, clipShape: {
+      kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.5, innerRadius: 0.2, start: -90, sweep: 250
+    }))
+    Panel(key: "clips.star", style: style(Tile, clipShape: { kind: "polygon", points: [
+      { x: 0.5, y: 0.0 }, { x: 0.62, y: 0.35 }, { x: 1.0, y: 0.38 }, { x: 0.7, y: 0.6 },
+      { x: 0.8, y: 1.0 }, { x: 0.5, y: 0.76 }, { x: 0.2, y: 1.0 }, { x: 0.3, y: 0.6 },
+      { x: 0.0, y: 0.38 }, { x: 0.38, y: 0.35 } ] })) {
+      Text(key: "clips.star.text", text: "Content is cut to the star as well as its background.")
+    }
+    Panel(key: "clips.arc", style: style(Tile, clipShape: {
+      kind: "arc", center: { x: 0.5, y: 0.5 }, radius: 0.38, start: 150, sweep: 240,
+      stroke: #FFFFFFFF, strokeStyle: { width: 16, cap: "round" }
+    }))
+  }
+}

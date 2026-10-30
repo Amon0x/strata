@@ -113,8 +113,8 @@ void add_builtin_types(BuiltinCatalog& catalog) {
         DeclaredNamedType{.id = "clipShapeEnum",
                           .definition = declared_type(DeclaredType{
                               .kind = DeclaredTypeKind::union_value,
-                              .label = "clip shape: a name, or a circle, ellipse, rect, sector "
-                                       "or ring shape placed in the node",
+                              .label = "clip shape: a name, or any shape placed in the node "
+                                       "(also what a pointer hits, unless hitShape says)",
                               .options = {declared_type_reference("clipShapeName"),
                                           declared_type_reference("shape")}})},
         DeclaredNamedType{

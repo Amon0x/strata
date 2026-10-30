@@ -112,9 +112,9 @@ void retain_drawn_pages(PreparationCache& cache, const std::span<const CommandRa
     RenderSubmission& output
 ) {
     if (!cache.changed_draw_updates || !cache.plan_current) return false;
-    const std::vector<RenderCommand>& previous = cache.planned_commands.commands();
-    const std::vector<RenderCommand>& current = commands.commands();
-    if (&previous == &current || previous.size() != current.size() ||
+    const RenderCommandView& previous = cache.planned_commands.commands();
+    const RenderCommandView& current = commands.commands();
+    if (commands.shares_storage(cache.planned_commands) || previous.size() != current.size() ||
         cache.command_plans.size() != current.size() || cache.text.size() != current.size()) {
         return false;
     }
@@ -129,10 +129,10 @@ void retain_drawn_pages(PreparationCache& cache, const std::span<const CommandRa
     }
     // A changed draw is planned again alone; a changed scope (a moved subtree's transform, a
     // resized clip) with everything up to its end. Either way only the changed draws are encoded.
+    // Runs both streams read from one storage are equal unread: a reused subtree costs nothing.
     std::vector<CommandRange> ranges;
     std::size_t covered = 0U;
-    for (std::size_t index = 0U; index < current.size(); ++index) {
-        if (current[index] == previous[index]) continue;
+    for (const std::size_t index : current.differences(previous)) {
         if (current[index].index() != previous[index].index()) return false;
         if (index < covered) continue;
         CommandRange range{index, index};

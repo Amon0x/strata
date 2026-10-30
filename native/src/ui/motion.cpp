@@ -532,6 +532,10 @@ MotionFrameCounters MotionRuntime::evaluate(
     });
     result.running_players = next_active.size();
     implementation_->active_nodes = std::move(next_active);
+    // Only a change of structure removes nodes: the tables of every node are pruned then.
+    if (implementation_->pruned_structure_generation == tree.structure_generation())
+        return result;
+    implementation_->pruned_structure_generation = tree.structure_generation();
     std::erase_if(implementation_->configs, [&tree](const auto& entry) {
         return tree.find_identity(entry.first) == nullptr;
     });
