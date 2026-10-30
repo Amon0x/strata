@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -722,6 +723,39 @@ void ExpressionRuntime::perform_action(const std::shared_ptr<const ActionValue>&
     active_run_->transaction.actions.push_back(action);
 }
 
+bool ExpressionRuntime::constant_function(const LambdaValue& function) {
+    // A top-level function: a declared one (no lambda expression) closing over no block.
+    if (function.expression != no_program_id || function.group != nullptr)
+        return false;
+    const ProgramFunction& declaration = function.declaration();
+    if (declaration.parameters_count != 0U || declaration.asynchronous)
+        return false;
+    const ProgramNodeKey key{function.program->serial(), function.function};
+    if (const auto known = constant_functions_.find(key); known != constant_functions_.end())
+        return known->second;
+    // It reads nothing a call could change when every name it reads, and every name each
+    // function it reaches reads past its own parameters, is a top-level function.
+    const Program& program = *function.program;
+    std::vector<std::uint32_t> pending{function.function};
+    std::set<std::uint32_t> seen{function.function};
+    bool constant = true;
+    while (constant && !pending.empty()) {
+        const ProgramFunction& reached = program.function(pending.back());
+        pending.pop_back();
+        for (const Symbol name : program.free_variables(reached)) {
+            const std::optional<std::uint32_t> index = program.function_index(name.name());
+            if (!index.has_value()) {
+                constant = false;
+                break;
+            }
+            if (seen.insert(*index).second)
+                pending.push_back(*index);
+        }
+    }
+    constant_functions_.emplace(key, constant);
+    return constant;
+}
+
 ExpressionValue ExpressionRuntime::invoke(const LambdaValue& function,
                                           std::vector<ExpressionValue> positional,
                                           std::vector<std::pair<Symbol, ExpressionValue>> named,
@@ -730,6 +764,24 @@ ExpressionValue ExpressionRuntime::invoke(const LambdaValue& function,
         script_error("STRATA.SCRIPT.CALL_DEPTH",
                      "Calls nested deeper than " + std::to_string(script_call_depth) + ".");
     }
+    const bool constant = positional.empty() && named.empty() && constant_function(function);
+    if (constant) {
+        const auto known =
+            constant_values_.find(ProgramNodeKey{function.program->serial(), function.function});
+        if (known != constant_values_.end())
+            return known->second;
+    }
+    ExpressionValue value = invoke_once(function, std::move(positional), std::move(named), reads);
+    if (constant) {
+        constant_values_.insert_or_assign(
+            ProgramNodeKey{function.program->serial(), function.function}, value);
+    }
+    return value;
+}
+
+ExpressionValue ExpressionRuntime::invoke_once(
+    const LambdaValue& function, std::vector<ExpressionValue> positional,
+    std::vector<std::pair<Symbol, ExpressionValue>> named, DependencyRecorder& reads) {
     Nesting depth(call_depth_);
     const ProgramFunction& declaration = function.declaration();
     ExpressionScope scope =

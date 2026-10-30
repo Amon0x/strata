@@ -274,6 +274,15 @@ component BlueprintPage() {
   state counter = 12
 
   fn node(id: string) = find(nodes, n => n.id == id)
+  /** The pins of a node on one side that have a wire. */
+  fn wiredPins(id: string, side: string): List<string> {
+    var pins = []
+    for link in links {
+      if side == "in" && link.to == id { pins += [link.toPin] }
+      if side == "out" && link.from == id { pins += [link.fromPin] }
+    }
+    return pins
+  }
   fn selected(id: string) = findIndex(selection, s => s == id) >= 0
   fn linked(id: string, side: string, pin: string) =
     findIndex(links, l => side == "in" ? l.to == id && l.toPin == pin : l.from == id && l.fromPin == pin) >= 0
@@ -593,8 +602,8 @@ component BlueprintPage() {
             BlueprintNode(
               node: item,
               selected: selected(item.id),
-              linkedIn: map(filter(links, l => l.to == item.id), l => l.toPin),
-              linkedOut: map(filter(links, l => l.from == item.id), l => l.fromPin),
+              linkedIn: wiredPins(item.id, "in"),
+              linkedOut: wiredPins(item.id, "out"),
               onPick: e => pick(item.id, e.shift),
               onMove: e => {
                 if !selected(item.id) { pick(item.id, false) }

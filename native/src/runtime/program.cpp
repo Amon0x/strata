@@ -390,7 +390,14 @@ class ProgramLowering final {
             result.block = this->block(block, {});
         std::vector<Symbol> free;
         if (result.body != no_program_id) collect_free_variables(result.body, free);
-        if (result.block != no_program_id) collect_block_free_variables(result.block, free);
+        if (result.block != no_program_id) {
+            collect_block_free_variables(result.block, free);
+            std::vector<Symbol> declared;
+            collect_block_declarations(result.block, declared);
+            std::erase_if(free, [&declared](const Symbol name) {
+                return std::ranges::find(declared, name) != declared.end();
+            });
+        }
         for (const ProgramFunctionParameter& parameter : parameters) {
             if (parameter.default_value != no_program_id)
                 collect_free_variables(parameter.default_value, free);
@@ -672,6 +679,33 @@ class ProgramLowering final {
                      program_.free_variables(program_.functions_[statement.function]))
                     names.push_back(name);
             }
+        }
+    }
+
+    /** The names a block and the blocks in it declare: locals, loop items, caught values, functions. */
+    void collect_block_declarations(const BlockId id, std::vector<Symbol>& names) const {
+        const ProgramBlock& block = program_.blocks_[id];
+        for (std::uint32_t index = 0U; index < block.statements_count; ++index) {
+            const ProgramStatement& statement = program_.statements_[block.statements_begin + index];
+            switch (statement.kind) {
+            case StatementKind::let_binding:
+            case StatementKind::function:
+            case StatementKind::try_catch:
+                names.push_back(statement.name);
+                break;
+            case StatementKind::loop:
+                names.push_back(statement.name);
+                if (statement.has_index) names.push_back(statement.index_name);
+                break;
+            default:
+                break;
+            }
+            for (const BlockId nested : {statement.block, statement.otherwise}) {
+                if (nested != no_program_id) collect_block_declarations(nested, names);
+            }
+            for (std::uint32_t branch = 0U; branch < statement.branches_count; ++branch)
+                collect_block_declarations(
+                    program_.branches_[statement.branches_begin + branch].block, names);
         }
     }
 

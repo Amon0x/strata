@@ -697,6 +697,10 @@ class ExpressionRuntime final {
                                          std::vector<ExpressionValue> positional,
                                          std::vector<std::pair<Symbol, ExpressionValue>> named,
                                          DependencyRecorder& reads);
+    [[nodiscard]] ExpressionValue invoke_once(const LambdaValue& function,
+                                              std::vector<ExpressionValue> positional,
+                                              std::vector<std::pair<Symbol, ExpressionValue>> named,
+                                              DependencyRecorder& reads);
     /** The scope a function's body runs in, its parameters bound from the arguments. */
     [[nodiscard]] ExpressionScope function_scope(const LambdaValue& function,
                                                  std::vector<ExpressionValue> positional,
@@ -749,6 +753,15 @@ class ExpressionRuntime final {
     std::size_t collection_cache_entries_ = 0U;
     /** Programs lowered from standalone expressions, by content. */
     std::unordered_map<std::string, std::shared_ptr<const Program>> standalone_programs_;
+    /**
+     * Top-level functions without parameters that read only other top-level functions: each
+     * gives one value however often it is called, so it is computed once. Whether a function is
+     * one, and its value once known, by program and function.
+     */
+    std::unordered_map<ProgramNodeKey, bool, ProgramNodeKeyHash> constant_functions_;
+    std::unordered_map<ProgramNodeKey, ExpressionValue, ProgramNodeKeyHash> constant_values_;
+    /** Whether a declared function's value never changes: see constant_functions_. */
+    [[nodiscard]] bool constant_function(const LambdaValue& function);
 };
 
 /**

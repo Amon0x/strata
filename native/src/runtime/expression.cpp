@@ -885,6 +885,8 @@ void ExpressionRuntime::clear_caches() noexcept {
     collection_cache_.clear();
     collection_cache_entries_ = 0U;
     dynamic_host_paths_.clear();
+    constant_functions_.clear();
+    constant_values_.clear();
 }
 
 ExpressionHostDependency
