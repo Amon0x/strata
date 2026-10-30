@@ -72,6 +72,7 @@ PixelInput main(VertexInput input) {
     int mode = (int)floor(input.drawData3.z + 0.5);
     float2 local = input.position.xy;
     float2 uv = input.uv;
+    float detail = 0.0;
     if (mode == 13 || mode == 14) {
         // A vector glyph's quad is its outline's bounds (uv in font units). It grows here by whole
         // device distances at whatever scale and turn its group shows it, so the pixels its edge
@@ -89,6 +90,12 @@ PixelInput main(VertexInput input) {
         float2 grow = outward * reach / max(float2(length(deviceX), length(deviceY)), 1.0e-6);
         local += grow.x * input.drawData1.xy + grow.y * input.drawData1.zw;
         uv += grow;
+        // The glyph's record is its finest detail level; each next (up to four) is flattened twice
+        // as loosely. The loosest whose curves stay within a thirty-second of a device pixel at
+        // the size it shows: its em in device pixels (drawData2.x, units per em) at most 128 for
+        // the first, 64 for the next.
+        float em = max(length(deviceX), length(deviceY)) * input.drawData2.x;
+        detail = clamp(floor(log2(128.0 / max(em, 1.0e-3))), 0.0, 4.0);
     }
     float2 position = local * group.transform.xy + local.yx * group.opacity.zw + translation;
     // A group turned in depth: the projected position is position / w, which the rasterizer
@@ -109,7 +116,7 @@ PixelInput main(VertexInput input) {
     // group's tone passed in drawData1.x.
     float tone = (mode == 1 || mode == 6 || mode == 11) ? 0.0 : group.opacity.y;
     output.color = float4(strataTone(input.color.rgb, tone), input.color.a);
-    output.drawData0 = input.drawData0;
+    output.drawData0 = float4(input.drawData0.x + detail, input.drawData0.yzw);
     output.drawData1 = mode == 11
         ? float4(group.opacity.y, input.drawData1.yzw)
         : input.drawData1;

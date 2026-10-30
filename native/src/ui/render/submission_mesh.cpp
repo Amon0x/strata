@@ -400,12 +400,14 @@ void gradient_mask_geometry(
  * A vector glyph's quad: its outline's bounds in font units at its pen, under its shear. Each
  * corner carries the glyph's record (draw data 0), the record of its variant fitted to the pixel
  * grid at the size it is laid out for (1; -1 for none), its subpixel order (2: 0 gray, 1 red
- * first, 2 blue first), which corner it is (3: bit 0 right, bit 1 top, in font units) and the
+ * first, 2 blue first), which corner it is (3: bit 0 right, bit 1 top, in font units), the
  * logical pixels a font unit spans along x (4, 5) and along y (6, 7), so the vertex stage grows
- * the quad by whole device pixels at whatever scale it is shown.
+ * the quad by whole device pixels at whatever scale it is shown, and its font's units per em (8),
+ * from which it picks the detail level that size needs.
  */
 void vector_glyph_quad(RenderSubmission& output, const PreparedDraw& draw, const Point origin,
-                       const PreparedGlyph& glyph, const font::SubpixelOrder subpixel,
+                       const PreparedGlyph& glyph, const double units_per_em,
+                       const font::SubpixelOrder subpixel,
                        const RenderColor left_color, const RenderColor right_color,
                        std::array<float, draw_data_float_count> data,
                        const std::uint32_t batch_base_vertex) {
@@ -432,6 +434,7 @@ void vector_glyph_quad(RenderSubmission& output, const PreparedDraw& draw, const
     data[5] = static_cast<float>(along_x.y);
     data[6] = static_cast<float>(along_y.x);
     data[7] = static_cast<float>(along_y.y);
+    data[8] = static_cast<float>(units_per_em);
     const double left = glyph.uv.u;
     const double top = glyph.uv.v;
     const double right = left + glyph.uv.width;
@@ -521,8 +524,9 @@ void text_geometry(
                 right > left ? gradient_at(glyph.bounds.x) : text.color;
             const RenderColor right_color =
                 right > left ? gradient_at(glyph.bounds.right()) : text.color;
-            vector_glyph_quad(output, draw, origin, glyph, text.vector_subpixel, left_color,
-                              right_color, data, batch_base_vertex);
+            vector_glyph_quad(output, draw, origin, glyph, text.pixel_size / glyph.scale,
+                              text.vector_subpixel, left_color, right_color, data,
+                              batch_base_vertex);
         } else if (text.mode == font::GlyphRasterMode::color) {
             // An emoji keeps its own colours; the run lends it only its opacity.
             quad(output, draw, bounds, RenderColor{255U, 255U, 255U, text.color.alpha}, glyph.uv,

@@ -34,6 +34,14 @@ struct VectorGlyphRecord final {
 static_assert(sizeof(VectorGlyphRecord) == 32U);
 
 /**
+ * The records a glyph has, from its own on: its outline flattened for any size (within an em over
+ * 4096 of its curves), then each next twice as loosely. The vertex stage draws the loosest whose
+ * curves stay within a thirty-second of a device pixel at the size the glyph shows
+ * (gpu/shaders.hpp).
+ */
+inline constexpr std::uint32_t vector_glyph_detail_levels = 5U;
+
+/**
  * What the host appends to its vector-text buffers: the glyphs made since the last append, from
  * the first index of each buffer on (every buffer only grows, so what is appended once stays).
  * Segments count in four floats, bands in single indices.
@@ -67,8 +75,9 @@ class VectorGlyphPool final {
         return id_;
     }
     /**
-     * The glyph's record index, made now if it is new; nothing when the font draws it some other
-     * way: a colour glyph, or one it has no TrueType outline for (bitmap and CFF fonts).
+     * The glyph's record index (the first of its vector_glyph_detail_levels), made now if it is
+     * new; nothing when the font draws it some other way: a colour glyph, or one it has no
+     * TrueType outline for (bitmap and CFF fonts).
      */
     [[nodiscard]] std::optional<std::uint32_t>
     glyph(std::string_view font_id, const font::OpenTypeFont& font, std::uint16_t glyph);

@@ -109,6 +109,7 @@ struct PixelRect final {
     result.v = read_float(bytes, base + 16U);
     const int vertex_mode =
         static_cast<int>(std::floor(read_float(bytes, base + 24U + 14U * sizeof(float)) + 0.5F));
+    double detail = 0.0;
     if (vertex_mode == 13 || vertex_mode == 14) {
         // A vector glyph's quad (its outline's bounds, uv in font units) grows by whole device
         // distances at whatever scale its group shows it, as in the vertex stage: value 3 is its
@@ -136,6 +137,11 @@ struct PixelRect final {
         y += grow_x * along_x_y + grow_y * along_y_y;
         result.u = static_cast<float>(result.u + grow_x);
         result.v = static_cast<float>(result.v + grow_y);
+        // The detail level its size needs, as the vertex stage picks it (value 8 its em).
+        const double em = std::max(device_length(along_x_x, along_x_y),
+                                   device_length(along_y_x, along_y_y)) *
+                          value(8U);
+        detail = std::clamp(std::floor(std::log2(128.0 / std::max(em, 1.0e-3))), 0.0, 4.0);
     }
     // A group turned in depth divides by its w; the reference interpolates in screen space.
     const double w = group.place_w(x, y);
@@ -154,6 +160,7 @@ struct PixelRect final {
     for (std::size_t value = 0U; value < result.data.size(); ++value) {
         result.data[value] = read_float(bytes, base + 24U + value * sizeof(float));
     }
+    result.data[0U] += static_cast<float>(detail);
     result.data[15U] *= static_cast<float>(group.opacity);
     // Tone, as in the vertex stage: images (mode 1) and shadows (mode 6) are not ink, and a rounded
     // rect (mode 2) carries its border colour in values 8 to 10.

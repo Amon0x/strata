@@ -23,6 +23,18 @@ std::optional<std::uint32_t> VectorGlyphPool::glyph(const std::string_view font_
         if (!vector.empty()) {
             index = add(vector);
             sources_.emplace(*index, Source{outline, font.units_per_em(), &zones->second});
+            // Coarser levels, each flattened twice as loosely, for the sizes a zoom shows it at
+            // where the finest would read more segments than its pixels need.
+            const double em = std::max(1.0, static_cast<double>(font.units_per_em()));
+            for (std::uint32_t level = 1U; level < vector_glyph_detail_levels; ++level) {
+                const font::VectorGlyph coarse =
+                    font::build_vector_glyph(*outline, font.units_per_em(), zones->second,
+                                             em / 4096.0 * static_cast<double>(1U << level));
+                if (coarse.empty())
+                    records_.push_back(records_[*index]);
+                else
+                    static_cast<void>(add(coarse));
+            }
         }
     }
     indices_.emplace(std::make_tuple(std::string(font_id), glyph), index);
