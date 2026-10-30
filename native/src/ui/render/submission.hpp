@@ -166,8 +166,11 @@ struct RenderSubmissionEnvironment final {
  */
 struct GroupRasterScale final {
     std::uint32_t group = 0U;
+    /** The scale masks rasterize at: exact at rest, stepped while the group's scale moves. */
     double x = 1.0;
     double y = 1.0;
+    /** The scale text rasterizes at: always exact, so it never resamples or snaps as it scales. */
+    double text = 1.0;
     [[nodiscard]] friend bool operator==(const GroupRasterScale&, const GroupRasterScale&) = default;
 };
 

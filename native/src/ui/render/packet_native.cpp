@@ -547,10 +547,13 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                                  previous->scale_y != group.scale_y);
             const double x = moving ? stepped(group.scale_x) : group.scale_x;
             const double y = moving ? stepped(group.scale_y) : group.scale_y;
-            // A resting group rasterizes at its exact scale, however close to one, so its text's
-            // texels land one to one; a moving one only once its step leaves one.
-            if (x != 1.0 || y != 1.0)
-                scales.push_back(GroupRasterScale{group.index, x, y});
+            // A resting group rasterizes at its exact scale, however close to one; a moving one's
+            // masks only once its step leaves one. Text always takes the exact scale: glyphs are
+            // cheap to rasterize again, and a stepped glyph would be resampled while the group
+            // moves and snap when it stops.
+            const double text = std::max(group.scale_x, group.scale_y);
+            if (x != 1.0 || y != 1.0 || text != 1.0)
+                scales.push_back(GroupRasterScale{group.index, x, y, text});
         }
         submission_cache_.set_group_raster_scales(std::move(scales));
         std::ranges::sort(turned);

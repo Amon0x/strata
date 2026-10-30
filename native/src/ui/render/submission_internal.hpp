@@ -158,6 +158,7 @@ struct PreparedTextCacheEntry final {
     double display_scale = 1.0;
     double raster_scale = 1.0;
     bool subpixel = false;
+    bool unhinted = false;
     std::vector<PreparedTextPtr> groups;
 };
 

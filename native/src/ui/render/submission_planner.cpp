@@ -233,7 +233,7 @@ struct CommandTexture final {
 [[nodiscard]] std::vector<PreparedText>
 prepare_text(const TextRunRenderCommand& command, font::GlyphAtlas& atlas,
              const TextEngine& text_engine, const double display_scale, const double group_scale,
-             const bool subpixel) {
+             const bool subpixel, const bool unhinted) {
     // Glyphs are requested at the zoomed size and placed back at the run's own: plane bounds
     // shrink by the same factor, and pen positions snap to the zoomed device grid.
     const double raster_scale = effective_raster_scale(command, group_scale);
@@ -256,7 +256,7 @@ prepare_text(const TextRunRenderCommand& command, font::GlyphAtlas& atlas,
             static_cast<std::uint16_t>(logical.glyph_id), command.pixel_size * raster_scale, phase,
             logical.font_style_flags, run_raster_mode(command, subpixel),
             // Text effects read the distance this far beyond the glyph's edge.
-            effect_reach(command) * raster_scale);
+            effect_reach(command) * raster_scale, unhinted);
         if (!atlas_entry.has_value()) continue;
         const double pen_x =
             positioned(atlas_entry->mode)
@@ -427,7 +427,7 @@ void align_text_cache(
 
 void append_warmup_requests(const TextRunRenderCommand& text, const TextEngine& text_engine,
                             const SubmissionContext& context, const double group_scale,
-                            const bool subpixel,
+                            const bool subpixel, const bool unhinted,
                             std::vector<font::GlyphAtlasWarmupRequest>& requests) {
     const double raster_scale = effective_raster_scale(text, group_scale);
     requests.reserve(requests.size() + text.glyphs.size());
@@ -448,6 +448,7 @@ void append_warmup_requests(const TextRunRenderCommand& text, const TextEngine& 
             logical.font_style_flags,
             run_raster_mode(text, subpixel),
             effect_reach(text) * raster_scale,
+            unhinted,
         });
     }
 }
@@ -487,9 +488,35 @@ text_group_scales(const RenderCommandBuffer& commands,
                 const auto found = std::ranges::lower_bound(group_scales, groups.back(), {},
                                                             &GroupRasterScale::group);
                 if (found != group_scales.end() && found->group == groups.back())
-                    scale *= std::max(found->x, found->y);
+                    scale *= found->text;
             }
             result[index] = std::clamp(scale, 0.125, 8.0);
+        }
+    }
+    return result;
+}
+
+/**
+ * Which text runs are in a group drawn scaled (a zoom): they rasterize without hinting, which would
+ * move their stems and x-height a pixel at a time as the scale passes through sizes.
+ */
+[[nodiscard]] std::vector<bool>
+zoomed_text_runs(const RenderCommandBuffer& commands,
+                 const std::span<const GroupRasterScale> group_scales) {
+    std::vector<bool> result(commands.size(), false);
+    std::vector<std::uint32_t> groups;
+    for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
+        const RenderCommand& source = commands.commands()[index];
+        if (const auto* push = std::get_if<GroupPushRenderCommand>(&source)) {
+            groups.push_back(push->group);
+        } else if (std::holds_alternative<GroupPopRenderCommand>(source)) {
+            if (!groups.empty())
+                groups.pop_back();
+        } else if (std::holds_alternative<TextRunRenderCommand>(source) && !groups.empty()) {
+            const auto found = std::ranges::lower_bound(group_scales, groups.back(), {},
+                                                        &GroupRasterScale::group);
+            result[index] = found != group_scales.end() && found->group == groups.back() &&
+                            found->text != 1.0;
         }
     }
     return result;
@@ -2612,6 +2639,7 @@ std::vector<PlannedItem> plan(
     const std::vector<double> text_scales = text_group_scales(commands, cache.group_raster_scales);
     const std::vector<bool> subpixel_runs =
         subpixel_text_runs(commands, text_scales, cache.turned_groups, context.text_subpixel);
+    const std::vector<bool> zoomed_runs = zoomed_text_runs(commands, cache.group_raster_scales);
     const auto collect_warmup_requests =
         [&](const std::uint64_t atlas_generation, const bool all) {
         std::vector<font::GlyphAtlasWarmupRequest> requests;
@@ -2627,11 +2655,12 @@ std::vector<PlannedItem> plan(
                 retained->atlas_generation == atlas_generation &&
                 retained->display_scale == context.scale &&
                 retained->raster_scale == text_scales[index] &&
-                retained->subpixel == subpixel_runs[index]) {
+                retained->subpixel == subpixel_runs[index] &&
+                retained->unhinted == zoomed_runs[index]) {
                 continue;
             }
             append_warmup_requests(*text, *text_engine, context, text_scales[index],
-                                   subpixel_runs[index], requests);
+                                   subpixel_runs[index], zoomed_runs[index], requests);
         }
         return requests;
     };
@@ -2670,12 +2699,13 @@ std::vector<PlannedItem> plan(
                     retained->atlas_generation == warm_generation &&
                     retained->display_scale == context.scale &&
                     retained->raster_scale == text_scales[index] &&
-                retained->subpixel == subpixel_runs[index]) {
+                retained->subpixel == subpixel_runs[index] &&
+                retained->unhinted == zoomed_runs[index]) {
                     continue;
                 }
                 std::vector<PreparedText> prepared =
                     prepare_text(*text, glyph_atlas, *text_engine, context.scale,
-                                 text_scales[index], subpixel_runs[index]);
+                                 text_scales[index], subpixel_runs[index], zoomed_runs[index]);
                 std::vector<PreparedTextPtr> groups;
                 groups.reserve(prepared.size());
                 for (PreparedText& group : prepared) {
@@ -2684,7 +2714,7 @@ std::vector<PlannedItem> plan(
                 cache.text[index] = PreparedTextCacheEntry{
                     *text,         text_engine,          glyph_atlas.generation(),
                     context.scale, text_scales[index],   subpixel_runs[index],
-                    std::move(groups),
+                    zoomed_runs[index],  std::move(groups),
                 };
             }
             telemetry.text_preparation_nanos +=
@@ -2774,6 +2804,7 @@ std::optional<std::vector<std::size_t>> replan_ranges(
     const std::vector<double> text_scales = text_group_scales(commands, cache.group_raster_scales);
     const std::vector<bool> subpixel_runs =
         subpixel_text_runs(commands, text_scales, cache.turned_groups, context.text_subpixel);
+    const std::vector<bool> zoomed_runs = zoomed_text_runs(commands, cache.group_raster_scales);
     // Text in the ranges is prepared as the full plan would: a run keeps its prepared glyphs
     // while its content does, and a hidden run drops them. Entries are exact for their content,
     // so they stand even when this update gives way to a full plan.
@@ -2792,13 +2823,14 @@ std::optional<std::vector<std::size_t>> replan_ranges(
                 retained->atlas_generation == glyph_atlas.generation() &&
                 retained->display_scale == context.scale &&
                 retained->raster_scale == text_scales[index] &&
-                retained->subpixel == subpixel_runs[index]) {
+                retained->subpixel == subpixel_runs[index] &&
+                retained->unhinted == zoomed_runs[index]) {
                 continue;
             }
             glyph_atlas.adopt_display_scale(context.scale);
             std::vector<font::GlyphAtlasWarmupRequest> requests;
             append_warmup_requests(*text, *text_engine, context, text_scales[index],
-                                   subpixel_runs[index], requests);
+                                   subpixel_runs[index], zoomed_runs[index], requests);
             const std::uint64_t generation = glyph_atlas.generation();
             const auto warmup_started = std::chrono::steady_clock::now();
             const bool warmed = glyph_atlas.warm(requests);
@@ -2811,7 +2843,7 @@ std::optional<std::vector<std::size_t>> replan_ranges(
             const auto preparation_started = std::chrono::steady_clock::now();
             std::vector<PreparedText> prepared =
                 prepare_text(*text, glyph_atlas, *text_engine, context.scale, text_scales[index],
-                             subpixel_runs[index]);
+                             subpixel_runs[index], zoomed_runs[index]);
             std::vector<PreparedTextPtr> groups;
             groups.reserve(prepared.size());
             for (PreparedText& group : prepared) {
@@ -2820,7 +2852,7 @@ std::optional<std::vector<std::size_t>> replan_ranges(
             cache.text[index] = PreparedTextCacheEntry{
                 *text,         text_engine,        generation,
                 context.scale, text_scales[index], subpixel_runs[index],
-                std::move(groups),
+                zoomed_runs[index], std::move(groups),
             };
             telemetry.text_preparation_nanos +=
                 std::chrono::duration_cast<std::chrono::nanoseconds>(

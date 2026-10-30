@@ -120,6 +120,8 @@ struct GlyphAtlasWarmupRequest final {
     GlyphRasterMode mode = GlyphRasterMode::coverage;
     /** How far beyond its edge an MSDF glyph's distance must reach (see GlyphAtlas::request). */
     double reach = 0.0;
+    /** Rasterize without hinting (see GlyphAtlas::request). */
+    bool unhinted = false;
 };
 
 /**
@@ -165,7 +167,8 @@ class GlyphAtlas final {
     [[nodiscard]] std::optional<GlyphAtlasEntry>
     request(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
             double pixel_size, SubpixelPhase coverage_phase, std::uint32_t font_style_flags = 0U,
-            GlyphRasterMode mode = GlyphRasterMode::coverage, double reach = 0.0);
+            GlyphRasterMode mode = GlyphRasterMode::coverage, double reach = 0.0,
+            bool unhinted = false);
 
     /**
      * The pages something still drawn uses, given before planning a frame. With it, a full atlas
@@ -261,13 +264,13 @@ class GlyphAtlas final {
     [[nodiscard]] std::optional<GlyphAtlasEntry>
     request_mode(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
                  double pixel_size, SubpixelPhase phase, GlyphRasterMode mode,
-                 std::uint32_t font_style_flags, double reach = 0.0);
+                 std::uint32_t font_style_flags, double reach = 0.0, bool unhinted = false);
     struct Resolved;
     /** What a glyph request rasterizes as and is cached under; request and warm agree on it. */
     [[nodiscard]] Resolved resolve(std::string_view font_id, const OpenTypeFont& font,
                                    std::uint16_t glyph, double pixel_size, SubpixelPhase phase,
                                    GlyphRasterMode mode, std::uint32_t font_style_flags,
-                                   double reach) const;
+                                   double reach, bool unhinted = false) const;
     [[nodiscard]] bool recycle_for_capacity(Key& key);
     [[nodiscard]] std::optional<Allocation> reuse_unretained_page(std::uint32_t width,
                                                                   std::uint32_t height,

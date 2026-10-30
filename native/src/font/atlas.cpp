@@ -316,6 +316,8 @@ struct GlyphAtlas::Key final {
     std::uint64_t generation = 0U;
     /** An MSDF glyph's widened reach, in whole layout pixels (0: the configured range). */
     std::uint32_t reach = 0U;
+    /** A coverage or subpixel glyph rasterized without hinting. */
+    bool unhinted = false;
 
     [[nodiscard]] friend auto operator<=>(const Key&, const Key&) = default;
 };
@@ -410,23 +412,24 @@ std::optional<GlyphAtlasEntry>
 GlyphAtlas::request(const std::string_view font_id, const OpenTypeFont& font,
                     const std::uint16_t glyph, const double pixel_size,
                     const SubpixelPhase coverage_phase, const std::uint32_t font_style_flags,
-                    const GlyphRasterMode mode, const double reach) {
+                    const GlyphRasterMode mode, const double reach, const bool unhinted) {
     const bool positioned = mode == GlyphRasterMode::coverage || mode == GlyphRasterMode::subpixel;
     return request_mode(font_id, font, glyph, pixel_size,
                         positioned ? coverage_phase : SubpixelPhase{}, mode, font_style_flags,
-                        reach);
+                        reach, unhinted);
 }
 
 struct GlyphAtlas::Resolved final {
     Key key;
     MsdfRasterConfig msdf;
+    CoverageRasterConfig coverage;
 };
 
 GlyphAtlas::Resolved GlyphAtlas::resolve(const std::string_view font_id, const OpenTypeFont& font,
                                          const std::uint16_t glyph, const double pixel_size,
                                          const SubpixelPhase phase, const GlyphRasterMode mode,
                                          const std::uint32_t font_style_flags,
-                                         const double reach) const {
+                                         const double reach, const bool unhinted) const {
     if (font_id.empty())
         throw std::invalid_argument("glyph atlas font id must not be empty");
     // A colour glyph (an emoji) draws its own colours, whatever its text asked for.
@@ -452,7 +455,16 @@ GlyphAtlas::Resolved GlyphAtlas::resolve(const std::string_view font_id, const O
             generation_,
         },
         config_.msdf,
+        config_.coverage,
     };
+    // Text drawn at a scale that keeps changing (a zoom) is not grid-fitted: hinting would move
+    // its stems and x-height a pixel at a time as the size passes through, and the text would
+    // shimmer while it scales.
+    if (unhinted && (effective_mode == GlyphRasterMode::coverage ||
+                     effective_mode == GlyphRasterMode::subpixel)) {
+        result.key.unhinted = true;
+        result.coverage.hinting = GlyphHinting::none;
+    }
     // A distance that must reach further than the configured range: the field widened to
     // cover it on both sides of the edge, with padding to hold it.
     if (effective_mode == GlyphRasterMode::msdf && reach > 0.0 && std::isfinite(reach)) {
@@ -472,9 +484,10 @@ std::optional<GlyphAtlasEntry>
 GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& font,
                          const std::uint16_t glyph, const double pixel_size,
                          const SubpixelPhase phase, const GlyphRasterMode mode,
-                         const std::uint32_t font_style_flags, const double reach) {
-    Resolved resolved =
-        resolve(font_id, font, glyph, pixel_size, phase, mode, font_style_flags, reach);
+                         const std::uint32_t font_style_flags, const double reach,
+                         const bool unhinted) {
+    Resolved resolved = resolve(font_id, font, glyph, pixel_size, phase, mode, font_style_flags,
+                                reach, unhinted);
     Key& key = resolved.key;
     const MsdfRasterConfig& msdf = resolved.msdf;
     const GlyphRasterMode effective_mode = key.mode;
@@ -486,12 +499,12 @@ GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& fon
     }
     RasterCacheIdentity identity =
         raster_cache_identity(font, glyph, pixel_size, display_scale_, key.phase, effective_mode,
-                              realized_style_flags, config_.coverage, msdf, subpixel_order_);
+                              realized_style_flags, resolved.coverage, msdf, subpixel_order_);
     SharedRaster bitmap = shared_raster_cache().find(identity.key);
     if (bitmap == nullptr) {
         bitmap = std::make_shared<const std::optional<GlyphRasterBitmap>>(
             rasterize(font, glyph, pixel_size, display_scale_, key.phase, effective_mode,
-                      realized_style_flags, config_.coverage, msdf, subpixel_order_));
+                      realized_style_flags, resolved.coverage, msdf, subpixel_order_));
         bitmap = shared_raster_cache().insert(std::move(identity), std::move(bitmap));
     }
     if (!bitmap->has_value())
@@ -614,6 +627,7 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
         RasterCacheIdentity identity;
         SharedRaster raster;
         MsdfRasterConfig msdf;
+        CoverageRasterConfig coverage;
     };
     std::vector<Pending> pending;
     pending.reserve(requests.size());
@@ -625,13 +639,14 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
         }
         Resolved resolved =
             resolve(request.font_id, *request.font, request.glyph, request.pixel_size,
-                    request.phase, request.mode, request.font_style_flags, request.reach);
+                    request.phase, request.mode, request.font_style_flags, request.reach,
+                    request.unhinted);
         Key& key = resolved.key;
         if (cache_.contains(key) || unique.contains(key))
             continue;
         RasterCacheIdentity identity = raster_cache_identity(
             *request.font, request.glyph, request.pixel_size, display_scale_, key.phase, key.mode,
-            key.font_style_flags, config_.coverage, resolved.msdf, subpixel_order_);
+            key.font_style_flags, resolved.coverage, resolved.msdf, subpixel_order_);
         SharedRaster raster = shared_raster_cache().find(identity.key);
         unique.emplace(key, pending.size());
         pending.push_back(Pending{
@@ -640,6 +655,7 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
             std::move(identity),
             std::move(raster),
             resolved.msdf,
+            resolved.coverage,
         });
     }
 
@@ -688,7 +704,7 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
                         std::make_shared<const std::optional<GlyphRasterBitmap>>(rasterize(
                             *item.font, item.key.glyph, std::bit_cast<double>(item.key.pixel_size),
                             display_scale_, item.key.phase, item.key.mode,
-                            item.key.font_style_flags, config_.coverage, item.msdf,
+                            item.key.font_style_flags, item.coverage, item.msdf,
                             subpixel_order_));
                 } catch (...) {
                     {
