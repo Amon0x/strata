@@ -749,6 +749,74 @@ std::uint64_t packet_u64(const std::vector<std::uint8_t>& packet, std::size_t& o
     return value;
 }
 
+void test_render_streams_share_runs_without_copies() {
+    using namespace strata::ui;
+    const auto rect = [](const double x) {
+        return RenderCommand(SolidRectRenderCommand{Rect{x, 0.0, 1.0, 1.0}, {}});
+    };
+    // A frame draws ten commands into storage of its own: one run.
+    RenderCommandBuffer first;
+    for (int index = 0; index < 10; ++index)
+        first.append(rect(index));
+    check(first.commands().segments().size() == 1U && first.size() == 10U,
+          "commands drawn in order did not make one run");
+
+    // The next frame reuses commands 2..7 where they are, between two drawn anew.
+    const std::vector<RenderCommandView::Segment> kept = first.commands().slice(2U, 8U);
+    check(kept.size() == 1U && kept.front().size() == 6U, "a slice within one run is not one run");
+    RenderCommandBuffer second;
+    second.append(rect(100));
+    second.append(kept);
+    second.append(rect(200));
+    check(second.size() == 8U && second.commands().segments().size() == 3U,
+          "reused commands were not appended as a run of their own");
+    check(second.commands().segments()[1].storage == first.commands().segments()[0].storage,
+          "reused commands were copied rather than read where they were drawn");
+    check(second.commands()[1] == rect(2) && second.commands()[6] == rect(7) &&
+              second.commands().back() == rect(200),
+          "a stream of runs reads its commands out of order");
+    std::size_t walked = 0U;
+    for (const RenderCommand& command : second.commands()) {
+        static_cast<void>(command);
+        ++walked;
+    }
+    check(walked == 8U, "walking a stream of runs missed commands");
+
+    // A slice across runs takes the parts of each run it covers.
+    const std::vector<RenderCommandView::Segment> across = second.commands().slice(0U, 3U);
+    check(across.size() == 2U && across[0].size() == 1U && across[1].size() == 2U,
+          "a slice across runs did not cut them at its ends");
+
+    // Two streams compare equal whatever their runs; their differences are the commands that
+    // differ, read across runs that do not line up, and runs both share are not read at all.
+    RenderCommandBuffer flat;
+    for (const RenderCommand& command : second.commands())
+        flat.append(command);
+    check(flat.commands() == second.commands() && flat.commands() == second.commands().to_vector(),
+          "equal streams of different runs compared unequal");
+    RenderCommandBuffer changed;
+    changed.append(rect(100));
+    changed.append(first.commands().slice(2U, 5U));
+    changed.append(rect(-1));
+    changed.append(first.commands().slice(6U, 8U));
+    changed.append(rect(200));
+    const std::vector<std::size_t> differences = changed.commands().differences(second.commands());
+    check(differences == std::vector<std::size_t>{4U},
+          "differences between streams were not the one command that changed");
+    check(!(changed.commands() == second.commands()), "streams that differ compared equal");
+
+    // A copy reads the same runs; appending to the original never changes what the copy holds.
+    RenderCommandBuffer copy = second;
+    check(copy.shares_storage(second), "a copied stream did not share its runs");
+    second.append(rect(300));
+    check(copy.size() == 8U && copy.commands().back() == rect(200),
+          "appending to a stream changed a copy of it");
+    copy.append(rect(400));
+    check(second.size() == 9U && second.commands().back() == rect(300) &&
+              copy.commands().back() == rect(400),
+          "appending to a copy changed the stream it was copied from");
+}
+
 void test_render_packet_batches_every_portable_command() {
     using namespace strata::ui;
     RenderCommandBuffer commands;
@@ -9409,6 +9477,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_content_size_motion_interrupts_and_settles();
         test_scroll_virtual_range_clipping_and_safe_insets();
         test_active_work_scheduler_and_detach_cleanup();
+        test_render_streams_share_runs_without_copies();
         test_render_packet_batches_every_portable_command();
         test_authored_material_scope_is_fill_local();
         test_shadow_submission_extends_beyond_the_source_shape();
