@@ -62,6 +62,9 @@ static_assert(static_cast<std::uint32_t>(strata::ui::PacketClipCoverage::straigh
               "the engine's clip coverage modes must be the C ABI's");
 static_assert(strata::ui::effect_sample_reach == STRATA_EFFECT_SAMPLE_REACH,
               "the engine's effect sample reach must be the C ABI's");
+static_assert(strata::ui::maximum_content_effect_depth ==
+                  STRATA_RENDER_PACKET_MAXIMUM_CONTENT_EFFECT_DEPTH,
+              "the planner's content-effect nesting bound must be the packet's");
 
 namespace {
 

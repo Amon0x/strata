@@ -163,9 +163,11 @@ acknowledges the terminal resource packet before releasing the Surface.
 
 At application configuration the host enumerates material declarations and ordered effect-pass
 declarations for the `hlsl` backend, resolves their resource ids, and compiles them once. Effect
-targets are retained at framebuffer size and reused by nesting depth; backdrop capture, isolated
-content, blur/shader passes, rounded masking, and premultiplied composition do not rebuild widget
-geometry.
+workspace targets are retained at framebuffer size. Isolated content nests without a depth limit:
+the innermost few open layers take framebuffer-sized targets in turn, deeper nesting parks the
+outer ones in targets sized to their read bounds, and targets unused for a while are released.
+Backdrop capture, isolated content, blur/shader passes, rounded masking, and premultiplied
+composition do not rebuild widget geometry.
 
 Register action handlers and required snapshots before `activate()`, because activation validates
 the configured application schema. Use `bindings().snapshot(...)` for revision-watched models and

@@ -669,14 +669,12 @@ struct RenderContext::Impl final {
             current_frame_seconds
         );
         effects->begin_surface(target_texture.Get(), capture_surface_backdrop);
+        effects->begin_content_layers(packet.batches,
+                                      ContentTarget{target_texture.Get(), target.Get()},
+                                      logical_width, logical_height);
         bind_draw_pipeline(retained, target.Get());
-        struct ContentLayer final {
-            EffectBatch effect;
-            ID3D11Texture2D* parent_texture = nullptr;
-            ID3D11RenderTargetView* parent_target = nullptr;
-            std::size_t depth = 0U;
-        };
-        std::vector<ContentLayer> content_layers;
+        // The open isolated layers' effects; the effect renderer holds their targets.
+        std::vector<const EffectBatch*> content_layers;
         ID3D11Texture2D* active_texture = target_texture.Get();
         ID3D11RenderTargetView* active_target = target.Get();
         const auto add_effect_telemetry = [&telemetry](const EffectPassTelemetry& measured) {
@@ -699,6 +697,7 @@ struct RenderContext::Impl final {
         for (const SubmissionBatch& batch : packet.batches) {
             if (const auto* draw_batch = std::get_if<DrawBatch>(&batch); draw_batch != nullptr) {
                 draw(*draw_batch);
+                effects->touch_content();
             } else if (const auto* blur_batch = std::get_if<BlurBatch>(&batch);
                        blur_batch != nullptr) {
                 const BlurPassTelemetry measured =
@@ -710,39 +709,38 @@ struct RenderContext::Impl final {
                 telemetry.blur_target_height =
                     std::max(telemetry.blur_target_height, measured.target_height);
                 telemetry.blur_nanos += measured.nanos;
+                effects->touch_content();
                 bind_draw_pipeline(retained, active_target);
             } else if (const auto* backdrop_effect = std::get_if<EffectBatch>(&batch);
                        backdrop_effect != nullptr &&
                        backdrop_effect->kind == EffectBatchKind::backdrop) {
                 add_effect_telemetry(effects->apply_backdrop(
-                    id, content_layers.size(), *backdrop_effect, active_texture, active_target,
-                    logical_width, logical_height, current_frame_seconds));
+                    id, *backdrop_effect, active_texture, active_target, logical_width,
+                    logical_height, current_frame_seconds));
+                effects->touch_content();
                 bind_draw_pipeline(retained, active_target);
             } else if (const auto* content_effect = std::get_if<EffectBatch>(&batch);
                        content_effect != nullptr &&
                        content_effect->kind == EffectBatchKind::content_begin) {
-                const std::size_t depth = content_layers.size();
-                content_layers.push_back(ContentLayer{
-                    *content_effect,
-                    active_texture,
-                    active_target,
-                    depth,
-                });
-                active_target = effects->begin_content(depth);
-                active_texture = effects->content_texture(depth);
+                content_layers.push_back(content_effect);
+                const ContentTarget opened = effects->begin_content();
+                active_texture = opened.texture;
+                active_target = opened.target;
                 bind_draw_pipeline(retained, active_target);
             } else {
                 if (!std::holds_alternative<host::ContentEffectEndBatch>(batch) ||
                     content_layers.empty()) {
                     throw std::logic_error("D3D11 content effect stack is invalid");
                 }
-                ContentLayer layer = std::move(content_layers.back());
+                const EffectBatch& layer = *content_layers.back();
                 content_layers.pop_back();
                 add_effect_telemetry(effects->finish_content(
-                    id, layer.depth, layer.effect, layer.parent_texture, layer.parent_target,
-                    logical_width, logical_height, current_frame_seconds));
-                active_texture = layer.parent_texture;
-                active_target = layer.parent_target;
+                    id, layer, logical_width, logical_height, current_frame_seconds));
+                // The parent may have been parked while deeper layers drew, and restored to
+                // another target.
+                const ContentTarget parent = effects->active_content();
+                active_texture = parent.texture;
+                active_target = parent.target;
                 bind_draw_pipeline(retained, active_target);
             }
         }

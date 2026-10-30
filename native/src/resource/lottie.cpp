@@ -17,8 +17,6 @@ using data::JsonValue;
 
 /** Samples a spatial segment's arc is measured at; its speed is even to within their spacing. */
 constexpr std::size_t arc_samples = 48U;
-/** The deepest precomposition nesting and the most shape-group nesting a document may have. */
-constexpr std::size_t maximum_nesting = 64U;
 
 [[nodiscard]] std::optional<double> number(const JsonValue* const value) noexcept {
     if (value == nullptr)
@@ -792,6 +790,30 @@ composition(const JsonValue* const layers,
     return false;
 }
 
+/**
+ * How many precompositions deep precomposition `index` nests, itself included, in a document
+ * without cycles; `known` memoizes it. A precomposition `level` deep whose nesting reaches past
+ * maximum_nesting is rejected.
+ */
+[[nodiscard]] std::size_t precomp_nesting(const Animation& animation, const std::size_t index,
+                                          std::vector<std::size_t>& known,
+                                          const std::size_t level) {
+    if (level > maximum_nesting)
+        throw std::invalid_argument("Lottie precompositions nest too deeply");
+    if (known[index] == 0U) {
+        std::size_t deepest = 0U;
+        for (const Layer& entry : animation.precomps[index].layers) {
+            if (entry.precomp.has_value())
+                deepest = std::max(
+                    deepest, precomp_nesting(animation, *entry.precomp, known, level + 1U));
+        }
+        known[index] = deepest + 1U;
+    }
+    if (level + known[index] - 1U > maximum_nesting)
+        throw std::invalid_argument("Lottie precompositions nest too deeply");
+    return known[index];
+}
+
 [[nodiscard]] double cubic_axis(const double a, const double b, const double t) noexcept {
     const double u = 1.0 - t;
     return 3.0 * u * u * t * a + 3.0 * u * t * t * b + t * t * t;
@@ -1187,6 +1209,13 @@ Animation parse(const std::string_view json) {
     for (std::size_t index = 0U; index < result.precomps.size(); ++index) {
         if (cyclic(result, index, state))
             throw std::invalid_argument("a Lottie precomposition contains itself");
+    }
+    // A frame follows every level it nests, so a document deeper than that is refused here
+    // rather than cut short as it plays.
+    std::vector<std::size_t> known(result.precomps.size(), 0U);
+    for (const Layer& layer : result.root.layers) {
+        if (layer.precomp.has_value())
+            static_cast<void>(precomp_nesting(result, *layer.precomp, known, 1U));
     }
     return result;
 }

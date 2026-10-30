@@ -119,6 +119,24 @@ void test_parsing() {
                 R"([{"id":"a","layers":[{"ty":0,"refId":"a","ip":0,"op":60,"ks":{}}]}])")));
         },
         "a precomposition containing itself is refused");
+    // Precompositions nest as deep as maximum_nesting, every level drawn; deeper is refused rather
+    // than cut short as it plays.
+    const auto chain = [](const std::size_t levels) {
+        std::string assets = "[";
+        for (std::size_t level = 1U; level <= levels; ++level) {
+            const std::string inner =
+                level < levels ? R"({"ty":0,"refId":"p)" + std::to_string(level + 1U) +
+                                     R"(","ip":0,"op":60,"ks":{}})"
+                               : std::string{};
+            assets += (level > 1U ? "," : "") + std::string(R"({"id":"p)") +
+                      std::to_string(level) + R"(","layers":[)" + inner + "]}";
+        }
+        return document(R"([{"ty":0,"refId":"p1","ip":0,"op":60,"ks":{}}])", assets + "]");
+    };
+    check(model::parse(chain(model::maximum_nesting)).precomps.size() == model::maximum_nesting,
+          "precompositions nest as deep as the loader allows");
+    check_throws([&] { static_cast<void>(model::parse(chain(model::maximum_nesting + 1U))); },
+                 "precompositions nested too deeply are refused");
 }
 
 void test_easing() {
@@ -426,6 +444,19 @@ void test_frames(const std::filesystem::path& resources) {
     return result;
 }
 
+/** How deep the content effects of a frame nest. */
+[[nodiscard]] std::size_t layer_depth(const std::vector<ui::RenderCommand>& commands) {
+    std::size_t depth = 0U;
+    std::size_t deepest = 0U;
+    for (const ui::RenderCommand& command : commands) {
+        if (std::holds_alternative<ui::ContentEffectPushRenderCommand>(command))
+            deepest = std::max(deepest, ++depth);
+        else if (std::holds_alternative<ui::ContentEffectPopRenderCommand>(command))
+            --depth;
+    }
+    return deepest;
+}
+
 void test_layers() {
     // Blend modes, feather, effects, images and text parse into the model.
     const std::string square =
@@ -508,6 +539,46 @@ void test_layers() {
             R"("shapes":[{"ty":"gr","it":[{"ty":"rc","p":{"a":0,"k":[50,50]},"s":{"a":0,"k":[60,60]},"r":{"a":0,"k":0}},{"ty":"fl","c":{"a":0,"k":[1,1,1,1]},"o":{"a":0,"k":100}}]},{"ty":"rc","p":{"a":0,"k":[70,50]},"s":{"a":0,"k":[60,60]},"r":{"a":0,"k":0}},{"ty":"fl","c":{"a":0,"k":[1,0,0,1]},"o":{"a":0,"k":100}}])") ==
             1U,
         "overlapping faded paints fade as one layer");
+
+    // Layers isolate however deep they nest: ten screen precompositions, one inside the next,
+    // around a multiplied square under a track matte. Every level is a layer of its own, and the
+    // innermost keep their blend and their matte.
+    std::string assets = "[";
+    for (int level = 1; level <= 10; ++level) {
+        const std::string inner =
+            level < 10
+                ? R"({"ty":0,"ind":1,"refId":"p)" + std::to_string(level + 1) +
+                      R"(","w":200,"h":100,"ip":0,"op":60,"st":0,"bm":2,"ks":{}})"
+                : R"({"ty":4,"ind":1,"ip":0,"op":60,"st":0,"td":1,"ks":{},)" + square +
+                      R"(},{"ty":4,"ind":2,"ip":0,"op":60,"st":0,"tt":1,"bm":1,"ks":{},)" +
+                      square + "}";
+        assets += (level > 1 ? "," : "") + std::string(R"({"id":"p)") + std::to_string(level) +
+                  R"(","layers":[)" + inner + "]}";
+    }
+    const model::Animation deep = model::parse(document(
+        R"([{"ty":0,"ind":1,"refId":"p1","w":200,"h":100,"ip":0,"op":60,"st":0,"bm":2,"ks":{}}])",
+        assets + "]"));
+    commands.clear();
+    geo::append_frame(commands, deep, 0.0, ui::Rect{0.0, 0.0, 200.0, 100.0},
+                      ui::Rect{0.0, 0.0, 200.0, 100.0});
+    const std::vector<ui::EffectState> deep_layers = layers(commands);
+    check(layer_depth(commands) >= 13U,
+          "layers nested past the old budget are each drawn apart");
+    check(std::ranges::count_if(deep_layers,
+                                [](const ui::EffectState& effect) {
+                                    return effect.composite == ui::LayerComposite::screen;
+                                }) == 10,
+          "every nested screen precomposition keeps its blend");
+    check(std::ranges::any_of(deep_layers,
+                              [](const ui::EffectState& effect) {
+                                  return effect.composite == ui::LayerComposite::multiply;
+                              }) &&
+              std::ranges::any_of(deep_layers,
+                                  [](const ui::EffectState& effect) {
+                                      return effect.composite ==
+                                             ui::LayerComposite::destination_in;
+                                  }),
+          "the innermost layer keeps its blend and its matte");
 }
 
 } // namespace

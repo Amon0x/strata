@@ -30,7 +30,6 @@ namespace {
 
 constexpr double transform_epsilon = 0.000001;
 constexpr std::uint16_t coverage_subpixel_divisions = 4U;
-constexpr std::size_t maximum_content_effect_depth = 8U;
 
 [[nodiscard]] bool rounded(const CornerRadii radii) noexcept {
     return radii.top_left > 0.0 || radii.top_right > 0.0 ||

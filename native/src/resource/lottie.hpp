@@ -20,6 +20,12 @@
 namespace strata::resource::lottie {
 
 /**
+ * The deepest precomposition nesting and the most shape-group nesting a document may have; the
+ * loader rejects a deeper one, so a frame follows every level of any document it accepts.
+ */
+inline constexpr std::size_t maximum_nesting = 64U;
+
+/**
  * A Lottie (Bodymovin) animation, parsed once into typed properties so a frame is evaluated by
  * arithmetic alone: no JSON is read after parsing. Coordinates are the composition's own units
  * (y down), times are frames, colours are 0-1 channels and percentages stay percentages, exactly

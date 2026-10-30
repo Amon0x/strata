@@ -18,6 +18,7 @@
 
 #include "gpu/effect_policy.hpp"
 #include "gpu/effect_shaders.hpp"
+#include "gpu/isolation.hpp"
 #include "gpu/layer_shaders.hpp"
 #include <strata/render_shapes.hpp>
 
@@ -1703,13 +1704,55 @@ void SoftwareRenderer::render(const host::RenderPacket& packet,
     );
     const std::vector<std::uint8_t> surface_backdrop =
         capture_surface_backdrop ? pixels_ : std::vector<std::uint8_t>{};
+    // An isolated layer keeps only the pixels later passes read back from it while the layers
+    // nested in it draw (gpu/isolation.hpp), as the GPU renderers park theirs: only the Surface
+    // and the innermost layer are whole images, however deep layers nest. The read bounds use the
+    // GPU renderers' sample region, which holds everything these passes read.
+    const double scale = std::max(static_cast<double>(width_) / logical_width_,
+                                  static_cast<double>(height_) / logical_height_);
+    const std::vector<gpu::PixelBounds> reads = gpu::content_read_bounds(
+        packet.batches, width_, height_, logical_width_, logical_height_,
+        [&](const host::EffectBatch& effect) {
+            double widest = 0.0;
+            if (const std::vector<EffectPass>* const program = program_of(effect)) {
+                for (const EffectPass& pass : *program) {
+                    if (pass.kind == 0U)
+                        widest = std::max(widest, pass.radius_parameter < effect.parameter_count
+                                                      ? effect.parameters[pass.radius_parameter]
+                                                      : pass.radius);
+                }
+            }
+            const double reach = std::ceil(std::max(
+                gpu::effect_sample_reach * scale,
+                std::clamp(std::ceil(std::max(widest, effect.filter_reach() * 2.0) * scale), 1.0,
+                           512.0)));
+            const auto edge = [](const double value, const std::uint32_t limit) {
+                return static_cast<std::uint32_t>(
+                    std::clamp(value, 0.0, static_cast<double>(limit)));
+            };
+            const double scale_x = static_cast<double>(width_) / logical_width_;
+            const double scale_y = static_cast<double>(height_) / logical_height_;
+            return gpu::PixelBounds{
+                edge(std::floor(effect.x * scale_x) - reach, width_),
+                edge(std::floor(effect.y * scale_y) - reach, height_),
+                edge(std::ceil((effect.x + effect.width) * scale_x) + reach, width_),
+                edge(std::ceil((effect.y + effect.height) * scale_y) + reach, height_),
+            };
+        });
+    std::size_t next_read = 0U;
+    // The innermost open layer's read bounds, and whether anything has been drawn into it.
+    gpu::PixelBounds active_read;
+    bool active_drawn = false;
+    const std::size_t row_bytes = static_cast<std::size_t>(width_) * 4U;
     std::vector<ContentEffect> content_effects;
     for (const host::SubmissionBatch& batch : packet.batches) {
         if (const auto* draw_batch = std::get_if<host::DrawBatch>(&batch); draw_batch != nullptr) {
             draw(*draw_batch, packet);
+            active_drawn = true;
         } else if (const auto* blur_batch = std::get_if<host::BlurBatch>(&batch);
                    blur_batch != nullptr) {
             blur(*blur_batch);
+            active_drawn = true;
         } else if (const auto* backdrop_effect = std::get_if<host::EffectBatch>(&batch);
                    backdrop_effect != nullptr &&
                    backdrop_effect->kind == host::EffectBatchKind::backdrop) {
@@ -1732,13 +1775,33 @@ void SoftwareRenderer::render(const host::RenderPacket& packet,
             } else {
                 composite_cached_effect(*backdrop_effect, false);
             }
+            active_drawn = true;
         } else if (const auto* content_effect = std::get_if<host::EffectBatch>(&batch);
                    content_effect != nullptr &&
                    content_effect->kind == host::EffectBatchKind::content_begin) {
             if (content_effects.size() == host::maximum_content_effect_depth) {
                 throw std::length_error("software content effect nesting exceeds the packet limit");
             }
-            content_effects.push_back(ContentEffect{*content_effect, std::move(pixels_)});
+            ContentEffect saved{*content_effect, {}, active_read, !content_effects.empty()};
+            if (!saved.parent_is_layer) {
+                saved.parent = std::move(pixels_);
+            } else if (active_drawn && !active_read.empty()) {
+                const std::size_t kept_row = static_cast<std::size_t>(active_read.width()) * 4U;
+                saved.parent.resize(kept_row * active_read.height());
+                for (std::uint32_t row = 0U; row < active_read.height(); ++row) {
+                    std::copy_n(pixels_.begin() + static_cast<std::ptrdiff_t>(
+                                                      (active_read.top + row) * row_bytes +
+                                                      active_read.left * 4U),
+                                kept_row,
+                                saved.parent.begin() +
+                                    static_cast<std::ptrdiff_t>(row * kept_row));
+                }
+            }
+            content_effects.push_back(std::move(saved));
+            active_read = next_read < reads.size() ? reads[next_read]
+                                                   : gpu::PixelBounds{0U, 0U, width_, height_};
+            ++next_read;
+            active_drawn = false;
             pixels_.assign(static_cast<std::size_t>(width_) * height_ * 4U, std::uint8_t{0U});
         } else {
             if (!std::holds_alternative<host::ContentEffectEndBatch>(batch) ||
@@ -1747,15 +1810,32 @@ void SoftwareRenderer::render(const host::RenderPacket& packet,
             }
             ContentEffect content = std::move(content_effects.back());
             content_effects.pop_back();
+            // The parent whole again: a layer's kept read bounds back in place.
+            std::vector<std::uint8_t> backdrop = std::move(content.parent);
+            if (content.parent_is_layer) {
+                std::vector<std::uint8_t> whole(static_cast<std::size_t>(height_) * row_bytes,
+                                                std::uint8_t{0U});
+                const gpu::PixelBounds kept = content.parent_read;
+                const std::size_t kept_row = static_cast<std::size_t>(kept.width()) * 4U;
+                for (std::uint32_t row = 0U; !backdrop.empty() && row < kept.height(); ++row) {
+                    std::copy_n(backdrop.begin() + static_cast<std::ptrdiff_t>(row * kept_row),
+                                kept_row,
+                                whole.begin() + static_cast<std::ptrdiff_t>(
+                                                    (kept.top + row) * row_bytes + kept.left * 4U));
+                }
+                backdrop = std::move(whole);
+            }
+            active_read = content.parent_read;
+            active_drawn = true;
             if (effect_refresh_due(content.effect, true, time_nanoseconds)) {
                 apply_effect(content.effect);
                 apply_layer_filters(content.effect);
                 if (content.effect.refresh_rate > 0.0) {
                     capture_effect(content.effect, true, time_nanoseconds);
                 }
-                composite_effect(std::move(pixels_), std::move(content.backdrop), content.effect);
+                composite_effect(std::move(pixels_), std::move(backdrop), content.effect);
             } else {
-                pixels_ = std::move(content.backdrop);
+                pixels_ = std::move(backdrop);
                 composite_cached_effect(content.effect, true);
             }
         }

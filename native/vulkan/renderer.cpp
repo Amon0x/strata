@@ -96,13 +96,61 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
             if (left < right && top < bottom)
                 surface_backdrop = &capture(target, {left, top, right - left, bottom - top});
         }
+        // Isolated layers nest without limit. The innermost few draw into framebuffer-sized
+        // images; a layer nested past them parks the outermost of those, keeping only the pixels
+        // later passes read back from it in an image sized to them (gpu/isolation.hpp).
+        const std::vector<gpu::PixelBounds> reads = gpu::content_read_bounds(
+            packet.batches, target.width, target.height, logical_width, logical_height,
+            [&](const host::EffectBatch& effect) {
+                const host::Scissor region = sample_region(effect, target);
+                return gpu::PixelBounds{region.x, region.y, region.x + region.width,
+                                        region.y + region.height};
+            });
+        std::size_t next_read = 0;
         struct Content {
-            Target parent;
+            /** The framebuffer-sized image it draws into, or null while it is parked. */
             Image* image;
-            Image* backdrop;
+            /** Its read bounds while parked, when anything had been drawn into it. */
+            Image* parked;
+            gpu::PixelBounds read;
+            bool drawn;
             host::EffectBatch batch;
         };
         std::vector<Content> stack;
+        // The host target, while layers are open over it.
+        Target surface = target;
+        const auto park = [&](Content& level) {
+            if (level.drawn && !level.read.empty()) {
+                level.parked =
+                    &temporary(gpu::parked_extent(level.read.width(), surface.width),
+                               gpu::parked_extent(level.read.height(), surface.height),
+                               surface.format);
+                auto held = target_of(*level.image);
+                copy(held, *level.parked,
+                     {level.read.left, level.read.top, level.read.width(), level.read.height()}, 0,
+                     0);
+                level.image->layout = held.layout;
+            }
+            recycle(*level.image);
+            level.image = nullptr;
+        };
+        const auto restore = [&](Content& level) {
+            level.image = &temporary(surface.width, surface.height, surface.format);
+            clear(*level.image);
+            if (!level.parked)
+                return;
+            auto kept = target_of(*level.parked);
+            copy(kept, *level.image, {0, 0, level.read.width(), level.read.height()},
+                 static_cast<std::int32_t>(level.read.left),
+                 static_cast<std::int32_t>(level.read.top));
+            level.parked->layout = kept.layout;
+            recycle(*level.parked);
+            level.parked = nullptr;
+        };
+        const auto touch = [&stack] {
+            if (!stack.empty())
+                stack.back().drawn = true;
+        };
         for (const auto& submission : packet.batches) {
             if (const auto* batch = std::get_if<host::DrawBatch>(&submission)) {
                 // The decoder has checked every index against the vertex payload.
@@ -123,6 +171,7 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                 draw(target, program, batch->blend, constants,
                      clip_constants(batch->rounded_clips, batch->clip_coverage), *texture, *texture,
                      batch->scissor, batch, vertices, indices);
+                touch();
             } else if (const auto* blur_batch = std::get_if<host::BlurBatch>(&submission)) {
                 host::EffectBatch region;
                 region.x = blur_batch->x;
@@ -134,44 +183,68 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                     continue;
                 blur(target, bounds(region, target), blur_batch->radius * pixel_scale(target),
                      blur_batch->downsample, blur_batch->rounded_clips);
+                touch();
             } else if (const auto* effect_batch = std::get_if<host::EffectBatch>(&submission)) {
                 if (effect_batch->kind == host::EffectBatchKind::content_begin) {
                     if (stack.size() >= host::maximum_content_effect_depth)
                         throw std::length_error("content effect stack overflow");
-                    // Authored passes read what is behind the content as the backdrop; it is
-                    // captured only when the effect refreshes this frame.
-                    // A layer composited by an operator reads it too.
-                    Image* backdrop = nullptr;
-                    if (!reusable(*effect_batch, true, target) &&
-                        (effect_batch->composite != host::LayerComposite::source_over ||
-                         std::ranges::any_of(passes(*effect_batch), [](const auto& entry) {
-                             return entry.second.kind == 1;
-                         })))
-                        backdrop = &capture(target, sample_region(*effect_batch, target));
-                    auto& content = temporary(target.width, target.height, target.format);
+                    if (stack.empty())
+                        surface = target;
+                    else
+                        stack.back().image->layout = target.layout;
+                    // The layers holding images are always the innermost ones open; past the
+                    // resident count the outermost of them, the last needed again, is parked.
+                    const auto holds = [](const Content& open) { return open.image != nullptr; };
+                    if (static_cast<std::size_t>(std::ranges::count_if(stack, holds)) >=
+                        gpu::resident_content_layers)
+                        park(*std::ranges::find_if(stack, holds));
+                    auto& content = temporary(surface.width, surface.height, surface.format);
                     clear(content);
-                    stack.push_back({target, &content, backdrop, *effect_batch});
+                    const gpu::PixelBounds read =
+                        next_read < reads.size()
+                            ? reads[next_read]
+                            : gpu::PixelBounds{0, 0, surface.width, surface.height};
+                    ++next_read;
+                    stack.push_back({&content, nullptr, read, false, *effect_batch});
                     target = target_of(content);
-                } else if (effect_batch->backdrop_source == host::EffectBackdropSource::surface) {
-                    if (!surface_backdrop && !reusable(*effect_batch, false, target) &&
-                        bounds(*effect_batch, target).width && bounds(*effect_batch, target).height)
-                        throw std::logic_error(
-                            "Vulkan SURFACE effect refresh has no captured input");
-                    effect(target, *effect_batch, false, surface_backdrop, nullptr);
-                } else
-                    effect(target, *effect_batch, false, nullptr, nullptr);
+                } else {
+                    if (effect_batch->backdrop_source == host::EffectBackdropSource::surface) {
+                        if (!surface_backdrop && !reusable(*effect_batch, false, target) &&
+                            bounds(*effect_batch, target).width &&
+                            bounds(*effect_batch, target).height)
+                            throw std::logic_error(
+                                "Vulkan SURFACE effect refresh has no captured input");
+                        effect(target, *effect_batch, false, surface_backdrop, nullptr);
+                    } else
+                        effect(target, *effect_batch, false, nullptr, nullptr);
+                    touch();
+                }
             } else {
                 if (stack.empty())
                     throw std::invalid_argument("unbalanced content effect end");
                 auto content = std::move(stack.back());
                 stack.pop_back();
                 content.image->layout = target.layout;
-                target = content.parent;
-                effect(target, content.batch, true, content.image, content.backdrop);
+                if (!stack.empty() && !stack.back().image)
+                    restore(stack.back());
+                target = stack.empty() ? surface : target_of(*stack.back().image);
+                // Authored passes read what is behind the content as the backdrop, and a layer
+                // composited by an operator reads it too. Nothing draws into the parent while
+                // the layer is open, so it is captured now, when the layer composites, and only
+                // when the effect refreshes this frame.
+                Image* backdrop = nullptr;
+                if (!reusable(content.batch, true, target) &&
+                    (content.batch.composite != host::LayerComposite::source_over ||
+                     std::ranges::any_of(passes(content.batch), [](const auto& entry) {
+                         return entry.second.kind == 1;
+                     })))
+                    backdrop = &capture(target, sample_region(content.batch, target));
+                effect(target, content.batch, true, content.image, backdrop);
                 // Its content has been composited: later layers this frame may reuse the images.
                 recycle(*content.image);
-                if (content.backdrop != nullptr)
-                    recycle(*content.backdrop);
+                if (backdrop != nullptr)
+                    recycle(*backdrop);
+                touch();
             }
         }
         if (!stack.empty())

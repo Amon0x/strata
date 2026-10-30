@@ -33,6 +33,12 @@ struct SubmissionScissor final {
 };
 
 inline constexpr std::size_t maximum_rounded_clip_depth = 16U;
+/**
+ * The packet's bound on content-effect nesting, a sanity bound on its shape: a command stream
+ * deeper than it is malformed. The C ABI pins it to
+ * STRATA_RENDER_PACKET_MAXIMUM_CONTENT_EFFECT_DEPTH, which the decoder and renderers use.
+ */
+inline constexpr std::size_t maximum_content_effect_depth = 1024U;
 
 /**
  * One rounded clip in its authored coordinate space. The inverse transform maps presented

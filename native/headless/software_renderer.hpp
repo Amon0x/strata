@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "capture_renderer.hpp"
+#include "gpu/isolation.hpp"
 #include <strata/render_packet.hpp>
 
 namespace strata::headless {
@@ -51,9 +52,16 @@ class SoftwareRenderer final : public CaptureRenderer {
         std::uint32_t radius_parameter = UINT32_MAX;
         std::uint32_t downsample_parameter = UINT32_MAX;
     };
+    /** An open isolated layer and what it composites into. */
     struct ContentEffect final {
         host::EffectBatch effect;
-        std::vector<std::uint8_t> backdrop;
+        /**
+         * The parent's pixels: the whole Surface, or only a parent layer's read bounds (empty when
+         * nothing had been drawn into it).
+         */
+        std::vector<std::uint8_t> parent;
+        gpu::PixelBounds parent_read;
+        bool parent_is_layer = false;
     };
     struct CachedEffect final {
         std::uint32_t left = 0U;

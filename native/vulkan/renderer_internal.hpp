@@ -5,6 +5,7 @@
 #include "gpu/effect_policy.hpp"
 #include "gpu/effect_shaders.hpp"
 #include "gpu/groups.hpp"
+#include "gpu/isolation.hpp"
 #include "gpu/layer_shaders.hpp"
 #include "gpu/shaders.hpp"
 #include "resources.hpp"

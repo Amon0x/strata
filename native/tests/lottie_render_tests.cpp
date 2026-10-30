@@ -313,6 +313,35 @@ struct Case final {
              (25600.0 - 10000.0) * half_grey + 10000.0 * (1.0 - half_grey),
              0.015,
              {Probe{100, 100, 0.47, 0.53}}});
+    // Layers nested past where Lottie used to draw them in place: eight precompositions, each a
+    // screen layer (over nothing it shows as it is) holding the next, around a matte and a
+    // multiply. Every level isolates, and the innermost keeps its matte and its blend.
+    const auto nested = [&](const std::string& innermost) {
+        std::string assets = "[";
+        for (int level = 1; level <= 8; ++level) {
+            const std::string layers =
+                level < 8 ? R"({"ty":0,"ind":1,"refId":"p)" + std::to_string(level + 1) +
+                                R"(","w":200,"h":200,"ip":0,"op":60,"st":0,"ks":{},"bm":2})"
+                          : innermost;
+            assets += (level > 1 ? "," : "") + std::string(R"({"id":"p)") +
+                      std::to_string(level) + R"(","layers":[)" + layers + "]}";
+        }
+        return composition(
+            R"({"ty":0,"ind":1,"refId":"p1","w":200,"h":200,"ip":0,"op":60,"st":0,"ks":{},"bm":2})",
+            assets + "]");
+    };
+    result.push_back(
+        Case{"deeply nested alpha matte",
+             nested(matte_disc + "," + shape_layer(2, big + "," + white, R"(,"tt":1)")), 0.5,
+             disc});
+    result.push_back(Case{"deeply nested multiply blend",
+                          nested(shape_layer(1, rect(100, 100, 100, 100) + "," + fill_color(0.5),
+                                             R"(,"bm":1)") +
+                                 "," + under),
+                          0.5,
+                          (25600.0 - 10000.0) * half_grey + 10000.0 * half_grey * half_grey,
+                          0.015,
+                          {Probe{100, 100, 0.22, 0.28}}});
     // A feathered mask: the disc's area stays, its edge ramps (half way on the outline).
     const auto feathered = [&](const bool inverted) {
         std::string result_mask = mask("a");

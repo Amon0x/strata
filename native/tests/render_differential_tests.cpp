@@ -2,7 +2,9 @@
 // sequences are replayed through every backend this build has (the reference renderer, D3D11/WARP
 // and Vulkan), and their frames are compared within a tolerance. Each backend's retained effect
 // samples are also checked against a twin of the same backend that never reuses one, so a stale
-// sample shows as a difference however the backends compare with each other.
+// sample shows as a difference however the backends compare with each other. Isolated layers
+// nested far past where backends park them must draw as their flattened twin does, and alike on
+// every backend.
 
 #include <strata/render_packet.hpp>
 
@@ -432,6 +434,170 @@ void replay_effect_cache_sequences(const std::vector<std::string>& backends) {
     }
 }
 
+// ---- Deeply nested isolated layers --------------------------------------------------------------
+
+constexpr std::uint32_t deep_side = 256U;
+constexpr std::size_t deep_levels = 40U;
+
+/** Level `level`'s bounds: each nested layer three pixels inside its parent all round. */
+[[nodiscard]] std::array<float, 4U> level_bounds(const std::size_t level) {
+    const auto inset = static_cast<float>(level) * 3.0F;
+    return {inset, inset, static_cast<float>(deep_side) - inset * 2.0F,
+            static_cast<float>(deep_side) - inset * 2.0F};
+}
+
+/**
+ * `deep_levels` content layers, each inside the last, each drawing a quad over its bounds before
+ * the next opens, so every level holds pixels while deeper ones draw and most are parked. With
+ * `composites`, quads are translucent and levels fade, multiply, screen, blur and end in a
+ * matte; without, every level is an opaque source-over layer, which must draw exactly as the same
+ * quads drawn without layers (`isolated` false).
+ */
+[[nodiscard]] host::RenderPacket deep_packet(const bool composites, const bool isolated,
+                                             const std::uint64_t epoch) {
+    host::RenderPacket packet;
+    packet.geometry_epoch = epoch;
+    // Each variant draws other quads, so every packet carries its whole geometry.
+    packet.full_geometry_payload = true;
+    packet.materials = {"strata:unified_ui"};
+    packet.effects = {"test:layer"};
+    const host::Scissor whole{0U, 0U, deep_side, deep_side};
+    std::uint32_t order = 0U;
+    const auto add_quad = [&](const std::array<float, 4U> rect,
+                              const std::array<std::uint8_t, 4U> color) {
+        const auto first = static_cast<std::uint32_t>(packet.vertices.size() /
+                                                      host::packet_vertex_bytes);
+        const std::array<std::array<float, 2U>, 4U> corners{{
+            {rect[0U], rect[1U]},
+            {rect[0U] + rect[2U], rect[1U]},
+            {rect[0U] + rect[2U], rect[1U] + rect[3U]},
+            {rect[0U], rect[1U] + rect[3U]},
+        }};
+        for (const auto& corner : corners) {
+            std::array<std::uint8_t, host::packet_vertex_bytes> vertex{};
+            std::memcpy(vertex.data(), corner.data(), sizeof(corner));
+            std::copy(color.begin(), color.end(), vertex.begin() + 20);
+            const float opacity = 1.0F;
+            std::memcpy(vertex.data() + 84U, &opacity, sizeof(opacity));
+            packet.vertices.insert(packet.vertices.end(), vertex.begin(), vertex.end());
+        }
+        const auto first_index = static_cast<std::uint32_t>(packet.indices.size());
+        for (const std::uint32_t index : {0U, 1U, 2U, 0U, 2U, 3U})
+            packet.indices.push_back(first + index);
+        packet.batches.emplace_back(host::DrawBatch{
+            .source_order = order++,
+            .scissor = whole,
+            .material = 0U,
+            .blend = host::DrawBlend::straight_alpha,
+            .clip_coverage = host::ClipCoverage::hard,
+            .base_vertex = 0U,
+            .first_index = first_index,
+            .index_count = 6U,
+        });
+    };
+    for (std::size_t level = 0U; level < deep_levels; ++level) {
+        const std::array<float, 4U> bounds = level_bounds(level);
+        const bool matte = composites && level + 1U == deep_levels;
+        if (isolated) {
+            host::EffectBatch layer;
+            layer.kind = host::EffectBatchKind::content_begin;
+            layer.source_order = order++;
+            layer.scissor = whole;
+            // A layer composites with a soft edge at its bounds, so they reach past its quad;
+            // the matte's cover the whole surface, keeping nothing of its parent beside it.
+            const double grown = matte ? static_cast<double>(deep_side) : 2.0;
+            layer.x = bounds[0U] - grown;
+            layer.y = bounds[1U] - grown;
+            layer.width = bounds[2U] + grown * 2.0;
+            layer.height = bounds[3U] + grown * 2.0;
+            // Fades and blends sit deep, near the matte: each damps what is drawn inside it, and
+            // the innermost levels must still show at the surface.
+            if (composites) {
+                layer.opacity = level == 31U || level == 37U ? 0.9 : 1.0;
+                layer.composite = matte          ? host::LayerComposite::destination_in
+                                  : level == 33U ? host::LayerComposite::multiply
+                                  : level == 35U ? host::LayerComposite::screen
+                                                 : host::LayerComposite::source_over;
+            }
+            packet.batches.emplace_back(std::move(layer));
+        }
+        const std::array<std::uint8_t, 4U> color{
+            static_cast<std::uint8_t>(90U + (level * 29U) % 100U),
+            static_cast<std::uint8_t>(160U - (level * 17U) % 90U),
+            static_cast<std::uint8_t>(70U + (level * 43U) % 120U),
+            static_cast<std::uint8_t>(composites ? 200U : 255U)};
+        // The matte keeps a small square of everything under it.
+        add_quad(matte ? std::array<float, 4U>{120.0F, 120.0F, 16.0F, 16.0F} : bounds, color);
+        if (composites && level % 7U == 3U && level < 35U) {
+            packet.batches.emplace_back(host::BlurBatch{
+                .source_order = order++,
+                .scissor = whole,
+                .x = bounds[0U] - 4.0,
+                .y = bounds[1U] + 8.0,
+                .width = 24.0,
+                .height = bounds[3U] - 16.0,
+                .radius = 3.0,
+            });
+        }
+    }
+    for (std::size_t level = 0U; isolated && level < deep_levels; ++level)
+        packet.batches.emplace_back(host::ContentEffectEndBatch{order++, whole, {}});
+    return packet;
+}
+
+/**
+ * Layers nested 40 deep, five times past the old eight-level cap: each backend draws opaque
+ * source-over layers exactly as their flattened twin, and translucent, blended, blurred and
+ * matted ones as the reference renderer does. A second frame reuses the parked targets.
+ */
+void replay_deep_isolation(const std::vector<std::string>& backends) {
+    std::vector<std::unique_ptr<headless::CaptureRenderer>> renderers;
+    std::vector<std::vector<std::uint8_t>> composited;
+    for (const std::string& backend : backends) {
+        auto renderer = headless::create_capture_renderer(backend);
+        renderer->resize(deep_side, deep_side, deep_side, deep_side);
+        renderer->set_clear_color({20U, 24U, 30U, 255U});
+        std::uint64_t epoch = 0U;
+        for (int frame = 0; frame < 2; ++frame) {
+            renderer->render(deep_packet(false, false, ++epoch), frame);
+            const std::vector<std::uint8_t> flat(renderer->pixels().begin(),
+                                                 renderer->pixels().end());
+            renderer->render(deep_packet(false, true, ++epoch), frame);
+            const Difference nested = difference(flat, renderer->pixels());
+            check(nested.largest <= 1, backend + " drew " + std::to_string(deep_levels) +
+                                           " nested source-over layers unlike their flattened "
+                                           "twin (largest difference " +
+                                           std::to_string(nested.largest) + ")");
+            renderer->render(deep_packet(true, true, ++epoch), frame);
+        }
+        composited.emplace_back(renderer->pixels().begin(), renderer->pixels().end());
+        renderers.push_back(std::move(renderer));
+    }
+    for (std::size_t other = 1U; other < backends.size(); ++other) {
+        require_close(difference(composited.front(), composited[other]),
+                      "deep isolation: " + backends.front() + " vs " + backends[other]);
+    }
+    // The innermost matte keeps its square of the level under it, and nothing of that level
+    // beside it: there the levels further out show, as they do just outside that level.
+    const auto pixel = [&](const std::size_t x, const std::size_t y) {
+        const std::size_t at = (y * deep_side + x) * 4U;
+        return std::array<int, 4U>{composited.front()[at], composited.front()[at + 1U],
+                                   composited.front()[at + 2U], composited.front()[at + 3U]};
+    };
+    const auto apart = [](const std::array<int, 4U> left, const std::array<int, 4U> right) {
+        int widest = 0;
+        for (std::size_t channel = 0U; channel < 4U; ++channel)
+            widest = std::max(widest, std::abs(left[channel] - right[channel]));
+        return widest;
+    };
+    check(apart(pixel(116U, 128U), pixel(113U, 128U)) <= 2,
+          "the innermost matte did not cut away the layer it keeps beside its square");
+    check(apart(pixel(128U, 128U), pixel(113U, 128U)) > 6,
+          "the layer under the innermost matte did not show within its square");
+    std::cout << "render differential: " << deep_levels << " nested layers drawn alike across "
+              << backends.size() << " backends\n";
+}
+
 } // namespace
 
 int main(const int argument_count, const char* const* const arguments) {
@@ -444,6 +610,7 @@ int main(const int argument_count, const char* const* const arguments) {
         const std::filesystem::path output = arguments[2];
         const std::vector<std::string> backends = available_backends();
         replay_effect_cache_sequences(backends);
+        replay_deep_isolation(backends);
         for (int index = 3; index < argument_count; ++index) {
             const std::filesystem::path scenario = arguments[index];
             const std::string name = scenario.stem().string();

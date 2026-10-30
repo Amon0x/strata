@@ -831,8 +831,10 @@ Each paint is a vector path command, so a shape that only moves, turns or scales
 Masks resolve as geometry where that is exact: the masked content and its mask shapes are
 intersected into regions of equal coverage. A layer that must be seen as one picture (to fade,
 blend, run effects, take a matte or a feathered mask) is drawn apart as an isolated layer and
-composited by the renderer on every backend; an animation with blend modes or effects is itself
-drawn apart and cut to the widget's box. Expressions (they need a JavaScript engine) and 3D layers
+composited by the renderer on every backend, however deeply such layers nest; an animation with
+blend modes or effects is itself drawn apart and cut to the widget's box. Precompositions may nest
+64 deep and shape groups 64 deep; a document nested deeper is refused as it loads, so nothing in
+one that loads is cut short. Expressions (they need a JavaScript engine) and 3D layers
 and cameras are not played, as in other native players (Skottie, rlottie): expressions keep their
 property's keyframed value and 3D layers draw flat.
 
@@ -1562,8 +1564,12 @@ and combines with what is under it by a composite operator: source-over, the fif
 modes, plus, destination-in and -out by alpha or luminance (a matte), and channel-wise maximum,
 minimum and difference (coverage masks). Every backend, the reference renderer included, runs
 these the same way; `Lottie` draws its blend modes, mattes, feathered masks and effects with them.
-The public decoder rejects malformed clip/effect state, caps nested `CONTENT` effects at eight
-levels, and caps rounded clip stacks at sixteen.
+`CONTENT` effects nest as deep as a document draws them, and every level is drawn: a renderer
+keeps the few innermost open layers in framebuffer-sized targets and parks the rest in targets
+sized to what is read back from them, so memory follows the layers' own sizes, not their depth.
+The public decoder rejects malformed clip/effect state, bounds `CONTENT` nesting at 1024 levels
+(`STRATA_RENDER_PACKET_MAXIMUM_CONTENT_EFFECT_DEPTH`, a sanity bound on the packet's shape that no
+compiled document reaches, not a drawing limit), and caps rounded clip stacks at sixteen.
 
 ## Local retained and derived state
 

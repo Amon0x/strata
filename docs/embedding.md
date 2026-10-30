@@ -160,9 +160,14 @@ Surface/backend stream. Compact packets are deltas and cannot initialize a fresh
 `reset()` only when discarding the stream, not while continuing to consume it. `RenderPacket`
 exposes ordered texture mutations (images arrive decoded, as straight-alpha RGBA8), fixed-layout
 vertex bytes, indices, scissors, draw batches, blur batches, backdrop/content effect batches, and
-content stack markers. Draw batches name their material by index into `RenderPacket::materials`
-and carry a `DrawBlend` and `ClipCoverage` the core already adapted to their rounded clips, so a
-backend maps enums to pipeline state and resolves the id table once per packet. Effect batches name
+content stack markers. The content stack nests as deep as the document draws, up to the decoder's
+sanity bound `host::maximum_content_effect_depth` (1024,
+`STRATA_RENDER_PACKET_MAXIMUM_CONTENT_EFFECT_DEPTH`); a backend draws every level it is handed
+rather than assuming a small fixed depth. The bundled backends keep the innermost few open layers
+in framebuffer-sized targets and park the rest at the pixels later passes read back from them
+(`native/gpu/isolation.hpp`). Draw batches name their material by index into
+`RenderPacket::materials` and carry a `DrawBlend` and `ClipCoverage` the core already adapted to
+their rounded clips, so a backend maps enums to pipeline state and resolves the id table once per packet. Effect batches name
 their effect by index into `RenderPacket::effects` and carry a maximum refresh rate, zero (the
 default) for every frame; for a nonzero rate custom backends may retain the latest filtered sample
 and composite it while its `sample_revision` is unchanged and the rate is not yet due. The decoder

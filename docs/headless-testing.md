@@ -264,7 +264,9 @@ The reference renderer is an oracle only for what it implements the same way as 
 - decoded RGBA8 images, atlas uploads and raster jobs (by the reference rasterizer the GPU
   backends reproduce exactly), sampled nearest or bilinear as declared;
 - effect-sample retention: it reuses a sample exactly when a GPU backend would (the decoder's
-  `sample_revision` and the refresh interval).
+  `sample_revision` and the refresh interval);
+- isolated content layers composited source-over, by a blend mode or as a matte, however deeply
+  they nest.
 
 It is not an oracle for authored HLSL materials or shader effect passes (it draws the unified
 fallback and skips shader passes), for GPU rasterization rules beyond the subpixel snap (its edges
@@ -279,6 +281,9 @@ within a mean channel difference of 0.5 and 0.2% of pixels differing by more tha
 replays scripted effect-cache sequences (content changing beside a blur edge and beyond its reach,
 a presentation group moving under the glass, an image swapped under its edge) and requires each
 backend's retained samples to match, exactly, a twin of the same backend that never reuses one.
+Finally it draws content layers nested 40 deep, far past where the backends park layers: opaque
+source-over layers must match the same quads drawn without layers on every backend, and translucent
+layers that fade, blend, blur and end in a matte must agree across backends.
 
 The offscreen backend establishes renderer and shader output without pretending to replace physical
 clipboard/IME integration or final hardware/driver acceptance.

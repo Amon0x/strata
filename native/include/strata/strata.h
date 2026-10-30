@@ -1953,7 +1953,19 @@ typedef struct strata_surface_frame_info {
  * deep.
  */
 #define STRATA_RENDER_PACKET_VERSION_21 UINT32_C(21)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_21
+/*
+ * Version 22 lets content effects nest as deep as a document draws them: the eight-level cap
+ * becomes STRATA_RENDER_PACKET_MAXIMUM_CONTENT_EFFECT_DEPTH, a sanity bound on the packet's shape
+ * that no document the compiler accepts reaches. A renderer must draw every level it accepts.
+ */
+#define STRATA_RENDER_PACKET_VERSION_22 UINT32_C(22)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_22
+/*
+ * The deepest balanced content-effect nesting a packet may have. It guards the decoder against a
+ * malformed or hostile stream, not what a renderer can draw: the planner, the decoder and the
+ * bundled renderers all take it from here.
+ */
+#define STRATA_RENDER_PACKET_MAXIMUM_CONTENT_EFFECT_DEPTH UINT32_C(1024)
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES UINT32_C(2)

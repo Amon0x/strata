@@ -23,8 +23,13 @@ class Surface;
 
 namespace strata::host {
 
-/** Maximum balanced CONTENT-effect nesting accepted by the packet and bundled renderers. */
-inline constexpr std::size_t maximum_content_effect_depth = 8U;
+/**
+ * Deepest balanced CONTENT-effect nesting the decoder accepts: a sanity bound on the packet's
+ * shape (STRATA_RENDER_PACKET_MAXIMUM_CONTENT_EFFECT_DEPTH), not a drawing limit. The bundled
+ * renderers draw every level of a packet it accepts.
+ */
+inline constexpr std::size_t maximum_content_effect_depth =
+    STRATA_RENDER_PACKET_MAXIMUM_CONTENT_EFFECT_DEPTH;
 inline constexpr std::size_t maximum_rounded_clip_depth = 16U;
 
 inline constexpr std::uint32_t resource_create = 0U;

@@ -5,6 +5,7 @@
 #include "effect_pass.hpp"
 #include "gpu/effect_policy.hpp"
 #include "gpu/effect_shaders.hpp"
+#include "gpu/isolation.hpp"
 #include "gpu/layer_shaders.hpp"
 
 #include <algorithm>
@@ -103,6 +104,31 @@ struct EffectPassRenderer::Impl final {
         Target pong;
         /** A layer's drop shadow while it is drawn and blurred. */
         Target shadow;
+    };
+    /** A framebuffer-sized target isolated layers draw into, taken in turn as they open. */
+    struct ContentSlot final {
+        Target target;
+        bool busy = false;
+        std::uint64_t used = 0U;
+    };
+    /** A parked layer's read bounds, copied to the top left of a target sized to them. */
+    struct ParkedTarget final {
+        ComPtr<ID3D11Texture2D> texture;
+        std::uint32_t width = 0U;
+        std::uint32_t height = 0U;
+        bool busy = false;
+        std::uint64_t used = 0U;
+    };
+    static constexpr std::size_t none = SIZE_MAX;
+    /** One open isolated layer. */
+    struct ContentLevel final {
+        /** The pixels later passes read back from it (gpu::content_read_bounds). */
+        gpu::PixelBounds read;
+        /** The slot it draws into, or none while it is parked. */
+        std::size_t slot = none;
+        /** Its parked pixels; none when nothing had been drawn into it yet. */
+        std::size_t parked = none;
+        bool drawn = false;
     };
     struct Pass final {
         std::uint32_t kind = 0U;
@@ -333,7 +359,9 @@ struct EffectPassRenderer::Impl final {
         width = next_width;
         height = next_height;
         format = next_format;
-        content_targets.clear();
+        content_levels.clear();
+        content_slots.clear();
+        parked_targets.clear();
         processing.reset();
         surface_backdrop.reset();
         surface_backdrop_available = false;
@@ -365,6 +393,15 @@ struct EffectPassRenderer::Impl final {
 
     void begin_layer(const std::string_view layer_id, const std::span<const std::string> effect_ids) {
         ++layer_frames[std::string(layer_id)];
+        // Layers balance within a layer render, so none is open here and no level refers to a
+        // target released now.
+        content_levels.clear();
+        ++isolation_clock;
+        const auto stale = [this](const auto& entry) {
+            return !entry.busy && isolation_clock - entry.used > gpu::isolation_target_lifetime;
+        };
+        std::erase_if(content_slots, stale);
+        std::erase_if(parked_targets, stale);
         // The packet names effects by index; resolve its table once rather than per batch.
         layer_programs.clear();
         layer_programs.reserve(effect_ids.size());
@@ -463,12 +500,9 @@ struct EffectPassRenderer::Impl final {
         return result;
     }
 
-    [[nodiscard]] Workspace& processing_workspace(const std::size_t depth) {
+    [[nodiscard]] Workspace& processing_workspace() {
         if (width == 0U || height == 0U) {
             throw std::logic_error("D3D11 effect workspace has no framebuffer size");
-        }
-        if (depth > host::maximum_content_effect_depth) {
-            throw std::length_error("D3D11 content effect nesting exceeds the packet limit");
         }
         if (!processing.has_value()) {
             processing.emplace(Workspace{target(), target(), target(), target(), target()});
@@ -476,17 +510,167 @@ struct EffectPassRenderer::Impl final {
         return *processing;
     }
 
-    [[nodiscard]] Target& content_target(const std::size_t depth) {
+    void begin_content_layers(const std::span<const host::SubmissionBatch> batches,
+                              const ContentTarget surface, const double logical_width,
+                              const double logical_height) {
+        content_levels.clear();
+        content_surface = surface;
+        next_content = 0U;
+        content_reads = gpu::content_read_bounds(
+            batches, width, height, logical_width, logical_height,
+            [&](const host::EffectBatch& effect) {
+                const D3D11_BOX region = sample_region(effect, logical_width, logical_height);
+                return gpu::PixelBounds{region.left, region.top, region.right, region.bottom};
+            });
+    }
+
+    [[nodiscard]] ContentTarget active_content() const noexcept {
+        if (content_levels.empty())
+            return content_surface;
+        const Target& active = content_slots[content_levels.back().slot].target;
+        return ContentTarget{active.texture.Get(), active.target.Get()};
+    }
+
+    /** Takes and clears a framebuffer-sized target no open layer holds. */
+    [[nodiscard]] std::size_t take_slot() {
+        std::size_t index = 0U;
+        while (index < content_slots.size() && content_slots[index].busy)
+            ++index;
+        if (index == content_slots.size())
+            content_slots.push_back(ContentSlot{target()});
+        ContentSlot& slot = content_slots[index];
+        slot.busy = true;
+        slot.used = isolation_clock;
+        const float clear[4]{};
+        context->ClearRenderTargetView(slot.target.target.Get(), clear);
+        return index;
+    }
+
+    void release_slot(const std::size_t index) noexcept {
+        content_slots[index].busy = false;
+        content_slots[index].used = isolation_clock;
+    }
+
+    /** Takes a parked target holding at least `pixel_width` x `pixel_height`. */
+    [[nodiscard]] std::size_t take_parked(const std::uint32_t pixel_width,
+                                          const std::uint32_t pixel_height) {
+        const std::uint32_t extent_x = gpu::parked_extent(pixel_width, width);
+        const std::uint32_t extent_y = gpu::parked_extent(pixel_height, height);
+        std::size_t index = 0U;
+        while (index < parked_targets.size() &&
+               (parked_targets[index].busy || parked_targets[index].width != extent_x ||
+                parked_targets[index].height != extent_y)) {
+            ++index;
+        }
+        if (index == parked_targets.size()) {
+            D3D11_TEXTURE2D_DESC descriptor{};
+            descriptor.Width = extent_x;
+            descriptor.Height = extent_y;
+            descriptor.MipLevels = 1U;
+            descriptor.ArraySize = 1U;
+            descriptor.Format = format;
+            descriptor.SampleDesc.Count = 1U;
+            descriptor.Usage = D3D11_USAGE_DEFAULT;
+            descriptor.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            ParkedTarget parked;
+            parked.width = extent_x;
+            parked.height = extent_y;
+            require_hresult(device->CreateTexture2D(&descriptor, nullptr, &parked.texture),
+                            "D3D11 parked content texture creation");
+            parked_targets.push_back(std::move(parked));
+        }
+        parked_targets[index].busy = true;
+        parked_targets[index].used = isolation_clock;
+        return index;
+    }
+
+    /** Sets a layer's target aside, keeping only its read bounds, and frees its slot. */
+    void park(ContentLevel& level) {
+        if (level.drawn && !level.read.empty()) {
+            level.parked = take_parked(level.read.width(), level.read.height());
+            const D3D11_BOX region{level.read.left,  level.read.top,    0U,
+                                   level.read.right, level.read.bottom, 1U};
+            context->OMSetRenderTargets(0U, nullptr, nullptr);
+            context->CopySubresourceRegion(parked_targets[level.parked].texture.Get(), 0U, 0U, 0U,
+                                           0U, content_slots[level.slot].target.texture.Get(), 0U,
+                                           &region);
+        }
+        release_slot(level.slot);
+        level.slot = none;
+    }
+
+    /** Gives a parked layer a framebuffer-sized target again, holding what it kept. */
+    void restore(ContentLevel& level) {
+        level.slot = take_slot();
+        if (level.parked == none)
+            return;
+        ParkedTarget& parked = parked_targets[level.parked];
+        const D3D11_BOX region{0U, 0U, 0U, level.read.width(), level.read.height(), 1U};
+        context->OMSetRenderTargets(0U, nullptr, nullptr);
+        context->CopySubresourceRegion(content_slots[level.slot].target.texture.Get(), 0U,
+                                       level.read.left, level.read.top, 0U, parked.texture.Get(),
+                                       0U, &region);
+        parked.busy = false;
+        parked.used = isolation_clock;
+        level.parked = none;
+    }
+
+    [[nodiscard]] ContentTarget begin_content() {
         if (width == 0U || height == 0U) {
             throw std::logic_error("D3D11 content target has no framebuffer size");
         }
-        if (depth >= host::maximum_content_effect_depth) {
+        if (content_levels.size() >= host::maximum_content_effect_depth) {
             throw std::length_error("D3D11 content effect nesting exceeds the packet limit");
         }
-        while (content_targets.size() <= depth) {
-            content_targets.push_back(target());
+        ContentLevel level;
+        level.read = next_content < content_reads.size() ? content_reads[next_content]
+                                                         : gpu::PixelBounds{0U, 0U, width, height};
+        ++next_content;
+        // The layers holding targets are always the innermost ones open; past the resident
+        // count the outermost of them, the last to be needed again, is parked.
+        const auto holds = [](const ContentLevel& open) { return open.slot != none; };
+        if (static_cast<std::size_t>(std::ranges::count_if(content_levels, holds)) >=
+            gpu::resident_content_layers) {
+            park(*std::ranges::find_if(content_levels, holds));
         }
-        return content_targets[depth];
+        level.slot = take_slot();
+        content_levels.push_back(level);
+        return active_content();
+    }
+
+    void touch_content() noexcept {
+        if (!content_levels.empty())
+            content_levels.back().drawn = true;
+    }
+
+    [[nodiscard]] EffectPassTelemetry finish_content(const std::string_view layer_id,
+                                                     const host::EffectBatch& effect,
+                                                     const double logical_width,
+                                                     const double logical_height,
+                                                     const double frame_seconds) {
+        if (content_levels.empty())
+            throw std::logic_error("D3D11 content effect stack is invalid");
+        const ContentLevel level = content_levels.back();
+        content_levels.pop_back();
+        if (!content_levels.empty() && content_levels.back().slot == none)
+            restore(content_levels.back());
+        const ContentTarget parent = active_content();
+        const Target& content = content_slots[level.slot].target;
+        const EffectPassTelemetry telemetry =
+            apply(layer_id, true, false, effect, content.texture.Get(), content.target.Get(),
+                  parent.texture, parent.target, logical_width, logical_height, frame_seconds);
+        release_slot(level.slot);
+        touch_content();
+        return telemetry;
+    }
+
+    [[nodiscard]] IsolationTargetTelemetry isolation_targets() const noexcept {
+        IsolationTargetTelemetry result;
+        result.framebuffer_targets = content_slots.size();
+        result.parked_targets = parked_targets.size();
+        for (const ParkedTarget& parked : parked_targets)
+            result.parked_pixels += static_cast<std::uint64_t>(parked.width) * parked.height;
+        return result;
     }
 
     void upload_constants(const host::EffectBatch& effect, const double logical_width,
@@ -866,7 +1050,7 @@ struct EffectPassRenderer::Impl final {
 
     [[nodiscard]] EffectPassTelemetry
     apply(const std::string_view layer_id, const bool content, const bool surface_source,
-          const std::size_t depth, const host::EffectBatch& effect,
+          const host::EffectBatch& effect,
           ID3D11Texture2D* const source_texture,
           ID3D11RenderTargetView* const source_target,
           ID3D11Texture2D* const backdrop_texture,
@@ -930,7 +1114,7 @@ struct EffectPassRenderer::Impl final {
             resolved_backdrop = resolved_source;
             direct_backdrop = surface_backdrop->view.Get();
         }
-        Workspace& work = processing_workspace(depth);
+        Workspace& work = processing_workspace();
         context->OMSetRenderTargets(0U, nullptr, nullptr);
         ID3D11ShaderResourceView* cleared[]{nullptr, nullptr};
         context->PSSetShaderResources(0U, 2U, cleared);
@@ -1054,7 +1238,16 @@ struct EffectPassRenderer::Impl final {
     ComPtr<ID3D11BlendState> replace_blend;
     ComPtr<ID3D11BlendState> composite_blend;
     std::unique_ptr<RoundedClipBuffer> rounded_clips;
-    std::vector<Target> content_targets;
+    std::vector<ContentSlot> content_slots;
+    std::vector<ParkedTarget> parked_targets;
+    /** The layers open in the layer being rendered, outermost first. */
+    std::vector<ContentLevel> content_levels;
+    /** Each planned layer's read bounds, in the order the layer opens them. */
+    std::vector<gpu::PixelBounds> content_reads;
+    std::size_t next_content = 0U;
+    ContentTarget content_surface;
+    /** Layer renders so far, which date the isolation targets' last uses. */
+    std::uint64_t isolation_clock = 0U;
     std::optional<Workspace> processing;
     std::optional<Target> surface_backdrop;
     std::map<std::string, std::vector<Pass>, std::less<>> programs;
@@ -1229,26 +1422,37 @@ void EffectPassRenderer::declare_pass(const std::string_view effect_id, const st
     impl_->cached_samples.clear();
 }
 
-ID3D11RenderTargetView* EffectPassRenderer::begin_content(const std::size_t depth) {
-    Impl::Target& target = impl_->content_target(depth);
-    const float clear[4]{};
-    impl_->context->ClearRenderTargetView(target.target.Get(), clear);
-    return target.target.Get();
+void EffectPassRenderer::begin_content_layers(const std::span<const host::SubmissionBatch> batches,
+                                              const ContentTarget surface,
+                                              const double logical_width,
+                                              const double logical_height) {
+    impl_->begin_content_layers(batches, surface, logical_width, logical_height);
 }
 
-ID3D11Texture2D* EffectPassRenderer::content_texture(const std::size_t depth) {
-    return impl_->content_target(depth).texture.Get();
+ContentTarget EffectPassRenderer::begin_content() {
+    return impl_->begin_content();
+}
+
+void EffectPassRenderer::touch_content() noexcept {
+    impl_->touch_content();
+}
+
+ContentTarget EffectPassRenderer::active_content() const noexcept {
+    return impl_->active_content();
+}
+
+IsolationTargetTelemetry EffectPassRenderer::isolation_targets() const noexcept {
+    return impl_->isolation_targets();
 }
 
 EffectPassTelemetry EffectPassRenderer::apply_backdrop(
-    const std::string_view layer_id, const std::size_t depth, const host::EffectBatch& effect,
+    const std::string_view layer_id, const host::EffectBatch& effect,
     ID3D11Texture2D* const target_texture, ID3D11RenderTargetView* const target,
     const double logical_width, const double logical_height, const double frame_seconds) {
     return impl_->apply(
         layer_id,
         false,
         effect.backdrop_source == host::EffectBackdropSource::surface,
-        depth,
         effect,
         target_texture,
         target,
@@ -1261,24 +1465,9 @@ EffectPassTelemetry EffectPassRenderer::apply_backdrop(
 }
 
 EffectPassTelemetry EffectPassRenderer::finish_content(
-    const std::string_view layer_id, const std::size_t depth, const host::EffectBatch& effect,
-    ID3D11Texture2D* const backdrop_texture, ID3D11RenderTargetView* const destination,
-    const double logical_width, const double logical_height, const double frame_seconds) {
-    Impl::Target& content = impl_->content_target(depth);
-    return impl_->apply(
-        layer_id,
-        true,
-        false,
-        depth,
-        effect,
-        content.texture.Get(),
-        content.target.Get(),
-        backdrop_texture,
-        destination,
-        logical_width,
-        logical_height,
-        frame_seconds
-    );
+    const std::string_view layer_id, const host::EffectBatch& effect, const double logical_width,
+    const double logical_height, const double frame_seconds) {
+    return impl_->finish_content(layer_id, effect, logical_width, logical_height, frame_seconds);
 }
 
 } // namespace strata::d3d11

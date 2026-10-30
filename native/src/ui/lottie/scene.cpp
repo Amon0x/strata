@@ -26,8 +26,13 @@ namespace model = resource::lottie;
 
 /** How far a flattened curve may stray from the true one, in logical pixels. */
 constexpr double flatness = 0.08;
-/** The deepest precomposition nesting a frame follows. */
-constexpr std::size_t maximum_depth = 24U;
+/**
+ * How deep a frame follows compositions and the track mattes inside them. The loader rejects a
+ * document whose precompositions nest past model::maximum_nesting, and each of those levels' mattes
+ * may nest as deep again, so no document it accepts reaches this: it only stops mattes that name
+ * each other (`tp`) from recursing for ever.
+ */
+constexpr std::size_t maximum_depth = model::maximum_nesting * 2U;
 
 template <typename... Visitors> struct Overloaded : Visitors... {
     using Visitors::operator()...;
@@ -580,7 +585,8 @@ std::vector<std::size_t> evaluate_group(const std::vector<model::ShapeItem>& ite
         std::visit(
             Overloaded{
                 [&](const model::GroupItem& group) {
-                    if (depth >= maximum_depth)
+                    // The loader rejects deeper groups; this only bounds the recursion.
+                    if (depth >= model::maximum_nesting)
                         return;
                     const double group_opacity = group.transform.opacity.scalar(frame) / 100.0;
                     const std::vector<std::size_t> inner = evaluate_group(
@@ -751,13 +757,6 @@ std::vector<std::size_t> evaluate_group(const std::vector<model::ShapeItem>& ite
 /** The id isolated Lottie layers draw under: no host declares it, so it has no passes of its own.
  */
 constexpr std::string_view layer_effect_id = "strata:lottie-layer";
-/**
- * How many layers a frame nests at most, leaving room under the packet's limit for the content
- * effects of the widgets around it. Past it a layer draws in place: its group opacity becomes the
- * opacity of each paint and its blend, effects and matte are left out.
- */
-constexpr std::size_t layer_budget = 6U;
-
 /** One isolated layer: how it composites, its opacity and its filters. */
 struct LayerSpec final {
     LayerComposite composite = LayerComposite::source_over;
@@ -795,9 +794,6 @@ class Sink final {
         output_.emplace_back(ClipPopRenderCommand{});
     }
 
-    [[nodiscard]] bool can_isolate(const std::size_t levels = 1U) const noexcept {
-        return depth_ + levels <= layer_budget;
-    }
     [[nodiscard]] Rect bounds() const noexcept {
         return bounds_;
     }
@@ -812,11 +808,9 @@ class Sink final {
         effect.filters = spec.filters;
         output_.emplace_back(ContentEffectPushRenderCommand{root ? box_ : bounds_, CornerRadii{},
                                                             std::move(effect)});
-        ++depth_;
     }
     void pop_layer() {
         output_.emplace_back(ContentEffectPopRenderCommand{});
-        --depth_;
     }
 
     void draw(const Drawable& drawable, const Constraints& constraints) {
@@ -838,7 +832,7 @@ class Sink final {
                     const Constraints& constraints) {
         // Geometry cannot cut an image, so under masks it is drawn apart and its mask's coverage
         // keeps what shows of it.
-        const bool cut = !constraints.empty() && can_isolate(2U);
+        const bool cut = !constraints.empty();
         if (cut)
             push_layer(LayerSpec{});
         output_.emplace_back(TransformPushRenderCommand{to_widget.a, to_widget.c, to_widget.e,
@@ -890,7 +884,6 @@ class Sink final {
     std::vector<RenderCommand>& output_;
     Rect box_;
     Rect bounds_;
-    std::size_t depth_ = 0U;
 };
 
 /** A Lottie blend mode (`bm`) as the layer composite that draws it. */
@@ -1620,8 +1613,7 @@ class Renderer final {
             layer.masks, [](const model::Mask& mask) { return mask.mode != 'n'; });
         // Feathered masks, and any mask over an image, are drawn apart as coverage: geometry
         // can neither blur an edge nor cut an image.
-        const bool raster =
-            masked && (feathered(layer, time) || image != nullptr) && sink_.can_isolate(3U);
+        const bool raster = masked && (feathered(layer, time) || image != nullptr);
         Constraints constraints = inherited;
         std::optional<Constraint> mask_constraint;
         if (masked && !raster) {
@@ -1644,10 +1636,10 @@ class Renderer final {
         const bool apart = composite != LayerComposite::source_over || !filters.empty() ||
                            matte.has_value() || raster || blending_inside ||
                            (opacity < 1.0 && overlapping);
-        if (apart && sink_.can_isolate()) {
+        if (apart) {
             // Effects act on the masked layer before its matte cuts it: with a matte they are a
             // layer of their own inside it.
-            const bool split = matte.has_value() && !filters.empty() && sink_.can_isolate(2U);
+            const bool split = matte.has_value() && !filters.empty();
             sink_.push_layer(
                 LayerSpec{composite, opacity, split ? std::vector<LayerFilter>{} : filters});
             if (split)
@@ -1657,7 +1649,7 @@ class Renderer final {
                 raster_masks(layer, time, world);
             if (split)
                 sink_.pop_layer();
-            if (matte.has_value() && sink_.can_isolate()) {
+            if (matte.has_value()) {
                 sink_.push_layer(LayerSpec{matte_composite(layer.matte), 1.0, {}});
                 layer_content(layers, *matte, worlds, frame, to_widget, {}, depth + 1U);
                 sink_.pop_layer();

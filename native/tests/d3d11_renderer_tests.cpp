@@ -13,18 +13,21 @@
 #include <cstring>
 #include <iostream>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <strata/d3d11.hpp>
 #include <strata/render_packet.hpp>
 
 #include "d3d11/effect_pass.hpp"
+#include "gpu/isolation.hpp"
 #include "d3d11/raster_pass.hpp"
 #include <strata/raster_job.hpp>
 
@@ -81,14 +84,14 @@ struct Fixture final {
     ComPtr<ID3D11RenderTargetView> view;
     ComPtr<ID3D11Texture2D> staging;
 
-    Fixture() {
+    explicit Fixture(const std::uint32_t side = 4U) {
         if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0U, nullptr, 0U,
                                      D3D11_SDK_VERSION, &device, nullptr, &context))) {
             throw std::runtime_error("could not create a WARP device");
         }
         D3D11_TEXTURE2D_DESC descriptor{};
-        descriptor.Width = 4U;
-        descriptor.Height = 4U;
+        descriptor.Width = side;
+        descriptor.Height = side;
         descriptor.MipLevels = 1U;
         descriptor.ArraySize = 1U;
         descriptor.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -195,7 +198,7 @@ void effect_frame(const Fixture& fixture, d3d11::EffectPassRenderer& effects,
     effects.begin_surface(fixture.texture.Get(),
                           effects.surface_backdrop_required("layer", batches, 4.0, 4.0, seconds));
     for (const host::SubmissionBatch& batch : batches) {
-        static_cast<void>(effects.apply_backdrop("layer", 0U, std::get<host::EffectBatch>(batch),
+        static_cast<void>(effects.apply_backdrop("layer", std::get<host::EffectBatch>(batch),
                                                  fixture.texture.Get(), fixture.view.Get(), 4.0,
                                                  4.0, seconds));
     }
@@ -218,6 +221,71 @@ void test_unused_effect_samples_are_evicted() {
 }
 
 // Images arrive decoded by the core as straight-alpha RGBA8, and are sampled exactly as uploaded.
+// Isolated layers nest past any fixed depth without a framebuffer-sized target per level: the
+// innermost few draw into whole targets and the rest park at their read bounds. Later frames
+// reuse those targets rather than add more, and layer renders that open no layers release them.
+void test_deep_isolation_is_bounded() {
+    constexpr std::uint32_t side = 512U;
+    constexpr std::size_t depth = 50U;
+    Fixture fixture(side);
+    d3d11::EffectPassRenderer effects(fixture.device.Get(), fixture.context.Get());
+    effects.resize(side, side, DXGI_FORMAT_R8G8B8A8_UNORM);
+    std::vector<host::SubmissionBatch> batches;
+    for (std::size_t level = 0U; level < depth; ++level) {
+        host::EffectBatch layer;
+        layer.kind = host::EffectBatchKind::content_begin;
+        layer.source_order = static_cast<std::uint32_t>(level);
+        layer.scissor = host::Scissor{0U, 0U, side, side};
+        layer.x = layer.y = static_cast<double>(level) * 5.0;
+        layer.width = layer.height = side - static_cast<double>(level) * 10.0;
+        batches.emplace_back(std::move(layer));
+    }
+    for (std::size_t level = 0U; level < depth; ++level)
+        batches.emplace_back(host::ContentEffectEndBatch{});
+    const std::array<std::string, 1U> ids{"fixture.layer"};
+    const auto frame = [&](const std::span<const host::SubmissionBatch> drawn) {
+        effects.begin_layer("layer", ids);
+        effects.begin_surface(fixture.texture.Get(), false);
+        effects.begin_content_layers(drawn, {fixture.texture.Get(), fixture.view.Get()}, side,
+                                     side);
+        std::vector<const host::EffectBatch*> open;
+        for (const host::SubmissionBatch& batch : drawn) {
+            if (const auto* layer = std::get_if<host::EffectBatch>(&batch)) {
+                open.push_back(layer);
+                check(effects.begin_content().target != nullptr, "a nested layer had no target");
+                // Something is drawn into every level, so each one parked keeps its pixels.
+                effects.touch_content();
+            } else {
+                static_cast<void>(
+                    effects.finish_content("layer", *open.back(), side, side, 0.0));
+                open.pop_back();
+            }
+        }
+        check(effects.active_content().target == fixture.view.Get(),
+              "the outermost layer did not composite into the surface");
+        effects.end_layer("layer");
+    };
+    frame(batches);
+    const d3d11::IsolationTargetTelemetry first = effects.isolation_targets();
+    check(first.framebuffer_targets == gpu::resident_content_layers,
+          "nested layers held more framebuffer-sized targets than the resident count");
+    check(first.parked_targets == depth - gpu::resident_content_layers,
+          "every level past the resident count was not parked once");
+    check(first.parked_pixels < first.parked_targets * std::uint64_t{side} * side * 3U / 4U,
+          "parked layers were not sized to their read bounds");
+    frame(batches);
+    const d3d11::IsolationTargetTelemetry second = effects.isolation_targets();
+    check(second.framebuffer_targets == first.framebuffer_targets &&
+              second.parked_targets == first.parked_targets &&
+              second.parked_pixels == first.parked_pixels,
+          "a repeated frame did not reuse its isolation targets");
+    for (std::uint64_t render = 0U; render <= gpu::isolation_target_lifetime; ++render)
+        frame({});
+    const d3d11::IsolationTargetTelemetry idle = effects.isolation_targets();
+    check(idle.framebuffer_targets == 0U && idle.parked_targets == 0U,
+          "isolation targets unused for their lifetime were kept");
+}
+
 void test_image_texels_are_sampled_as_uploaded() {
     Fixture fixture;
     d3d11::Renderer renderer(fixture.device.Get(), fixture.context.Get());
@@ -566,6 +634,7 @@ int main() {
         test_geometry_after_a_failed_frame();
         test_target_is_validated_on_its_own();
         test_unused_effect_samples_are_evicted();
+        test_deep_isolation_is_bounded();
         test_image_texels_are_sampled_as_uploaded();
         std::cout << "strata_d3d11_renderer_tests: OK\n";
         return 0;
