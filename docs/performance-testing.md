@@ -138,7 +138,10 @@ Desktop performance scenarios are JSON documents independent of headless scenari
 }
 ```
 
-Supported steps are `frames`, `click`, `move`, `drag`, `scroll`, and `key`. Pointer targets use the
+Supported steps are `frames`, `settle`, `click`, `move`, `drag`, `scroll`, and `key`. `settle` takes
+milliseconds and frames, unmeasured, until that much wall time has passed, so a transition the
+previous steps started has finished before a phase measures anything; uncapped frames are too fast
+for a frame count to do that. Pointer targets use the
 same joined semantic/inspection selector model as the headless browser: coordinates, `key`, `path`,
 or `role`/`name`. A drag resolves the selected element's bounds and alternates pointer moves between
 two fractions, providing a sustained worst-case control-update workload:
@@ -168,3 +171,13 @@ build\cmake\windows-x64\native\RelWithDebInfo\strata_desktop.exe ^
 `strata.desktop.performance_smoke` only verifies the runner and report protocol with a very short,
 hidden, non-foreground-gated workload. It does not steal focus during ordinary `check`, and its
 numbers are not performance results.
+
+## Proportionality workload
+
+`strata_benchmark_blueprint` runs `native/tests/fixtures/performance/blueprint.json`: idle, a hover
+sweep, a node drag, a right-drag pan and a wheel zoom on the Blueprint editor. Every frame record
+and phase carries a `work` object counting what the frame did (nodes described, expressions
+evaluated, layout nodes measured and arranged, render nodes visited and fragments built, pointer
+geometry rebuilds, glyphs rasterized and the time spent rasterizing them). These counters, not the
+timings, are what [the core architecture](core-architecture.md) gates its phases on: they hold on
+any machine.

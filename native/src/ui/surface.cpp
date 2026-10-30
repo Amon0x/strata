@@ -954,6 +954,19 @@ void Surface::invalidate() noexcept {
     invalidate_description();
 }
 
+void Surface::request_frame() noexcept {
+    invalidate_frame();
+}
+
+bool Surface::idle() const {
+    const bool pending_lifecycle = !pending_lifecycle_input_.events.empty() ||
+                                   !pending_lifecycle_input_.action_outcomes.empty() ||
+                                   pending_lifecycle_input_.injected_events != 0U ||
+                                   pending_lifecycle_input_.processed_events != 0U;
+    return !frame_invalidated_ && tree_.root() != nullptr && input_.queued_event_count() == 0U &&
+           observe_dirty(last_frame_.frame_time_nanos, false, pending_lifecycle).settled();
+}
+
 void Surface::invalidate_frame() noexcept {
     frame_invalidated_ = true;
 }

@@ -310,6 +310,13 @@ class Surface final {
     /** Adopts input, inset, density, and motion preferences as a separate generation domain. */
     [[nodiscard]] bool adopt_environment_preferences(const SurfaceEnvironment& environment);
     void invalidate() noexcept;
+    /** Asks for another frame without changing anything: work a frame left continues there. */
+    void request_frame() noexcept;
+    /**
+     * Nothing is left for a frame to do: no change, motion, animation, queued input or requested
+     * frame. A host may stop framing an idle Surface until input or a host change arrives.
+     */
+    [[nodiscard]] bool idle() const;
     /** Releases all surface-owned interaction state; lifecycle output is published next frame. */
     void cancel_interactions();
     /**

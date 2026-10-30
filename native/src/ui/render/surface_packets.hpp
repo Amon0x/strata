@@ -49,6 +49,12 @@ class SurfacePackets final {
     [[nodiscard]] const std::vector<std::uint8_t>& packet() const noexcept;
     [[nodiscard]] const HostRenderPacketTelemetry& telemetry() const noexcept;
     [[nodiscard]] const font::GlyphAtlas& glyph_atlas() const noexcept { return glyph_atlas_; }
+    /** The last encode re-sent the retained frame: nothing a host draws changed. */
+    [[nodiscard]] bool unchanged() const noexcept { return unchanged_; }
+    /** Encoding left work for later frames: text to rasterize, a zoom to settle. */
+    [[nodiscard]] bool refining() const noexcept { return cache_.refining(); }
+    /** Glyphs the last encode rasterized, and the time it took. */
+    [[nodiscard]] font::GlyphAtlas::RasterWork raster_work() const noexcept { return raster_work_; }
     [[nodiscard]] const SurfaceTextures& textures() const noexcept { return textures_; }
 
   private:
@@ -58,6 +64,8 @@ class SurfacePackets final {
     SurfaceTextures textures_;
     HostRenderPacketCache cache_;
     bool release_prepared_ = false;
+    font::GlyphAtlas::RasterWork raster_work_;
+    bool unchanged_ = false;
 };
 
 } // namespace strata::ui

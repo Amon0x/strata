@@ -204,6 +204,8 @@ public:
     void set_shape_atlas(font::GlyphAtlas* atlas) noexcept;
     /** Groups whose masks rasterize denser than the display (ordered by group); a change replans. */
     void set_group_raster_scales(std::vector<GroupRasterScale> scales);
+    /** The last plan left text at an earlier raster scale: a later frame must plan again. */
+    [[nodiscard]] bool raster_deferred() const noexcept;
     /** Groups presented turned, sheared or scaled (ordered); a change replans. */
     void set_turned_groups(std::vector<std::uint32_t> groups);
     void clear() noexcept;

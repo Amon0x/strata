@@ -48,7 +48,17 @@ const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const 
         textures_.sync(images, registry != nullptr ? registry->lottie() : nullptr);
     const bool settled = frame.operations.render.nodes_visited == 0U &&
                          frame.operations.render.commands_emitted == 0U && !textures_changed;
-    if (!settled || !cache_.reuse(frame.frame_index)) {
+    unchanged_ = settled && cache_.reuse(frame.frame_index);
+    if (!unchanged_) {
+        // Text left at an earlier scale, or a zoom settling, is drawn exact by a later frame.
+        struct Refine final {
+            Surface& surface;
+            const HostRenderPacketCache& cache;
+            ~Refine() {
+                if (cache.refining())
+                    surface.request_frame();
+            }
+        } refine{surface, cache_};
         const SurfaceEnvironment& environment = surface.environment();
         cache_.set_text_subpixel(environment.text_subpixel);
         static_cast<void>(cache_.encode(surface.render_commands(), frame.frame_index, &textures_,
@@ -99,6 +109,7 @@ const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const 
         profiler.record_external_timing("packet-cold-geometry", packet.cold_geometry_packet_nanos);
         profiler.record_external_timing("packet-cold-resources", packet.cold_resource_packet_nanos);
     }
+    raster_work_ = glyph_atlas_.take_raster_work();
     return this->packet();
 }
 

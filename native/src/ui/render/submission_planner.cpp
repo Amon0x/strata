@@ -2665,9 +2665,14 @@ std::vector<PlannedItem> plan(
     const std::vector<bool> subpixel_runs =
         subpixel_text_runs(commands, text_scales, cache.turned_groups, context.text_subpixel);
     const std::vector<bool> zoomed_runs = zoomed_text_runs(commands, cache.group_raster_scales);
+    // A run drawn before whose glyphs only want another raster scale may wait on the frame's
+    // raster budget: until it is rasterized again it draws its last preparation, resampled.
+    std::vector<std::size_t> rescaled;
+    std::vector<bool> deferred(commands.commands().size(), false);
     const auto collect_warmup_requests =
         [&](const std::uint64_t atlas_generation, const bool all) {
         std::vector<font::GlyphAtlasWarmupRequest> requests;
+        rescaled.clear();
         for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
             if (!visible_text[index]) continue;
             const auto* text = std::get_if<TextRunRenderCommand>(
@@ -2675,19 +2680,51 @@ std::vector<PlannedItem> plan(
             );
             if (text == nullptr) continue;
             const auto& retained = cache.text[index];
-            if (!all && retained.has_value() && same_text_content(retained->source, *text) &&
-                retained->text_engine == text_engine &&
-                retained->atlas_generation == atlas_generation &&
-                retained->display_scale == context.scale &&
-                retained->raster_scale == text_scales[index] &&
+            const bool shown = !all && retained.has_value() &&
+                               same_text_content(retained->source, *text) &&
+                               retained->text_engine == text_engine &&
+                               retained->atlas_generation == atlas_generation &&
+                               retained->display_scale == context.scale;
+            if (shown && retained->raster_scale == text_scales[index] &&
                 retained->subpixel == subpixel_runs[index] &&
                 retained->unhinted == zoomed_runs[index]) {
+                continue;
+            }
+            if (shown) {
+                rescaled.push_back(index);
                 continue;
             }
             append_warmup_requests(*text, *text_engine, context, text_scales[index],
                                    subpixel_runs[index], zoomed_runs[index], requests);
         }
         return requests;
+    };
+    // Rasterizes the rescaled runs a batch at a time while the budget lasts; false on a recycle.
+    const auto warm_rescaled = [&]() {
+        constexpr std::size_t batch_glyphs = 96U;
+        std::size_t next = 0U;
+        while (next < rescaled.size()) {
+            if (std::chrono::steady_clock::now() >= cache.raster_deadline) {
+                for (; next < rescaled.size(); ++next)
+                    deferred[rescaled[next]] = true;
+                break;
+            }
+            std::vector<font::GlyphAtlasWarmupRequest> batch;
+            while (next < rescaled.size() && batch.size() < batch_glyphs) {
+                const std::size_t index = rescaled[next++];
+                append_warmup_requests(
+                    std::get<TextRunRenderCommand>(commands.commands()[index]), *text_engine,
+                    context, text_scales[index], subpixel_runs[index], zoomed_runs[index], batch);
+            }
+            const auto warmup_started = std::chrono::steady_clock::now();
+            const bool warmed = glyph_atlas.warm(batch);
+            telemetry.atlas_warmup_nanos +=
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - warmup_started
+                ).count();
+            if (!warmed) return false;
+        }
+        return true;
     };
     // Populate only changed text runs. Capacity reclamation is generation-wide, so a recycle
     // during warmup invalidates older prepared UVs and repeats until every retained run belongs
@@ -2705,7 +2742,8 @@ std::vector<PlannedItem> plan(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now() - warmup_started
                 ).count();
-            if (!warmed) {
+            std::ranges::fill(deferred, false);
+            if (!warmed || !warm_rescaled()) {
                 warm_all = true;
                 continue;
             }
@@ -2716,6 +2754,10 @@ std::vector<PlannedItem> plan(
                 );
                 if (text == nullptr || !visible_text[index]) {
                     cache.text[index].reset();
+                    continue;
+                }
+                if (deferred[index]) {
+                    cache.raster_deferred = true;
                     continue;
                 }
                 const auto& retained = cache.text[index];
@@ -2843,13 +2885,18 @@ std::optional<std::vector<std::size_t>> replan_ranges(
             }
             if (text_engine == nullptr) return std::nullopt;
             const std::optional<PreparedTextCacheEntry>& retained = cache.text[index];
-            if (retained.has_value() && same_text_content(retained->source, *text) &&
-                retained->text_engine == text_engine &&
-                retained->atlas_generation == glyph_atlas.generation() &&
-                retained->display_scale == context.scale &&
-                retained->raster_scale == text_scales[index] &&
+            const bool shown = retained.has_value() && same_text_content(retained->source, *text) &&
+                               retained->text_engine == text_engine &&
+                               retained->atlas_generation == glyph_atlas.generation() &&
+                               retained->display_scale == context.scale;
+            if (shown && retained->raster_scale == text_scales[index] &&
                 retained->subpixel == subpixel_runs[index] &&
                 retained->unhinted == zoomed_runs[index]) {
+                continue;
+            }
+            // Only its scale changed, and the frame's raster budget is spent: it waits.
+            if (shown && std::chrono::steady_clock::now() >= cache.raster_deadline) {
+                cache.raster_deferred = true;
                 continue;
             }
             glyph_atlas.adopt_display_scale(context.scale);

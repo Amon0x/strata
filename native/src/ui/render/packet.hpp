@@ -1,6 +1,8 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
+#include <map>
 #include <span>
 #include <string>
 #include <vector>
@@ -110,6 +112,11 @@ class HostRenderPacketCache final {
            double logical_width, double logical_height);
     /** Emits a compact packet referencing the settled geometry epoch. */
     [[nodiscard]] bool reuse(std::uint64_t frame_index);
+    /**
+     * A zoomed group is settling, or text still waits to be rasterized at its scale: frames must
+     * keep coming, and encoding, until it is drawn at rest.
+     */
+    [[nodiscard]] bool refining() const noexcept;
     /** How coverage text is antialiased from the next encode on (subpixel where it can be). */
     void set_text_subpixel(font::SubpixelOrder order) noexcept {
         text_subpixel_ = order;
@@ -142,6 +149,9 @@ class HostRenderPacketCache final {
     std::size_t skipped_draws_ = 0U;
     // A failed packet encode must be retried even if the retained UI becomes settled meanwhile.
     bool frame_encoding_incomplete_ = false;
+    /** When each scaled group's scale last moved, while it settles. */
+    std::map<std::uint32_t, std::chrono::steady_clock::time_point> scale_moved_;
+    bool scales_settling_ = false;
     bool terminal_release_prepared_ = false;
     std::uint64_t geometry_epoch_ = 0U;
 };

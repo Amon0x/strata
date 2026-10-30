@@ -115,6 +115,8 @@ struct RenderContext::Impl final {
     struct MaterialProgram final {
         std::shared_future<ComPtr<ID3DBlob>> pending;
         ComPtr<ID3D11PixelShader> shader;
+        /** It reads the frame time or the pointer, so it changes without its packet changing. */
+        bool live = false;
     };
 
     Impl(
@@ -404,6 +406,9 @@ struct RenderContext::Impl final {
                                    std::string(shaders::material_entry);
         auto [program, inserted] = material_programs.try_emplace(source);
         if (inserted) {
+            program->second.live = hlsl_source.find("materialTime") != std::string_view::npos ||
+                                   hlsl_source.find("frameSeconds") != std::string_view::npos ||
+                                   hlsl_source.find("framePointer") != std::string_view::npos;
             if (asynchronous_shader_compilation) {
                 program->second.pending = std::async(
                     std::launch::async,
@@ -509,13 +514,15 @@ struct RenderContext::Impl final {
     void resolve_materials(const std::span<const std::string> materials) {
         layer_shaders.clear();
         layer_shaders.reserve(materials.size());
-        for (const std::string& material : materials) {
+        layer_live_materials.assign(materials.size(), false);
+        for (std::size_t index = 0U; index < materials.size(); ++index) {
             ID3D11PixelShader* selected = pixel_shader.Get();
-            if (const auto id = material_program_ids.find(material);
+            if (const auto id = material_program_ids.find(materials[index]);
                 id != material_program_ids.end()) {
                 if (const auto program = material_programs.find(id->second);
                     program != material_programs.end() && program->second.shader != nullptr) {
                     selected = program->second.shader.Get();
+                    layer_live_materials[index] = program->second.live;
                 }
             }
             layer_shaders.push_back(selected);
@@ -525,6 +532,8 @@ struct RenderContext::Impl final {
     void draw(const DrawBatch& batch) {
         if (batch.index_count == 0U)
             return;
+        if (batch.material < layer_live_materials.size() && layer_live_materials[batch.material])
+            drew_live_material = true;
         ID3D11PixelShader* const selected_shader = batch.material < layer_shaders.size()
                                                        ? layer_shaders[batch.material]
                                                        : pixel_shader.Get();
@@ -617,6 +626,7 @@ struct RenderContext::Impl final {
         if (target == nullptr)
             throw std::logic_error("D3D11 render target is not configured");
         RenderLayerTelemetry telemetry;
+        drew_live_material = false;
         GeometryBuffers& retained = geometry[std::string(id)];
         if (!retained.epoch.has_value() || *retained.epoch != packet.geometry_epoch) {
             const std::size_t index_bytes = packet.indices.size() * sizeof(std::uint32_t);
@@ -755,6 +765,7 @@ struct RenderContext::Impl final {
         if (!content_layers.empty()) {
             throw std::logic_error("D3D11 content effect stack is unbalanced");
         }
+        telemetry.live = drew_live_material;
         return telemetry;
     }
 
@@ -857,6 +868,9 @@ struct RenderContext::Impl final {
     std::array<ComPtr<ID3D11BlendState>, host::draw_blend_count> blends;
     /** The current layer's material table resolved to pixel shaders (see resolve_materials). */
     std::vector<ID3D11PixelShader*> layer_shaders;
+    /** Which of the layer frame's materials are live (see MaterialProgram::live). */
+    std::vector<bool> layer_live_materials;
+    bool drew_live_material = false;
     std::map<std::string, std::string, std::less<>> material_sources;
     std::map<std::string, std::string, std::less<>> material_program_ids;
     std::map<std::string, MaterialProgram, std::less<>> material_programs;

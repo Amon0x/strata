@@ -84,6 +84,11 @@ struct RenderLayerTelemetry final {
      * back without waiting, so this trails the frame by a few. Zero until one is known.
      */
     std::uint64_t gpu_nanos = 0U;
+    /**
+     * The layer drew a material that changes on its own, reading the frame time or the pointer:
+     * drawing it again shows something new even when its packet did not change.
+     */
+    bool live = false;
 };
 
 struct PresentedFrame final {

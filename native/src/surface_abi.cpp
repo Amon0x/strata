@@ -1081,6 +1081,20 @@ strata_result strata_surface_frame(strata_surface* const surface,
                           surface->core.semantics().generation(),
                           static_cast<std::uint64_t>(surface->core.input().queued_event_count()),
                           static_cast<std::uint64_t>(packet.size()),
+                          static_cast<std::uint64_t>(frame.operations.described_nodes),
+                          static_cast<std::uint64_t>(frame.operations.evaluated_expressions),
+                          static_cast<std::uint64_t>(frame.operations.layout_measured_nodes),
+                          static_cast<std::uint64_t>(frame.operations.layout_arranged_nodes),
+                          static_cast<std::uint64_t>(frame.operations.render.nodes_visited),
+                          static_cast<std::uint64_t>(frame.operations.render.fragments_built),
+                          static_cast<std::uint64_t>(frame.operations.pointer_geometry_rebuilds),
+                          surface->packets.raster_work().glyphs,
+                          surface->packets.raster_work().nanoseconds,
+                          surface->packets.unchanged() ? 1U : 0U,
+                          surface->packets.unchanged() && !surface->packets.refining() &&
+                                  surface->core.idle()
+                              ? 1U
+                              : 0U,
                       }));
         return strata::abi_detail::result(STRATA_STATUS_OK);
     });

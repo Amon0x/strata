@@ -1172,6 +1172,19 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         COMMENT "Running the visible uncapped desktop performance scenario"
         VERBATIM
     )
+    # The proportionality workload: idle, hover, a node drag, pan and zoom on the Blueprint editor,
+    # with each frame's work counters (docs/core-architecture.md).
+    add_custom_target(
+        strata_benchmark_blueprint
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/performance/blueprint-desktop"
+        COMMAND strata_desktop
+            --performance "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/performance/blueprint.json"
+            --output "${CMAKE_BINARY_DIR}/performance/blueprint-desktop"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources"
+        DEPENDS strata_desktop
+        COMMENT "Running the Blueprint proportionality scenario"
+        VERBATIM
+    )
 endif()
 
 if(BUILD_TESTING AND STRATA_BUILD_TESTS)

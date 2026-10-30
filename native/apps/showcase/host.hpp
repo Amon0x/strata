@@ -18,6 +18,19 @@ using HWND = HWND__*;
 
 namespace strata::desktop {
 
+/** What one frame did, counted: the work a change should be proportional to. */
+struct DesktopFrameWork final {
+    std::uint64_t described_nodes = 0U;
+    std::uint64_t evaluated_expressions = 0U;
+    std::uint64_t layout_measured_nodes = 0U;
+    std::uint64_t layout_arranged_nodes = 0U;
+    std::uint64_t render_visited_nodes = 0U;
+    std::uint64_t render_built_fragments = 0U;
+    std::uint64_t pointer_geometry_rebuilds = 0U;
+    std::uint64_t rasterized_glyphs = 0U;
+    std::uint64_t raster_nanos = 0U;
+};
+
 struct DesktopFrameSample final {
     std::uint64_t frame_index = 0U;
     std::int64_t frame_time_nanos = 0;
@@ -36,6 +49,7 @@ struct DesktopFrameSample final {
     std::uint64_t batches = 0U;
     std::uint64_t vertices = 0U;
     std::uint64_t blur_passes = 0U;
+    DesktopFrameWork work;
     bool had_draws = false;
     bool presented = true;
 };
@@ -92,6 +106,13 @@ public:
     /** The pointer shape the interactive layer asks for; nullopt when no layer is live. */
     [[nodiscard]] std::optional<std::uint32_t> pointer_cursor() noexcept;
     void frame();
+    /** The last frame drew and presented the window: something it shows changed. */
+    [[nodiscard]] bool presented() const noexcept;
+    /**
+     * Nothing is left to do until input or a host change: every shown layer is idle and nothing
+     * on screen animates by itself. The loop may wait for input instead of framing.
+     */
+    [[nodiscard]] bool idle() const noexcept;
     /** The windows the documents asked to open or close since the last call. */
     [[nodiscard]] std::vector<WindowRequest> take_window_requests();
     /** Answers a window request with `json`, at the next frame. */

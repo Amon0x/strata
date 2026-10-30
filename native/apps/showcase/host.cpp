@@ -1596,11 +1596,52 @@ struct Host::Impl final {
         bool drew = false;
     };
 
-    /** Frames one layer's Session, draws its packet into the layer and publishes the work. */
-    [[nodiscard]] LayerFrame frame_layer(Layer& layer, DesktopFrameSample* const sample) {
+    /** One layer's Session framed this host frame, before anything is drawn. */
+    struct FramedLayer final {
+        Layer* layer = nullptr;
+        host::SurfacePacketFrame framed;
+        std::int64_t core_nanos = 0;
+    };
+
+    /** Frames one layer's Session: its core frame, packet read and decode. */
+    [[nodiscard]] FramedLayer frame_session(Layer& layer) {
         const auto started = std::chrono::steady_clock::now();
-        const host::SurfacePacketFrame framed = layer.session->frame(frame_time);
-        const RenderPacket& packet = *framed.packet;
+        host::SurfacePacketFrame framed = layer.session->frame(frame_time);
+        return FramedLayer{
+            &layer,
+            std::move(framed),
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - started)
+                .count(),
+        };
+    }
+
+    /** Fills the performance sample with what framing a layer reported. */
+    static void sample_framing(const FramedLayer& framed, DesktopFrameSample& sample) {
+        const strata_surface_frame_info& info = framed.framed.surface;
+        const RenderPacket& packet = *framed.framed.packet;
+        sample.frame_index = info.frame_index;
+        sample.frame_time_nanos = info.frame_time_nanoseconds;
+        sample.input_events = info.processed_input_event_count;
+        sample.emitted_events = info.emitted_event_count;
+        sample.render_commands = info.render_command_count;
+        sample.packet_bytes = info.render_packet_size;
+        sample.draw_calls = packet.planned_draw_count;
+        sample.batches = packet.batches.size();
+        sample.vertices = packet.vertices.size() / host::packet_vertex_bytes;
+        sample.work = DesktopFrameWork{
+            info.described_node_count,         info.evaluated_expression_count,
+            info.layout_measured_node_count,   info.layout_arranged_node_count,
+            info.render_visited_node_count,    info.render_built_fragment_count,
+            info.pointer_geometry_rebuild_count, info.rasterized_glyph_count,
+            info.raster_nanoseconds,
+        };
+    }
+
+    /** Draws a framed layer's packet into the layer and publishes the work. */
+    [[nodiscard]] LayerFrame draw_layer(const FramedLayer& framed, DesktopFrameSample* const sample) {
+        Layer& layer = *framed.layer;
+        const RenderPacket& packet = *framed.framed.packet;
         const auto submit_started = std::chrono::steady_clock::now();
         const RenderLayerTelemetry rendered = renderer.render_layer(layer.id, packet);
         const std::vector<strata_backdrop_sample> backdrop =
@@ -1608,22 +1649,14 @@ struct Host::Impl final {
         if (!backdrop.empty())
             layer.surface().report_backdrop(backdrop);
         const auto finished = std::chrono::steady_clock::now();
-        const strata_surface_frame_info& info = framed.surface;
+        const strata_surface_frame_info& info = framed.framed.surface;
         const LayerFrame result{
-            std::chrono::duration_cast<std::chrono::nanoseconds>(submit_started - started).count(),
+            framed.core_nanos,
             std::chrono::duration_cast<std::chrono::nanoseconds>(finished - submit_started).count(),
             info.render_command_count > 0U && packet.planned_draw_count > 0U,
         };
+        drew_live_material = drew_live_material || rendered.live;
         if (sample != nullptr) {
-            sample->frame_index = info.frame_index;
-            sample->frame_time_nanos = info.frame_time_nanoseconds;
-            sample->input_events = info.processed_input_event_count;
-            sample->emitted_events = info.emitted_event_count;
-            sample->render_commands = info.render_command_count;
-            sample->packet_bytes = info.render_packet_size;
-            sample->draw_calls = packet.planned_draw_count;
-            sample->batches = packet.batches.size();
-            sample->vertices = packet.vertices.size() / host::packet_vertex_bytes;
             sample->blur_passes = rendered.blur_passes;
             sample->gpu_nanos = static_cast<std::int64_t>(rendered.gpu_nanos);
         }
@@ -1795,7 +1828,6 @@ struct Host::Impl final {
                 std::chrono::steady_clock::now() - tooling_update_started
             ).count();
         tooling_nanos += tooling_update_nanos;
-        renderer.begin_frame();
         bool had_draws = false;
         LayerFrame active;
         LayerFrame showcase_frame;
@@ -1803,10 +1835,32 @@ struct Host::Impl final {
         LayerFrame debug_frame;
         LayerFrame performance_frame;
         DesktopFrameSample sample;
+        // Every shown layer is framed first; the window is drawn only when what it shows changed:
+        // a packet that is not a re-send, a layer shown or hidden, a live material, a capture.
+        std::vector<FramedLayer> framed_layers;
+        std::vector<std::string> drawn_ids;
+        bool changed = rendered_frames == 0U || drew_live_material || platform_capture || host_capture;
+        bool idle = true;
         for (Layer* const layer : layers()) {
             if (!shown(*layer) || !layer->live()) continue;
-            const LayerFrame result =
-                frame_layer(*layer, layer == interactive ? &sample : nullptr);
+            framed_layers.push_back(frame_session(*layer));
+            const strata_surface_frame_info& info = framed_layers.back().framed.surface;
+            changed = changed || info.unchanged == 0U;
+            idle = idle && info.idle != 0U;
+            drawn_ids.push_back(layer->id);
+            if (layer == interactive) sample_framing(framed_layers.back(), sample);
+        }
+        changed = changed || drawn_ids != last_drawn_ids;
+        last_frame_idle = idle && !drew_live_material;
+        if (changed) {
+            drew_live_material = false;
+            renderer.begin_frame();
+        }
+        for (const FramedLayer& framed : framed_layers) {
+            Layer* const layer = framed.layer;
+            const LayerFrame result = changed
+                ? draw_layer(framed, layer == interactive ? &sample : nullptr)
+                : LayerFrame{framed.core_nanos, 0, false};
             had_draws = result.drew || had_draws;
             if (layer == interactive) active = result;
             if (layer == &showcase) {
@@ -1832,7 +1886,10 @@ struct Host::Impl final {
             }
         }
         const auto present_started = std::chrono::steady_clock::now();
-        const bool presented = renderer.end_frame();
+        const bool presented = changed && renderer.end_frame();
+        if (changed)
+            last_drawn_ids = std::move(drawn_ids);
+        last_frame_presented = presented;
         deliver_platform_capture();
         const std::int64_t present_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - present_started
@@ -1956,6 +2013,13 @@ struct Host::Impl final {
     bool performance_snapshot_dirty = true;
     bool clear_diagnostics_pending = false;
     bool last_frame_had_draws = false;
+    /** The last frame drew the window; and every shown layer was idle with nothing live on it. */
+    bool last_frame_presented = false;
+    bool last_frame_idle = false;
+    /** A drawn material reads the time or the pointer: the next frame draws again. */
+    bool drew_live_material = false;
+    /** The layers the window showed when it was last drawn. */
+    std::vector<std::string> last_drawn_ids;
     bool first_frame_contains_instance = false;
     static constexpr std::int64_t showcase_transition_nanos = 180'000'000;
     static constexpr std::array debug_modes{
@@ -2114,6 +2178,10 @@ void Host::cancel_interactions() noexcept {
 }
 
 void Host::frame() { impl_->frame(); }
+
+bool Host::presented() const noexcept { return impl_->last_frame_presented; }
+
+bool Host::idle() const noexcept { return impl_->last_frame_idle; }
 
 void Host::files(const std::uint32_t kind, const double x, const double y,
                  const std::string& paths) {

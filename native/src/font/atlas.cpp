@@ -4,12 +4,15 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <compare>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -24,6 +27,73 @@
 
 namespace strata::font {
 namespace {
+
+/**
+ * The threads glyph misses are rasterized on, kept for the life of the process. A lane keeps the
+ * FreeType faces it leased in thread-local caches, so a persistent lane rasterizes the next batch
+ * without building them again, and no batch pays for starting threads. One batch runs at a time;
+ * the caller works as a lane too.
+ */
+class RasterPool final {
+  public:
+    static constexpr std::size_t helpers = 3U;
+
+    /** The pool, made on first use and never destroyed: its threads end with the process. */
+    [[nodiscard]] static RasterPool& shared() {
+        static RasterPool* const pool = new RasterPool();
+        return *pool;
+    }
+
+    /** Runs `lane` on the caller and on `count` helpers (at most `helpers`), and waits for all. */
+    void run(const std::size_t count, const std::function<void()>& lane) {
+        const std::scoped_lock batch(batch_mutex_);
+        const std::size_t used = std::min(count, helpers);
+        {
+            const std::scoped_lock lock(mutex_);
+            lane_ = &lane;
+            waiting_ = used;
+            running_ = used;
+        }
+        work_.notify_all();
+        lane();
+        std::unique_lock lock(mutex_);
+        done_.wait(lock, [this] { return running_ == 0U; });
+        lane_ = nullptr;
+    }
+
+  private:
+    RasterPool() {
+        for (std::size_t index = 0U; index < helpers; ++index)
+            threads_.emplace_back([this] { serve(); });
+    }
+
+    void serve() {
+        for (;;) {
+            const std::function<void()>* lane = nullptr;
+            {
+                std::unique_lock lock(mutex_);
+                work_.wait(lock, [this] { return waiting_ != 0U; });
+                --waiting_;
+                lane = lane_;
+            }
+            (*lane)();
+            {
+                const std::scoped_lock lock(mutex_);
+                --running_;
+            }
+            done_.notify_one();
+        }
+    }
+
+    std::mutex batch_mutex_;
+    std::mutex mutex_;
+    std::condition_variable work_;
+    std::condition_variable done_;
+    const std::function<void()>* lane_ = nullptr;
+    std::size_t waiting_ = 0U;
+    std::size_t running_ = 0U;
+    std::vector<std::thread> threads_;
+};
 
 [[nodiscard]] std::string owner_token(const std::string_view owner_id) {
     // Length-prefixing is injective for arbitrary owner bytes; a fixed-width hash would make
@@ -667,9 +737,9 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
     }
 
     // Raster misses are independent immutable results. Use a small fixed ceiling rather than a
-    // hardware-sized fan-out: one caller lane plus at most three temporary workers reduces a cold
-    // atlas stall without monopolizing a host's render/game worker pool. Coverage rasterization
-    // obtains one cached FT_Face per thread because FT_Face owns mutable size/transform state.
+    // hardware-sized fan-out: one caller lane plus at most three pool lanes reduces a cold atlas
+    // stall without monopolizing a host's render/game worker pool. Coverage rasterization obtains
+    // one cached FT_Face per thread because FT_Face owns mutable size/transform state.
     constexpr std::size_t maximum_raster_lanes = 4U;
     constexpr std::size_t parallel_raster_threshold = 8U;
     const std::size_t available_lanes =
@@ -718,14 +788,17 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
             }
         }
     };
-    std::vector<std::jthread> workers;
-    workers.reserve(raster_lanes - 1U);
-    for (std::size_t lane = 1U; lane < raster_lanes; ++lane) {
-        workers.emplace_back(raster_lane);
+    const auto raster_started = std::chrono::steady_clock::now();
+    if (raster_lanes == 1U) {
+        raster_lane();
+    } else {
+        RasterPool::shared().run(raster_lanes - 1U, std::function<void()>(raster_lane));
     }
-    raster_lane();
-    for (std::jthread& worker : workers)
-        worker.join();
+    raster_work_.glyphs += missing.size();
+    raster_work_.nanoseconds += static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
+                                                             raster_started)
+            .count());
     if (failure != nullptr)
         std::rethrow_exception(failure);
 
@@ -745,6 +818,10 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
     }
     flush_pending_uploads();
     return true;
+}
+
+GlyphAtlas::RasterWork GlyphAtlas::take_raster_work() noexcept {
+    return std::exchange(raster_work_, RasterWork{});
 }
 
 std::vector<AtlasOperation> GlyphAtlas::take_operations() {

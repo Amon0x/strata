@@ -867,8 +867,13 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                 running = false;
             }
             if (!headless && !uncapped) {
-                static_cast<void>(MsgWaitForMultipleObjectsEx(0U, nullptr, 16U, QS_ALLINPUT,
-                                                              MWMO_INPUTAVAILABLE));
+                // A window whose frame changed nothing waits for input; one with nothing left to
+                // do at all waits longer, waking only to notice timers and async completions.
+                const bool idle = std::ranges::all_of(applications, [](const auto& app) {
+                    return app->host != nullptr && app->host->idle() && !app->host->presented();
+                });
+                static_cast<void>(MsgWaitForMultipleObjectsEx(0U, nullptr, idle ? 50U : 16U,
+                                                              QS_ALLINPUT, MWMO_INPUTAVAILABLE));
             }
         }
         // The windows documents opened go first: they share their opener's model.

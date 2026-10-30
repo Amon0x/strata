@@ -517,13 +517,22 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     const bool profile_cold_encode = geometry_packet_.empty();
     const auto cold_encode_started = profile_cold_encode ? std::chrono::steady_clock::now()
                                                          : std::chrono::steady_clock::time_point{};
-    // Masks in a scaled group rasterize at the group's density, so a zoomed group's shapes stay
-    // sharp rather than magnified. A new group, or one whose scale held since the last frame, is
-    // exact; one whose scale is moving takes the nearest quarter octave, so a zoom replans only a
-    // few times on its way, and steps within a tenth of one are left at one.
+    // A scaled group rasterizes its masks and text at its density, so a zoomed group stays sharp
+    // rather than magnified. A new group, or one whose scale has held a moment, is exact; one
+    // whose scale is moving takes the nearest quarter octave, so a zoom rasterizes again only a
+    // few times on its way, and what it shows meanwhile is resampled.
     {
         std::vector<RenderGroup> composed;
         static_cast<void>(compose_groups(commands.groups(), composed));
+        // How long a group's scale holds before it counts as at rest: wheel notches and pinch
+        // updates arrive frames apart, and each pause would otherwise rasterize at an exact scale.
+        constexpr std::chrono::milliseconds scale_settle{150};
+        const auto now = std::chrono::steady_clock::now();
+        scales_settling_ = false;
+        bool scales_settling = false;
+        std::erase_if(scale_moved_, [&](const auto& entry) {
+            return now - entry.second >= scale_settle;
+        });
         std::vector<GroupRasterScale> scales;
         std::vector<std::uint32_t> turned;
         const auto stepped = [](const double value) {
@@ -542,20 +551,25 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
             }
             const auto previous =
                 std::ranges::lower_bound(groups_, group.index, {}, &RenderGroup::index);
-            const bool moving = previous != groups_.end() && previous->index == group.index &&
-                                (previous->scale_x != group.scale_x ||
-                                 previous->scale_y != group.scale_y);
+            const bool changed = previous != groups_.end() && previous->index == group.index &&
+                                 (previous->scale_x != group.scale_x ||
+                                  previous->scale_y != group.scale_y);
+            if (changed)
+                scale_moved_[group.index] = now;
+            const auto moved = scale_moved_.find(group.index);
+            const bool moving = moved != scale_moved_.end() && now - moved->second < scale_settle;
+            if (moving)
+                scales_settling = true;
             const double x = moving ? stepped(group.scale_x) : group.scale_x;
             const double y = moving ? stepped(group.scale_y) : group.scale_y;
             // A resting group rasterizes at its exact scale, however close to one; a moving one's
-            // masks only once its step leaves one. Text always takes the exact scale: glyphs are
-            // cheap to rasterize again, and a stepped glyph would be resampled while the group
-            // moves and snap when it stops.
-            const double text = std::max(group.scale_x, group.scale_y);
+            // masks and text only at its step.
+            const double text = moving ? std::max(x, y) : std::max(group.scale_x, group.scale_y);
             if (x != 1.0 || y != 1.0 || text != 1.0)
                 scales.push_back(GroupRasterScale{group.index, x, y, text});
         }
         submission_cache_.set_group_raster_scales(std::move(scales));
+        scales_settling_ = scales_settling;
         std::ranges::sort(turned);
         submission_cache_.set_turned_groups(std::move(turned));
     }
@@ -729,8 +743,12 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                   logical_height);
 }
 
+bool HostRenderPacketCache::refining() const noexcept {
+    return scales_settling_ || submission_cache_.raster_deferred();
+}
+
 bool HostRenderPacketCache::reuse(const std::uint64_t frame_index) {
-    if (frame_encoding_incomplete_ || geometry_packet_.empty())
+    if (frame_encoding_incomplete_ || geometry_packet_.empty() || refining())
         return false;
     if (reuse_packet_.empty()) {
         RenderSubmission retained_submission;

@@ -245,6 +245,12 @@ class GlyphAtlas final {
     [[nodiscard]] bool reclamation_pending() const noexcept;
     [[nodiscard]] bool frame_preparation_active() const noexcept;
     [[nodiscard]] std::uint64_t generation_recycle_count() const noexcept;
+    /** Glyphs rasterized on the CPU since the last call, and the time it took; then zero. */
+    struct RasterWork final {
+        std::uint64_t glyphs = 0U;
+        std::uint64_t nanoseconds = 0U;
+    };
+    [[nodiscard]] RasterWork take_raster_work() noexcept;
 
   private:
     struct Key;
@@ -300,6 +306,7 @@ class GlyphAtlas final {
     bool reclamation_pending_ = false;
     std::uint32_t preparation_recycles_ = 0U;
     std::uint64_t generation_recycle_count_ = 0U;
+    RasterWork raster_work_;
 };
 
 } // namespace strata::font

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -255,6 +256,14 @@ struct PreparationCache final {
     font::SubpixelOrder text_subpixel = font::SubpixelOrder::none;
     std::uint64_t planned_shape_generation = 0U;
     bool plan_current = false;
+    /**
+     * Rasterizing shown text again at another scale (a zoom) is spent from a budget each frame:
+     * once it runs out, a run keeps its last preparation, resampled, and a later frame prepares
+     * it. A frame never waits on a scale change, however much text it shows.
+     */
+    std::chrono::steady_clock::time_point raster_deadline{};
+    /** This plan left runs at their last scale: the next frame plans again to finish them. */
+    bool raster_deferred = false;
     /** Tests compare the fast path against a full plan of the same stream. */
     bool changed_draw_updates = true;
     std::size_t changed_draw_update_count = 0U;

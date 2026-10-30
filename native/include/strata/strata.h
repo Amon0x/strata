@@ -1849,6 +1849,22 @@ typedef struct strata_surface_frame_info {
     uint64_t semantics_generation;
     uint64_t queued_input_event_count;
     uint64_t render_packet_size;
+    /* The work the frame did, for checking that it is proportional to what changed. */
+    uint64_t described_node_count;
+    uint64_t evaluated_expression_count;
+    uint64_t layout_measured_node_count;
+    uint64_t layout_arranged_node_count;
+    uint64_t render_visited_node_count;
+    uint64_t render_built_fragment_count;
+    uint64_t pointer_geometry_rebuild_count;
+    uint64_t rasterized_glyph_count;
+    uint64_t raster_nanoseconds;
+    /* The packet re-sends the retained frame: what the host drew last time is still current. */
+    uint32_t unchanged;
+    /* Nothing is left to do until input or a host change arrives: the host may stop framing this
+     * Surface (and stop drawing it, unless what it shows animates on its own, such as a material
+     * reading time). Framing an idle Surface anyway is cheap and harmless. */
+    uint32_t idle;
 } strata_surface_frame_info;
 
 /*

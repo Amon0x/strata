@@ -48,7 +48,7 @@ const RenderSubmission& RenderSubmissionCache::resolve(
         shape_atlas == nullptr || (!shape_atlas->reclamation_pending() &&
                                    shape_atlas_generation_ == shape_atlas->generation());
     if (submission_.has_value() && text_resources_match && shape_resources_match &&
-        environment_ == environment &&
+        !preparation_cache_->raster_deferred && environment_ == environment &&
         (commands_.shares_storage(commands) || commands_.commands() == commands.commands()) &&
         std::ranges::equal(texture_descriptors_, textures)) {
         ++hits_;
@@ -101,6 +101,10 @@ void RenderSubmissionCache::set_shape_atlas(font::GlyphAtlas* const atlas) noexc
         return;
     preparation_cache_->shape_atlas = atlas;
     submission_.reset();
+}
+
+bool RenderSubmissionCache::raster_deferred() const noexcept {
+    return preparation_cache_->raster_deferred;
 }
 
 void RenderSubmissionCache::set_group_raster_scales(std::vector<GroupRasterScale> scales) {

@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "name": "blueprint-desktop",
+  "window": {"width": 1500, "height": 950},
+  "validity": {"requireForeground": false, "requireVisible": false},
+  "spikes": {
+    "floorMillis": 1.0,
+    "baselineMultiplier": 2.0,
+    "maximumReported": 8
+  },
+  "regression": {
+    "maximumAveragePercent": 10.0,
+    "maximumP95Percent": 15.0,
+    "maximumP99Percent": 20.0,
+    "minimumAbsoluteMillis": 0.1
+  },
+  "setup": [
+    {"key": "f7"},
+    {"frames": 3},
+    {"click": {"role": "tab", "name": "BLUEPRINT"}},
+    {"settle": 500}
+  ],
+  "phases": [
+    {
+      "name": "idle",
+      "warmupFrames": 30,
+      "iterations": 1,
+      "steps": [{"frames": 240}]
+    },
+    {
+      "name": "hover",
+      "warmupFrames": 0,
+      "iterations": 2,
+      "steps": [
+        {"gesture": {"from": {"x": 200, "y": 300}, "to": {"x": 1300, "y": 700}, "moves": 120, "press": false, "release": false}}
+      ]
+    },
+    {
+      "name": "drag-node",
+      "warmupFrames": 0,
+      "iterations": 3,
+      "steps": [
+        {"gesture": {"from": {"key": "blueprint.node.n2.header"}, "to": {"x": 640, "y": 620}, "moves": 60}},
+        {"frames": 2},
+        {"gesture": {"from": {"key": "blueprint.node.n2.header"}, "to": {"x": 500, "y": 250}, "moves": 60}},
+        {"frames": 2}
+      ]
+    },
+    {
+      "name": "pan",
+      "warmupFrames": 0,
+      "iterations": 2,
+      "steps": [
+        {"gesture": {"from": {"x": 700, "y": 800}, "to": {"x": 400, "y": 600}, "moves": 120, "button": 2}}
+      ]
+    },
+    {
+      "name": "zoom",
+      "warmupFrames": 0,
+      "iterations": 3,
+      "steps": [
+        {"scroll": {"key": "blueprint.canvas", "deltaY": -120}}, {"scroll": {"key": "blueprint.canvas", "deltaY": -120}},
+        {"scroll": {"key": "blueprint.canvas", "deltaY": -120}}, {"scroll": {"key": "blueprint.canvas", "deltaY": -120}},
+        {"scroll": {"key": "blueprint.canvas", "deltaY": -120}}, {"scroll": {"key": "blueprint.canvas", "deltaY": -120}},
+        {"scroll": {"key": "blueprint.canvas", "deltaY": -120}}, {"scroll": {"key": "blueprint.canvas", "deltaY": -120}},
+        {"scroll": {"key": "blueprint.canvas", "deltaY": -120}}, {"scroll": {"key": "blueprint.canvas", "deltaY": -120}},
+        {"frames": 2},
+        {"scroll": {"key": "blueprint.canvas", "deltaY": 120}}, {"scroll": {"key": "blueprint.canvas", "deltaY": 120}},
+        {"scroll": {"key": "blueprint.canvas", "deltaY": 120}}, {"scroll": {"key": "blueprint.canvas", "deltaY": 120}},
+        {"scroll": {"key": "blueprint.canvas", "deltaY": 120}}, {"scroll": {"key": "blueprint.canvas", "deltaY": 120}},
+        {"scroll": {"key": "blueprint.canvas", "deltaY": 120}}, {"scroll": {"key": "blueprint.canvas", "deltaY": 120}},
+        {"scroll": {"key": "blueprint.canvas", "deltaY": 120}}, {"scroll": {"key": "blueprint.canvas", "deltaY": 120}},
+        {"frames": 2}
+      ]
+    }
+  ]
+}

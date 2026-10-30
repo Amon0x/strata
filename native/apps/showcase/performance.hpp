@@ -21,6 +21,13 @@ namespace strata::desktop {
 struct PerformanceFramesStep final {
     std::uint32_t count = 1U;
 };
+/**
+ * Frames, unmeasured, until this much wall time has passed: lets transitions started by the steps
+ * before it finish, however fast uncapped frames run.
+ */
+struct PerformanceSettleStep final {
+    std::uint32_t milliseconds = 0U;
+};
 struct PerformanceClickStep final {
     host::Selector target;
 };
@@ -69,9 +76,10 @@ struct PerformanceCaptureStep final {
 };
 
 using PerformanceStep =
-    std::variant<PerformanceFramesStep, PerformanceClickStep, PerformanceMoveStep,
-                 PerformanceDragStep, PerformanceScrollStep, PerformanceKeyStep,
-                 PerformanceCaptureStep, PerformanceFilesStep, PerformanceGestureStep>;
+    std::variant<PerformanceFramesStep, PerformanceSettleStep, PerformanceClickStep,
+                 PerformanceMoveStep, PerformanceDragStep, PerformanceScrollStep,
+                 PerformanceKeyStep, PerformanceCaptureStep, PerformanceFilesStep,
+                 PerformanceGestureStep>;
 
 struct PerformancePhase final {
     std::string name;

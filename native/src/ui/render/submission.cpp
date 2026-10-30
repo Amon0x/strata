@@ -272,6 +272,11 @@ void update_cached(
         logical_width,
         logical_height,
     };
+    // What rasterizing shown text at a new scale may take of this frame (see raster_deadline).
+    constexpr std::chrono::microseconds rescale_budget{1500};
+    cache.raster_deadline = std::chrono::steady_clock::now() + rescale_budget;
+    if (std::exchange(cache.raster_deferred, false))
+        cache.plan_current = false;
     const bool textures_changed = !std::ranges::equal(cache.geometry_textures, textures);
     if (textures_changed)
         validate_texture_descriptors(textures);

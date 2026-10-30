@@ -1683,6 +1683,39 @@ void test_extension_clip_balance(const std::filesystem::path& resource_root) {
           "a balanced extension clip did not reach the frame");
 }
 
+/**
+ * A Surface with nothing left to do says so: its frames re-send the retained packet, report idle,
+ * and do no work; input makes it busy, and it is idle again once the input is handled.
+ */
+void test_idle_frames(const std::filesystem::path& resource_root) {
+    FragmentFixture fixture(resource_root, &present_balanced_clip, nullptr);
+    strata_surface_frame_info info{};
+    const auto settle = [&](const std::string_view context) {
+        for (int frame = 0; frame < 60; ++frame) {
+            check(fixture.frame(info).status == STRATA_STATUS_OK,
+                  std::string(context) + ": frame failed");
+            if (info.idle != 0U)
+                return;
+        }
+        check(false, std::string(context) + ": the Surface never became idle");
+    };
+    settle("first settle");
+    for (int frame = 0; frame < 3; ++frame) {
+        check(fixture.frame(info).status == STRATA_STATUS_OK, "idle frame failed");
+        check(info.idle != 0U && info.unchanged != 0U,
+              "an idle Surface's next frame was not idle and unchanged");
+        check(info.described_node_count == 0U && info.evaluated_expression_count == 0U &&
+                  info.layout_measured_node_count == 0U && info.layout_arranged_node_count == 0U &&
+                  info.render_visited_node_count == 0U && info.render_built_fragment_count == 0U &&
+                  info.pointer_geometry_rebuild_count == 0U && info.rasterized_glyph_count == 0U,
+              "an idle frame did work");
+    }
+    check(fixture.pointer_move(10.0, 10.0).status == STRATA_STATUS_OK, "pointer move failed");
+    check(fixture.frame(info).status == STRATA_STATUS_OK, "input frame failed");
+    check(info.processed_input_event_count != 0U, "the input frame handled no input");
+    settle("settle after input");
+}
+
 struct ReentryProbe final {
     strata_runtime* runtime = nullptr;
     strata_surface* surface = nullptr;
@@ -2086,6 +2119,7 @@ int strata_test_abi(const int argument_count, const char* const* const arguments
             test_extension_fragment_failure_isolation(arguments[1]);
             test_extension_allocation_failure_status(arguments[1]);
             test_extension_clip_balance(arguments[1]);
+            test_idle_frames(arguments[1]);
             test_reentrant_and_cross_thread_calls(arguments[1]);
             test_struct_size_versioning(arguments[1]);
         }

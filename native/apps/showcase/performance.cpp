@@ -174,6 +174,9 @@ void require_object(const JsonValue& value, const std::string_view label) {
     if (operation == "frames") {
         return PerformanceFramesStep{positive_count(argument, std::string(label) + ".frames")};
     }
+    if (operation == "settle") {
+        return PerformanceSettleStep{positive_count(argument, std::string(label) + ".settle")};
+    }
     if (operation == "click") return PerformanceClickStep{selector(argument, "click")};
     if (operation == "move") return PerformanceMoveStep{selector(argument, "move")};
     if (operation == "drag") {
@@ -717,6 +720,13 @@ struct PerformanceRunner::Impl final {
         }
     }
 
+    void execute(const PerformanceSettleStep& step, const bool, PhaseResult*,
+                 const std::uint32_t) {
+        const auto until = Clock::now() + std::chrono::milliseconds(step.milliseconds);
+        while (Clock::now() < until)
+            run_frame(false, nullptr, 0U, "settle");
+    }
+
     void execute(const PerformanceCaptureStep& step, const bool, PhaseResult*,
                  const std::uint32_t) {
         // The next frame, read from the swap chain before it is presented: Strata's pixels only.
@@ -893,6 +903,47 @@ struct PerformanceRunner::Impl final {
         return result;
     }
 
+    /** The work counters, by their report names. */
+    static constexpr std::array<std::pair<std::string_view, std::uint64_t DesktopFrameWork::*>, 9U>
+        work_counters{{
+            {"describedNodes", &DesktopFrameWork::described_nodes},
+            {"evaluatedExpressions", &DesktopFrameWork::evaluated_expressions},
+            {"layoutMeasuredNodes", &DesktopFrameWork::layout_measured_nodes},
+            {"layoutArrangedNodes", &DesktopFrameWork::layout_arranged_nodes},
+            {"renderVisitedNodes", &DesktopFrameWork::render_visited_nodes},
+            {"renderBuiltFragments", &DesktopFrameWork::render_built_fragments},
+            {"pointerGeometryRebuilds", &DesktopFrameWork::pointer_geometry_rebuilds},
+            {"rasterizedGlyphs", &DesktopFrameWork::rasterized_glyphs},
+            {"rasterNanoseconds", &DesktopFrameWork::raster_nanos},
+        }};
+
+    [[nodiscard]] static JsonValue work_json(const DesktopFrameWork& work) {
+        std::vector<std::pair<std::string, JsonValue>> fields;
+        for (const auto& [name, member] : work_counters)
+            fields.emplace_back(std::string(name), JsonValue(static_cast<std::int64_t>(work.*member)));
+        return JsonValue(JsonValue::Object(std::move(fields)));
+    }
+
+    /** Each counter's mean and maximum over a phase's frames. */
+    [[nodiscard]] static JsonValue work_summary_json(const std::vector<FrameRecord>& frames) {
+        std::vector<std::pair<std::string, JsonValue>> fields;
+        for (const auto& [name, member] : work_counters) {
+            std::uint64_t total = 0U;
+            std::uint64_t maximum = 0U;
+            for (const FrameRecord& frame : frames) {
+                total += frame.sample.work.*member;
+                maximum = std::max(maximum, frame.sample.work.*member);
+            }
+            fields.emplace_back(std::string(name), object({
+                {"maximum", JsonValue(static_cast<std::int64_t>(maximum))},
+                {"mean", JsonValue(frames.empty() ? 0.0
+                                                  : static_cast<double>(total) /
+                                                        static_cast<double>(frames.size()))},
+            }));
+        }
+        return JsonValue(JsonValue::Object(std::move(fields)));
+    }
+
     [[nodiscard]] JsonValue frame_json(const FrameRecord& frame) const {
         return object({
             {"batches", JsonValue(static_cast<std::int64_t>(frame.sample.batches))},
@@ -917,6 +968,7 @@ struct PerformanceRunner::Impl final {
             {"totalMillis", JsonValue(millis(frame.sample.total_nanos))},
             {"valid", JsonValue(frame.valid)},
             {"vertices", JsonValue(static_cast<std::int64_t>(frame.sample.vertices))},
+            {"work", work_json(frame.sample.work)},
         });
     }
 
@@ -958,6 +1010,7 @@ struct PerformanceRunner::Impl final {
             {"name", JsonValue(result.phase.name)},
             {"operations", array(std::move(operation_values))},
             {"present", distribution_json(distribution(timing(result.frames, &DesktopFrameSample::present_nanos)))},
+            {"work", work_summary_json(result.frames)},
             {"spikeThresholdMillis", JsonValue(threshold)},
             {"spikes", array(std::move(spike_values))},
             {"submit", distribution_json(distribution(timing(result.frames, &DesktopFrameSample::submit_nanos)))},
