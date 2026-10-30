@@ -280,9 +280,15 @@ void InputRouter::reveal_node(
     if (layout_ == nullptr) return;
     const LayoutRecord* target = layout_->find(node.identity());
     if (target == nullptr) return;
+    reveal_rect(node, target->bounds, padding, result);
+}
+
+void InputRouter::reveal_rect(const RetainedNode& node, Rect revealed, const double padding,
+                              InputOperationResult& result) {
+    if (layout_ == nullptr)
+        return;
     // Every scroller moves the target by its own change: an outer scroller brings into view where
     // the inner ones left the target, not where this layout placed it.
-    Rect revealed = target->bounds;
     const auto axis_offset = [](
                                  const double offset,
                                  const double start,

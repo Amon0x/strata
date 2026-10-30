@@ -742,6 +742,24 @@ InputOperationResult InputRouter::ime_preedit(ImePreeditInputEvent event) {
 }
 
 bool InputRouter::copy_static_text_selection(RetainedNode& owner) {
+    // A sourced selection copies its range of the source, realized or not; only the texts placed
+    // in the source take part, so anything beside them (a code view's line numbers) never does.
+    if (const std::optional<StaticTextSource> located = static_text_source(owner);
+        located.has_value() && static_text_selection_.has_value() &&
+        static_text_selection_->source.has_value() &&
+        static_text_selection_->source->holder_identity == located->holder->identity()) {
+        const std::size_t low =
+            text_boundary(located->text, std::min(static_text_selection_->source->anchor,
+                                                  static_text_selection_->source->focus));
+        const std::size_t high =
+            text_boundary(located->text, std::max(static_text_selection_->source->anchor,
+                                                  static_text_selection_->source->focus));
+        if (high <= low)
+            return false;
+        static_cast<void>(
+            host_services_->write_clipboard(std::string(located->text.substr(low, high - low))));
+        return true;
+    }
     const std::optional<std::string_view> container = static_text_container(owner);
     std::string selected;
     const std::vector<RetainedNode*> nodes =
@@ -790,6 +808,19 @@ bool InputRouter::select_all_static_text(RetainedNode& owner, InputOperationResu
     if (!other_selections.empty() && frame_invalidator_)
         frame_invalidator_();
     text_navigation_.erase(owner.identity());
+    // Texts placed in a source select all of the source, realized or not.
+    if (const std::optional<StaticTextSource> located = static_text_source(owner);
+        located.has_value() && container.has_value()) {
+        static_text_selection_ = StaticTextSelectionSession{
+            owner.identity(),
+            0U,
+            std::string(*container),
+            StaticTextSourceSelection{located->holder->identity(), 0U, located->text.size()},
+            std::nullopt,
+        };
+        apply_sourced_static_text_selection();
+        return true;
+    }
     set_static_text_selection(owner, 0U, text->size(), result);
     // In a selection container, all of it: every text that shares the container, so a document
     // split across many texts (a code view's rows) selects and copies whole.
@@ -806,6 +837,8 @@ bool InputRouter::select_all_static_text(RetainedNode& owner, InputOperationResu
         owner.identity(),
         0U,
         container.has_value() ? std::optional<std::string>(std::string(*container)) : std::nullopt,
+        std::nullopt,
+        std::nullopt,
     };
     return true;
 }

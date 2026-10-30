@@ -649,9 +649,21 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
             }
         }
     }
-    if (static_text_selection_.has_value() &&
-        (tree.find_identity(static_text_selection_->anchor_identity) == nullptr ||
-         !static_text_ranges_.contains(static_text_selection_->anchor_identity))) {
+    if (static_text_selection_.has_value() && static_text_selection_->source.has_value()) {
+        // A sourced selection lives in its source, not in its texts: it ends only with the
+        // source, and texts realized since it changed are given their share of it.
+        const RetainedNode* holder =
+            tree.find_identity(static_text_selection_->source->holder_identity);
+        const runtime::Value* source =
+            holder != nullptr ? scalar_property(*holder, "$selectionSource") : nullptr;
+        if (source == nullptr || source->string() == nullptr) {
+            static_text_selection_.reset();
+        } else {
+            apply_sourced_static_text_selection();
+        }
+    } else if (static_text_selection_.has_value() &&
+               (tree.find_identity(static_text_selection_->anchor_identity) == nullptr ||
+                !static_text_ranges_.contains(static_text_selection_->anchor_identity))) {
         static_text_selection_.reset();
     }
     if (restore_focus_key.has_value()) {
@@ -677,6 +689,12 @@ InputOperationResult InputRouter::after_layout() {
         if (session.active) {
             synchronize_drag_target(session, session.position, false, result);
         }
+    }
+    // A selection dragged past a viewport's edge takes in what this frame scrolled into view.
+    if (static_text_selection_.has_value() && static_text_selection_->drag.has_value() &&
+        static_text_selection_->drag->scrolled) {
+        static_text_selection_->drag->scrolled = false;
+        extend_sourced_static_text_selection(nullptr, static_text_selection_->drag->position);
     }
     std::vector<PendingReveal> pending = std::move(pending_reveals_);
     pending_reveals_.clear();

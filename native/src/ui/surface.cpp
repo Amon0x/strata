@@ -240,8 +240,10 @@ declaration_root(const std::shared_ptr<const DescriptionNode>& declaration) {
     const LayoutRecord* const record = layout.find(node.identity());
     if (record == nullptr)
         return desired;
+    // A list windowed by the viewports around it realizes what layout found those show; its own
+    // scroll offset does not move its window.
     if (record->virtual_item_extents.has_value() && record->virtual_axis.has_value() &&
-        record->viewport.has_value()) {
+        record->viewport.has_value() && !record->virtual_windowed_by_ancestors) {
         const collection::VirtualItemExtents& extents = *record->virtual_item_extents;
         const LayoutAxis axis = *record->virtual_axis;
         double offset =

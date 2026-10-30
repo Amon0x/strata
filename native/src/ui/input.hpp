@@ -728,6 +728,9 @@ class InputRouter final {
                                          InputOperationResult& result);
     /** Scrolls every scrolling ancestor so `node`, with `padding` around it, is in view. */
     void reveal_node(const RetainedNode& node, double padding, InputOperationResult& result);
+    /** Scrolls every scrolling ancestor of `node` so `revealed`, with `padding`, is in view. */
+    void reveal_rect(const RetainedNode& node, Rect revealed, double padding,
+                     InputOperationResult& result);
     [[nodiscard]] bool scroll_focused_ancestor(std::string_view key, InputOperationResult& result);
     void place_pointer_caret(RetainedNode& node, const PointerInputEvent& event,
                              bool extend_selection, InputOperationResult& result);
@@ -760,6 +763,41 @@ class InputRouter final {
                                                                            std::string_view key);
     [[nodiscard]] bool copy_static_text_selection(RetainedNode& owner);
     [[nodiscard]] bool select_all_static_text(RetainedNode& owner, InputOperationResult& result);
+    /**
+     * Where a selectable text in a selection container lies in its container's source: the
+     * nearest ancestor carrying the whole text as `$selectionSource`, and the text's own
+     * `$sourceOffset` into it. Texts placed so keep their selection as offsets into the source,
+     * which reaches texts that are not realized (rows of a virtual list scrolled away).
+     */
+    struct StaticTextSource final {
+        const RetainedNode* holder = nullptr;
+        std::string_view text;
+        std::size_t offset = 0U;
+    };
+    [[nodiscard]] std::optional<StaticTextSource>
+    static_text_source(const RetainedNode& node) const noexcept;
+    /** The realized texts of `container` placed in `holder`'s source, in tree order. */
+    [[nodiscard]] std::vector<RetainedNode*>
+    sourced_static_text_nodes(const RetainedNode& holder, std::string_view container) const;
+    /** Gives each realized text of a sourced selection its share of the selected source range. */
+    void apply_sourced_static_text_selection();
+    /**
+     * Moves a sourced selection's focus to the text under `position`, or, beside or beyond its
+     * texts, to the nearest point of the nearest realized one inside the source's viewport.
+     */
+    void extend_sourced_static_text_selection(RetainedNode* candidate, Point position);
+    [[nodiscard]] bool move_sourced_static_text_selection(RetainedNode& node,
+                                                          const StaticTextSource& located,
+                                                          std::string_view key,
+                                                          KeyModifiers modifiers,
+                                                          InputOperationResult& result);
+    /** Records the pointer dragging a sourced selection, for scrolling at viewport edges. */
+    void track_static_text_drag(std::int32_t pointer_id, Point position);
+    /**
+     * While a pointer drags a sourced selection past the edge of a scrolling viewport around
+     * it, scrolls that viewport and extends the selection over what scrolls into view.
+     */
+    void auto_scroll_static_text_selection(InputOperationResult& result);
     void activate(RetainedNode& target, InputOperationResult& result,
                   const PointerInputEvent* pointer = nullptr,
                   RetainedNode* pointer_target = nullptr, std::size_t click_count = 0U,
@@ -1051,10 +1089,26 @@ class InputRouter final {
         std::size_t focus = 0U;
     };
     std::map<std::uint64_t, StaticTextRange> static_text_ranges_;
+    /** A selection kept as offsets into a selection source (see StaticTextSource). */
+    struct StaticTextSourceSelection final {
+        std::uint64_t holder_identity = 0U;
+        std::size_t anchor = 0U;
+        std::size_t focus = 0U;
+    };
+    /** The pointer dragging a sourced selection, while it is pressed. */
+    struct StaticTextSelectionDrag final {
+        std::int32_t pointer_id = 0;
+        Point position;
+        std::optional<std::int64_t> last_scroll_nanos;
+        /** The last frame scrolled, so what came under the pointer joins the selection. */
+        bool scrolled = false;
+    };
     struct StaticTextSelectionSession final {
         std::uint64_t anchor_identity = 0U;
         std::size_t anchor_offset = 0U;
         std::optional<std::string> container;
+        std::optional<StaticTextSourceSelection> source;
+        std::optional<StaticTextSelectionDrag> drag;
     };
     std::optional<StaticTextSelectionSession> static_text_selection_;
     struct TextNavigationState final {

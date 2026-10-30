@@ -222,9 +222,13 @@ void LayoutEngine::arrange(
         arrangement_bounds.y -
             (cached != arrangement_cache_.end() ? cached->second.bounds.y : arrangement_bounds.y),
     };
-    const bool translated_cache_hit = !measured.subtree_portals &&
-        cached != arrangement_cache_.end() &&
+    // A windowed virtual list realizes what its clip shows, so it moves as a whole only with its
+    // clip: a page scrolling past it arranges it again to learn its new window.
+    const bool translated_cache_hit =
+        !measured.subtree_portals && cached != arrangement_cache_.end() &&
         cached_measured == measured_ptr && translation != Point{} &&
+        (!measured.subtree_windowed ||
+         translated_rect(cached->second.inherited_clip, translation) == inherited_clip) &&
         cached->second.bounds.width == arrangement_bounds.width &&
         cached->second.bounds.height == arrangement_bounds.height &&
         cached->second.pin_context == cache_pin_context &&
@@ -549,40 +553,13 @@ void LayoutEngine::arrange(
     } else if (style.kind == LayoutKind::scroll) {
         std::optional<collection::VirtualExtentResolution> virtual_extents;
         Point resolved_scroll_offset = requested_scroll_offset;
+        const bool windowed = virtual_list_windowed_by_ancestors(style);
         if (style.virtual_list.has_value()) {
             const VirtualListSpec& virtual_list = *style.virtual_list;
-            std::vector<collection::VirtualMeasurement> measurements;
-            if (virtual_list.measure_item_extents) {
-                measurements.reserve(flow_children.size());
-                for (const MeasuredNodePtr& child : flow_children) {
-                    const std::optional<std::string>& materialization_key =
-                        child->node->description().materialization_key;
-                    measurements.push_back(collection::VirtualMeasurement{
-                        child->node->source_index(),
-                        materialization_key.value_or(
-                            child->node->description().key.value_or(std::string{})
-                        ),
-                        virtual_list.axis == LayoutAxis::vertical
-                            ? child->measured_size.height
-                            : child->measured_size.width,
-                    });
-                }
-            }
             const double requested_offset = virtual_list.axis == LayoutAxis::vertical
                                                 ? requested_scroll_offset.y
                                                 : requested_scroll_offset.x;
-            virtual_extents = collection_virtualization_.resolve(
-                measured.node->identity(),
-                collection::VirtualExtentRequest{
-                    virtual_list.items,
-                    virtual_list.item_extent,
-                    virtual_list.item_extents,
-                    virtual_list.measure_item_extents,
-                    virtual_list.reset_anchor_on_change,
-                },
-                requested_offset,
-                measurements
-            );
+            virtual_extents = resolve_virtual_extents(measured, requested_offset);
             if (virtual_list.axis == LayoutAxis::vertical) {
                 resolved_scroll_offset.y = virtual_extents->offset;
             } else {
@@ -593,6 +570,7 @@ void LayoutEngine::arrange(
             record.virtual_item_extents = virtual_extents->extents;
             record.virtual_axis = virtual_list.axis;
             record.virtual_overscan = virtual_list.overscan;
+            record.virtual_windowed_by_ancestors = windowed;
         }
         // A horizontal virtual list lays its items side by side, so they share one row's height
         // instead of stacking.
@@ -680,8 +658,19 @@ void LayoutEngine::arrange(
         }
         if (style.virtual_list.has_value()) {
             const VirtualListSpec& virtual_list = *style.virtual_list;
-            const double offset = virtual_list.axis == LayoutAxis::vertical ? record.scroll_offset.y : record.scroll_offset.x;
-            const double extent = virtual_list.axis == LayoutAxis::vertical ? scroll_viewport.height : scroll_viewport.width;
+            const bool vertical = virtual_list.axis == LayoutAxis::vertical;
+            double offset = vertical ? record.scroll_offset.y : record.scroll_offset.x;
+            double extent = vertical ? scroll_viewport.height : scroll_viewport.width;
+            if (windowed) {
+                // Its own viewport holds every item; what shows is the part of it inside the
+                // viewports around it (or the window's, with none).
+                const std::optional<Rect> shown =
+                    inherited_clip.value_or(environment.viewport).intersection(scroll_viewport);
+                offset = !shown.has_value() ? 0.0
+                         : vertical         ? shown->y - content_bounds.y + record.scroll_offset.y
+                                            : shown->x - content_bounds.x + record.scroll_offset.x;
+                extent = !shown.has_value() ? 0.0 : vertical ? shown->height : shown->width;
+            }
             const collection::VirtualItemExtents& resolved = virtual_extents->extents;
             const std::size_t item_count = virtual_list.item_count();
             if (item_count == 0U || offset >= resolved.total() || extent <= 0.0) {

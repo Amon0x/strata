@@ -3625,7 +3625,7 @@ component ExpectedText(selectedPage: string) {
   } else if selectedPage == "LOTTIE" {
     Text(text: "Six After Effects animations, written as Lottie JSON, play on their own: trim paths on a gradient stroke, a bouncy overshoot, a repeater burst, a morphing path, masks (add, subtract, expansion), alpha and luma track mattes inside a time-remapped precomposition, round corners, dashes and merged paths. Each frame is drawn as vector paths, crisp at any size. Pause stops where it is and the slider follows; drag the slider to scrub, playing or paused, and Play carries on from there. Speed plays it slower, faster or backwards. Switch plays the toggle's on or off segment once and counts each completion.", wrapMode: "WORD")
   } else if selectedPage == "CONTENT" {
-    Text(text: "The wheel, pie and checker are conic gradients; the radar and both cards below spin theirs with paintRotate on an endless linear animation, while the GPU draws the same sweep the reference renderer does. Borders take any paint and keep every corner's rounding. Pick a language: the code is tokenized once and stays selectable; the 4,000-line file scrolls without stalling and the line numbers stay pinned as it scrolls sideways. The Markdown's fenced blocks use the same highlighter. The formats table ticks with the wall clock every second.", wrapMode: "WORD")
+    Text(text: "The wheel, pie and checker are conic gradients; the radar and both cards below spin theirs with paintRotate on an endless linear animation, while the GPU draws the same sweep the reference renderer does. Borders take any paint and keep every corner's rounding. Pick a language: the code is tokenized once and stays selectable; the 4,000-line file scrolls without stalling, select-all copies all of it, and the line numbers stay pinned as it scrolls sideways; fitted to its content it is as tall as its lines and the page realizes only the rows it shows. The Markdown's fenced blocks use the same highlighter. The formats table ticks with the wall clock every second.", wrapMode: "WORD")
   } else if selectedPage == "SYSTEM" {
     Text(text: "Drag files from Explorer onto the drop box: it lights up as they arrive and lists them when dropped. Open files, pick a folder or save: the dialogs are Windows' own, and their answers land in state. Send a notification from the tray icon; open a folder or link in its default app. Mica, Acrylic and Tabbed turn the header into the title bar (drag to move, double-click to maximize, buttons at its right) over the system backdrop. Paste an image from the clipboard and copy it back.", wrapMode: "WORD")
   } else if selectedPage == "DESKTOP" {
@@ -3687,6 +3687,11 @@ style CometCard {
 style CodeFrame {
   width: { weight: 1 };
   height: 380;
+  border: { width: 1, color: #2B3445FF };
+}
+
+style CodeFrameFitted {
+  width: { weight: 1 };
   border: { width: 1, color: #2B3445FF };
 }
 
@@ -3789,6 +3794,7 @@ component CodeCard() {
   state language = "rust";
   state numbers = true;
   state wrapped = false;
+  state fitted = false;
   derived rustSample = "use std::collections::HashMap;\n\n/// Counts how often each word appears, ignoring case.\n#[derive(Debug, Default)]\npub struct Tally<'a> {\n    counts: HashMap<&'a str, usize>,\n}\n\nimpl<'a> Tally<'a> {\n    pub fn add(&mut self, text: &'a str) -> usize {\n        let words = text.split_whitespace().filter(|w| !w.is_empty());\n        for word in words {\n            *self.counts.entry(word).or_insert(0) += 1;\n        }\n        self.counts.len()\n    }\n}\n\nfn main() {\n    let mut tally = Tally::default();\n    let unique = tally.add(\"to be or not to be\");\n    println!(\"{unique} unique words, r#raw = {}\", 0x2A_u8 as f64 * 1.5e-3);\n}"
   derived pythonSample = "from dataclasses import dataclass\nimport math\n\n\n@dataclass(frozen=True)\nclass Point:\n    \"\"\"A point in the plane.\"\"\"\n    x: float\n    y: float\n\n    def distance(self, other: \"Point\") -> float:\n        # Euclidean distance, rounded for display\n        return round(math.hypot(self.x - other.x, self.y - other.y), 3)\n\n\nif __name__ == \"__main__\":\n    a, b = Point(0, 0), Point(3, 4)\n    print(f\"distance = {a.distance(b)}\", len([n for n in range(10) if n % 2]))\n    flags = {\"ok\": True, \"missing\": None, \"ratio\": 0.75}"
   derived typescriptSample = "import { readFile } from \"node:fs/promises\";\n\ninterface User {\n  id: number;\n  name: string;\n  tags?: readonly string[];\n}\n\n/** Loads users and greets the active ones. */\nexport async function greet(path: string): Promise<string[]> {\n  const users: User[] = JSON.parse(await readFile(path, \"utf8\"));\n  const pattern = /^[a-z]+$/i;\n  return users\n    .filter((user) => user.tags?.includes(\"active\") ?? false)\n    .map((user) => `Hello, ${user.name.trim()} (#${user.id})!`)\n    .filter((line) => pattern.test(line) || line.length > 0);\n}\n\nconst total = 42 * 1.5e3 / 7; // a comment\nconsole.log(total, null, undefined, true);"
@@ -3853,6 +3859,7 @@ component CodeCard() {
       )
       Toggle(key: "content.numbers", label: "Line numbers", checked: numbers, onChange: action("state.setFromEvent", name: "numbers"))
       Toggle(key: "content.wrap", label: "Wrap", checked: wrapped, onChange: action("state.setFromEvent", name: "wrapped"))
+      Toggle(key: "content.fit", label: "Fit to content", checked: fitted, onChange: action("state.setFromEvent", name: "fitted"))
     }
     CodeView(
       key: "content.code",
@@ -3861,9 +3868,9 @@ component CodeCard() {
       lineNumbers: numbers,
       wrap: wrapped,
       highlightLines: [4, 5],
-      style: CodeFrame
+      style: fitted ? CodeFrameFitted : CodeFrame
     )
-    Text(text: "Select text across lines and copy it; scroll sideways under the pinned line numbers. Each language has its own tokenizer, run once per text change; a long file is laid out in chunks of eighty lines and only the chunks in view are drawn.", style: CardNote, wrapMode: "WORD")
+    Text(text: "Select text across lines and copy it, or select all of a long file and copy every line; scroll sideways under the pinned line numbers. Each language has its own tokenizer, run once per text change; a long file is laid out in chunks of eighty lines and only the chunks in view are realized, whether the view scrolls itself or, fitted to its content, the page scrolls past it.", style: CardNote, wrapMode: "WORD")
   }
 }
 

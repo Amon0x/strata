@@ -722,6 +722,35 @@ LayoutStyle LayoutEngine::resolved_style(const RetainedNode& node) const {
     return style;
 }
 
+collection::VirtualExtentResolution
+LayoutEngine::resolve_virtual_extents(const MeasuredNode& measured, const double requested_offset) {
+    const VirtualListSpec& virtual_list = *measured.style.virtual_list;
+    std::vector<collection::VirtualMeasurement> measurements;
+    if (virtual_list.measure_item_extents) {
+        measurements.reserve(measured.flow_child_count);
+        for (std::size_t index = 0U; index < measured.flow_child_count; ++index) {
+            const MeasuredNode& child = *measured.children[index];
+            const std::optional<std::string>& materialization_key =
+                child.node->description().materialization_key;
+            measurements.push_back(collection::VirtualMeasurement{
+                child.node->source_index(),
+                materialization_key.value_or(child.node->description().key.value_or(std::string{})),
+                virtual_list.axis == LayoutAxis::vertical ? child.measured_size.height
+                                                          : child.measured_size.width,
+            });
+        }
+    }
+    return collection_virtualization_.resolve(measured.node->identity(),
+                                              collection::VirtualExtentRequest{
+                                                  virtual_list.items,
+                                                  virtual_list.item_extent,
+                                                  virtual_list.item_extents,
+                                                  virtual_list.measure_item_extents,
+                                                  virtual_list.reset_anchor_on_change,
+                                              },
+                                              requested_offset, measurements);
+}
+
 Point LayoutEngine::resolved_scroll_offset(const RetainedNode& node, Point fallback) noexcept {
     if (const runtime::Value* retained = node.retained_value("strata.scroll.offset");
         retained != nullptr && retained->object() != nullptr) {

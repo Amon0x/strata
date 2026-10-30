@@ -593,8 +593,10 @@ CodeView(text: source, language: "rust", lineNumbers: true, wrap: false, highlig
 scrolls sideways under it; `firstLine` numbers from another line. `wrap` (off by default) breaks
 long lines instead, each keeping its number beside its first row. `highlightLines` bands the lines
 it lists. `tabSize` (4) expands tabs to columns. The text is selectable (`selectable: false` turns
-that off): a drag selects across lines, Ctrl+A selects all of it, and a copy gives back the lines
-joined by newlines. Its font is `strata:fonts/mono` at 13 pixels unless its style sets `font`,
+that off): a drag selects across lines, scrolling the view (or the page around it) when it is
+dragged past an edge, Shift+click and Shift with the arrow, Home and End keys extend a selection,
+Ctrl+A selects all of it, and a copy gives back exactly the selected text, never the line numbers.
+Its font is `strata:fonts/mono` at 13 pixels unless its style sets `font`,
 `pixelSize`, `color` or `lineHeightMultiplier`.
 
 The colours come from the theme's palette (`syntaxKeyword`, `syntaxType`, `syntaxBuiltin`,
@@ -607,11 +609,15 @@ same names without the prefix (`keyword`, `string`, ..., `plain` for untokenized
 `lineNumber`, `lineHighlight`, and `gutter` for the numbers' background, which is the view's own
 background unless set).
 
-A view with a height of its own (fixed, a weight or a fraction) scrolls inside it and realizes only
-the rows in view: lines are laid out in rows of eighty (a highlighted line is a row of its own), so a
-file of many thousands of lines lays out, shapes and draws just what is on screen, and scrolling it
-lays out nothing new until a row enters view. A view sized to its content shows every line, so
-give a long file a height. A selection and a copy reach the rows that are realized.
+Lines are laid out in rows of eighty (a highlighted line is a row of its own), and only the rows in
+view are realized, so a file of many thousands of lines lays out, shapes and draws just what is on
+screen, and scrolling lays out nothing new until a row enters view. A view with a height of its own
+(fixed, a weight or a fraction) scrolls inside it; a view sized to its content is as tall as all its
+lines, so the page around it scrolls over the whole file, while only the rows that page shows are
+realized. Rows not yet realized are estimated from the ones that have been measured, so the view's
+height holds still as it scrolls. A selection is kept in the whole text, not in the realized rows:
+select-all and copy take the entire file, and a selection survives the row it started in scrolling
+away.
 
 ### Drawers and sheets
 

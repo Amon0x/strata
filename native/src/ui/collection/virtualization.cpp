@@ -129,12 +129,28 @@ VirtualExtentResolution VirtualizationCache::resolve(
                                                request.items->count(),
                                                request.estimated_extent
                                            );
-        if (request.measure_item_extents) {
+        if (request.measure_item_extents && !entry.measured_by_key.empty()) {
+            // Items not yet measured are estimated in proportion to how the measured ones
+            // turned out against their estimates, so the total is close to its final value as
+            // soon as one item is measured and stays still as the rest are.
+            std::vector<bool> measured_items(values.size(), false);
+            double measured_total = 0.0;
+            double estimated_total = 0.0;
             for (const auto& [key, measured] : entry.measured_by_key) {
                 if (const std::optional<std::size_t> index =
                         request.items->index_of_key(key);
                     index.has_value()) {
+                    estimated_total += values[*index];
+                    measured_total += measured;
                     values[*index] = measured;
+                    measured_items[*index] = true;
+                }
+            }
+            const double scale = estimated_total > 0.0 ? measured_total / estimated_total : 1.0;
+            if (std::isfinite(scale) && scale > 0.0 && scale != 1.0) {
+                for (std::size_t index = 0U; index < values.size(); ++index) {
+                    if (!measured_items[index])
+                        values[index] *= scale;
                 }
             }
         }

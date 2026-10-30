@@ -3299,6 +3299,25 @@ void test_virtualization_cache_queries_only_observed_keys() {
         std::size_t count_;
     };
 
+    // Unmeasured items are estimated in proportion to how the measured ones turned out, so the
+    // total holds still as the rest are measured.
+    {
+        VirtualizationCache scaled;
+        auto items = std::make_shared<CountingKeySequence>(9U, 4U);
+        const VirtualMeasurement measured_first{0U, items->key_at(0U), 20.0};
+        const VirtualExtentResolution resolved =
+            scaled.resolve(9U, VirtualExtentRequest{items, 10.0, std::nullopt, true}, 0.0,
+                           std::span<const VirtualMeasurement>(&measured_first, 1U));
+        check(resolved.extents.total() == 80.0 && resolved.extents.extent(3U) == 20.0,
+              "unmeasured virtual items did not follow the measured ones' scale");
+        const VirtualMeasurement measured_last{3U, items->key_at(3U), 20.0};
+        const VirtualExtentResolution settled =
+            scaled.resolve(9U, VirtualExtentRequest{items, 10.0, std::nullopt, true}, 0.0,
+                           std::span<const VirtualMeasurement>(&measured_last, 1U));
+        check(settled.extents.total() == 80.0,
+              "measuring an item estimated at its measured scale moved the total");
+    }
+
     auto initial = std::make_shared<CountingKeySequence>(1U, 10'000U);
     VirtualizationCache cache;
     static_cast<void>(cache.resolve(7U, VirtualExtentRequest{initial, 20.0, std::nullopt, false},

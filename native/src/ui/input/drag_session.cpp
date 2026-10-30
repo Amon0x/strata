@@ -378,6 +378,7 @@ InputOperationResult InputRouter::advance_frame() {
         static_cast<void>(pointer_id);
         static_cast<void>(auto_scroll_drag(session, result));
     }
+    auto_scroll_static_text_selection(result);
     request_watched_widget_frames();
     synchronize_widgets(result);
     advance_widget_frames(result);

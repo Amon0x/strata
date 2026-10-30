@@ -59,39 +59,6 @@ pointer_geometry_generations_match(const DirtyGenerationSnapshot& left,
            point.y <= bounds.bottom();
 }
 
-[[nodiscard]] std::size_t text_boundary(const std::string_view text, std::size_t offset) noexcept {
-    offset = std::min(offset, text.size());
-    while (offset > 0U && offset < text.size() &&
-           (static_cast<unsigned char>(text[offset]) & 0xC0U) == 0x80U) {
-        --offset;
-    }
-    return offset;
-}
-
-[[nodiscard]] std::size_t previous_text_boundary(const std::string_view text,
-                                                 const std::size_t offset) noexcept {
-    std::size_t result = text_boundary(text, offset);
-    if (result == 0U)
-        return 0U;
-    --result;
-    while (result > 0U && (static_cast<unsigned char>(text[result]) & 0xC0U) == 0x80U) {
-        --result;
-    }
-    return result;
-}
-
-[[nodiscard]] std::size_t next_text_boundary(const std::string_view text,
-                                             const std::size_t offset) noexcept {
-    std::size_t result = text_boundary(text, offset);
-    if (result >= text.size())
-        return text.size();
-    ++result;
-    while (result < text.size() && (static_cast<unsigned char>(text[result]) & 0xC0U) == 0x80U) {
-        ++result;
-    }
-    return result;
-}
-
 [[nodiscard]] int text_word_class(const std::string_view text, const std::size_t offset) noexcept {
     if (offset >= text.size())
         return -1;
@@ -126,20 +93,6 @@ pointer_geometry_generations_match(const DirtyGenerationSnapshot& left,
         end = next_text_boundary(text, end);
     }
     return {start, end};
-}
-
-[[nodiscard]] std::size_t text_line_start(const std::string_view text,
-                                          const std::size_t offset) noexcept {
-    const std::size_t clamped = text_boundary(text, offset);
-    const std::size_t newline =
-        clamped == 0U ? std::string_view::npos : text.rfind('\n', clamped - 1U);
-    return newline == std::string_view::npos ? 0U : newline + 1U;
-}
-
-[[nodiscard]] std::size_t text_line_end(const std::string_view text,
-                                        const std::size_t offset) noexcept {
-    const std::size_t newline = text.find('\n', text_boundary(text, offset));
-    return newline == std::string_view::npos ? text.size() : newline;
 }
 
 } // namespace
@@ -512,7 +465,17 @@ void InputRouter::begin_static_text_selection(RetainedNode& node, InputOperation
         node.identity(),
         selected->second.focus,
         container.has_value() ? std::optional<std::string>(std::string(*container)) : std::nullopt,
+        std::nullopt,
+        std::nullopt,
     };
+    if (const std::optional<StaticTextSource> located = static_text_source(node);
+        located.has_value()) {
+        static_text_selection_->source = StaticTextSourceSelection{
+            located->holder->identity(),
+            located->offset + selected->second.anchor,
+            located->offset + selected->second.focus,
+        };
+    }
     std::vector<std::uint64_t> other_selections;
     other_selections.reserve(static_text_ranges_.size());
     for (const auto& [identity, range] : static_text_ranges_) {
@@ -578,6 +541,10 @@ void InputRouter::transition_static_text_selection_owner(RetainedNode* const own
 void InputRouter::extend_static_text_selection(RetainedNode& candidate, const Point position,
                                                InputOperationResult& result) {
     static_cast<void>(result);
+    if (static_text_selection_.has_value() && static_text_selection_->source.has_value()) {
+        extend_sourced_static_text_selection(&candidate, position);
+        return;
+    }
     if (!static_text_selection_.has_value() || !static_text_selectable(candidate) ||
         !static_text_selection_owner_matches(candidate)) {
         return;
@@ -706,6 +673,10 @@ bool InputRouter::move_static_text_selection(RetainedNode& node, const std::stri
         !modifiers.shift && lifecycle->input.static_text_interactive(node)) {
         return false;
     }
+    if (const std::optional<StaticTextSource> located = static_text_source(node);
+        located.has_value()) {
+        return move_sourced_static_text_selection(node, *located, key, modifiers, result);
+    }
     const std::optional<std::string_view> text = static_text_value(node);
     if (!text.has_value())
         return false;
@@ -752,6 +723,8 @@ bool InputRouter::move_static_text_selection(RetainedNode& node, const std::stri
             next,
             container.has_value() ? std::optional<std::string>(std::string(*container))
                                   : std::nullopt,
+            std::nullopt,
+            std::nullopt,
         };
     }
     set_static_text_selection(node, modifiers.shift ? old_anchor : next, next, result);
@@ -1589,7 +1562,13 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
         if (pressed != pressed_pointer_targets_.end()) {
             if (RetainedNode* owner = tree_->find_identity(pressed->second.identity);
                 owner != nullptr) {
-                if (hover_target != nullptr && static_text_selection_.has_value()) {
+                if (static_text_selection_.has_value() &&
+                    static_text_selection_->source.has_value()) {
+                    // A sourced selection follows the pointer anywhere, and scrolls when it
+                    // is dragged past the edge of what shows the source.
+                    extend_sourced_static_text_selection(hover_target, event.position);
+                    track_static_text_drag(event.pointer_id, event.position);
+                } else if (hover_target != nullptr && static_text_selection_.has_value()) {
                     extend_static_text_selection(*hover_target, event.position, result);
                 } else {
                     place_pointer_caret(*owner, event, true, result);

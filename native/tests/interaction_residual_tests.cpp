@@ -3562,6 +3562,262 @@ overlay Code {
           "a fenced block lost its fence's language");
 }
 
+// Four thousand lines of equal length, generated the same way in Strata and here.
+constexpr std::string_view long_code_lines =
+    R"(join(map(range(1, 4001), n -> "let row" + (n < 10 ? "000" : n < 100 ? "00" : n < 1000 ? "0" : "") + formatNumber(n, 0) + " = " + formatNumber(n * 7 % 1000 + 1000, 0) + ";"), "\n"))";
+
+[[nodiscard]] std::string long_code_text() {
+    std::string result;
+    for (int n = 1; n <= 4000; ++n) {
+        std::string number = std::to_string(n);
+        number.insert(0U, 4U - number.size(), '0');
+        if (n > 1)
+            result.push_back('\n');
+        result += "let row" + number + " = " + std::to_string(n * 7 % 1000 + 1000) + ";";
+    }
+    return result;
+}
+
+/** Offset in `text` where its 1-based `line` starts. */
+[[nodiscard]] std::size_t line_start(const std::string_view text, const std::size_t line) {
+    std::size_t at = 0U;
+    for (std::size_t current = 1U; current < line; ++current)
+        at = text.find('\n', at) + 1U;
+    return at;
+}
+
+/** How many of a code view's row texts are realized. */
+[[nodiscard]] std::size_t realized_code_rows(const ui::Surface& surface, const std::string& key) {
+    std::size_t count = 0U;
+    const std::string prefix = key + ".r";
+    const auto visit = [&](const auto& self, const ui::RetainedNode& node) -> void {
+        const std::optional<std::string>& own = node.description().key;
+        if (own.has_value() && own->starts_with(prefix) && own->ends_with(".t"))
+            ++count;
+        for (const auto& child : node.children())
+            self(self, *child);
+    };
+    if (surface.tree().root() != nullptr)
+        visit(visit, *surface.tree().root());
+    return count;
+}
+
+/**
+ * A code view with a height of its own realizes only the rows near its viewport, yet selecting
+ * all of it copies the whole file, a shift-click selection reaches a row thousands of lines away
+ * after the row it started in has gone, a drag past its edge scrolls and selects on, and the line
+ * numbers beside the text never join a copy.
+ */
+void test_code_view_selection_spans_unrealized_rows(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay LongCode {
+  root Panel(key: "long.root", layout: { kind: "COLUMN", width: 600, height: 400 }) {
+    CodeView(key: "long.code", text: )" +
+                               std::string(long_code_lines) +
+                               R"(, language: "rust", layout: { height: 300 })
+  }
+}
+)";
+    const std::string expected = long_code_text();
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("long-code", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "LongCode", 600.0, 400.0);
+    std::int64_t now = 1'000'000;
+    const auto frames = [&](const int count) {
+        for (int frame = 0; frame < count; ++frame)
+            static_cast<void>(surface->frame(now += 16'000'000));
+    };
+    const auto send = [&](std::vector<ui::SurfaceInputEvent> events) {
+        static_cast<void>(surface->input().enqueue(std::move(events)));
+        frames(2);
+    };
+    const ui::KeyModifiers command{false, true, false, false};
+    const ui::KeyModifiers shift{true, false, false, false};
+    const auto copied = [&]() {
+        send({ui::KeyInputEvent{"c", command}});
+        return std::string(surface->input().clipboard_text().value_or("<none>"));
+    };
+    const auto row = [&](const std::size_t first) -> const ui::LayoutRecord* {
+        const ui::RetainedNode* node =
+            surface->tree().find_key("long.code.r" + std::to_string(first) + ".t");
+        return node != nullptr ? surface->layout().find(node->identity()) : nullptr;
+    };
+    // The start of a line, as a point in the realized row holding it (rows hold 80 lines).
+    const auto line_point = [&](const std::size_t line) -> std::optional<ui::Point> {
+        const std::size_t first = (line - 1U) / 80U * 80U;
+        const ui::LayoutRecord* record = row(first);
+        if (record == nullptr)
+            return std::nullopt;
+        const double height = record->content_bounds.height / 80.0;
+        return ui::Point{record->content_bounds.x + 1.0,
+                         record->content_bounds.y +
+                             (static_cast<double>(line - 1U - first) + 0.5) * height};
+    };
+    frames(4);
+    check(realized_code_rows(*surface, "long.code") <= 4U,
+          "a code view with a height of its own realized more than the rows near its viewport");
+
+    // Select all and copy: the whole file, exactly, though only a few rows are realized.
+    const std::optional<ui::Point> first_line = line_point(1U);
+    check(first_line.has_value(), "the code view's first row was not realized");
+    send({ui::PointerInputEvent{*first_line, ui::PointerEventType::press, 5, 0},
+          ui::PointerInputEvent{*first_line, ui::PointerEventType::release, 5, 0},
+          ui::KeyInputEvent{"a", command}});
+    const std::string all = copied();
+    check(all == expected, "select-all in a virtualized code view did not copy the whole file (" +
+                               std::to_string(all.size()) + " of " +
+                               std::to_string(expected.size()) + " bytes)");
+
+    // Click at line 10, scroll to line 3000, shift-click it and extend to its end.
+    const std::optional<ui::Point> tenth = line_point(10U);
+    check(tenth.has_value(), "line 10 was not realized");
+    send({ui::PointerInputEvent{*tenth, ui::PointerEventType::press, 5, 0},
+          ui::PointerInputEvent{*tenth, ui::PointerEventType::release, 5, 0}});
+    const double line_height = row(0U)->content_bounds.height / 80.0;
+    ui::InputOperationResult scrolled;
+    check(surface->input().scroll_to("long.code.scroll", ui::Point{0.0, 2995.0 * line_height},
+                                     scrolled),
+          "the code view did not scroll");
+    frames(4);
+    const std::optional<ui::Point> far = line_point(3000U);
+    check(far.has_value(), "line 3000 was not realized after scrolling to it");
+    send({ui::PointerInputEvent{*far, ui::PointerEventType::press, 5, 0, shift},
+          ui::PointerInputEvent{*far, ui::PointerEventType::release, 5, 0, shift},
+          ui::KeyInputEvent{"end", shift}});
+    check(surface->tree().find_key("long.code.r0.t") == nullptr,
+          "the row the selection started in was still realized far away from it");
+    const std::size_t from = line_start(expected, 10U);
+    const std::size_t to = line_start(expected, 3001U) - 1U;
+    const std::string span = copied();
+    check(span == expected.substr(from, to - from),
+          "a selection from line 10 to line 3000 did not copy exactly those lines (" +
+              std::to_string(span.size()) + " of " + std::to_string(to - from) + " bytes)");
+    check(span.find("2999\n") == std::string::npos && span.find(" 3000") == std::string::npos,
+          "line numbers joined a copied selection");
+
+    // Shift+Down past the end of a row moves into the next one.
+    send({ui::KeyInputEvent{"down", shift}, ui::KeyInputEvent{"down", shift}});
+    const std::string longer = copied();
+    check(longer == expected.substr(from, line_start(expected, 3003U) - 1U - from),
+          "extending a selection down by lines did not take the next lines");
+
+    // Press at line 10 and drag below the view: it scrolls, and the selection follows on into
+    // rows that were not realized when the drag began.
+    check(surface->input().scroll_to("long.code.scroll", ui::Point{0.0, 0.0}, scrolled),
+          "the code view did not scroll back");
+    frames(4);
+    const std::optional<ui::Point> start = line_point(10U);
+    check(start.has_value(), "line 10 was not realized again");
+    const ui::LayoutRecord* list =
+        surface->layout().find(surface->tree().find_key("long.code.scroll")->identity());
+    const ui::Point below{start->x + 40.0, list->viewport->bottom() + 200.0};
+    send({ui::PointerInputEvent{*start, ui::PointerEventType::press, 5, 0},
+          ui::PointerInputEvent{ui::Point{start->x, start->y + 30.0}, ui::PointerEventType::move, 5,
+                                0},
+          ui::PointerInputEvent{below, ui::PointerEventType::move, 5, 0}});
+    frames(90);
+    send({ui::PointerInputEvent{below, ui::PointerEventType::release, 5, 0}});
+    const ui::LayoutRecord* moved =
+        surface->layout().find(surface->tree().find_key("long.code.scroll")->identity());
+    check(moved != nullptr && moved->scroll_offset.y > 200.0 * line_height,
+          "dragging a selection below a code view did not scroll it");
+    const std::string dragged = copied();
+    const std::size_t dragged_lines =
+        static_cast<std::size_t>(std::ranges::count(dragged, '\n')) + 1U;
+    check(expected.compare(from, dragged.size(), dragged) == 0 && dragged_lines > 200U,
+          "a drag scrolled past the realized rows did not select on from line 10 (" +
+              std::to_string(dragged_lines) + " lines)");
+}
+
+/**
+ * A code view sized to its content inside a scrolling page is as tall as all its lines, so the
+ * page scrolls over all of it, but realizes only the rows the page shows; its height holds still
+ * as rows are measured, and select-all still copies the whole file.
+ */
+void test_content_sized_code_view_realizes_what_the_page_shows(
+    const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay LongPage {
+  root Panel(key: "page.root", layout: { kind: "COLUMN", width: 600, height: 400 }) {
+    Scroll(key: "page.scroll", vertical: true, horizontal: false, layout: { width: 600, height: 400 }) {
+      Panel(key: "page.content", layout: { kind: "COLUMN", width: 580 }) {
+        Text(key: "page.intro", text: "Before")
+        CodeView(key: "page.code", text: )" +
+                               std::string(long_code_lines) + R"(, language: "rust")
+        Text(key: "page.after", text: "After")
+      }
+    }
+  }
+}
+)";
+    const std::string expected = long_code_text();
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("long-page", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "LongPage", 600.0, 400.0);
+    std::int64_t now = 1'000'000;
+    const auto frames = [&](const int count) {
+        for (int frame = 0; frame < count; ++frame)
+            static_cast<void>(surface->frame(now += 16'000'000));
+    };
+    const auto record = [&](const std::string& key) -> const ui::LayoutRecord* {
+        const ui::RetainedNode* node = surface->tree().find_key(key);
+        return node != nullptr ? surface->layout().find(node->identity()) : nullptr;
+    };
+    frames(4);
+    check(realized_code_rows(*surface, "page.code") <= 3U,
+          "a code view sized to its content realized rows the page does not show (" +
+              std::to_string(realized_code_rows(*surface, "page.code")) + ")");
+    const ui::LayoutRecord* first_row = record("page.code.r0.t");
+    check(first_row != nullptr, "the first row of a code view sized to its content was missing");
+    const double line_height = first_row->content_bounds.height / 80.0;
+    const double full = 4000.0 * line_height + 22.0;
+    const ui::LayoutRecord* code = record("page.code");
+    // Rows not yet realized are estimated from the measured ones: within a line or two.
+    check(code != nullptr && std::abs(code->bounds.height - full) < 2.0 * line_height,
+          "a code view sized to its content was not as tall as all its lines (" +
+              std::to_string(code != nullptr ? code->bounds.height : 0.0) + " of " +
+              std::to_string(full) + ")");
+    const double first_height = code->bounds.height;
+    const ui::LayoutRecord* page = record("page.scroll");
+    const ui::LayoutRecord* intro = record("page.intro");
+    const ui::LayoutRecord* after = record("page.after");
+    check(page != nullptr && intro != nullptr && after != nullptr &&
+              std::abs(page->content_size.height -
+                       (intro->bounds.height + first_height + after->bounds.height)) < 1.0,
+          "the page's scroll extent did not span the whole code view");
+
+    // Scrolled to the middle, the page shows rows from the middle and has let the first go.
+    ui::InputOperationResult scrolled;
+    check(surface->input().scroll_to("page.scroll", ui::Point{0.0, 2000.0 * line_height}, scrolled),
+          "the page did not scroll");
+    frames(4);
+    check(surface->tree().find_key("page.code.r1920.t") != nullptr &&
+              surface->tree().find_key("page.code.r0.t") == nullptr,
+          "scrolling the page did not move the code view's realized rows with it");
+    check(realized_code_rows(*surface, "page.code") <= 4U,
+          "a code view sized to its content realized more than the page shows after scrolling");
+    check(std::abs(record("page.code")->bounds.height - first_height) < 2.0 * line_height,
+          "a code view sized to its content changed height as its rows were measured");
+
+    // Select all and copy from a row in the middle: the whole file.
+    const ui::LayoutRecord* middle = record("page.code.r1920.t");
+    const ui::LayoutRecord* viewport = record("page.scroll");
+    const double y = std::clamp(viewport->viewport->y + 100.0, middle->content_bounds.y + 1.0,
+                                middle->content_bounds.bottom() - 1.0);
+    const ui::Point inside{middle->content_bounds.x + 4.0, y};
+    std::vector<ui::SurfaceInputEvent> copy;
+    copy.emplace_back(ui::PointerInputEvent{inside, ui::PointerEventType::press, 5, 0});
+    copy.emplace_back(ui::PointerInputEvent{inside, ui::PointerEventType::release, 5, 0});
+    copy.emplace_back(ui::KeyInputEvent{"a", ui::KeyModifiers{false, true, false, false}});
+    copy.emplace_back(ui::KeyInputEvent{"c", ui::KeyModifiers{false, true, false, false}});
+    static_cast<void>(surface->input().enqueue(std::move(copy)));
+    frames(2);
+    check(surface->input().clipboard_text() == std::optional<std::string_view>(expected),
+          "select-all in a code view sized to its content did not copy the whole file");
+}
+
 void test_rotation_draws_and_hits_the_turned_shape(const std::filesystem::path& resources) {
     const std::string source = R"(
 overlay Rotated {
@@ -4519,6 +4775,8 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_number_bytes_duration_and_relative_time_formats(resources);
         test_paint_rotate_spins_a_gradient_border(resources);
         test_code_view_highlights_numbers_and_copies(resources);
+        test_code_view_selection_spans_unrealized_rows(resources);
+        test_content_sized_code_view_realizes_what_the_page_shows(resources);
         test_rotation_draws_and_hits_the_turned_shape(resources);
         test_delayed_and_clipboard_actions(resources);
         test_scroll_snaps_to_the_nearest_child(resources);

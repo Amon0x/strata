@@ -83,6 +83,55 @@ using data::JsonValue;
     return value != nullptr && value->boolean() != nullptr ? *value->boolean() : fallback;
 }
 
+/** `offset` moved back onto the start of the UTF-8 character it falls in. */
+[[nodiscard]] inline std::size_t text_boundary(const std::string_view text,
+                                               std::size_t offset) noexcept {
+    offset = std::min(offset, text.size());
+    while (offset > 0U && offset < text.size() &&
+           (static_cast<unsigned char>(text[offset]) & 0xC0U) == 0x80U) {
+        --offset;
+    }
+    return offset;
+}
+
+[[nodiscard]] inline std::size_t previous_text_boundary(const std::string_view text,
+                                                        const std::size_t offset) noexcept {
+    std::size_t result = text_boundary(text, offset);
+    if (result == 0U)
+        return 0U;
+    --result;
+    while (result > 0U && (static_cast<unsigned char>(text[result]) & 0xC0U) == 0x80U) {
+        --result;
+    }
+    return result;
+}
+
+[[nodiscard]] inline std::size_t next_text_boundary(const std::string_view text,
+                                                    const std::size_t offset) noexcept {
+    std::size_t result = text_boundary(text, offset);
+    if (result >= text.size())
+        return text.size();
+    ++result;
+    while (result < text.size() && (static_cast<unsigned char>(text[result]) & 0xC0U) == 0x80U) {
+        ++result;
+    }
+    return result;
+}
+
+[[nodiscard]] inline std::size_t text_line_start(const std::string_view text,
+                                                 const std::size_t offset) noexcept {
+    const std::size_t clamped = text_boundary(text, offset);
+    const std::size_t newline =
+        clamped == 0U ? std::string_view::npos : text.rfind('\n', clamped - 1U);
+    return newline == std::string_view::npos ? 0U : newline + 1U;
+}
+
+[[nodiscard]] inline std::size_t text_line_end(const std::string_view text,
+                                               const std::size_t offset) noexcept {
+    const std::size_t newline = text.find('\n', text_boundary(text, offset));
+    return newline == std::string_view::npos ? text.size() : newline;
+}
+
 [[nodiscard]] inline const runtime::Value* scalar_property(
     const RetainedNode& node,
     const std::string_view name

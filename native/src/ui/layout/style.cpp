@@ -143,6 +143,13 @@ std::size_t VirtualListSpec::item_count() const noexcept {
     return items != nullptr ? items->count() : 0U;
 }
 
+bool virtual_list_windowed_by_ancestors(const LayoutStyle& style) noexcept {
+    if (style.kind != LayoutKind::scroll || !style.virtual_list.has_value())
+        return false;
+    return style.virtual_list->axis == LayoutAxis::vertical ? !style.scroll_vertical
+                                                            : !style.scroll_horizontal;
+}
+
 LayoutStyle layout_style(const DescriptionNode& description) {
     LayoutStyle style;
     style.participates = boolean(scalar_property(description, "$layoutParticipates"), true);

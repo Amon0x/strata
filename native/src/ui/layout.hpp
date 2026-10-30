@@ -342,6 +342,11 @@ struct LayoutRecord final {
     std::optional<collection::VirtualItemExtents> virtual_item_extents;
     std::optional<LayoutAxis> virtual_axis;
     std::size_t virtual_overscan = 0U;
+    /**
+     * The virtual list does not scroll along its axis, so its window is what the viewports
+     * around it show (see virtual_list_windowed_by_ancestors) rather than its own viewport.
+     */
+    bool virtual_windowed_by_ancestors = false;
     bool scroll_horizontal = false;
     bool scroll_vertical = false;
     bool pin_horizontal = false;
@@ -468,6 +473,11 @@ class LayoutEngine final {
         bool subtree_pins_vertical = false;
         bool subtree_sticky = false;
         bool subtree_portals = false;
+        /**
+         * The subtree holds a virtual list windowed by the viewports around it, so moving it
+         * relative to its clip changes what it realizes and it is never moved as a whole.
+         */
+        bool subtree_windowed = false;
         Size content_motion_target_size;
         std::vector<MeasuredNodePtr> children;
         /**
@@ -530,6 +540,12 @@ class LayoutEngine final {
     void arrange(const MeasuredNodePtr& measured, Rect bounds, std::optional<Rect> inherited_clip,
                  PinContext pin_context, const LayoutEnvironment& environment,
                  LayoutResult& result);
+    /**
+     * The item extents of the virtual list `measured` lays out, learning the extents of the
+     * items it measured: the estimate, an authored table, or what each item measured.
+     */
+    [[nodiscard]] collection::VirtualExtentResolution
+    resolve_virtual_extents(const MeasuredNode& measured, double requested_offset);
     [[nodiscard]] LayoutStyle resolved_style(const RetainedNode& node) const;
     /** The node's style as parsed from its description, before runtime adjustments. */
     [[nodiscard]] static const ParsedLayout& parsed_layout(const RetainedNode& node);
@@ -577,6 +593,13 @@ class LayoutEngine final {
 };
 
 [[nodiscard]] LayoutStyle layout_style(const DescriptionNode& description);
+/**
+ * Whether `style` is a virtual list that does not scroll along its axis. Such a list is as long as
+ * all its items, sized to them, and the scroll viewports around it decide which items it
+ * realizes: a long list sized to its content inside a scrolling page lays out only what the page
+ * shows.
+ */
+[[nodiscard]] bool virtual_list_windowed_by_ancestors(const LayoutStyle& style) noexcept;
 [[nodiscard]] std::optional<ContentSizeMotionSpec>
 content_size_motion(const DescriptionNode& description);
 

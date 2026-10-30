@@ -101,6 +101,7 @@ bool LayoutEngine::measured_model_equal(const LayoutEngine::MeasuredNode& left,
            left.subtree_pins_vertical == right.subtree_pins_vertical &&
            left.subtree_sticky == right.subtree_sticky &&
            left.subtree_portals == right.subtree_portals &&
+           left.subtree_windowed == right.subtree_windowed &&
            left.content_motion_target_size == right.content_motion_target_size &&
            left.children == right.children && left.flow_child_count == right.flow_child_count &&
            left.linear == right.linear && left.grid == right.grid && left.masonry == right.masonry;
@@ -431,6 +432,24 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
                     std::isfinite(available_content_height)) {
                     child_constraints.min_height = available_content_height;
                 }
+                // Across a scrolling axis the content is unbounded, so a child's fractional
+                // minimum is a fraction of the viewport: a row at least as wide as the view.
+                if (measured.style.scroll_horizontal && child_style.min_width.has_value() &&
+                    child_style.min_width->kind == LayoutSize::Kind::percent &&
+                    std::isfinite(available_content_width)) {
+                    child_constraints.min_width = std::max(
+                        child_constraints.min_width,
+                        std::max(0.0, available_content_width * child_style.min_width->value -
+                                          child_style.margin.horizontal()));
+                }
+                if (measured.style.scroll_vertical && child_style.min_height.has_value() &&
+                    child_style.min_height->kind == LayoutSize::Kind::percent &&
+                    std::isfinite(available_content_height)) {
+                    child_constraints.min_height = std::max(
+                        child_constraints.min_height,
+                        std::max(0.0, available_content_height * child_style.min_height->value -
+                                          child_style.margin.vertical()));
+                }
                 if (measured.style.scroll_horizontal)
                     child_constraints.max_width = infinity;
                 if (measured.style.scroll_vertical)
@@ -480,9 +499,19 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         measured.style.kind == LayoutKind::portal || !measured.style.anchor_target.empty() ||
         std::ranges::any_of(measured.children,
                             [](const MeasuredNodePtr& child) { return child->subtree_portals; });
+    // A virtual list windowed by the viewports around it is as long as all its items, measured or
+    // estimated, though only those in view are realized: its parent sizes and scrolls the whole.
+    const bool windowed = virtual_list_windowed_by_ancestors(measured.style);
+    const std::optional<double> windowed_extent =
+        windowed ? std::optional<double>(resolve_virtual_extents(measured, 0.0).extents.total())
+                 : std::nullopt;
+    measured.subtree_windowed =
+        windowed || std::ranges::any_of(measured.children, [](const MeasuredNodePtr& child) {
+            return child->subtree_windowed;
+        });
 
-    const auto intrinsic_children = [&measured, available_content_width,
-                                     available_content_height](const bool attached_only) {
+    const auto intrinsic_children = [&measured, available_content_width, available_content_height,
+                                     windowed_extent](const bool attached_only) {
         if (measured.style.kind == LayoutKind::row || measured.style.kind == LayoutKind::column) {
             if (!attached_only && measured.linear.has_value()) {
                 return measured.linear->intrinsic_size;
@@ -541,6 +570,13 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         if (count != 0U) {
             if (measured.style.kind == LayoutKind::scroll) {
                 result.height += measured.style.gap.y * static_cast<double>(count - 1U);
+            }
+        }
+        if (windowed_extent.has_value()) {
+            if (measured.style.virtual_list->axis == LayoutAxis::vertical) {
+                result.height = std::max(result.height, *windowed_extent);
+            } else {
+                result.width = std::max(result.width, *windowed_extent);
             }
         }
         return result;

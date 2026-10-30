@@ -253,9 +253,11 @@ class CodeViewBuilder final {
           spans_(highlight_syntax(source_.text, options.language)) {}
 
     [[nodiscard]] std::shared_ptr<const DescriptionNode> build() {
-        // Each row is one chunk of lines (or, wrapping, one line), and the scroll materializes
-        // only the rows in and near its viewport: a long file lays out, shapes and draws what is
-        // on screen, whatever its length.
+        // Each row is one chunk of lines (or, wrapping, one line), and the list realizes only the
+        // rows in and near what is on screen: a long file lays out, shapes and draws what is
+        // visible, whatever its length. A view with a height of its own scrolls its rows; one
+        // sized to its content is as tall as all of them, and the scrolling page around it
+        // decides which are realized.
         std::vector<std::shared_ptr<const DescriptionNode>> rows;
         const std::vector<std::pair<std::size_t, std::size_t>> parts =
             options_.wrap ? single_lines() : segments();
@@ -271,38 +273,46 @@ class CodeViewBuilder final {
             if (name == "lineHeightMultiplier" && value.number() != nullptr)
                 multiplier = *value.number();
         }
-        // A line's height is about 1.32 em of the font times the authored multiplier; the scroll
-        // measures each row it materializes and uses this only for rows it has not.
-        const double line_height = pixel_size * 1.32 * multiplier;
-        const double lines_per_row = parts.empty() ? 1.0
-                                                   : static_cast<double>(source_.lines.size()) /
-                                                         static_cast<double>(parts.size());
+        // A line's height is about 1.32 em of the font times the authored multiplier. Each row is
+        // estimated from its own line count and padding; the list measures the rows it realizes
+        // and scales the estimates of the rest by how the measured ones turned out.
+        const double line_height = std::max(1.0, pixel_size * 1.32 * multiplier);
+        std::vector<runtime::Value> extents;
+        extents.reserve(parts.size());
+        for (std::size_t index = 0U; index < parts.size(); ++index) {
+            const double lines = static_cast<double>(parts[index].second - parts[index].first);
+            extents.emplace_back(lines * line_height + (index == 0U ? 10.0 : 0.0) +
+                                 (index + 1U == parts.size() ? 12.0 : 0.0));
+        }
         DescriptionNode::Properties scroll{
             {"horizontal", runtime::ExpressionValue(runtime::Value(!options_.wrap))},
             {"vertical", runtime::ExpressionValue(runtime::Value(options_.bounded))},
             // Its layout is authored here, so the theme's list style does not replace it.
             {"style", runtime::ExpressionValue(object({}))},
         };
-        // A view with a height of its own scrolls a virtual list of its rows; one sized to its
-        // content shows every row anyway, so it lays them all out.
-        const std::string_view type = options_.bounded ? "VirtualList" : "Scroll";
-        scope_.apply_layout_defaults(type, scroll);
+        // Selection over the rows works in offsets into the whole text, so it reaches rows that
+        // are not realized: select-all and copy take the whole file, and a selection survives
+        // its rows scrolling away.
+        if (options_.selectable) {
+            scroll.emplace("$selectionSource",
+                           runtime::ExpressionValue(runtime::Value(source_.text)));
+        }
+        scope_.apply_layout_defaults("VirtualList", scroll);
         scope_.set_layout(scroll, "height",
                           options_.bounded ? widget_fill() : runtime::Value("content"));
         scope_.set_layout(scroll, "width", widget_fill());
+        // A view sized to its content does not scroll vertically: the list is as tall as all its
+        // rows, and the viewports around it decide which are realized.
+        scope_.set_layout(scroll, "scrollHorizontal", runtime::Value(!options_.wrap));
+        scope_.set_layout(scroll, "scrollVertical", runtime::Value(options_.bounded));
         // The rows carry the view's padding, so a view sized to its content measures all of it.
         scope_.set_layout(scroll, "contentPadding", edges(0.0, 0.0, 0.0, 0.0));
         scope_.set_layout(scroll, "viewportInsets", edges(0.0, 0.0, 0.0, 0.0));
         scope_.set_layout(scroll, "scrollbarGutter", runtime::Value(0.0));
-        if (!options_.bounded) {
-            scope_.synthesized();
-            return scope_.node(std::string(type), key_ + ".scroll", std::move(scroll),
-                               std::move(rows));
-        }
         scope_.set_layout(scroll, "virtualItemCount",
                           runtime::Value(static_cast<double>(rows.size())));
-        scope_.set_layout(scroll, "virtualItemExtent",
-                          runtime::Value(std::max(1.0, line_height * lines_per_row)));
+        scope_.set_layout(scroll, "virtualItemExtent", runtime::Value(line_height));
+        scope_.set_layout(scroll, "virtualItemExtents", runtime::Value(std::move(extents)));
         scope_.set_layout(scroll, "virtualOverscan", runtime::Value(1.0));
         // Rows are measured as they are realized, keyed as the list knows them.
         scope_.set_layout(scroll, "virtualMeasureItemExtents", runtime::Value(true));
@@ -315,7 +325,7 @@ class CodeViewBuilder final {
         // The list starts with nothing realized: layout publishes the rows in view, and only
         // those are realized, laid out and drawn.
         auto list = std::make_shared<DescriptionNode>(
-            *scope_.node(std::string(type), key_ + ".scroll", std::move(scroll), std::move(rows)));
+            *scope_.node("VirtualList", key_ + ".scroll", std::move(scroll), std::move(rows)));
         list->materialization = MaterializationRange{};
         return list;
     }
@@ -417,6 +427,10 @@ class CodeViewBuilder final {
             properties.emplace("selectable", runtime::ExpressionValue(runtime::Value(true)));
             properties.emplace("selectionContainer",
                                runtime::ExpressionValue(runtime::Value(key_)));
+            // Where this text starts in the list's selection source.
+            properties.emplace("$sourceOffset",
+                               runtime::ExpressionValue(runtime::Value(
+                                   static_cast<double>(source_.lines[first].first))));
         }
         scope_.synthesized();
         return scope_.node("RichText", key, std::move(properties));

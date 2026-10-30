@@ -120,7 +120,11 @@ placement, keyboard line navigation and IME placement share the same scrolled ge
 Static `Text` and `RichText` are non-selectable by default. Opt reading surfaces into selection with
 `selectable: true`; `selectionContainer` groups opted-in text without making labels selectable.
 Editable fields retain their normal caret, selection, clipboard, and IME behavior. RichText links
-remain interactive independently of text selection.
+remain interactive independently of text selection. When a container's texts are slices of one
+document, as a `CodeView`'s rows are, the selection is kept as positions in that whole document
+rather than in the texts on screen: it reaches rows of a virtual list that are not realized,
+select-all and copy take the whole document, a selection survives the row it started in scrolling
+away, and dragging it past the edge of a scrolling viewport scrolls that viewport.
 
 `strata.hoverable` uses the resolved `hoverOverlay` and radius, without adding a separate border or
 hardcoded surface. Set `hoverOverlay: null` to suppress its decoration. Toggle/Switch hover and
@@ -288,6 +292,12 @@ Wheel/trackpad input, scrollbar drags, focus reveal, animated scrolling, and pro
 use this one post-mutation path. An unchanged or already-clamped offset emits nothing. The callback
 is an observer of effective state, not raw input: use a native extension behavior only when the
 mechanic needs capture/target/bubble wheel deltas before default scrolling.
+
+A virtual list that does not scroll along its own axis (one sized to its content inside a scrolling
+page) is as long as all its items, measured or estimated, so the page scrolls over all of it, but it
+realizes only the items the scroll viewports around it show, with its overscan. Items not yet
+measured are estimated in proportion to how the measured ones compared with their estimates, so a
+list's length holds still as more of it is measured.
 
 ### Typography rasterization
 
