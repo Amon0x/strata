@@ -12,6 +12,7 @@
 #include <string_view>
 #include <vector>
 
+#include "font/raster.hpp"
 #include "resource/svg_image.hpp"
 #include "runtime/application.hpp"
 #include "runtime/host_services.hpp"
@@ -69,6 +70,8 @@ struct SurfaceEnvironment final {
     bool system_dark = false;
     /** The user's accent colour (env.systemAccent), when the host knows it. */
     std::optional<runtime::ColorValue> system_accent;
+    /** How small text is antialiased: per subpixel in this order, or gray (`none`). */
+    font::SubpixelOrder text_subpixel = font::SubpixelOrder::none;
 
     void validate() const;
     [[nodiscard]] LayoutEnvironment layout_environment(std::int64_t frame_time_nanos) const;

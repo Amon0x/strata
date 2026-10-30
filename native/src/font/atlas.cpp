@@ -38,6 +38,13 @@ namespace {
     return filtered_coverage ? AtlasTextureFormat::r8_filtered : AtlasTextureFormat::r8;
 }
 
+/** The end of a page's texture name, which says what its texels hold. */
+[[nodiscard]] const char* page_suffix(const GlyphRasterMode mode) noexcept {
+    return mode == GlyphRasterMode::coverage   ? "/coverage"
+           : mode == GlyphRasterMode::subpixel ? "/subpixel"
+                                               : "/msdf";
+}
+
 [[nodiscard]] std::size_t bytes_per_pixel(const GlyphRasterMode mode) noexcept {
     return mode == GlyphRasterMode::coverage ? 1U : 4U;
 }
@@ -132,9 +139,10 @@ class SharedGlyphRasterCache final {
 
 [[nodiscard]] std::array<std::uint64_t, 12U>
 raster_config_identity(const GlyphRasterMode mode, const CoverageRasterConfig& coverage,
-                       const MsdfRasterConfig& msdf) noexcept {
+                       const MsdfRasterConfig& msdf, const SubpixelOrder order) noexcept {
     std::array<std::uint64_t, 12U> result{};
-    if (mode == GlyphRasterMode::coverage || mode == GlyphRasterMode::color) {
+    if (mode == GlyphRasterMode::coverage || mode == GlyphRasterMode::color ||
+        mode == GlyphRasterMode::subpixel) {
         result = {
             coverage.maximum_dimension,
             coverage.padding_pixels,
@@ -143,6 +151,7 @@ raster_config_identity(const GlyphRasterMode mode, const CoverageRasterConfig& c
             std::bit_cast<std::uint64_t>(coverage.stem_darkening_taper_start_physical_pixel_size),
             std::bit_cast<std::uint64_t>(coverage.stem_darkening_taper_end_physical_pixel_size),
             std::bit_cast<std::uint64_t>(coverage.transfer_strength),
+            mode == GlyphRasterMode::subpixel ? static_cast<std::uint64_t>(order) : 0U,
         };
     } else {
         result = {
@@ -161,7 +170,8 @@ raster_config_identity(const GlyphRasterMode mode, const CoverageRasterConfig& c
 raster_cache_identity(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
                       const double display_scale, const SubpixelPhase phase,
                       const GlyphRasterMode mode, const std::uint32_t font_style_flags,
-                      const CoverageRasterConfig& coverage, const MsdfRasterConfig& msdf) {
+                      const CoverageRasterConfig& coverage, const MsdfRasterConfig& msdf,
+                      const SubpixelOrder order) {
     std::shared_ptr<const void> owner = font.cache_identity();
     return RasterCacheIdentity{
         RasterCacheKey{
@@ -172,7 +182,7 @@ raster_cache_identity(const OpenTypeFont& font, const std::uint16_t glyph, const
             std::bit_cast<std::uint64_t>(mode != GlyphRasterMode::msdf ? display_scale : 1.0),
             mode,
             phase,
-            raster_config_identity(mode, coverage, msdf),
+            raster_config_identity(mode, coverage, msdf, order),
         },
         std::move(owner),
     };
@@ -278,10 +288,13 @@ rasterize_color(const OpenTypeFont& font, const std::uint16_t glyph, const doubl
 rasterize(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
           const double display_scale, const SubpixelPhase phase, const GlyphRasterMode mode,
           const std::uint32_t font_style_flags, const CoverageRasterConfig& coverage,
-          const MsdfRasterConfig& msdf) {
+          const MsdfRasterConfig& msdf, const SubpixelOrder order) {
     if (mode == GlyphRasterMode::color)
         return rasterize_color(font, glyph, pixel_size, display_scale, phase, font_style_flags,
                                coverage);
+    if (mode == GlyphRasterMode::subpixel)
+        return rasterize_subpixel(font, glyph, pixel_size, display_scale, order, phase, coverage,
+                                  font_style_flags);
     return mode == GlyphRasterMode::coverage
                ? rasterize_coverage(font, glyph, pixel_size, display_scale, phase, coverage,
                                     font_style_flags)
@@ -350,6 +363,17 @@ void GlyphAtlas::adopt_display_scale(const double display_scale) {
     invalidate_pages();
 }
 
+void GlyphAtlas::adopt_subpixel_order(const SubpixelOrder order) {
+    if (subpixel_order_ == order)
+        return;
+    subpixel_order_ = order;
+    invalidate_pages();
+}
+
+SubpixelOrder GlyphAtlas::subpixel_order() const noexcept {
+    return subpixel_order_;
+}
+
 bool GlyphAtlas::begin_frame_preparation() {
     if (frame_preparation_active_) {
         throw std::logic_error("glyph atlas frame preparation is already active");
@@ -385,9 +409,10 @@ GlyphAtlas::request(const std::string_view font_id, const OpenTypeFont& font,
                     const std::uint16_t glyph, const double pixel_size,
                     const SubpixelPhase coverage_phase, const std::uint32_t font_style_flags,
                     const GlyphRasterMode mode, const double reach) {
+    const bool positioned = mode == GlyphRasterMode::coverage || mode == GlyphRasterMode::subpixel;
     return request_mode(font_id, font, glyph, pixel_size,
-                        mode == GlyphRasterMode::coverage ? coverage_phase : SubpixelPhase{}, mode,
-                        font_style_flags, reach);
+                        positioned ? coverage_phase : SubpixelPhase{}, mode, font_style_flags,
+                        reach);
 }
 
 struct GlyphAtlas::Resolved final {
@@ -418,7 +443,10 @@ GlyphAtlas::Resolved GlyphAtlas::resolve(const std::string_view font_id, const O
             std::bit_cast<std::uint64_t>(effective_mode != GlyphRasterMode::msdf ? display_scale_
                                                                                  : 1.0),
             effective_mode,
-            effective_mode == GlyphRasterMode::coverage ? phase : SubpixelPhase{},
+            effective_mode == GlyphRasterMode::coverage ||
+                    effective_mode == GlyphRasterMode::subpixel
+                ? phase
+                : SubpixelPhase{},
             generation_,
         },
         config_.msdf,
@@ -456,12 +484,12 @@ GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& fon
     }
     RasterCacheIdentity identity =
         raster_cache_identity(font, glyph, pixel_size, display_scale_, key.phase, effective_mode,
-                              realized_style_flags, config_.coverage, msdf);
+                              realized_style_flags, config_.coverage, msdf, subpixel_order_);
     SharedRaster bitmap = shared_raster_cache().find(identity.key);
     if (bitmap == nullptr) {
         bitmap = std::make_shared<const std::optional<GlyphRasterBitmap>>(
             rasterize(font, glyph, pixel_size, display_scale_, key.phase, effective_mode,
-                      realized_style_flags, config_.coverage, msdf));
+                      realized_style_flags, config_.coverage, msdf, subpixel_order_));
         bitmap = shared_raster_cache().insert(std::move(identity), std::move(bitmap));
     }
     if (!bitmap->has_value())
@@ -601,7 +629,7 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
             continue;
         RasterCacheIdentity identity = raster_cache_identity(
             *request.font, request.glyph, request.pixel_size, display_scale_, key.phase, key.mode,
-            key.font_style_flags, config_.coverage, resolved.msdf);
+            key.font_style_flags, config_.coverage, resolved.msdf, subpixel_order_);
         SharedRaster raster = shared_raster_cache().find(identity.key);
         unique.emplace(key, pending.size());
         pending.push_back(Pending{
@@ -658,7 +686,8 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
                         std::make_shared<const std::optional<GlyphRasterBitmap>>(rasterize(
                             *item.font, item.key.glyph, std::bit_cast<double>(item.key.pixel_size),
                             display_scale_, item.key.phase, item.key.mode,
-                            item.key.font_style_flags, config_.coverage, item.msdf));
+                            item.key.font_style_flags, config_.coverage, item.msdf,
+                            subpixel_order_));
                 } catch (...) {
                     {
                         const std::scoped_lock lock(failure_mutex);
@@ -829,7 +858,7 @@ GlyphAtlas::Allocation GlyphAtlas::create_page_and_allocate(const std::uint32_t 
     const std::uint32_t index = static_cast<std::uint32_t>(pages_.size());
     const std::string texture = "strata:native-font-atlas/" + owner_token_ + "/" +
                                 std::to_string(generation_) + "/" + std::to_string(index) +
-                                (mode == GlyphRasterMode::coverage ? "/coverage" : "/msdf");
+                                page_suffix(mode);
     const std::size_t channels = bytes_per_pixel(mode);
     const std::uint64_t page_pixels =
         static_cast<std::uint64_t>(config_.page_size) * config_.page_size;
@@ -1032,7 +1061,7 @@ std::optional<GlyphAtlas::Allocation> GlyphAtlas::reuse_unretained_page(
                 page.texture = "strata:native-font-atlas/" + owner_token_ + "/" +
                                std::to_string(generation_) + "/" + std::to_string(page.index) +
                                "/" + std::to_string(preparation_serial_) +
-                               (mode == GlyphRasterMode::coverage ? "/coverage" : "/msdf");
+                               page_suffix(mode);
                 page.mode = mode;
                 if (!config_.backend_rasterized) {
                     page.pixels.assign(static_cast<std::size_t>(config_.page_size) *

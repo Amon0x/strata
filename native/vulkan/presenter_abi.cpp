@@ -134,7 +134,8 @@ strata_vulkan_presenter_create(strata_runtime* const runtime,
         *out_presenter = nullptr;
     return guarded([&] {
         if (runtime == nullptr || device == nullptr ||
-            device->struct_size < sizeof(strata_vulkan_device) || device->reserved != 0U ||
+            device->struct_size < sizeof(strata_vulkan_device) ||
+            (device->features & ~STRATA_VULKAN_DEVICE_FEATURE_DUAL_SOURCE_BLEND) != 0U ||
             out_presenter == nullptr) {
             throw std::invalid_argument("Vulkan presenter creation arguments are incomplete");
         }
@@ -170,8 +171,9 @@ strata_vulkan_presenter_create(strata_runtime* const runtime,
         auto presenter = std::make_unique<strata_vulkan_presenter>();
         presenter->value = std::make_unique<strata::vulkan::Presenter>(
             runtime,
-            strata::vulkan::Device{device->physical_device, device->device, device->queue,
-                                   device->queue_family},
+            strata::vulkan::Device{
+                device->physical_device, device->device, device->queue, device->queue_family,
+                (device->features & STRATA_VULKAN_DEVICE_FEATURE_DUAL_SOURCE_BLEND) != 0U},
             std::move(native_options));
         *out_presenter = presenter.release();
     });

@@ -26,6 +26,12 @@ struct Device final {
     VkDevice device = VK_NULL_HANDLE;
     VkQueue queue = VK_NULL_HANDLE;
     std::uint32_t queue_family = 0;
+    /**
+     * Whether the device was created with VkPhysicalDeviceFeatures::dualSrcBlend. Subpixel text
+     * blends each colour channel by its own coverage only then; without it, it blends by its
+     * strongest channel, as gray text does.
+     */
+    bool dual_source_blend = false;
 };
 
 enum class TargetLoadAction { preserve, clear };

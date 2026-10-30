@@ -272,6 +272,10 @@ struct ApplicationHost::Impl final {
                                     STRATA_SURFACE_INPUT_CLIPBOARD |
                                     STRATA_SURFACE_INPUT_CONTROLLER;
         result.reduced_motion = scenario.reduced_motion ? 1U : 0U;
+        // Headless runs are gray unless the scenario asks for subpixel text (an RGB display).
+        result.text_antialiasing = scenario.text_antialiasing == "subpixel"
+                                       ? STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB
+                                       : STRATA_TEXT_ANTIALIASING_GRAYSCALE;
         return result;
     }
 

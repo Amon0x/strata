@@ -666,6 +666,12 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                     config.extension_packages = application_launch->packages;
                     config.extension_search_paths = application_launch->extension_search_paths;
                     config.reduced_motion = application_launch->reduced_motion;
+                    config.text_antialiasing =
+                        application_launch->text_antialiasing == "grayscale"
+                            ? strata::desktop::TextAntialiasing::grayscale
+                        : application_launch->text_antialiasing == "subpixel"
+                            ? strata::desktop::TextAntialiasing::subpixel
+                            : strata::desktop::TextAntialiasing::system;
                     if (!application_launch->fonts.empty()) {
                         config.fonts.clear();
                         for (const strata::headless::FontConfig& font : application_launch->fonts) {

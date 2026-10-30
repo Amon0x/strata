@@ -152,6 +152,9 @@ the initialized application and accept operations from the control stream instea
 }
 ```
 
+`surface.textAntialiasing` is `"system"` (gray here, so a capture never depends on the machine),
+`"grayscale"` or `"subpixel"` (per subpixel for an RGB display).
+
 Resource and module paths are relative to `--resources`; absolute and root-escaping paths are
 rejected. `surface.images` accepts encoded PNGs and the bounded static SVG subset documented in
 [PNG and SVG images](svg.md). Raster `sampling` is ignored for SVG geometry. Imported modules resolve relative to their importer through the shared host module-path

@@ -87,6 +87,7 @@ using Blend = host::DrawBlend;
 inline constexpr std::array<Blend, host::draw_blend_count> blends{
     Blend::opaque,   Blend::straight_alpha, Blend::premultiplied_alpha,
     Blend::additive, Blend::multiply,       Blend::clipped_multiply,
+    Blend::subpixel_text,
 };
 } // namespace detail
 

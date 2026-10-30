@@ -34,6 +34,12 @@ Strata creates no swapchain, changes no window state, and performs no presentati
 must remain valid until the presenter is destroyed. Calls are owner-thread serialized, including
 all other access to the borrowed queue.
 
+Create the device with `VkPhysicalDeviceFeatures::dualSrcBlend` where it is supported and say so
+(`Device::dual_source_blend`, or `STRATA_VULKAN_DEVICE_FEATURE_DUAL_SOURCE_BLEND` in
+`strata_vulkan_device::features`): subpixel text blends each colour channel by its own coverage
+through dual-source blending. Without it, subpixel text blends by its strongest channel, as gray
+text does.
+
 Each render submits its own command buffer and returns without waiting for it. The renderer keeps
 three frames in flight: a frame's command buffer, upload arena, descriptor pools, framebuffers,
 retired resources and per-layer geometry copy are reused only after that frame's own fence has

@@ -136,6 +136,9 @@ class GlyphAtlas final {
 
     /** Invalidates scale-dependent coverage pages and plans explicit host releases. */
     void adopt_display_scale(double display_scale);
+    /** The subpixel order subpixel glyphs are rasterized for; a change drops the pages. */
+    void adopt_subpixel_order(SubpixelOrder order);
+    [[nodiscard]] SubpixelOrder subpixel_order() const noexcept;
 
     /**
      * Opens the frame-safe glyph preparation phase. If a prior submission hit capacity, old pages
@@ -274,6 +277,7 @@ class GlyphAtlas final {
     std::string owner_token_;
     GlyphAtlasConfig config_;
     double display_scale_ = 1.0;
+    SubpixelOrder subpixel_order_ = SubpixelOrder::rgb;
     std::uint64_t generation_ = 1U;
     std::vector<Page> pages_;
     std::map<Key, GlyphAtlasEntry> cache_;

@@ -19,6 +19,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_OUTLINE_H
+#include FT_LCD_FILTER_H
 #include FT_MULTIPLE_MASTERS_H
 
 namespace strata::font {
@@ -35,6 +36,11 @@ class FreeTypeLibrary final {
         const FT_Error error = FT_Init_FreeType(&library_);
         if (error != FT_Err_Ok)
             freetype_error("initialization", error);
+        // LCD rendering filters its subpixel samples with FreeType's default five-tap filter, as
+        // ClearType and Skia do, so colour fringes stay below what reads as colour. A FreeType
+        // built without that filter answers Unimplemented_Feature and renders LCD bitmaps with its
+        // Harmony method instead, which needs none.
+        static_cast<void>(FT_Library_SetLcdFilter(library_, FT_LCD_FILTER_DEFAULT));
     }
 
     ~FreeTypeLibrary() {
@@ -311,10 +317,17 @@ SubpixelPhase SubpixelPhase::quantize(const double physical_position,
     return SubpixelPhase{static_cast<std::uint16_t>(modulus), divisions};
 }
 
+namespace {
+
+/**
+ * One glyph's coverage: gray (one byte a pixel) when `order` is none, else per subpixel in that
+ * order (four bytes a pixel: red, green, blue and the largest of them).
+ */
 std::optional<GlyphRasterBitmap>
-rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
-                   const double display_scale, const SubpixelPhase phase,
-                   const CoverageRasterConfig& config, const std::uint32_t font_style_flags) {
+rasterize_glyph(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
+                const double display_scale, const SubpixelPhase phase,
+                const CoverageRasterConfig& config, const std::uint32_t font_style_flags,
+                const SubpixelOrder order) {
     validate(config);
     if (!std::isfinite(pixel_size) || pixel_size <= 0.0 || !std::isfinite(display_scale) ||
         display_scale <= 0.0) {
@@ -367,19 +380,24 @@ rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const do
                 freetype_error("outline emboldening", embolden_error);
         }
     }
-    const FT_Error render_error = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
+    const bool subpixel = order != SubpixelOrder::none;
+    const FT_Error render_error =
+        FT_Render_Glyph(face->glyph, subpixel ? FT_RENDER_MODE_LCD : FT_RENDER_MODE_NORMAL);
     if (render_error != FT_Err_Ok)
-        freetype_error("grayscale glyph rendering", render_error);
+        freetype_error("glyph rendering", render_error);
 
     const FT_Bitmap& source = face->glyph->bitmap;
     if (source.width == 0U || source.rows == 0U)
         return std::nullopt;
-    if (source.pixel_mode != FT_PIXEL_MODE_GRAY || source.buffer == nullptr) {
-        throw FontError("FreeType grayscale glyph produced an unsupported bitmap format");
+    if (source.pixel_mode != (subpixel ? FT_PIXEL_MODE_LCD : FT_PIXEL_MODE_GRAY) ||
+        source.buffer == nullptr || (subpixel && source.width % 3U != 0U)) {
+        throw FontError("FreeType glyph produced an unsupported bitmap format");
     }
+    // An LCD bitmap holds three samples a pixel, one for each subpixel from the left.
+    const std::uint32_t source_width = subpixel ? source.width / 3U : source.width;
 
     const std::uint64_t padding = config.padding_pixels;
-    const std::uint64_t width64 = static_cast<std::uint64_t>(source.width) + padding * 2U;
+    const std::uint64_t width64 = static_cast<std::uint64_t>(source_width) + padding * 2U;
     const std::uint64_t height64 = static_cast<std::uint64_t>(source.rows) + padding * 2U;
     if (width64 > config.maximum_dimension || height64 > config.maximum_dimension) {
         throw FontError("coverage raster exceeds its configured maximum dimension");
@@ -389,19 +407,36 @@ rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const do
     }
     const auto width = static_cast<std::uint32_t>(width64);
     const auto height = static_cast<std::uint32_t>(height64);
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(width) * height, 0U);
+    const std::size_t texel = subpixel ? 4U : 1U;
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(width) * height * texel, 0U);
     const std::size_t source_pitch = static_cast<std::size_t>(
         source.pitch < 0 ? -static_cast<std::int64_t>(source.pitch) : source.pitch);
     for (std::uint32_t row = 0U; row < source.rows; ++row) {
         const std::uint32_t source_row = source.pitch < 0 ? source.rows - row - 1U : row;
         const std::uint8_t* source_bytes =
             source.buffer + static_cast<std::size_t>(source_row) * source_pitch;
-        std::uint8_t* destination = bytes.data() +
-                                    static_cast<std::size_t>(row + config.padding_pixels) * width +
-                                    config.padding_pixels;
-        for (std::uint32_t column = 0U; column < source.width; ++column) {
-            destination[column] =
-                gray_value(source, source_bytes[column], config.transfer_strength);
+        std::uint8_t* destination =
+            bytes.data() + (static_cast<std::size_t>(row + config.padding_pixels) * width +
+                            config.padding_pixels) *
+                               texel;
+        if (!subpixel) {
+            for (std::uint32_t column = 0U; column < source.width; ++column) {
+                destination[column] =
+                    gray_value(source, source_bytes[column], config.transfer_strength);
+            }
+            continue;
+        }
+        const bool reversed = order == SubpixelOrder::bgr;
+        for (std::uint32_t column = 0U; column < source_width; ++column) {
+            const std::uint8_t* samples = source_bytes + static_cast<std::size_t>(column) * 3U;
+            const std::uint8_t red = samples[reversed ? 2U : 0U];
+            const std::uint8_t green = samples[1U];
+            const std::uint8_t blue = samples[reversed ? 0U : 2U];
+            std::uint8_t* target = destination + static_cast<std::size_t>(column) * 4U;
+            target[0U] = red;
+            target[1U] = green;
+            target[2U] = blue;
+            target[3U] = std::max({red, green, blue});
         }
     }
 
@@ -432,8 +467,29 @@ rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const do
         1.0 / display_scale,
         layout_scale,
         physical_scale,
-        GlyphRasterMode::coverage,
+        subpixel ? GlyphRasterMode::subpixel : GlyphRasterMode::coverage,
     };
+}
+
+} // namespace
+
+std::optional<GlyphRasterBitmap>
+rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
+                   const double display_scale, const SubpixelPhase phase,
+                   const CoverageRasterConfig& config, const std::uint32_t font_style_flags) {
+    return rasterize_glyph(font, glyph, pixel_size, display_scale, phase, config,
+                           font_style_flags, SubpixelOrder::none);
+}
+
+std::optional<GlyphRasterBitmap>
+rasterize_subpixel(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
+                   const double display_scale, const SubpixelOrder order,
+                   const SubpixelPhase phase, const CoverageRasterConfig& config,
+                   const std::uint32_t font_style_flags) {
+    if (order == SubpixelOrder::none)
+        throw FontError("subpixel rasterization needs a subpixel order");
+    return rasterize_glyph(font, glyph, pixel_size, display_scale, phase, config,
+                           font_style_flags, order);
 }
 
 } // namespace strata::font

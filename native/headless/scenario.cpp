@@ -389,6 +389,14 @@ Scenario load_scenario(const std::filesystem::path& path) {
     if (const JsonValue* value = optional(surface, "reducedMotion"); value != nullptr) {
         result.reduced_motion = boolean(*value, "surface.reducedMotion");
     }
+    if (const JsonValue* value = optional(surface, "textAntialiasing"); value != nullptr) {
+        result.text_antialiasing = text(*value, "surface.textAntialiasing");
+        if (result.text_antialiasing != "system" && result.text_antialiasing != "grayscale" &&
+            result.text_antialiasing != "subpixel") {
+            throw std::invalid_argument(
+                "surface.textAntialiasing must be \"system\", \"grayscale\" or \"subpixel\"");
+        }
+    }
     if (const JsonValue* value = optional(surface, "clearColor"); value != nullptr) {
         result.clear_color = color(*value);
     }

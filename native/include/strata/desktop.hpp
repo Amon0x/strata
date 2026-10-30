@@ -60,6 +60,13 @@ struct ImageResource final {
 };
 
 /** Description of one ordinary .strata application hosted in a Win32 window. */
+/**
+ * How small text is antialiased: as the operating system does (ClearType's setting and subpixel
+ * order on Windows; gray elsewhere), always gray, or always per subpixel (in the system's order
+ * where it has one, else RGB).
+ */
+enum class TextAntialiasing { system, grayscale, subpixel };
+
 struct ApplicationConfig final {
     std::string application_id;
     std::string surface_id;
@@ -80,6 +87,7 @@ struct ApplicationConfig final {
         {"strata:ui/icons/chevron-up", "assets/strata/images/ui/icons/chevron-up.svg"},
     };
     bool reduced_motion = false;
+    TextAntialiasing text_antialiasing = TextAntialiasing::system;
 };
 
 struct ApplicationOptions final {

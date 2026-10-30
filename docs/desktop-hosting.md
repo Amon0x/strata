@@ -229,6 +229,12 @@ everywhere else, without shipping the system font:
 ]
 ```
 
+`surface.textAntialiasing` chooses how small text is antialiased: `"system"` (the default) follows
+the operating system, which on Windows is ClearType's setting and subpixel order; `"grayscale"`
+always antialiases in gray; `"subpixel"` always antialiases per subpixel, in the system's order when
+it has one and RGB otherwise. A C++ host sets `ApplicationConfig::text_antialiasing` the same way.
+Headless runs treat `"system"` as gray, so captures do not depend on the machine.
+
 Candidates are bare file names; a name with a path component is rejected. Faces must be TrueType
 (`glyf`) fonts. A layout that fixes `lineHeight` on its text styles does not move when the face
 changes. Because the result depends on the machine, deterministic test scenarios should leave

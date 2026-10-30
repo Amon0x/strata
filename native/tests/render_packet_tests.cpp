@@ -993,7 +993,7 @@ void test_typed_draw_fields_are_validated(const std::filesystem::path& resources
     };
     check(!rejects(material_offset, 0U), "the typed-field fixture itself was rejected");
     check(rejects(material_offset, 1U), "a material index past the id table was accepted");
-    check(rejects(material_offset + 2U, 6U), "an unknown draw blend was accepted");
+    check(rejects(material_offset + 2U, 7U), "an unknown draw blend was accepted");
     check(rejects(material_offset + 3U, 4U), "an unknown clip coverage was accepted");
 }
 

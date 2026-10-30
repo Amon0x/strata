@@ -142,6 +142,12 @@ struct ApplicationHost::Impl final {
                                     STRATA_SURFACE_INPUT_IME | STRATA_SURFACE_INPUT_CLIPBOARD;
         result.reduced_motion = config.reduced_motion ? 1U : 0U;
         platform.appearance().apply(result);
+        if (config.text_antialiasing == TextAntialiasing::grayscale) {
+            result.text_antialiasing = STRATA_TEXT_ANTIALIASING_GRAYSCALE;
+        } else if (config.text_antialiasing == TextAntialiasing::subpixel &&
+                   result.text_antialiasing == STRATA_TEXT_ANTIALIASING_GRAYSCALE) {
+            result.text_antialiasing = STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB;
+        }
         return result;
     }
 

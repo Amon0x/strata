@@ -13,7 +13,7 @@
 namespace strata::ui {
 
 /** Packet format the encoder writes. The C ABI pins it to STRATA_RENDER_PACKET_VERSION_CURRENT. */
-inline constexpr std::uint32_t render_packet_version = 22U;
+inline constexpr std::uint32_t render_packet_version = 23U;
 
 /** A draw batch's clip-adapted blend; the C ABI pins these to STRATA_RENDER_BLEND_*. */
 enum class PacketBlend : std::uint8_t {
@@ -23,6 +23,7 @@ enum class PacketBlend : std::uint8_t {
     additive = 3U,
     multiply = 4U,
     clipped_multiply = 5U,
+    subpixel_text = 6U,
 };
 
 /** How a draw applies rounded-clip coverage; pinned to STRATA_RENDER_CLIP_COVERAGE_*. */
@@ -109,6 +110,10 @@ class HostRenderPacketCache final {
            double logical_width, double logical_height);
     /** Emits a compact packet referencing the settled geometry epoch. */
     [[nodiscard]] bool reuse(std::uint64_t frame_index);
+    /** How coverage text is antialiased from the next encode on (subpixel where it can be). */
+    void set_text_subpixel(font::SubpixelOrder order) noexcept {
+        text_subpixel_ = order;
+    }
     /**
      * Encodes terminal releases for the glyph atlas and every texture the host holds. The encoded
      * packet is retained before either resource set is committed/drained.
@@ -123,6 +128,7 @@ class HostRenderPacketCache final {
     [[nodiscard]] const HostRenderPacketTelemetry& telemetry() const noexcept;
 
   private:
+    font::SubpixelOrder text_subpixel_ = font::SubpixelOrder::none;
     RenderSubmissionCache submission_cache_;
     font::GlyphAtlas* shape_atlas_ = nullptr;
     std::vector<std::uint8_t> geometry_packet_;

@@ -29,8 +29,13 @@ typedef struct strata_vulkan_device {
     VkDevice device;
     VkQueue queue;
     uint32_t queue_family;
-    uint32_t reserved;
+    /* STRATA_VULKAN_DEVICE_FEATURE_* the device was created with; zero is valid. */
+    uint32_t features;
 } strata_vulkan_device;
+
+/* VkPhysicalDeviceFeatures::dualSrcBlend is enabled: subpixel text blends each colour channel by
+ * its own coverage. Without it, subpixel text blends by its strongest channel, as gray text does. */
+#define STRATA_VULKAN_DEVICE_FEATURE_DUAL_SOURCE_BLEND UINT32_C(1)
 
 typedef uint32_t strata_vulkan_target_load_action;
 #define STRATA_VULKAN_TARGET_PRESERVE UINT32_C(0)

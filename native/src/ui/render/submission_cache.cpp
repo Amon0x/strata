@@ -56,6 +56,12 @@ const RenderSubmission& RenderSubmissionCache::resolve(
     }
 
     if (!submission_.has_value()) submission_.emplace();
+    if (preparation_cache_->text_subpixel != environment.text_subpixel) {
+        preparation_cache_->text_subpixel = environment.text_subpixel;
+        preparation_cache_->plan_current = false;
+    }
+    if (text_engine != nullptr && environment.text_subpixel != font::SubpixelOrder::none)
+        glyph_atlas.adopt_subpixel_order(environment.text_subpixel);
     submission_detail::update_cached(
         commands,
         glyph_atlas,
@@ -101,6 +107,14 @@ void RenderSubmissionCache::set_group_raster_scales(std::vector<GroupRasterScale
     if (preparation_cache_->group_raster_scales == scales)
         return;
     preparation_cache_->group_raster_scales = std::move(scales);
+    preparation_cache_->plan_current = false;
+    submission_.reset();
+}
+
+void RenderSubmissionCache::set_turned_groups(std::vector<std::uint32_t> groups) {
+    if (preparation_cache_->turned_groups == groups)
+        return;
+    preparation_cache_->turned_groups = std::move(groups);
     preparation_cache_->plan_current = false;
     submission_.reset();
 }

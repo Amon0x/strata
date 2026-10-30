@@ -840,6 +840,62 @@ void test_render_packet_batches_every_portable_command() {
     check(offset == packet.size(), "render packet has unframed trailing bytes");
 }
 
+// Coverage text drawn straight onto the surface is antialiased per subpixel when the surface asks
+// for it, and stays gray under a transform that turns it, or when the surface asks for gray.
+void test_subpixel_text_runs(const std::filesystem::path& resource_root) {
+    using namespace strata;
+    const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
+        resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
+    const std::uint32_t glyph = text_engine->font("strata:fonts/default").glyph_id('H');
+    const auto run = [glyph](const double x) {
+        ui::TextRunRenderCommand text;
+        text.origin = ui::Point{x, 40.0};
+        text.color = ui::RenderColor{230U, 232U, 236U, 255U};
+        text.pixel_size = 13.0;
+        ui::LogicalGlyph logical;
+        logical.font_id = "strata:fonts/default";
+        logical.glyph_id = glyph;
+        logical.code_point = 'H';
+        logical.text_end_offset = 1U;
+        logical.advance = 8.0;
+        text.glyphs = {logical};
+        return text;
+    };
+    ui::RenderCommandBuffer commands;
+    commands.append(run(10.0));
+    commands.append(ui::TransformPushRenderCommand{0.8, -0.6, 100.0, 0.6, 0.8, 0.0});
+    commands.append(run(10.0));
+    commands.append(ui::TransformPopRenderCommand{});
+    const auto materials = [&](const font::SubpixelOrder order) {
+        font::GlyphAtlas atlas("subpixel-text-test");
+        ui::RenderSubmissionCache cache;
+        const ui::RenderSubmission& submission = cache.resolve(
+            commands, atlas, *text_engine,
+            ui::RenderSubmissionEnvironment{1.0, 640, 480, 640.0, 480.0, order});
+        std::pair<std::size_t, std::size_t> counts{0U, 0U};
+        // Text batches are told apart by their atlas page; subpixel text also blends per channel.
+        for (const ui::SubmissionBatch& batch : submission.batches) {
+            const std::string texture = batch.texture.value_or(std::string());
+            if (texture.ends_with("/subpixel")) {
+                ++counts.first;
+                check(batch.blend_mode == ui::SubmissionBlend::subpixel_text,
+                      "subpixel text did not blend per colour channel");
+            } else if (texture.ends_with("/coverage")) {
+                ++counts.second;
+            }
+        }
+        return counts;
+    };
+    const auto subpixel = materials(font::SubpixelOrder::rgb);
+    check(subpixel.first == 1U && subpixel.second == 1U,
+          "subpixel text was not drawn per subpixel straight on the surface and gray when turned (" +
+              std::to_string(subpixel.first) + " subpixel, " + std::to_string(subpixel.second) +
+              " gray batches)");
+    const auto gray = materials(font::SubpixelOrder::none);
+    check(gray.first == 0U && gray.second >= 1U,
+          "a surface that asked for gray text drew subpixel text");
+}
+
 void test_render_submission_cache(const std::filesystem::path& resource_root) {
     using namespace strata;
     ui::RenderCommandBuffer commands;
@@ -9323,6 +9379,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_bundled_font_metrics(arguments[1]);
             test_bundled_texture_descriptor(arguments[1]);
             test_render_submission_cache(arguments[1]);
+            test_subpixel_text_runs(arguments[1]);
             test_render_submission_translation_reuse(arguments[1]);
             test_render_submission_changed_draws_match_full_plan(arguments[1]);
             test_render_submission_structural_alignment(arguments[1]);

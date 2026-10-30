@@ -1961,6 +1961,42 @@ void test_msdf_overlapping_contours(const std::filesystem::path& resources) {
     }
 }
 
+// A subpixel glyph holds coverage per colour channel: its stems' edges differ from channel to
+// channel, its alpha is the strongest channel, and a BGR display gets the same glyph mirrored in
+// red and blue.
+void test_subpixel_raster(const std::filesystem::path& resources) {
+    using namespace strata;
+    const font::OpenTypeFont regular = font::OpenTypeFont::parse(resource::load_binary_resource(
+        resources, resource::ResourceId::parse("assets/strata/fonts/default.ttf")));
+    const std::uint16_t glyph = regular.glyph_id('l');
+    const std::optional<font::GlyphRasterBitmap> rgb =
+        font::rasterize_subpixel(regular, glyph, 13.0, 1.0, font::SubpixelOrder::rgb);
+    const std::optional<font::GlyphRasterBitmap> bgr =
+        font::rasterize_subpixel(regular, glyph, 13.0, 1.0, font::SubpixelOrder::bgr);
+    const std::optional<font::GlyphRasterBitmap> gray = font::rasterize_coverage(regular, glyph, 13.0, 1.0);
+    check(rgb.has_value() && bgr.has_value() && gray.has_value() &&
+              rgb->mode == font::GlyphRasterMode::subpixel &&
+              rgb->bytes.size() == static_cast<std::size_t>(rgb->width) * rgb->height * 4U,
+          "a subpixel glyph was not four bytes a pixel");
+    if (!rgb.has_value() || !bgr.has_value())
+        return;
+    bool coloured = false;
+    bool mirrored = rgb->width == bgr->width && rgb->height == bgr->height;
+    bool strongest = true;
+    for (std::size_t texel = 0U; texel + 3U < rgb->bytes.size(); texel += 4U) {
+        const std::uint8_t* value = rgb->bytes.data() + texel;
+        coloured = coloured || value[0U] != value[2U];
+        strongest = strongest && value[3U] == std::max({value[0U], value[1U], value[2U]});
+        if (mirrored) {
+            const std::uint8_t* other = bgr->bytes.data() + texel;
+            mirrored = other[0U] == value[2U] && other[1U] == value[1U] && other[2U] == value[0U];
+        }
+    }
+    check(coloured, "a subpixel glyph's channels did not differ at its edges");
+    check(strongest, "a subpixel glyph's alpha was not its strongest channel");
+    check(mirrored, "a BGR subpixel glyph was not the RGB one with red and blue swapped");
+}
+
 void test_variable_font_instance(const std::filesystem::path& resources) {
     using namespace strata;
     const std::filesystem::path path("C:/Windows/Fonts/bahnschrift.ttf");
@@ -2025,6 +2061,7 @@ int strata_test_text_font_residual(const int argument_count, const char* const* 
         test_layout_cache_drops_unused_text(resources);
         test_variable_font_instance(resources);
         test_msdf_overlapping_contours(resources);
+        test_subpixel_raster(resources);
         std::cout << "text/font residual tests passed\n";
         return 0;
     } catch (const std::exception& error) {

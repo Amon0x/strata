@@ -469,6 +469,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
                                              .type = declared_type_reference("number"),
                                              .material_type = "FLOAT"}}},
         DeclaredMaterial{.id = "strata:coverage_text", .parameters = {}},
+        DeclaredMaterial{.id = "strata:subpixel_text", .parameters = {}},
         DeclaredMaterial{.id = "strata:custom_mesh", .parameters = {}},
         DeclaredMaterial{.id = "strata:msdf_text",
                          .parameters = {DeclaredParameter{.name = "msdfDistanceScale",

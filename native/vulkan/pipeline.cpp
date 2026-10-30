@@ -112,6 +112,11 @@ VkPipeline Renderer::Impl::pipeline(std::string_view program, Blend blend, VkFor
             ba.srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR;
             ba.dstColorBlendFactor = blend == Blend::multiply ? VK_BLEND_FACTOR_ZERO
                                                               : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        } else if (blend == Blend::subpixel_text && device.dual_source_blend) {
+            // Each colour channel by its own alpha, the fragment stage's second source. Without
+            // dual-source blending it blends as straight alpha by its strongest channel.
+            ba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC1_COLOR;
+            ba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR;
         }
     }
     VkPipelineColorBlendStateCreateInfo cb{

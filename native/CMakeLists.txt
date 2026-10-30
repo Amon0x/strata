@@ -1388,6 +1388,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/portable.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/paints.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/code.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/subpixel.json
         )
         if(STRATA_BUILD_VULKAN AND STRATA_TEST_VULKAN)
             set_tests_properties(strata.render.differential PROPERTIES LABELS "gpu;vulkan")

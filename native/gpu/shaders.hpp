@@ -351,6 +351,12 @@ float3 strataTexelTone(float3 color, float tone) {
     return lerp(color, mirrored, saturate(tone) * ink);
 }
 
+/**
+ * Subpixel text's coverage per colour channel, set by strataShade for mode 12; every other draw
+ * leaves it white. The entry point turns it into the draw's per-channel alpha (strataOutput).
+ */
+static float3 strataSubpixelCoverage = float3(1.0, 1.0, 1.0);
+
 /** The shading Strata applies to one draw when no material overrides it. */
 float4 strataShade(PixelInput input) {
     int mode = strataDrawMode(input);
@@ -390,6 +396,15 @@ float4 strataShade(PixelInput input) {
         color.a *= saturate(outer - inner);
     } else if (mode == 4) {
         color.a *= strataTextCoverage(Texture0.Sample(Sampler0, input.uv).r, color.rgb);
+    } else if (mode == 12) {
+        // Subpixel text: each colour channel's coverage weighted as gray coverage is; alpha
+        // carries the strongest, and strataOutput hands the rest to the blend.
+        float3 sampled = Texture0.Sample(Sampler0, input.uv).rgb;
+        strataSubpixelCoverage = float3(strataTextCoverage(sampled.r, color.rgb),
+                                        strataTextCoverage(sampled.g, color.rgb),
+                                        strataTextCoverage(sampled.b, color.rgb));
+        color.a *= max(strataSubpixelCoverage.r,
+                       max(strataSubpixelCoverage.g, strataSubpixelCoverage.b));
     } else if (mode == 5) {
         float3 sampled = Texture0.Sample(Sampler0, input.uv).rgb;
         float signedDistance = median3(sampled.r, sampled.g, sampled.b) - 0.5;
@@ -465,9 +480,38 @@ float4 strataShade(PixelInput input) {
 }
 )hlsl";
 
+/**
+ * What a pixel stage writes: its colour, and the alpha each colour channel blends by (the second
+ * source of a dual-source blend). Only subpixel text (STRATA_RENDER_BLEND_SUBPIXEL_TEXT) reads the
+ * second; for every other draw it is the colour's alpha in all four channels.
+ */
+constexpr std::string_view pixel_output = R"hlsl(
+// STRATA_SINGLE_OUTPUT: a device without dual-source blending, where a second output would have
+// nothing to land in.
+struct PixelOutput {
+    float4 color : SV_TARGET0;
+#ifndef STRATA_SINGLE_OUTPUT
+    float4 channelAlpha : SV_TARGET1;
+#endif
+};
+
+/** The output for `color`, already clipped: per-channel alpha scaled as its alpha was. */
+PixelOutput strataOutput(float4 color) {
+    PixelOutput output;
+    output.color = color;
+#ifndef STRATA_SINGLE_OUTPUT
+    float strongest = max(strataSubpixelCoverage.r,
+                          max(strataSubpixelCoverage.g, strataSubpixelCoverage.b));
+    output.channelAlpha = float4(strataSubpixelCoverage / max(strongest, 0.000001) * color.a,
+                                 color.a);
+#endif
+    return output;
+}
+)hlsl";
+
 /** Entry point of the built-in pixel shader; the shading itself lives in the shared block. */
 constexpr std::string_view builtin_entry = R"hlsl(
-float4 main(PixelInput input) : SV_TARGET {
+PixelOutput main(PixelInput input) {
     // Shading writes the encoded [0, 1] values an RGBA8 target would hold, whatever the target's
     // format: an RGBA16F target receives the same values, not extended-range or linear light.
     float4 color = saturate(strataShade(input));
@@ -475,7 +519,7 @@ float4 main(PixelInput input) : SV_TARGET {
         input.position.xy * logicalSize / max(framebufferSize, 1.0);
     color = strataApplyRoundedClips(color, logicalPixel);
     clip(color.a - 0.000001);
-    return color;
+    return strataOutput(color);
 }
 )hlsl";
 
@@ -548,7 +592,7 @@ float4 materialFloat4(PixelInput input, int slot) {
 
 /** Entry point appended after an authored material, which routes each draw to its shading. */
 constexpr std::string_view material_entry = R"hlsl(
-float4 main(PixelInput input) : SV_TARGET {
+PixelOutput main(PixelInput input) {
     int mode = strataDrawMode(input);
     // A material describes a filled surface, so only fills reach it. Text, images, borders and
     // shadows drawn inside its scope keep the built-in shading: handing a material glyph coverage
@@ -558,7 +602,7 @@ float4 main(PixelInput input) : SV_TARGET {
         input.position.xy * logicalSize / max(framebufferSize, 1.0);
     color = strataApplyRoundedClips(color, logicalPixel);
     clip(color.a - 0.000001);
-    return color;
+    return strataOutput(color);
 }
 )hlsl";
 

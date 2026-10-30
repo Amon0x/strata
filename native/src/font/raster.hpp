@@ -22,6 +22,18 @@ enum class GlyphRasterMode : std::uint8_t {
     msdf,
     /** A colour glyph's layers (COLR) composited to straight RGBA, drawn as an image. */
     color,
+    /** Coverage per colour channel, for a display's subpixels (rasterize_subpixel). */
+    subpixel,
+};
+
+/**
+ * How a display's colour subpixels run from left to right, when text is antialiased per subpixel
+ * (STRATA_TEXT_ANTIALIASING_*); `none` antialiases text in gray.
+ */
+enum class SubpixelOrder : std::uint8_t {
+    none,
+    rgb,
+    bgr,
 };
 
 struct SubpixelPhase final {
@@ -109,6 +121,24 @@ struct MsdfRasterConfig final {
     std::uint16_t glyph,
     double pixel_size,
     double display_scale,
+    SubpixelPhase phase = {},
+    const CoverageRasterConfig& config = {},
+    std::uint32_t font_style_flags = 0U
+);
+
+/**
+ * Rasterizes one glyph as rasterize_coverage does, but with its coverage measured per colour
+ * subpixel of a display whose subpixels run in `order` (FreeType's LCD rendering at three times
+ * the horizontal resolution, filtered so its colour fringes stay below what reads as colour):
+ * straight RGBA8 texels holding red, green and blue coverage, and their largest in alpha. `order`
+ * must not be `none`.
+ */
+[[nodiscard]] std::optional<GlyphRasterBitmap> rasterize_subpixel(
+    const OpenTypeFont& font,
+    std::uint16_t glyph,
+    double pixel_size,
+    double display_scale,
+    SubpixelOrder order,
     SubpixelPhase phase = {},
     const CoverageRasterConfig& config = {},
     std::uint32_t font_style_flags = 0U

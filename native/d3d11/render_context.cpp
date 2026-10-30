@@ -146,6 +146,7 @@ struct RenderContext::Impl final {
         const ComPtr<ID3DBlob> pixel_bytecode =
             compile_shader(std::string(shaders::pixel_common) +
                                std::string(rounded_clip_hlsl) +
+                               std::string(shaders::pixel_output) +
                                std::string(shaders::builtin_entry),
                            "main", "ps_5_0");
         require_hresult(device->CreateVertexShader(vertex_bytecode->GetBufferPointer(),
@@ -374,6 +375,12 @@ struct RenderContext::Impl final {
                 target_blend.SrcBlend = D3D11_BLEND_DEST_COLOR;
                 target_blend.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
                 break;
+            case host::DrawBlend::subpixel_text:
+                // Dual-source: each colour channel by its own alpha (the pixel stage's second
+                // output), so text antialiases per subpixel.
+                target_blend.SrcBlend = D3D11_BLEND_SRC1_COLOR;
+                target_blend.DestBlend = D3D11_BLEND_INV_SRC1_COLOR;
+                break;
             case host::DrawBlend::opaque:
                 break;
             }
@@ -393,7 +400,8 @@ struct RenderContext::Impl final {
         const std::string source = std::string(shaders::pixel_common) +
                                    std::string(rounded_clip_hlsl) +
                                    std::string(shaders::material_prelude) +
-                                   std::string(hlsl_source) + std::string(shaders::material_entry);
+                                   std::string(hlsl_source) + std::string(shaders::pixel_output) +
+                                   std::string(shaders::material_entry);
         auto [program, inserted] = material_programs.try_emplace(source);
         if (inserted) {
             if (asynchronous_shader_compilation) {

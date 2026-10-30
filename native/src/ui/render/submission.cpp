@@ -54,6 +54,8 @@ SubmissionBlend submission_blend(const std::string_view name) noexcept {
         return SubmissionBlend::additive;
     if (name == "multiply")
         return SubmissionBlend::multiply;
+    if (name == "subpixel_text")
+        return SubmissionBlend::subpixel_text;
     return SubmissionBlend::straight_alpha;
 }
 
@@ -261,6 +263,7 @@ void update_cached(
         logical_width,
         logical_height,
         textures,
+        cache.text_subpixel,
     };
     const RenderSubmissionEnvironment geometry_environment{
         display_scale,

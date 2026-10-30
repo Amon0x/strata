@@ -148,6 +148,7 @@ struct SubmissionContext final {
     double logical_width = 0.0;
     double logical_height = 0.0;
     std::span<const resource::TextureResourceDescriptor> textures;
+    font::SubpixelOrder text_subpixel = font::SubpixelOrder::none;
 };
 
 struct PreparedTextCacheEntry final {
@@ -156,6 +157,7 @@ struct PreparedTextCacheEntry final {
     std::uint64_t atlas_generation = 0U;
     double display_scale = 1.0;
     double raster_scale = 1.0;
+    bool subpixel = false;
     std::vector<PreparedTextPtr> groups;
 };
 
@@ -247,6 +249,9 @@ struct PreparationCache final {
     std::uint64_t update_serial = 0U;
     /** Groups whose masks rasterize denser than the display, ordered by group. */
     std::vector<GroupRasterScale> group_raster_scales;
+    /** Groups presented turned, sheared or scaled (ordered): text in them stays gray. */
+    std::vector<std::uint32_t> turned_groups;
+    font::SubpixelOrder text_subpixel = font::SubpixelOrder::none;
     std::uint64_t planned_shape_generation = 0U;
     bool plan_current = false;
     /** Tests compare the fast path against a full plan of the same stream. */

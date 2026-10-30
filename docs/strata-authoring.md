@@ -314,7 +314,18 @@ the ink it is drawn in. Coverage is raised to a power that falls with the ink's 
 how Chromium (DirectWrite on Windows) draws the same glyphs: light ink's faint edges are lifted, so
 it does not thin out over a dark surface, and dark ink's are thinned, so it does not turn heavy over
 a light one, while fully covered pixels stay as they are. Every platform rasterizes and blends the
-same way, so text looks the same on each. The same glyphs therefore serve both sides of a [tone](strata-language.md#tone)
+same way, so text looks the same on each.
+
+On a display that wants it, text is antialiased per subpixel instead, as ClearType does: each glyph
+is rasterized at three times the horizontal resolution (FreeType's LCD rendering, filtered so its
+colour fringes stay below what reads as colour) and each colour channel blends by its own coverage,
+which makes small text's stems and curves visibly sharper. A desktop host follows the system: on
+Windows, ClearType's setting and the display's subpixel order (RGB or BGR), changing live when the
+user changes them; elsewhere text stays gray. An application can override it either way (see
+[application manifests](desktop-hosting.md#application-manifests-and-preview)). Text drawn where
+per-channel blending cannot work stays gray: inside a content effect's layer, under an authored
+material, under a transform or in a presentation group that turns, shears or scales it, and text
+rasterized at a zoomed group's scale. The same glyphs therefore serve both sides of a [tone](strata-language.md#tone)
 change. An application chooses the faces behind the two ids, and may prefer the platform's own
 interface face; see [application manifests](desktop-hosting.md#application-manifests-and-preview).
 

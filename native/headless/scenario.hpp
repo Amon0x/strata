@@ -107,6 +107,12 @@ struct Scenario final {
     double height = 800.0;
     double scale = 1.0;
     bool reduced_motion = false;
+    /**
+     * How small text is antialiased: "system" (the operating system's choice on a desktop host,
+     * gray in headless runs, so captures do not depend on the machine), "grayscale" or
+     * "subpixel".
+     */
+    std::string text_antialiasing = "system";
     std::array<std::uint8_t, 4U> clear_color{9U, 11U, 15U, 255U};
     /** Writes the Surface's render packet stream to packets.strp for backend replay. */
     bool record_packets = false;

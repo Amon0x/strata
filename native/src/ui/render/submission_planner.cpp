@@ -187,6 +187,19 @@ struct CommandTexture final {
         : font::GlyphRasterMode::coverage;
 }
 
+/** The mode a run's glyphs are rasterized in: coverage runs drawn per subpixel where they can be. */
+[[nodiscard]] font::GlyphRasterMode run_raster_mode(const TextRunRenderCommand& command,
+                                                    const bool subpixel) noexcept {
+    const font::GlyphRasterMode mode = raster_mode(command.font_rasterization);
+    return subpixel && mode == font::GlyphRasterMode::coverage ? font::GlyphRasterMode::subpixel
+                                                               : mode;
+}
+
+/** Whether glyphs in this mode sit at quantized subpixel positions, each texel on a pixel. */
+[[nodiscard]] bool positioned(const font::GlyphRasterMode mode) noexcept {
+    return mode == font::GlyphRasterMode::coverage || mode == font::GlyphRasterMode::subpixel;
+}
+
 [[nodiscard]] double quantized_position(
     const double logical,
     const double display_scale,
@@ -219,7 +232,8 @@ struct CommandTexture final {
 
 [[nodiscard]] std::vector<PreparedText>
 prepare_text(const TextRunRenderCommand& command, font::GlyphAtlas& atlas,
-             const TextEngine& text_engine, const double display_scale, const double group_scale) {
+             const TextEngine& text_engine, const double display_scale, const double group_scale,
+             const bool subpixel) {
     // Glyphs are requested at the zoomed size and placed back at the run's own: plane bounds
     // shrink by the same factor, and pen positions snap to the zoomed device grid.
     const double raster_scale = effective_raster_scale(command, group_scale);
@@ -240,12 +254,12 @@ prepare_text(const TextRunRenderCommand& command, font::GlyphAtlas& atlas,
         const std::optional<font::GlyphAtlasEntry> atlas_entry = atlas.request(
             logical.font_id, text_engine.font(logical.font_id),
             static_cast<std::uint16_t>(logical.glyph_id), command.pixel_size * raster_scale, phase,
-            logical.font_style_flags, raster_mode(command.font_rasterization),
+            logical.font_style_flags, run_raster_mode(command, subpixel),
             // Text effects read the distance this far beyond the glyph's edge.
             effect_reach(command) * raster_scale);
         if (!atlas_entry.has_value()) continue;
         const double pen_x =
-            atlas_entry->mode == font::GlyphRasterMode::coverage
+            positioned(atlas_entry->mode)
                 ? quantized_position(requested_x, density, coverage_subpixel_divisions)
                 : requested_x;
         font::RasterPlaneBounds plane = atlas_entry->plane_bounds_layout_pixels;
@@ -307,7 +321,7 @@ prepare_text(const TextRunRenderCommand& command, font::GlyphAtlas& atlas,
         std::vector<PreparedText> shadowed;
         shadowed.reserve(groups.size() * 2U);
         for (const PreparedText& text : groups) {
-            if (text.mode == font::GlyphRasterMode::coverage)
+            if (positioned(text.mode))
                 continue;
             PreparedText shadow = text;
             shadow.origin.x += command.effects.shadow_x;
@@ -413,6 +427,7 @@ void align_text_cache(
 
 void append_warmup_requests(const TextRunRenderCommand& text, const TextEngine& text_engine,
                             const SubmissionContext& context, const double group_scale,
+                            const bool subpixel,
                             std::vector<font::GlyphAtlasWarmupRequest>& requests) {
     const double raster_scale = effective_raster_scale(text, group_scale);
     requests.reserve(requests.size() + text.glyphs.size());
@@ -431,7 +446,7 @@ void append_warmup_requests(const TextRunRenderCommand& text, const TextEngine& 
             font::SubpixelPhase::quantize(requested_x * context.scale * raster_scale,
                                           coverage_subpixel_divisions),
             logical.font_style_flags,
-            raster_mode(text.font_rasterization),
+            run_raster_mode(text, subpixel),
             effect_reach(text) * raster_scale,
         });
     }
@@ -478,6 +493,58 @@ text_group_scales(const RenderCommandBuffer& commands,
                     scale *= std::max(found->x, found->y);
             }
             result[index] = scale == 1.0 ? 1.0 : stepped(scale);
+        }
+    }
+    return result;
+}
+
+/**
+ * Which text runs are drawn per subpixel: coverage runs drawn straight onto the surface, where
+ * each colour channel can blend over what is already there. Text into a content effect's layer
+ * (translucent until composited), under an authored material, under a transform or in a group
+ * that turns, shears or scales it, or rasterized at a zoomed scale stays gray: its subpixels would
+ * not land on the display's.
+ */
+[[nodiscard]] std::vector<bool>
+subpixel_text_runs(const RenderCommandBuffer& commands, const std::span<const double> text_scales,
+                   const std::span<const std::uint32_t> turned_groups,
+                   const font::SubpixelOrder order) {
+    std::vector<bool> result(commands.size(), false);
+    if (order == font::SubpixelOrder::none)
+        return result;
+    std::size_t effects = 0U;
+    std::size_t materials = 0U;
+    std::vector<bool> transforms{false};
+    std::vector<std::uint32_t> groups;
+    for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
+        const RenderCommand& source = commands.commands()[index];
+        if (std::holds_alternative<ContentEffectPushRenderCommand>(source)) {
+            ++effects;
+        } else if (std::holds_alternative<ContentEffectPopRenderCommand>(source)) {
+            effects -= effects != 0U ? 1U : 0U;
+        } else if (std::holds_alternative<MaterialPushRenderCommand>(source)) {
+            ++materials;
+        } else if (std::holds_alternative<MaterialPopRenderCommand>(source)) {
+            materials -= materials != 0U ? 1U : 0U;
+        } else if (const auto* push = std::get_if<GroupPushRenderCommand>(&source)) {
+            groups.push_back(push->group);
+        } else if (std::holds_alternative<GroupPopRenderCommand>(source)) {
+            if (!groups.empty())
+                groups.pop_back();
+        } else if (const auto* transform = std::get_if<TransformPushRenderCommand>(&source)) {
+            const bool moves_only = transform->m00 == 1.0 && transform->m11 == 1.0 &&
+                                    transform->m01 == 0.0 && transform->m10 == 0.0;
+            transforms.push_back(transforms.back() || !moves_only);
+        } else if (std::holds_alternative<TransformPopRenderCommand>(source)) {
+            if (transforms.size() > 1U)
+                transforms.pop_back();
+        } else if (const auto* text = std::get_if<TextRunRenderCommand>(&source)) {
+            const bool turned =
+                !groups.empty() && std::ranges::binary_search(turned_groups, groups.back());
+            result[index] = effects == 0U && materials == 0U && !transforms.back() && !turned &&
+                            text_scales[index] == 1.0 &&
+                            raster_mode(text->font_rasterization) ==
+                                font::GlyphRasterMode::coverage;
         }
     }
     return result;
@@ -2456,6 +2523,8 @@ std::string_view default_material_id(const PreparedCommand& command) {
             // A colour glyph's texels are its colours: it draws as an image.
             if (value != nullptr && value->mode == font::GlyphRasterMode::color)
                 return "strata:textured";
+            if (value != nullptr && value->mode == font::GlyphRasterMode::subpixel)
+                return "strata:subpixel_text";
             return value != nullptr && value->mode == font::GlyphRasterMode::coverage
                 ? "strata:coverage_text" : "strata:msdf_text";
         } else if constexpr (std::is_same_v<Type, PathRenderCommand>) {
@@ -2480,13 +2549,18 @@ MaterialState default_material(const PreparedCommand& command) {
         material.opacity *= mesh->opacity;
         return material;
     }
-    return MaterialState{std::string(default_material_id(command))};
+    MaterialState material{std::string(default_material_id(command))};
+    // Subpixel text blends each colour channel by its own coverage.
+    if (material.id == "strata:subpixel_text")
+        material.blend_mode = "subpixel_text";
+    return material;
 }
 
 bool unified_material(const std::string_view material) noexcept {
     return material == "strata:solid" || material == "strata:textured" ||
            material == "strata:rounded_rect" || material == "strata:border" ||
            material == "strata:coverage_text" || material == "strata:msdf_text" ||
+           material == "strata:subpixel_text" ||
            material == "strata:custom_mesh" || material == "strata:shadow" ||
            material == "strata:coverage_mask" || material == "strata:color_mask";
 }
@@ -2500,12 +2574,14 @@ float unified_draw_mode(const std::string_view material) noexcept {
     if (material == "strata:shadow") return 6.0F;
     if (material == "strata:coverage_mask") return 10.0F;
     if (material == "strata:color_mask") return 11.0F;
+    if (material == "strata:subpixel_text") return 12.0F;
     return 0.0F;
 }
 
 bool samples_texture(const std::string_view material) noexcept {
     return material == "strata:textured" || material == "strata:nine_patch" ||
            material == "strata:coverage_text" || material == "strata:msdf_text" ||
+           material == "strata:subpixel_text" ||
            material == "strata:custom_mesh" || material == "strata:coverage_mask" ||
            material == "strata:color_mask";
 }
@@ -2537,6 +2613,8 @@ std::vector<PlannedItem> plan(
     align_text_cache(commands, cache);
     const std::vector<bool> visible_text = visible_text_commands(commands, context);
     const std::vector<double> text_scales = text_group_scales(commands, cache.group_raster_scales);
+    const std::vector<bool> subpixel_runs =
+        subpixel_text_runs(commands, text_scales, cache.turned_groups, context.text_subpixel);
     const auto collect_warmup_requests =
         [&](const std::uint64_t atlas_generation, const bool all) {
         std::vector<font::GlyphAtlasWarmupRequest> requests;
@@ -2551,10 +2629,12 @@ std::vector<PlannedItem> plan(
                 retained->text_engine == text_engine &&
                 retained->atlas_generation == atlas_generation &&
                 retained->display_scale == context.scale &&
-                retained->raster_scale == text_scales[index]) {
+                retained->raster_scale == text_scales[index] &&
+                retained->subpixel == subpixel_runs[index]) {
                 continue;
             }
-            append_warmup_requests(*text, *text_engine, context, text_scales[index], requests);
+            append_warmup_requests(*text, *text_engine, context, text_scales[index],
+                                   subpixel_runs[index], requests);
         }
         return requests;
     };
@@ -2592,19 +2672,22 @@ std::vector<PlannedItem> plan(
                     retained->text_engine == text_engine &&
                     retained->atlas_generation == warm_generation &&
                     retained->display_scale == context.scale &&
-                    retained->raster_scale == text_scales[index]) {
+                    retained->raster_scale == text_scales[index] &&
+                retained->subpixel == subpixel_runs[index]) {
                     continue;
                 }
-                std::vector<PreparedText> prepared = prepare_text(
-                    *text, glyph_atlas, *text_engine, context.scale, text_scales[index]);
+                std::vector<PreparedText> prepared =
+                    prepare_text(*text, glyph_atlas, *text_engine, context.scale,
+                                 text_scales[index], subpixel_runs[index]);
                 std::vector<PreparedTextPtr> groups;
                 groups.reserve(prepared.size());
                 for (PreparedText& group : prepared) {
                     groups.push_back(std::make_shared<const PreparedText>(std::move(group)));
                 }
                 cache.text[index] = PreparedTextCacheEntry{
-                    *text,         text_engine,        glyph_atlas.generation(),
-                    context.scale, text_scales[index], std::move(groups),
+                    *text,         text_engine,          glyph_atlas.generation(),
+                    context.scale, text_scales[index],   subpixel_runs[index],
+                    std::move(groups),
                 };
             }
             telemetry.text_preparation_nanos +=
@@ -2692,6 +2775,8 @@ std::optional<std::vector<std::size_t>> replan_ranges(
     const std::vector<RenderCommand>& stream = commands.commands();
     const std::vector<bool> visible_text = visible_text_commands(commands, context);
     const std::vector<double> text_scales = text_group_scales(commands, cache.group_raster_scales);
+    const std::vector<bool> subpixel_runs =
+        subpixel_text_runs(commands, text_scales, cache.turned_groups, context.text_subpixel);
     // Text in the ranges is prepared as the full plan would: a run keeps its prepared glyphs
     // while its content does, and a hidden run drops them. Entries are exact for their content,
     // so they stand even when this update gives way to a full plan.
@@ -2709,12 +2794,14 @@ std::optional<std::vector<std::size_t>> replan_ranges(
                 retained->text_engine == text_engine &&
                 retained->atlas_generation == glyph_atlas.generation() &&
                 retained->display_scale == context.scale &&
-                retained->raster_scale == text_scales[index]) {
+                retained->raster_scale == text_scales[index] &&
+                retained->subpixel == subpixel_runs[index]) {
                 continue;
             }
             glyph_atlas.adopt_display_scale(context.scale);
             std::vector<font::GlyphAtlasWarmupRequest> requests;
-            append_warmup_requests(*text, *text_engine, context, text_scales[index], requests);
+            append_warmup_requests(*text, *text_engine, context, text_scales[index],
+                                   subpixel_runs[index], requests);
             const std::uint64_t generation = glyph_atlas.generation();
             const auto warmup_started = std::chrono::steady_clock::now();
             const bool warmed = glyph_atlas.warm(requests);
@@ -2726,7 +2813,8 @@ std::optional<std::vector<std::size_t>> replan_ranges(
             if (!warmed || glyph_atlas.generation() != generation) return std::nullopt;
             const auto preparation_started = std::chrono::steady_clock::now();
             std::vector<PreparedText> prepared =
-                prepare_text(*text, glyph_atlas, *text_engine, context.scale, text_scales[index]);
+                prepare_text(*text, glyph_atlas, *text_engine, context.scale, text_scales[index],
+                             subpixel_runs[index]);
             std::vector<PreparedTextPtr> groups;
             groups.reserve(prepared.size());
             for (PreparedText& group : prepared) {
@@ -2734,7 +2822,8 @@ std::optional<std::vector<std::size_t>> replan_ranges(
             }
             cache.text[index] = PreparedTextCacheEntry{
                 *text,         text_engine,        generation,
-                context.scale, text_scales[index], std::move(groups),
+                context.scale, text_scales[index], subpixel_runs[index],
+                std::move(groups),
             };
             telemetry.text_preparation_nanos +=
                 std::chrono::duration_cast<std::chrono::nanoseconds>(

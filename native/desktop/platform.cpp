@@ -291,6 +291,19 @@ struct Pixels final {
                                      static_cast<std::uint8_t>((value >> 8U) & 0xFFU),
                                      static_cast<std::uint8_t>(value & 0xFFU), 255U};
     }
+    // ClearType: font smoothing on, of the ClearType kind, in the display's subpixel order.
+    BOOL smoothing = FALSE;
+    UINT type = 0U;
+    UINT orientation = FE_FONTSMOOTHINGORIENTATIONRGB;
+    if (SystemParametersInfoW(SPI_GETFONTSMOOTHING, 0U, &smoothing, 0U) && smoothing &&
+        SystemParametersInfoW(SPI_GETFONTSMOOTHINGTYPE, 0U, &type, 0U) &&
+        type == FE_FONTSMOOTHINGCLEARTYPE) {
+        static_cast<void>(
+            SystemParametersInfoW(SPI_GETFONTSMOOTHINGORIENTATION, 0U, &orientation, 0U));
+        result.text_antialiasing = orientation == FE_FONTSMOOTHINGORIENTATIONBGR
+                                       ? STRATA_TEXT_ANTIALIASING_SUBPIXEL_BGR
+                                       : STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB;
+    }
     return result;
 }
 
@@ -1572,6 +1585,10 @@ struct PlatformServices::Impl final : PlatformOutbox {
         if ((message == WM_SETTINGCHANGE && long_value != 0 &&
              std::wstring_view(reinterpret_cast<const wchar_t*>(long_value)) ==
                  L"ImmersiveColorSet") ||
+            // ClearType turned on or off, or its subpixel order changed.
+            (message == WM_SETTINGCHANGE &&
+             (word == SPI_SETFONTSMOOTHING || word == SPI_SETFONTSMOOTHINGTYPE ||
+              word == SPI_SETFONTSMOOTHINGORIENTATION || word == SPI_SETFONTSMOOTHINGCONTRAST)) ||
             message == WM_DWMCOLORIZATIONCOLORCHANGED || message == WM_THEMECHANGED) {
             if (SystemAppearance next = read_appearance(); !(next == system_appearance)) {
                 system_appearance = next;

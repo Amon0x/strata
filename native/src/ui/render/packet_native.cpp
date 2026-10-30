@@ -148,6 +148,9 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
     case SubmissionBlend::multiply:
         return clipped ? std::pair{PacketBlend::clipped_multiply, PacketClipCoverage::multiply}
                        : std::pair{PacketBlend::multiply, edge};
+    case SubmissionBlend::subpixel_text:
+        // Rounded clips scale its per-channel coverage as they scale straight alpha.
+        return {PacketBlend::subpixel_text, PacketClipCoverage::straight_alpha};
     case SubmissionBlend::straight_alpha:
         break;
     }
@@ -522,10 +525,16 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         std::vector<RenderGroup> composed;
         static_cast<void>(compose_groups(commands.groups(), composed));
         std::vector<GroupRasterScale> scales;
+        std::vector<std::uint32_t> turned;
         const auto stepped = [](const double value) {
             return std::exp2(std::round(std::log2(value) * 4.0) / 4.0);
         };
         for (const RenderGroup& group : composed) {
+            if (group.shear_x != 0.0 || group.shear_y != 0.0 || group.project_x != 0.0 ||
+                group.project_y != 0.0 || group.project_w != 1.0 || group.scale_x != 1.0 ||
+                group.scale_y != 1.0) {
+                turned.push_back(group.index);
+            }
             if (group.shear_x != 0.0 || group.shear_y != 0.0 || group.project_x != 0.0 ||
                 group.project_y != 0.0 || group.project_w != 1.0 || !(group.scale_x > 0.0) ||
                 !(group.scale_y > 0.0)) {
@@ -542,6 +551,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                 scales.push_back(GroupRasterScale{group.index, x, y});
         }
         submission_cache_.set_group_raster_scales(std::move(scales));
+        std::ranges::sort(turned);
+        submission_cache_.set_turned_groups(std::move(turned));
     }
     const std::size_t prior_hits = submission_cache_.hit_count();
     const auto submission_started = std::chrono::steady_clock::now();
@@ -553,6 +564,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                                       framebuffer_height,
                                       logical_width,
                                       logical_height,
+                                      text_subpixel_,
                                   },
                                   textures != nullptr
                                       ? textures->descriptors()

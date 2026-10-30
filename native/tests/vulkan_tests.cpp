@@ -266,7 +266,7 @@ void run() {
                  0.25});
             return context.pixels();
         };
-        require(renderer.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 12, "prepare builtins");
+        require(renderer.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 13, "prepare builtins");
         require(renderer.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 0, "prepare is idempotent");
         const auto cache = std::filesystem::temp_directory_path() /
             ("strata-vulkan-test-" + std::to_string(reinterpret_cast<std::uintptr_t>(&renderer)));
@@ -278,7 +278,7 @@ void run() {
         {
             vulkan::Renderer restored(context.device);
             require(restored.load_pipeline_cache(cache), "load saved pipeline cache");
-            require(restored.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 12, "prepare restored cache");
+            require(restored.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 13, "prepare restored cache");
             (void)restored.render("restored", quad(), context.target(32, 32),
                                   {vulkan::TargetLoadAction::clear, {}, 0});
             near(pixel(context.pixels(), 32, 16, 16), {255, 0, 0, 255}, "restored cache pixels");
@@ -288,7 +288,7 @@ void run() {
         require(!renderer.load_pipeline_cache(cache), "corrupt cache ignored");
         auto packet = quad();
         near(pixel(render(packet), 32, 16, 16), {255, 0, 0, 255}, "solid quad");
-        require(renderer.pipeline_count() == 12, "prepared draw creates no pipelines");
+        require(renderer.pipeline_count() == 13, "prepared draw creates no pipelines");
         std::get<host::DrawBatch>(packet.batches[0]).scissor = {0, 0, 16, 32};
         auto image = render(packet);
         near(pixel(image, 32, 24, 16), {0, 0, 0, 0}, "scissor");
@@ -617,7 +617,7 @@ void run() {
         options.environment.logical_height = 32;
         auto surface = runtime.create_surface(options);
         vulkan::Presenter presenter(runtime, context.device);
-        require(presenter.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 12, "presenter prepare");
+        require(presenter.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 13, "presenter prepare");
         presenter.attach("presenter", surface);
         const auto frame = presenter.present("presenter", surface, context.target(32, 32), now,
                                              {vulkan::TargetLoadAction::clear, {0, 0, 0, 0}, 0});
@@ -647,7 +647,7 @@ void run() {
         size_t prepared = 0;
         require(strata_vulkan_presenter_prepare(c_presenter, VK_FORMAT_R8G8B8A8_UNORM, &prepared)
                             .status == STRATA_STATUS_OK &&
-                    prepared == 12,
+                    prepared == 13,
                 "C presenter preparation");
         strata_vulkan_render_target target{sizeof(strata_vulkan_render_target),
                                            context.image->image,

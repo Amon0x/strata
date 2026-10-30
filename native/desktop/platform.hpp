@@ -46,6 +46,8 @@ struct SystemAppearance final {
     bool dark = false;
     /** The accent colour, when the system says. */
     std::optional<strata_color> accent;
+    /** How the system antialiases text (ClearType and its subpixel order), STRATA_TEXT_ANTIALIASING_*. */
+    std::uint32_t text_antialiasing = STRATA_TEXT_ANTIALIASING_GRAYSCALE;
 
     [[nodiscard]] friend bool operator==(const SystemAppearance& left,
                                          const SystemAppearance& right) noexcept {
@@ -57,13 +59,15 @@ struct SystemAppearance final {
                                                 left.accent->blue == right.accent->blue &&
                                                 left.accent->alpha == right.accent->alpha);
         };
-        return left.dark == right.dark && same_accent();
+        return left.dark == right.dark && same_accent() &&
+               left.text_antialiasing == right.text_antialiasing;
     }
     /** Writes the appearance into a Surface environment. */
     void apply(strata_surface_environment& environment) const noexcept {
         environment.system_appearance = (dark ? STRATA_SYSTEM_APPEARANCE_DARK : 0U) |
                                         (accent.has_value() ? STRATA_SYSTEM_APPEARANCE_ACCENT : 0U);
         environment.system_accent = accent.value_or(strata_color{});
+        environment.text_antialiasing = text_antialiasing;
     }
 };
 

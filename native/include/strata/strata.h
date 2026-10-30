@@ -757,6 +757,10 @@ typedef struct strata_surface_environment {
     /* The user's accent colour, read only when system_appearance has
      * STRATA_SYSTEM_APPEARANCE_ACCENT. */
     strata_color system_accent;
+    /* Since version 3: how small text is antialiased, STRATA_TEXT_ANTIALIASING_*. A desktop host
+     * follows the system (ClearType on Windows) unless the application overrides it; an older
+     * caller's layout ends before this field and reads as grayscale. */
+    uint32_t text_antialiasing;
 } strata_surface_environment;
 
 /* The layout of strata_surface_environment before the system appearance fields. A
@@ -769,6 +773,14 @@ typedef struct strata_surface_environment {
 #define STRATA_SYSTEM_APPEARANCE_DARK (UINT32_C(1) << 0)
 /* system_accent holds the user's accent colour. */
 #define STRATA_SYSTEM_APPEARANCE_ACCENT (UINT32_C(1) << 1)
+
+/* Coverage text is antialiased in gray. */
+#define STRATA_TEXT_ANTIALIASING_GRAYSCALE UINT32_C(0)
+/* Coverage text is antialiased per colour channel for a display whose subpixels run red, green,
+ * blue from left to right (ClearType's RGB), or blue, green, red (BGR). Text drawn where that
+ * cannot work (into a translucent layer, turned or scaled) stays gray. */
+#define STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB UINT32_C(1)
+#define STRATA_TEXT_ANTIALIASING_SUBPIXEL_BGR UINT32_C(2)
 
 typedef struct strata_surface_font_resource {
     /* Logical id referenced by .strata styles, for example strata:fonts/mono. */
@@ -1959,7 +1971,12 @@ typedef struct strata_surface_frame_info {
  * that no document the compiler accepts reaches. A renderer must draw every level it accepts.
  */
 #define STRATA_RENDER_PACKET_VERSION_22 UINT32_C(22)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_22
+/*
+ * Version 23 adds subpixel text: draw mode 12 samples an RGBA8 atlas page holding a glyph's
+ * coverage per colour channel, and its batches blend with STRATA_RENDER_BLEND_SUBPIXEL_TEXT.
+ */
+#define STRATA_RENDER_PACKET_VERSION_23 UINT32_C(23)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_23
 /*
  * The deepest balanced content-effect nesting a packet may have. It guards the decoder against a
  * malformed or hostile stream, not what a renderer can draw: the planner, the decoder and the
@@ -2040,6 +2057,12 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_BLEND_ADDITIVE UINT32_C(3)
 #define STRATA_RENDER_BLEND_MULTIPLY UINT32_C(4)
 #define STRATA_RENDER_BLEND_CLIPPED_MULTIPLY UINT32_C(5)
+/*
+ * Subpixel text: each colour channel blends by its own coverage, out = ink * c + dst * (1 - c)
+ * per channel with c the draw's per-channel alpha (dual-source blending on a GPU), and alpha as
+ * STRAIGHT_ALPHA blends it.
+ */
+#define STRATA_RENDER_BLEND_SUBPIXEL_TEXT UINT32_C(6)
 
 /*
  * How a draw applies its rounded-clip coverage to its colour: alpha only, all four channels

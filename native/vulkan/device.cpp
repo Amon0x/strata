@@ -141,6 +141,7 @@ void Renderer::Impl::initialize() {
     fullscreen = compile_hlsl(gpu::blur_shaders::vertex, true, "strata.fullscreen");
     add_program("builtin", std::string(gpu::shaders::pixel_common) +
                                std::string(gpu::rounded_clip_hlsl) +
+                               std::string(gpu::shaders::pixel_output) +
                                std::string(gpu::shaders::builtin_entry));
     add_program("blur",
                 std::string(gpu::rounded_clip_hlsl) + std::string(gpu::blur_shaders::pixel));
@@ -168,8 +169,19 @@ void Renderer::Impl::initialize() {
 }
 
 void Renderer::Impl::add_program(const std::string& name, const std::string& source) {
-    if (!programs.contains(name))
-        programs.emplace(name, compile_hlsl(source, false, name));
+    if (programs.contains(name))
+        return;
+    // A draw stage writes per-channel alpha second, for subpixel text's dual-source blend; a
+    // device without dual-source blending compiles it with its colour alone.
+    const bool draw_stage = source.find("channelAlpha : SV_TARGET1") != std::string::npos;
+    std::vector<std::uint32_t> spirv =
+        compile_hlsl(draw_stage && !device.dual_source_blend
+                         ? "#define STRATA_SINGLE_OUTPUT\n" + source
+                         : source,
+                     false, name);
+    if (draw_stage && device.dual_source_blend)
+        route_second_output_to_dual_source(spirv);
+    programs.emplace(name, std::move(spirv));
 }
 void Renderer::Impl::prune_programs() {
     const auto used = [&](const std::string& name) {

@@ -50,6 +50,7 @@ const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const 
                          frame.operations.render.commands_emitted == 0U && !textures_changed;
     if (!settled || !cache_.reuse(frame.frame_index)) {
         const SurfaceEnvironment& environment = surface.environment();
+        cache_.set_text_subpixel(environment.text_subpixel);
         static_cast<void>(cache_.encode(surface.render_commands(), frame.frame_index, &textures_,
                                         glyph_atlas_, surface.text_engine(), environment.scale,
                                         environment.framebuffer_width,

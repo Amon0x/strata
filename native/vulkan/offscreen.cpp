@@ -108,9 +108,16 @@ Offscreen::Offscreen(bool validation) {
         qi.queueFamilyIndex = device.queue_family;
         qi.queueCount = 1;
         qi.pQueuePriorities = &priority;
+        // Dual-source blending lets subpixel text blend each colour channel by its own coverage.
+        VkPhysicalDeviceFeatures supported{};
+        vkGetPhysicalDeviceFeatures(device.physical_device, &supported);
+        VkPhysicalDeviceFeatures enabled{};
+        enabled.dualSrcBlend = supported.dualSrcBlend;
+        device.dual_source_blend = supported.dualSrcBlend == VK_TRUE;
         VkDeviceCreateInfo di{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
         di.queueCreateInfoCount = 1;
         di.pQueueCreateInfos = &qi;
+        di.pEnabledFeatures = &enabled;
         check(vkCreateDevice(device.physical_device, &di, nullptr, &device.device),
               "create Vulkan device");
         vkGetDeviceQueue(device.device, device.queue_family, 0, &device.queue);

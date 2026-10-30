@@ -119,8 +119,9 @@ enum class DrawBlend : std::uint8_t {
     additive = STRATA_RENDER_BLEND_ADDITIVE,
     multiply = STRATA_RENDER_BLEND_MULTIPLY,
     clipped_multiply = STRATA_RENDER_BLEND_CLIPPED_MULTIPLY,
+    subpixel_text = STRATA_RENDER_BLEND_SUBPIXEL_TEXT,
 };
-inline constexpr std::size_t draw_blend_count = 6U;
+inline constexpr std::size_t draw_blend_count = 7U;
 
 /**
  * How a draw applies its rounded-clip coverage (STRATA_RENDER_CLIP_COVERAGE_*). The values are

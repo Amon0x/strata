@@ -294,6 +294,7 @@ void Renderer::declare_material(std::string_view id, std::string_view source) {
     impl_->add_program(
         program, std::string(gpu::shaders::pixel_common) + std::string(gpu::rounded_clip_hlsl) +
                      std::string(gpu::shaders::material_prelude) + std::string(source) +
+                     std::string(gpu::shaders::pixel_output) +
                      std::string(gpu::shaders::material_entry));
     impl_->materials[std::string(id)] = program;
     impl_->prune_programs();

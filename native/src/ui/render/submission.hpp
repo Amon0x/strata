@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "font/raster.hpp"
 #include "ui/layout.hpp"
 #include "ui/render.hpp"
 #include "resource/image.hpp"
@@ -61,6 +62,8 @@ enum class SubmissionBlend : std::uint8_t {
     premultiplied_alpha,
     additive,
     multiply,
+    /** Each colour channel by its own coverage (subpixel text); never authored. */
+    subpixel_text,
 };
 
 /** The blend an authored name requests; an unknown name blends as straight alpha (the default). */
@@ -149,6 +152,8 @@ struct RenderSubmissionEnvironment final {
     std::int64_t framebuffer_height = 0;
     double logical_width = 0.0;
     double logical_height = 0.0;
+    /** How coverage text is antialiased: per subpixel in this order where it can be, or gray. */
+    font::SubpixelOrder text_subpixel = font::SubpixelOrder::none;
     [[nodiscard]] friend bool operator==(
         const RenderSubmissionEnvironment&,
         const RenderSubmissionEnvironment&
@@ -196,6 +201,8 @@ public:
     void set_shape_atlas(font::GlyphAtlas* atlas) noexcept;
     /** Groups whose masks rasterize denser than the display (ordered by group); a change replans. */
     void set_group_raster_scales(std::vector<GroupRasterScale> scales);
+    /** Groups presented turned, sheared or scaled (ordered); a change replans. */
+    void set_turned_groups(std::vector<std::uint32_t> groups);
     void clear() noexcept;
     [[nodiscard]] std::size_t hit_count() const noexcept;
     [[nodiscard]] std::size_t miss_count() const noexcept;

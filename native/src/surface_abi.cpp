@@ -49,7 +49,9 @@ static_assert(static_cast<std::uint32_t>(strata::ui::PacketBlend::opaque) ==
               static_cast<std::uint32_t>(strata::ui::PacketBlend::multiply) ==
                   STRATA_RENDER_BLEND_MULTIPLY &&
               static_cast<std::uint32_t>(strata::ui::PacketBlend::clipped_multiply) ==
-                  STRATA_RENDER_BLEND_CLIPPED_MULTIPLY,
+                  STRATA_RENDER_BLEND_CLIPPED_MULTIPLY &&
+              static_cast<std::uint32_t>(strata::ui::PacketBlend::subpixel_text) ==
+                  STRATA_RENDER_BLEND_SUBPIXEL_TEXT,
               "the engine's packet blends must be the C ABI's");
 static_assert(static_cast<std::uint32_t>(strata::ui::PacketClipCoverage::straight_alpha) ==
                   STRATA_RENDER_CLIP_COVERAGE_STRAIGHT_ALPHA &&
@@ -253,6 +255,25 @@ rectangle_snapping(const strata_rectangle_snap_policy value) {
         },
     };
     result.system_dark = (appearance & STRATA_SYSTEM_APPEARANCE_DARK) != 0U;
+    // A caller built before the field reads as grayscale.
+    const std::uint32_t text_antialiasing =
+        strata::abi_detail::provides(value, offsetof(strata_surface_environment,
+                                                     text_antialiasing) +
+                                                sizeof(std::uint32_t))
+            ? value.text_antialiasing
+            : STRATA_TEXT_ANTIALIASING_GRAYSCALE;
+    switch (text_antialiasing) {
+    case STRATA_TEXT_ANTIALIASING_GRAYSCALE:
+        break;
+    case STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB:
+        result.text_subpixel = strata::font::SubpixelOrder::rgb;
+        break;
+    case STRATA_TEXT_ANTIALIASING_SUBPIXEL_BGR:
+        result.text_subpixel = strata::font::SubpixelOrder::bgr;
+        break;
+    default:
+        throw std::invalid_argument("surface text antialiasing is not a STRATA_TEXT_ANTIALIASING_*");
+    }
     if ((appearance & STRATA_SYSTEM_APPEARANCE_ACCENT) != 0U) {
         result.system_accent =
             strata::runtime::ColorValue{value.system_accent.red, value.system_accent.green,

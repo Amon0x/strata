@@ -3778,6 +3778,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 
 - `strata:border`
 - `strata:coverage_text`
+- `strata:subpixel_text`
 - `strata:custom_mesh`
 - `strata:msdf_text`
 - `strata:nine_patch`

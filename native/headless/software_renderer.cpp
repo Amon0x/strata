@@ -930,6 +930,8 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                 Color source = interpolate_color(a, b, c, wa, wb, wc);
                 const std::array<float, 16U> data = interpolate_data(a, b, c, wa, wb, wc);
                 const int mode = static_cast<int>(std::floor(data[14U] + 0.5F));
+                // Subpixel text's coverage per colour channel (mode 12); white otherwise.
+                std::array<float, 3U> subpixel{1.0F, 1.0F, 1.0F};
                 if (mode == 1 || mode == 11) {
                     Color sampled = texture_sample(u, v);
                     if (mode == 11 && data[4U] > 0.0F)
@@ -1026,6 +1028,14 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                 } else if (mode == 4) {
                     source.alpha *= host::text_coverage(texture_sample(u, v).red, source.red,
                                                         source.green, source.blue);
+                } else if (mode == 12) {
+                    const Color sampled = texture_sample(u, v);
+                    subpixel = {
+                        host::text_coverage(sampled.red, source.red, source.green, source.blue),
+                        host::text_coverage(sampled.green, source.red, source.green, source.blue),
+                        host::text_coverage(sampled.blue, source.red, source.green, source.blue),
+                    };
+                    source.alpha *= std::max({subpixel[0U], subpixel[1U], subpixel[2U]});
                 } else if (mode == 5) {
                     const Color sampled = texture_sample(u, v);
                     const float median =
@@ -1114,6 +1124,20 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         source.green * source.alpha + destination.green * inverse,
                         source.blue * source.alpha + destination.blue * inverse,
                         source.alpha + destination.alpha * inverse,
+                    };
+                } else if (blend == host::DrawBlend::subpixel_text) {
+                    // Each colour channel by its own coverage: the alpha scaled from the
+                    // strongest channel to that one.
+                    const float strongest =
+                        std::max({subpixel[0U], subpixel[1U], subpixel[2U], 0.000001F});
+                    const float red = source.alpha * subpixel[0U] / strongest;
+                    const float green = source.alpha * subpixel[1U] / strongest;
+                    const float blue = source.alpha * subpixel[2U] / strongest;
+                    output = Color{
+                        source.red * red + destination.red * (1.0F - red),
+                        source.green * green + destination.green * (1.0F - green),
+                        source.blue * blue + destination.blue * (1.0F - blue),
+                        source.alpha + destination.alpha * (1.0F - source.alpha),
                     };
                 } else if (blend == host::DrawBlend::premultiplied_alpha) {
                     const float inverse = 1.0F - source.alpha;
