@@ -1,6 +1,8 @@
 #include "offscreen.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
+#include <string>
 #include <string_view>
 namespace strata::vulkan::detail {
 namespace {
@@ -11,6 +13,22 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug(VkDebugUtilsMessageSeverityFlagBitsEXT seve
         ++static_cast<Offscreen*>(user)->validation_errors;
     std::fprintf(stderr, "Vulkan validation: %s\n", data->pMessage);
     return VK_FALSE;
+}
+
+/** An environment variable's value, or none when it is unset. */
+std::optional<std::string> environment(const char* name) {
+#if defined(_WIN32)
+    char* value = nullptr;
+    std::size_t size = 0;
+    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr)
+        return std::nullopt;
+    std::string result(value);
+    std::free(value);
+    return result;
+#else
+    const char* value = std::getenv(name);
+    return value != nullptr ? std::optional<std::string>(value) : std::nullopt;
+#endif
 }
 } // namespace
 Offscreen::Offscreen(bool validation) {
@@ -56,14 +74,15 @@ Offscreen::Offscreen(bool validation) {
         check(vkEnumeratePhysicalDevices(instance, &count, nullptr), "enumerate devices");
         std::vector<VkPhysicalDevice> devices(count);
         check(vkEnumeratePhysicalDevices(instance, &count, devices.data()), "read devices");
-        const char* requested = std::getenv("STRATA_VULKAN_DEVICE");
+        const std::optional<std::string> requested = environment("STRATA_VULKAN_DEVICE");
         int best = -1;
         for (auto candidate : devices) {
             VkPhysicalDeviceProperties properties{};
             vkGetPhysicalDeviceProperties(candidate, &properties);
             if (properties.apiVersion < VK_API_VERSION_1_1 ||
-                (requested &&
-                 std::string_view(properties.deviceName).find(requested) == std::string_view::npos))
+                (requested.has_value() &&
+                 std::string_view(properties.deviceName).find(*requested) ==
+                     std::string_view::npos))
                 continue;
             std::uint32_t families = 0;
             vkGetPhysicalDeviceQueueFamilyProperties(candidate, &families, nullptr);
