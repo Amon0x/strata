@@ -341,7 +341,15 @@ rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const do
     };
     FT_Set_Transform(face, &matrix, &translation);
 
-    const FT_Error load_error = FT_Load_Glyph(face, glyph, load_flags(config.hinting));
+    // Small text is fully grid-fitted where light hinting was asked for (see
+    // small_text_physical_pixel_size); unhinted stays unhinted.
+    const bool small = physical_pixel_size < small_text_physical_pixel_size;
+    const GlyphHinting hinting =
+        small && config.hinting == GlyphHinting::light ? GlyphHinting::full : config.hinting;
+    const double transfer_strength =
+        small ? std::max(config.transfer_strength, small_text_transfer_strength)
+              : config.transfer_strength;
+    const FT_Error load_error = FT_Load_Glyph(face, glyph, load_flags(hinting));
     if (load_error != FT_Err_Ok)
         freetype_error("glyph loading", load_error);
     if (face->glyph->format == FT_GLYPH_FORMAT_OUTLINE) {
@@ -396,7 +404,7 @@ rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const do
                                     config.padding_pixels;
         for (std::uint32_t column = 0U; column < source.width; ++column) {
             destination[column] =
-                gray_value(source, source_bytes[column], config.transfer_strength);
+                gray_value(source, source_bytes[column], transfer_strength);
         }
     }
 

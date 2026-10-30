@@ -422,7 +422,6 @@ class Catalog final {
     }
 
     std::mutex mutex_;
-    std::jthread preparing_;
     std::vector<std::filesystem::path> directories_;
     std::vector<std::filesystem::path> files_;
     bool enumerated_ = false;
@@ -434,7 +433,9 @@ class Catalog final {
     std::condition_variable names_read_;
     std::vector<Named> named_;
     bool names_ready_ = false;
-    /** Last, so it is joined before what it writes goes. */
+    // The workers come last, so each is joined before what it writes goes: a process that exits
+    // while the font folders are still being listed must not have the list freed under it.
+    std::jthread preparing_;
     std::jthread naming_;
 };
 

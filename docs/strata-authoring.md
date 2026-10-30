@@ -303,11 +303,17 @@ list's length holds still as more of it is measured.
 
 Text uses the bundled Regular face and size-specific grayscale masks by default at every font size
 and display scale. Controls use the Medium face; headings and other emphasized text should select
-`strata:fonts/default-medium` explicitly. Grayscale runs are regenerated for their physical scale,
-retain quarter-pixel horizontal positioning, and use R8 atlas pages. Glyphs are grid-fitted
+`strata:fonts/default-medium` explicitly. Grayscale runs are regenerated for their physical scale
+and use R8 atlas pages, and each quad maps its atlas texels one-to-one onto device pixels. From 15
+physical pixels up, runs keep quarter-pixel horizontal positioning and glyphs are grid-fitted
 vertically only (FreeType's light hinting, as Skia's "slight"), so baselines, x-heights and
-horizontal bars land on whole pixels while stems keep their true width at every horizontal phase,
-and each quad maps its atlas texels one-to-one onto device pixels.
+horizontal bars land on whole pixels while stems keep their true width at every horizontal phase.
+
+Smaller text is drawn the way Windows draws small interface text: each glyph starts on a whole
+pixel and is fully grid-fitted, so a stem lands on one solid pixel column instead of straddling two
+as faint half-bright ones, and its midtones are weighted further toward solid. The gaps between
+letters round to whole pixels there, a little less even than at larger sizes, in exchange for
+crisp stems. Every platform rasterizes the same way, so text looks the same on each.
 
 The atlas holds plain coverage; how much each glyph contributes is decided when it is drawn, from
 the ink it is drawn in. Light ink has its midtones weighted up, the way a linear-light blend would,
