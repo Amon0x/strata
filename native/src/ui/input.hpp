@@ -674,7 +674,59 @@ class InputRouter final {
         MotionTransform transform;
         /** The hit bounds before `transform`, for exact tests against a rotated node. */
         Rect local_bounds;
+        /** The anchor it is placed within (see PointerAnchor), or none. */
+        std::int32_t anchor = -1;
+        /** It is that anchor's own node: only the clips around the anchor apply to it. */
+        bool anchor_root = false;
+        /** Its transform, and its ancestors' clips, within the anchor. */
+        MotionTransform relative;
+        std::optional<Rect> relative_clip;
     };
+    /**
+     * A presentation group's root as hit testing sees it. Entries within it are kept relative to
+     * it, so a frame that only moves anchors (a pan, a zoom, a transform animation) places their
+     * entries again from these instead of walking the tree. Its transform and clips are kept
+     * within its parent anchor (on the surface for one at the top).
+     */
+    struct PointerAnchor final {
+        std::uint64_t identity = 0U;
+        std::int32_t parent = -1;
+        /** What it is presented under within its parent, and its own presentation. */
+        MotionTransform base;
+        MotionTransform local;
+        /** The clips around it within its parent, and its own, which clip what is within it. */
+        std::optional<Rect> clip;
+        std::optional<Rect> own_clip;
+        /** Composed on the surface: its transform, the clips around it, and with its own. */
+        MotionTransform world;
+        std::optional<Rect> world_clip;
+        std::optional<Rect> world_inner_clip;
+        /** The opacity it inherits; a fully faded anchor's content has no entries at all. */
+        double inherited_opacity = 1.0;
+        bool visible = true;
+    };
+    /** A placed node's transform within its anchor (presentation_transforms_ composes it). */
+    struct PointerPlacement final {
+        std::uint64_t identity = 0U;
+        std::int32_t anchor = -1;
+        MotionTransform relative;
+    };
+    /**
+     * Places the entries within anchors that moved, when every change since the geometry was
+     * built is an anchor's presentation; else false, and the geometry is built again.
+     */
+    [[nodiscard]] bool place_moved_anchors() const;
+
+  public:
+    /**
+     * Brings pointer geometry up to this frame while the frame's dirty marks still say what
+     * changed: a frame that only moved anchors places their entries now, so the next frame's first
+     * hit test does not build the geometry again for want of knowing what moved. Geometry nothing
+     * has built yet stays unbuilt.
+     */
+    void settle_pointer_geometry() const;
+
+  private:
     void prepare_pointer_geometry() const;
     void prepare_detached_subtargets() const;
     [[nodiscard]] RetainedNode* hit_test(Point position) const noexcept;
@@ -1177,6 +1229,8 @@ class InputRouter final {
     // Node identity to its entry in pointer_hit_entries_.
     mutable std::map<std::uint64_t, std::size_t> pointer_hit_index_;
     mutable std::unordered_map<std::uint64_t, MotionTransform> presentation_transforms_;
+    mutable std::vector<PointerAnchor> pointer_anchors_;
+    mutable std::vector<PointerPlacement> pointer_placements_;
     mutable std::map<std::uint64_t, std::vector<WidgetSubtarget>> projected_subtargets_;
     mutable std::vector<WidgetSubtarget> detached_subtargets_;
     mutable bool pointer_geometry_ready_ = false;

@@ -1974,6 +1974,7 @@ SurfaceFrame Surface::complete_frame(SurfaceFrame next) {
     }
     next.diagnostics = application_.services().diagnostics_snapshot();
     record_profiler_counters(next);
+    input_.settle_pointer_geometry();
     tree_.clear_dirty();
     frame_invalidated_ = false;
     const std::size_t publication_count =

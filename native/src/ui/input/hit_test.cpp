@@ -751,7 +751,9 @@ void InputRouter::prepare_pointer_geometry() const {
         pointer_geometry_layout_generation_ == layout_->generation &&
         pointer_geometry_notification_generation_ == notifications &&
         pointer_geometry_command_generation_ == command_generation &&
-        pointer_geometry_generations_match(pointer_geometry_dirty_generations_, dirty)) {
+        (pointer_geometry_generations_match(pointer_geometry_dirty_generations_, dirty) ||
+         place_moved_anchors())) {
+        pointer_geometry_dirty_generations_.animation = dirty.animation;
         if (pointer_geometry_dirty_generations_.input != dirty.input) {
             // Hover and press move no hit region, but widgets project subtargets from their
             // interaction state (a hovered Tooltip's bubble): only those are projected again.
@@ -774,6 +776,8 @@ void InputRouter::prepare_pointer_geometry() const {
     pointer_hit_entries_.clear();
     pointer_hit_index_.clear();
     presentation_transforms_.clear();
+    pointer_anchors_.clear();
+    pointer_placements_.clear();
     projected_subtargets_.clear();
     detached_subtargets_.clear();
     pointer_hit_entries_.reserve(layout_->records.size());
@@ -791,9 +795,17 @@ void InputRouter::prepare_pointer_geometry() const {
         }
     };
     collect_portals(collect_portals, *tree_->root(), false);
+    // Within an anchor, a transform and the clips around a node are kept relative to the anchor
+    // as well as on the surface (see place_moved_anchors).
+    struct Anchored final {
+        std::int32_t anchor = -1;
+        MotionTransform relative;
+        std::optional<Rect> relative_clip;
+    };
     const auto visit = [this](const auto& self, RetainedNode& node, const bool visit_portals,
                               const MotionTransform inherited, const double inherited_opacity,
-                              const std::optional<Rect> traversal_clip) -> void {
+                              const std::optional<Rect> traversal_clip,
+                              const Anchored anchored) -> void {
         if (node.lifecycle() == RetainedLifecycle::exiting)
             return;
         const LayoutRecord* record = layout_->find(node.identity());
@@ -803,21 +815,55 @@ void InputRouter::prepare_pointer_geometry() const {
             return;
         // Every placed node keeps the transform it is presented with, hittable or not: pointer
         // inversion, IME placement, spatial navigation and injection read it from here.
-        const MotionTransform transform =
-            motion_ != nullptr
-                ? concatenate_presentation_transform(
-                      inherited, local_presentation_transform(node, *motion_, record->bounds))
-                : inherited;
+        const MotionTransform local = motion_ != nullptr
+                                          ? local_presentation_transform(node, *motion_, record->bounds)
+                                          : MotionTransform{};
+        const MotionTransform transform = concatenate_presentation_transform(inherited, local);
         presentation_transforms_.insert_or_assign(node.identity(), transform);
         const double opacity = inherited_opacity * local_presentation_opacity(node, motion_);
+        // A presentation group's root is an anchor: what is within it is kept relative to it.
+        const bool anchor = motion_ != nullptr &&
+                            (local_presentation_tone(node, *motion_).has_value() ||
+                             motion_presentation_group(node, *motion_) ||
+                             presentation_in_depth(node, *motion_) ||
+                             parent_content_view(node).has_value());
+        Anchored here{anchored.anchor,
+                      concatenate_presentation_transform(anchored.relative, local),
+                      anchored.relative_clip};
+        if (anchor) {
+            pointer_anchors_.push_back(PointerAnchor{node.identity(), anchored.anchor,
+                                                     anchored.relative, local,
+                                                     anchored.relative_clip, std::nullopt,
+                                                     transform, traversal_clip, traversal_clip,
+                                                     inherited_opacity, opacity > 1.0e-3});
+            here = Anchored{static_cast<std::int32_t>(pointer_anchors_.size() - 1U), {}, {}};
+        }
+        pointer_placements_.push_back(PointerPlacement{node.identity(), here.anchor, here.relative});
         if (opacity <= 1.0e-3)
             return;
         std::optional<Rect> child_clip = traversal_clip;
-        const auto clip_children = [&child_clip, &inherited](const Rect clip) {
+        // The clips this node puts around its descendants, within its anchor: an anchor's own
+        // clip is placed by what it is presented under, so it belongs to its parent's space.
+        std::optional<Rect> child_relative_clip = anchor ? std::nullopt : here.relative_clip;
+        const auto relative_clip = [&](const Rect clip) {
+            const Rect placed = transform_presentation_bounds(clip, anchored.relative);
+            if (anchor) {
+                std::optional<Rect>& own = pointer_anchors_.back().own_clip;
+                own = own.has_value() ? std::optional(own->clip_intersection(placed))
+                                      : std::optional(placed);
+                pointer_anchors_.back().world_inner_clip = child_clip;
+                return;
+            }
+            child_relative_clip = child_relative_clip.has_value()
+                                      ? std::optional(child_relative_clip->clip_intersection(placed))
+                                      : std::optional(placed);
+        };
+        const auto clip_children = [&child_clip, &inherited, &relative_clip](const Rect clip) {
             const Rect transformed = transform_presentation_bounds(clip, inherited);
             child_clip = child_clip.has_value()
                              ? std::optional(child_clip->clip_intersection(transformed))
                              : std::optional(transformed);
+            relative_clip(clip);
         };
         if (!transform.axis_aligned() && record->local_clip.has_value()) {
             // A rotated node's clip turns with it, as it is drawn; descendants are hit within the
@@ -826,6 +872,13 @@ void InputRouter::prepare_pointer_geometry() const {
             child_clip = child_clip.has_value()
                              ? std::optional(child_clip->clip_intersection(turned))
                              : std::optional(turned);
+            // Within the anchor, as for an anchor itself, which moving (turned) is never placed
+            // again (place_moved_anchors needs an axis-aligned anchor).
+            const Rect relative = transform_presentation_bounds(*record->local_clip, here.relative);
+            child_relative_clip =
+                child_relative_clip.has_value()
+                    ? std::optional(child_relative_clip->clip_intersection(relative))
+                    : std::optional(relative);
         } else if (record->local_clip.has_value()) {
             // Only the node's own clip: `record->clip` already holds its ancestors' clips in
             // layout space, which a zoomed or panned ancestor no longer draws them at.
@@ -859,7 +912,8 @@ void InputRouter::prepare_pointer_geometry() const {
         if (!std::ranges::is_sorted(children, z_order))
             std::ranges::stable_sort(children, z_order);
         for (auto child = children.rbegin(); child != children.rend(); ++child) {
-            self(self, **child, visit_portals, transform, opacity, child_clip);
+            self(self, **child, visit_portals, transform, opacity, child_clip,
+                 Anchored{here.anchor, here.relative, child_relative_clip});
         }
         const Rect bounds =
             hit_bounds_resolver_ ? hit_bounds_resolver_(node, *record) : record->hit_bounds;
@@ -870,14 +924,18 @@ void InputRouter::prepare_pointer_geometry() const {
             traversal_clip,
             transform,
             bounds,
+            here.anchor,
+            anchor,
+            here.relative,
+            anchor ? std::nullopt : here.relative_clip,
         });
     };
     // Detached portal roots occupy the final render plane. Visit them first in reverse paint
     // order so hit testing observes the same topmost-first order as rendering.
     for (auto portal = portals.rbegin(); portal != portals.rend(); ++portal) {
-        visit(visit, **portal, true, MotionTransform{}, 1.0, std::nullopt);
+        visit(visit, **portal, true, MotionTransform{}, 1.0, std::nullopt, Anchored{});
     }
-    visit(visit, *tree_->root(), false, MotionTransform{}, 1.0, std::nullopt);
+    visit(visit, *tree_->root(), false, MotionTransform{}, 1.0, std::nullopt, Anchored{});
     pointer_geometry_tree_ = tree_;
     pointer_geometry_layout_ = layout_;
     pointer_geometry_motion_ = motion_;
@@ -888,6 +946,132 @@ void InputRouter::prepare_pointer_geometry() const {
     pointer_geometry_dirty_generations_ = dirty;
     pointer_geometry_ready_ = true;
     ++pointer_geometry_rebuild_count_;
+}
+
+void InputRouter::settle_pointer_geometry() const {
+    if (!pointer_geometry_ready_ || tree_ == nullptr || tree_->root() == nullptr ||
+        layout_ == nullptr) {
+        return;
+    }
+    const DirtyGenerationSnapshot dirty = tree_->dirty_generations();
+    if (pointer_geometry_dirty_generations_.animation == dirty.animation)
+        return;
+    // Only placing: geometry that must be built again is built when next asked for, as before.
+    const std::uint64_t notifications = notifications_.generation();
+    const std::uint64_t command_generation = commands_ != nullptr ? commands_->generation() : 0U;
+    if (pointer_geometry_tree_ == tree_ && pointer_geometry_layout_ == layout_ &&
+        pointer_geometry_motion_ == motion_ &&
+        pointer_geometry_tree_generation_ == tree_->generation() &&
+        pointer_geometry_layout_generation_ == layout_->generation &&
+        pointer_geometry_notification_generation_ == notifications &&
+        pointer_geometry_command_generation_ == command_generation && place_moved_anchors()) {
+        pointer_geometry_dirty_generations_.animation = dirty.animation;
+    }
+}
+
+bool InputRouter::place_moved_anchors() const {
+    // Only the animation lane moved, and the frame that moved it still holds its marks, so every
+    // node that changed is known.
+    const DirtyGenerationSnapshot dirty = tree_->dirty_generations();
+    DirtyGenerationSnapshot others = pointer_geometry_dirty_generations_;
+    others.animation = dirty.animation;
+    others.input = dirty.input;
+    others.semantics = dirty.semantics;
+    others.paint = dirty.paint;
+    if (!(others == dirty) || pointer_anchors_.empty() || motion_ == nullptr)
+        return false;
+    const std::vector<RetainedNode*> changed = tree_->dirty_nodes();
+    if (changed.empty())
+        return false;
+    const auto is_anchor = [this](const RetainedNode& node) {
+        return local_presentation_tone(node, *motion_).has_value() ||
+               motion_presentation_group(node, *motion_) || presentation_in_depth(node, *motion_) ||
+               parent_content_view(node).has_value();
+    };
+    std::vector<bool> placed(pointer_anchors_.size(), false);
+    bool any = false;
+    for (const RetainedNode* node : changed) {
+        const LayoutRecord* record = layout_->find(node->identity());
+        if (record == nullptr)
+            return false;
+        const MotionTransform local = local_presentation_transform(*node, *motion_, record->bounds);
+        const double opacity = local_presentation_opacity(*node, motion_);
+        const auto anchor =
+            std::ranges::find(pointer_anchors_, node->identity(), &PointerAnchor::identity);
+        if (anchor == pointer_anchors_.end()) {
+            // Anything else moves what is within it only by being presented, which it must not
+            // be: a node presented with a transform or a fade is built again.
+            if (is_anchor(*node) || !(local == MotionTransform{}) || opacity != 1.0)
+                return false;
+            continue;
+        }
+        // An anchor that turns, fades in or out, or stops being one changes more than where it is.
+        if (!is_anchor(*node) || !local.axis_aligned() || !anchor->visible ||
+            anchor->inherited_opacity * opacity <= 1.0e-3) {
+            return false;
+        }
+        if (!(anchor->local == local)) {
+            anchor->local = local;
+            placed[static_cast<std::size_t>(anchor - pointer_anchors_.begin())] = true;
+            any = true;
+        }
+    }
+    if (!any)
+        return true;
+    // Anchors are in tree order: a parent is placed before the anchors within it.
+    for (std::size_t index = 0U; index < pointer_anchors_.size(); ++index) {
+        PointerAnchor& anchor = pointer_anchors_[index];
+        const PointerAnchor* parent =
+            anchor.parent >= 0 ? &pointer_anchors_[static_cast<std::size_t>(anchor.parent)]
+                               : nullptr;
+        if (parent != nullptr && placed[static_cast<std::size_t>(anchor.parent)])
+            placed[index] = true;
+        if (!placed[index])
+            continue;
+        const MotionTransform parent_world = parent != nullptr ? parent->world : MotionTransform{};
+        const auto within = [&parent_world](std::optional<Rect> clip,
+                                            const std::optional<Rect>& relative) {
+            if (!relative.has_value())
+                return clip;
+            const Rect placed_clip = transform_presentation_bounds(*relative, parent_world);
+            return clip.has_value() ? std::optional(clip->clip_intersection(placed_clip))
+                                    : std::optional(placed_clip);
+        };
+        anchor.world = concatenate_presentation_transform(
+            parent_world, concatenate_presentation_transform(anchor.base, anchor.local));
+        if (!anchor.world.axis_aligned())
+            return false;
+        anchor.world_clip =
+            within(parent != nullptr ? parent->world_inner_clip : std::nullopt, anchor.clip);
+        anchor.world_inner_clip = within(anchor.world_clip, anchor.own_clip);
+    }
+    for (PointerHitEntry& entry : pointer_hit_entries_) {
+        if (entry.anchor < 0 || !placed[static_cast<std::size_t>(entry.anchor)])
+            continue;
+        const PointerAnchor& anchor = pointer_anchors_[static_cast<std::size_t>(entry.anchor)];
+        entry.transform = concatenate_presentation_transform(anchor.world, entry.relative);
+        entry.bounds = transform_presentation_bounds(entry.local_bounds, entry.transform);
+        std::optional<Rect> clip = entry.anchor_root ? anchor.world_clip : anchor.world_inner_clip;
+        if (entry.relative_clip.has_value()) {
+            const Rect placed_clip = transform_presentation_bounds(*entry.relative_clip, anchor.world);
+            clip = clip.has_value() ? std::optional(clip->clip_intersection(placed_clip))
+                                    : std::optional(placed_clip);
+        }
+        entry.traversal_clip = clip;
+    }
+    for (const PointerPlacement& placement : pointer_placements_) {
+        if (placement.anchor < 0 || !placed[static_cast<std::size_t>(placement.anchor)])
+            continue;
+        presentation_transforms_.insert_or_assign(
+            placement.identity,
+            concatenate_presentation_transform(
+                pointer_anchors_[static_cast<std::size_t>(placement.anchor)].world,
+                placement.relative));
+    }
+    projected_subtargets_.clear();
+    detached_subtargets_.clear();
+    detached_subtargets_ready_ = false;
+    return true;
 }
 
 const std::vector<WidgetSubtarget>&
