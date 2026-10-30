@@ -693,7 +693,7 @@ void SoftwareRenderer::apply(const host::ResourceOperation& operation) {
     }
     if (operation.kind == 0U) {
         // Glyph pages (format 0) sample texel-exact; shape masks (2) and MSDF (1) bilinearly.
-        const std::uint32_t channels = operation.format == 1U ? 4U : 1U;
+        const std::uint32_t channels = host::texture_format_rgba(operation.format) ? 4U : 1U;
         const std::uint64_t size =
             static_cast<std::uint64_t>(operation.width) * operation.height * channels;
         if (size > std::numeric_limits<std::size_t>::max()) {
@@ -704,7 +704,7 @@ void SoftwareRenderer::apply(const host::ResourceOperation& operation) {
                                        operation.width,
                                        operation.height,
                                        channels,
-                                       operation.format == 0U ? 0U : 1U,
+                                       host::texture_format_exact(operation.format) ? 0U : 1U,
                                        std::vector<std::uint8_t>(static_cast<std::size_t>(size)),
                                    });
         return;
@@ -726,7 +726,7 @@ void SoftwareRenderer::apply(const host::ResourceOperation& operation) {
         if (found == textures_.end())
             throw std::invalid_argument("headless raster job has no live texture");
         Texture& texture = found->second;
-        const std::uint32_t channels = operation.format == 1U ? 4U : 1U;
+        const std::uint32_t channels = host::texture_format_rgba(operation.format) ? 4U : 1U;
         if (texture.channels != channels ||
             static_cast<std::uint64_t>(operation.x) + operation.width > texture.width ||
             static_cast<std::uint64_t>(operation.y) + operation.height > texture.height) {
@@ -748,7 +748,7 @@ void SoftwareRenderer::apply(const host::ResourceOperation& operation) {
         throw std::invalid_argument("headless atlas upload has no live texture");
     }
     Texture& texture = found->second;
-    const std::uint32_t channels = operation.format == 1U ? 4U : 1U;
+    const std::uint32_t channels = host::texture_format_rgba(operation.format) ? 4U : 1U;
     const std::uint64_t right = static_cast<std::uint64_t>(operation.x) + operation.width;
     const std::uint64_t bottom = static_cast<std::uint64_t>(operation.y) + operation.height;
     const std::uint64_t expected =

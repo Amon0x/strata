@@ -33,6 +33,8 @@ namespace {
 
 [[nodiscard]] AtlasTextureFormat format_for(const GlyphRasterMode mode,
                                             const bool filtered_coverage) noexcept {
+    if (mode == GlyphRasterMode::subpixel)
+        return AtlasTextureFormat::rgba8_exact;
     if (mode != GlyphRasterMode::coverage)
         return AtlasTextureFormat::rgba8;
     return filtered_coverage ? AtlasTextureFormat::r8_filtered : AtlasTextureFormat::r8;

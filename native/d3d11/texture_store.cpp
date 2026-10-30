@@ -49,7 +49,7 @@ struct Texture final {
 [[nodiscard]] DXGI_FORMAT atlas_format(const std::uint32_t format) {
     if (format == 0U || format == 2U)
         return DXGI_FORMAT_R8_UNORM;
-    if (format == 1U)
+    if (host::texture_format_rgba(format))
         return DXGI_FORMAT_R8G8B8A8_UNORM;
     throw std::invalid_argument("D3D11 renderer received an unknown atlas format");
 }
@@ -165,9 +165,12 @@ struct TextureStore::Impl final {
             textures.insert_or_assign(operation.texture,
                                       create_texture(operation.width, operation.height,
                                                      atlas_format(operation.format),
-                                                     operation.format == 0U ? 0U : 1U, nullptr,
-                                                     0U, operation.format != 0U));
-            // Glyph pages (format 0) sample texel-exact; shape masks (2) and MSDF (1) bilinearly.
+                                                     host::texture_format_exact(operation.format)
+                                                         ? 0U
+                                                         : 1U,
+                                                     nullptr, 0U, operation.format != 0U));
+            // Glyph pages (0, and subpixel 3) sample texel-exact; shape masks (2) and MSDF (1)
+            // bilinearly.
             return;
         }
         if (operation.kind == host::resource_image) {
@@ -201,7 +204,7 @@ struct TextureStore::Impl final {
                         operation.x, operation.y, operation.width, operation.height);
             return;
         }
-        const std::uint32_t bytes_per_pixel = operation.format == 1U ? 4U : 1U;
+        const std::uint32_t bytes_per_pixel = host::texture_format_rgba(operation.format) ? 4U : 1U;
         const D3D11_BOX box{
             operation.x, operation.y, 0U, static_cast<UINT>(right), static_cast<UINT>(bottom), 1U,
         };

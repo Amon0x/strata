@@ -20,6 +20,8 @@ enum class AtlasTextureFormat : std::uint8_t {
     rgba8,
     /** R8 coverage sampled bilinearly (render_packet.hpp texture_format_r8_filtered). */
     r8_filtered,
+    /** RGBA8 sampled texel-exact: subpixel glyphs (texture_format_rgba8_exact). */
+    rgba8_exact,
 };
 
 /** Numbered as the render packet numbers its resource records. */

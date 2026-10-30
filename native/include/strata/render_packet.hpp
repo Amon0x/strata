@@ -60,6 +60,19 @@ inline constexpr std::uint32_t texture_format_rgba8 = 1U;
  * groups and rotated draws resample. Glyph pages stay texture_format_r8.
  */
 inline constexpr std::uint32_t texture_format_r8_filtered = 2U;
+/**
+ * An RGBA8 atlas sampled texel-exact, as glyph coverage is: subpixel glyph pages, whose per-channel
+ * coverage a bilinear sample would blur across neighbouring pixels.
+ */
+inline constexpr std::uint32_t texture_format_rgba8_exact = 3U;
+/** Whether an atlas format holds four bytes a texel. */
+[[nodiscard]] constexpr bool texture_format_rgba(const std::uint32_t format) noexcept {
+    return format == texture_format_rgba8 || format == texture_format_rgba8_exact;
+}
+/** Whether an atlas format is sampled texel-exact (nearest) rather than bilinearly. */
+[[nodiscard]] constexpr bool texture_format_exact(const std::uint32_t format) noexcept {
+    return format == texture_format_r8 || format == texture_format_rgba8_exact;
+}
 inline constexpr std::uint32_t texture_sampling_nearest = 0U;
 inline constexpr std::uint32_t texture_sampling_linear = 1U;
 
