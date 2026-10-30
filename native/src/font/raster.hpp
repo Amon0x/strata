@@ -60,22 +60,14 @@ enum class GlyphHinting : std::uint8_t {
 };
 
 /**
- * Below this physical pixel size, coverage text is drawn the way small UI text is on Windows: each
- * glyph starts on a whole pixel and is fully grid-fitted, so its stems land on single pixel
- * columns instead of straddling two as faint half-bright ones, and its midtones are weighted
- * toward solid (small_text_transfer_strength). The gaps between letters round to whole pixels
- * there. At this size and above, glyphs keep quarter-pixel positions and vertical-only hinting,
- * where a stem is wide enough to read solid wherever it falls.
+ * Below this physical pixel size a stem is about a pixel wide or less, and one that straddles two
+ * pixel columns reads as two faint half-bright ones: coverage text this small has its midtones
+ * weighted toward solid (small_text_transfer_strength), on top of the draw-time weighting by ink.
+ * Its shape, quarter-pixel positions and light hinting stay as at every other size.
  */
 inline constexpr double small_text_physical_pixel_size = 15.0;
 /** The midtone weighting baked into small glyphs (see CoverageRasterConfig::transfer_strength). */
 inline constexpr double small_text_transfer_strength = 0.6;
-
-/** How many horizontal positions per physical pixel a coverage glyph of this size is drawn at. */
-[[nodiscard]] constexpr std::uint16_t
-coverage_subpixel_divisions(const double physical_pixel_size) noexcept {
-    return physical_pixel_size < small_text_physical_pixel_size ? 1U : 4U;
-}
 
 struct CoverageRasterConfig final {
     std::uint32_t maximum_dimension = 1'024U;

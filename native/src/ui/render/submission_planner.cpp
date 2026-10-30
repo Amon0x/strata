@@ -29,6 +29,7 @@ namespace strata::ui::submission_detail {
 namespace {
 
 constexpr double transform_epsilon = 0.000001;
+constexpr std::uint16_t coverage_subpixel_divisions = 4U;
 
 [[nodiscard]] bool rounded(const CornerRadii radii) noexcept {
     return radii.top_left > 0.0 || radii.top_right > 0.0 ||
@@ -234,10 +235,8 @@ prepare_text(const TextRunRenderCommand& command, font::GlyphAtlas& atlas,
             throw font::FontError("logical glyph id exceeds the native OpenType glyph range");
         }
         const double requested_x = logical.x + logical.x_placement;
-        const std::uint16_t divisions =
-            font::coverage_subpixel_divisions(command.pixel_size * density);
         const font::SubpixelPhase phase =
-            font::SubpixelPhase::quantize(requested_x * density, divisions);
+            font::SubpixelPhase::quantize(requested_x * density, coverage_subpixel_divisions);
         const std::optional<font::GlyphAtlasEntry> atlas_entry = atlas.request(
             logical.font_id, text_engine.font(logical.font_id),
             static_cast<std::uint16_t>(logical.glyph_id), command.pixel_size * raster_scale, phase,
@@ -247,7 +246,7 @@ prepare_text(const TextRunRenderCommand& command, font::GlyphAtlas& atlas,
         if (!atlas_entry.has_value()) continue;
         const double pen_x =
             atlas_entry->mode == font::GlyphRasterMode::coverage
-                ? quantized_position(requested_x, density, divisions)
+                ? quantized_position(requested_x, density, coverage_subpixel_divisions)
                 : requested_x;
         font::RasterPlaneBounds plane = atlas_entry->plane_bounds_layout_pixels;
         plane.left /= raster_scale;
@@ -429,9 +428,8 @@ void append_warmup_requests(const TextRunRenderCommand& text, const TextEngine& 
             &text_engine.font(logical.font_id),
             static_cast<std::uint16_t>(logical.glyph_id),
             text.pixel_size * raster_scale,
-            font::SubpixelPhase::quantize(
-                requested_x * context.scale * raster_scale,
-                font::coverage_subpixel_divisions(text.pixel_size * context.scale * raster_scale)),
+            font::SubpixelPhase::quantize(requested_x * context.scale * raster_scale,
+                                          coverage_subpixel_divisions),
             logical.font_style_flags,
             raster_mode(text.font_rasterization),
             effect_reach(text) * raster_scale,
