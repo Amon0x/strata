@@ -53,11 +53,6 @@ namespace {
     return shape;
 }
 
-/**
- * A layout-space clip in the space the planner is in. Under scale and translation the clip stays
- * where layout put it, so the transform is cancelled; once something rotates, the clip turns with
- * the content it clips and becomes an exact clip mask in the planner.
- */
 /** A clip shape drawn as a shape record (`clipShape: { kind: "sector", ... }`), placed in its node. */
 struct DrawnClip final {
     ClipShape shape;
@@ -189,6 +184,11 @@ constexpr std::string_view clip_layer_id = "strata:clip-layer";
     return clip;
 }
 
+/**
+ * A layout-space clip in the space the planner is in. Under scale and translation the clip stays
+ * where layout put it, so the transform is cancelled; once something rotates, the clip turns with
+ * the content it clips and becomes an exact clip mask in the planner.
+ */
 [[nodiscard]] Rect layout_clip(const Rect clip, const MotionTransform& transform) noexcept {
     return transform.axis_aligned() ? inverse_presentation_bounds(clip, transform) : clip;
 }

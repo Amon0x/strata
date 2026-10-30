@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -46,28 +47,48 @@ namespace {
 }
 
 /**
- * A node's `hitShape` (a Draw shape, normalized to its bounds) as outlines over `bounds`; without
- * one, the area its `clipShape` cuts it to, as clip-path cuts what a pointer hits on the web. None
- * when it has neither, a malformed one, or a clip only a stroke draws, which leaves the whole box
- * hittable.
+ * A shape over `bounds` as outlines: a `hitShape`, or (`clipped`) the area a `clipShape` cuts, as
+ * clip-path cuts what a pointer hits on the web. None for a malformed shape or a clip only a
+ * stroke draws.
  */
-[[nodiscard]] std::vector<std::vector<Point>> hit_outlines(const RetainedNode& node,
-                                                          const Rect bounds) {
-    if (bounds.width <= 0.0 || bounds.height <= 0.0)
-        return {};
-    const auto found = node.description().properties.find("hitShape");
-    const runtime::Value* value =
-        found != node.description().properties.end() ? found->second.value() : nullptr;
-    const bool clipped = value == nullptr;
-    if (clipped)
-        value = visual_value(node, "clipShape");
-    if (value == nullptr)
+[[nodiscard]] std::vector<std::vector<Point>> shape_outlines(const RetainedNode& node,
+                                                            const runtime::Value* value,
+                                                            const bool clipped, const Rect bounds) {
+    if (value == nullptr || bounds.width <= 0.0 || bounds.height <= 0.0)
         return {};
     std::optional<PathShape> shape;
     if (clipped && value->string() != nullptr) {
-        // The named outlines that fill the box round.
-        if (*value->string() == "circle" || *value->string() == "ellipse")
+        // The named outlines, filling the box as the clip draws them: a regular polygon with a
+        // corner up, or a star whose points sit half a sector either side of up and whose
+        // notches reach half way in.
+        const std::string& name = *value->string();
+        if (name == "circle" || name == "ellipse") {
             shape = ellipse_shape(Point{0.5, 0.5}, 0.5, 0.5, std::nullopt);
+        } else if (name == "polygon" || name == "hexagon" || name == "diamond" || name == "star") {
+            double sides = name == "hexagon" ? 6.0 : name == "diamond" ? 4.0 : 5.0;
+            if (const std::optional<double> authored = visual_number(node, "clipSides");
+                authored.has_value())
+                sides = std::clamp(std::round(*authored), 3.0, 64.0);
+            const auto count = static_cast<std::size_t>(sides);
+            const double sector = 2.0 * std::numbers::pi / sides;
+            const bool star = name == "star";
+            std::vector<Point> corners;
+            for (std::size_t index = 0U; index < count; ++index) {
+                const auto corner = [&corners](const double angle, const double radius) {
+                    corners.push_back(Point{0.5 + 0.5 * radius * std::sin(angle),
+                                            0.5 - 0.5 * radius * std::cos(angle)});
+                };
+                const double at = sector * static_cast<double>(index);
+                if (star) {
+                    corner(at - sector * 0.5, 1.0);
+                    corner(at, 0.5);
+                } else {
+                    corner(at, 1.0);
+                }
+            }
+            shape = PathShape{};
+            shape->path = Path::polyline(corners, true);
+        }
     } else if (value->object() != nullptr) {
         try {
             shape = path_shape_from_value(value, false);
@@ -88,6 +109,24 @@ namespace {
         outlines.push_back(std::move(outline));
     }
     return outlines;
+}
+
+/** The area a node's `clipShape` cuts it to, over its layout bounds; none without one. */
+[[nodiscard]] std::vector<std::vector<Point>> clip_outlines(const RetainedNode& node,
+                                                           const Rect bounds) {
+    return shape_outlines(node, visual_value(node, "clipShape"), true, bounds);
+}
+
+/**
+ * Where a node itself is hit, over `bounds`: its `hitShape`, or without one its `clipShape`'s area;
+ * none leaves the whole box hittable.
+ */
+[[nodiscard]] std::vector<std::vector<Point>> hit_outlines(const RetainedNode& node,
+                                                          const Rect bounds) {
+    const auto found = node.description().properties.find("hitShape");
+    if (found != node.description().properties.end() && found->second.value() != nullptr)
+        return shape_outlines(node, found->second.value(), false, bounds);
+    return clip_outlines(node, bounds);
 }
 
 [[nodiscard]] bool
@@ -870,10 +909,11 @@ void InputRouter::prepare_pointer_geometry() const {
         MotionTransform relative;
         std::optional<Rect> relative_clip;
     };
+    using ClipChain = std::shared_ptr<const std::vector<ClipOutline>>;
     const auto visit = [this](const auto& self, RetainedNode& node, const bool visit_portals,
                               const MotionTransform inherited, const double inherited_opacity,
-                              const std::optional<Rect> traversal_clip,
-                              const Anchored anchored) -> void {
+                              const std::optional<Rect> traversal_clip, const Anchored anchored,
+                              const ClipChain& clips) -> void {
         if (node.lifecycle() == RetainedLifecycle::exiting)
             return;
         const LayoutRecord* record = layout_->find(node.identity());
@@ -979,9 +1019,18 @@ void InputRouter::prepare_pointer_geometry() const {
         // are, so skip it and its temporary buffer.
         if (!std::ranges::is_sorted(children, z_order))
             std::ranges::stable_sort(children, z_order);
+        // A clip shape cuts what is hit below it as well as the node itself.
+        ClipChain child_clips = clips;
+        if (std::vector<std::vector<Point>> own = clip_outlines(node, record->bounds);
+            !own.empty()) {
+            auto chain = clips != nullptr ? std::make_shared<std::vector<ClipOutline>>(*clips)
+                                          : std::make_shared<std::vector<ClipOutline>>();
+            chain->push_back(ClipOutline{node.identity(), std::move(own)});
+            child_clips = std::move(chain);
+        }
         for (auto child = children.rbegin(); child != children.rend(); ++child) {
             self(self, **child, visit_portals, transform, opacity, child_clip,
-                 Anchored{here.anchor, here.relative, child_relative_clip});
+                 Anchored{here.anchor, here.relative, child_relative_clip}, child_clips);
         }
         const Rect bounds =
             hit_bounds_resolver_ ? hit_bounds_resolver_(node, *record) : record->hit_bounds;
@@ -997,14 +1046,16 @@ void InputRouter::prepare_pointer_geometry() const {
             here.relative,
             anchor ? std::nullopt : here.relative_clip,
             hit_outlines(node, bounds),
+            clips,
         });
     };
     // Detached portal roots occupy the final render plane. Visit them first in reverse paint
     // order so hit testing observes the same topmost-first order as rendering.
     for (auto portal = portals.rbegin(); portal != portals.rend(); ++portal) {
-        visit(visit, **portal, true, MotionTransform{}, 1.0, std::nullopt, Anchored{});
+        visit(visit, **portal, true, MotionTransform{}, 1.0, std::nullopt, Anchored{}, nullptr);
     }
-    visit(visit, *tree_->root(), false, MotionTransform{}, 1.0, std::nullopt, Anchored{});
+    visit(visit, *tree_->root(), false, MotionTransform{}, 1.0, std::nullopt, Anchored{},
+          nullptr);
     pointer_geometry_tree_ = tree_;
     pointer_geometry_layout_ = layout_;
     pointer_geometry_motion_ = motion_;
@@ -1214,6 +1265,18 @@ void InputRouter::prepare_detached_subtargets() const {
     detached_subtargets_ready_ = true;
 }
 
+bool InputRouter::inside_clips(const PointerHitEntry& entry, const Point position) const noexcept {
+    if (entry.clips == nullptr)
+        return true;
+    return std::ranges::all_of(*entry.clips, [&](const ClipOutline& clip) {
+        const auto transform = presentation_transforms_.find(clip.node);
+        return inside_outlines(clip.outlines,
+                               transform != presentation_transforms_.end()
+                                   ? inverse_presentation_point(position, transform->second)
+                                   : position);
+    });
+}
+
 RetainedNode* InputRouter::hit_test(const Point position) const noexcept {
     prepare_pointer_geometry();
     for (const PointerHitEntry& entry : pointer_hit_entries_) {
@@ -1225,7 +1288,9 @@ RetainedNode* InputRouter::hit_test(const Point position) const noexcept {
                       inverse_presentation_point(position, entry.transform))) &&
             // And a node with a hit shape only inside that.
             (entry.shape.empty() ||
-             inside_outlines(entry.shape, inverse_presentation_point(position, entry.transform)))) {
+             inside_outlines(entry.shape, inverse_presentation_point(position, entry.transform))) &&
+            // And only inside the clip shapes of the nodes around it.
+            inside_clips(entry, position)) {
             return entry.node;
         }
     }

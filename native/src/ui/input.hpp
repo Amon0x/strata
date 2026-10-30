@@ -679,6 +679,11 @@ class InputRouter final {
     [[nodiscard]] static const DescriptionBehavior* behavior(const RetainedNode& node,
                                                              std::string_view id) noexcept;
     [[nodiscard]] static RetainedNode* drag_source_ancestor(RetainedNode* node) noexcept;
+    /** An ancestor's clip shape, as outlines over its layout bounds (see clip_outlines). */
+    struct ClipOutline final {
+        std::uint64_t node = 0U;
+        std::vector<std::vector<Point>> outlines;
+    };
     struct PointerHitEntry final {
         RetainedNode* node = nullptr;
         Rect bounds;
@@ -698,6 +703,11 @@ class InputRouter final {
          * only inside them (even-odd), so a slice of a ring is not hit in the box around it.
          */
         std::vector<std::vector<Point>> shape;
+        /**
+         * The clip shapes of the nodes it is drawn within: as clip-path does, they cut what is
+         * hit below them too. Each is tested under its node's current presentation transform.
+         */
+        std::shared_ptr<const std::vector<ClipOutline>> clips;
     };
     /**
      * A presentation group's root as hit testing sees it. Entries within it are kept relative to
@@ -747,6 +757,8 @@ class InputRouter final {
     void prepare_pointer_geometry() const;
     void prepare_detached_subtargets() const;
     [[nodiscard]] RetainedNode* hit_test(Point position) const noexcept;
+    /** Whether `position` is inside the clip shapes of the nodes `entry` is drawn within. */
+    [[nodiscard]] bool inside_clips(const PointerHitEntry& entry, Point position) const noexcept;
     [[nodiscard]] std::optional<WidgetSubtarget>
     hit_subtarget(Point position, const RetainedNode* ordinary_target) const;
     void set_hovered_subtarget(const std::optional<WidgetSubtarget>& target);

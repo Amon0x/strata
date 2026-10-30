@@ -689,18 +689,19 @@ Panel(style: style(Card, rotateY: open ? 0 : -60, perspective: 600),
 ### Clip shapes and fading edges
 
 A node that clips (`clip: true`, or a `Scroll`'s viewport) can cut its content to a shape other than
-its rounded rectangle and fade it out toward its edges. `clipShape` is `circle` or `ellipse` (filling
-the box), `diamond`, `hexagon` or `polygon` (a regular polygon, `clipSides` sides, a corner up) or
-`star` (`clipSides` points); any other name keeps the rectangle. It can also be any shape a `Draw`
-draws, placed in the node's box the same way (`{ kind: "sector", start: -90, sweep: 120 }`,
+its rounded rectangle and fade it out toward its edges. `clipShape` is `circle` or `ellipse`
+(filling the box), `diamond`, `hexagon` or `polygon` (a regular polygon, `clipSides` sides, a corner
+up) or `star` (`clipSides` points); any other name keeps the rectangle. It can also be any shape a
+`Draw` draws, placed in the node's box the same way (`{ kind: "sector", start: -90, sweep: 120 }`,
 `{ kind: "polygon", points: [...] }`, a `path`). Circles, ellipses, rectangles, sectors and rings
 are cut exactly per pixel; any other shape draws the node into a layer that its filled shape masks,
 and a shape with only a stroke (an `arc` with a `strokeStyle`) cuts the node to that line. A shape
 cuts the node itself as well, as `clip-path` does: its shadow, background and border take the shape
-too, and so does what a pointer hits (a `circle` or a shape with a fill), unless the node has a
-`hitShape` of its own. `fadeEdges` takes `top`, `right`, `bottom` and `left` distances in logical
-pixels over which content fades to nothing, so a list dissolves into its edges as it scrolls instead
-of being cut. Both are evaluated with the clip, under any transform.
+too, and so does what a pointer hits on it and within it (a named shape, or a shape with a fill),
+though a node's own `hitShape` decides where that node itself is hit. `fadeEdges` takes `top`,
+`right`, `bottom` and `left` distances in logical pixels over which content fades to nothing, so a
+list dissolves into its edges as it scrolls instead of being cut. Both are evaluated with the clip,
+under any transform.
 
 ```strata
 Panel(style: style(width: 96, height: 96, clip: true, clipShape: "hexagon")) { Avatar() }

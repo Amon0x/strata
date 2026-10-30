@@ -4863,6 +4863,29 @@ overlay Cut {
     check(presses() == "0", "a press outside a clipShape still hit the node it cuts");
     press(ui::Point{100.0, 180.0});
     check(presses() == "1", "a press inside a clipShape did not hit its node: " + presses());
+
+    // A named outline cuts what is hit as it cuts what is drawn, below it as well: what fills a
+    // diamond is not hit in its corners.
+    const std::string diamond = R"(
+overlay Cut {
+  state presses = 0
+  root Panel(key: "cut.root", style: { kind: "OVERLAY"; width: 200; height: 200; padding: 0 }) {
+    Panel(key: "cut.diamond", style: { kind: "OVERLAY"; width: 200; height: 200; padding: 0; background: #FF0000; clipShape: "diamond" }) {
+      Panel(key: "cut.inside", style: { width: 200; height: 200 },
+            behaviors: [{ id: "strata.pointer", action: e => { if e.phase == "press" { presses = presses + 1 } } }])
+    }
+    Text(key: "cut.presses", text: `${presses}`, layout: { position: "ABSOLUTE", inset: { left: 0, top: 0 } })
+  }
+}
+)";
+    const auto diamond_bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext diamond_application("cut-diamond", diamond_bundle);
+    surface = compiled_surface(diamond_application, resources, diamond, "Cut", 200.0, 200.0, false);
+    static_cast<void>(surface->frame(now += 16'000'000));
+    press(ui::Point{190.0, 190.0});
+    check(presses() == "0", "a press in a diamond clip's corner still hit what fills it");
+    press(ui::Point{100.0, 100.0});
+    check(presses() == "1", "a press inside a diamond clip did not hit what fills it: " + presses());
 }
 
 void test_chart_inspects_selects_and_hides_series(const std::filesystem::path& resources) {
