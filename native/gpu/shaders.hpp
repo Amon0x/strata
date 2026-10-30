@@ -178,12 +178,13 @@ float median3(float r, float g, float b) {
 }
 
 /**
- * The alpha a grayscale glyph's coverage contributes in this ink: host::text_coverage. Light ink
- * has its midtones weighted up, as a linear-light blend would; dark ink stays near its outline.
+ * The alpha a grayscale glyph's coverage contributes in this ink: host::text_coverage. Coverage is
+ * raised to a power that falls with the ink's lightness: light ink's faint edges are lifted, dark
+ * ink's thinned, fitted to how Chromium draws the same glyphs.
  */
 float strataTextCoverage(float coverage, float3 ink) {
-    float strength = 0.12 + 0.68 * dot(ink, float3(0.2126, 0.7152, 0.0722));
-    return saturate(coverage + strength * coverage * (1.0 - coverage));
+    float lightness = dot(ink, float3(0.2126, 0.7152, 0.0722));
+    return pow(saturate(coverage), 1.46 - 0.94 * lightness);
 }
 
 /**

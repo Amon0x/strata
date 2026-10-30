@@ -59,15 +59,6 @@ enum class GlyphHinting : std::uint8_t {
     full,
 };
 
-/**
- * Below this physical pixel size a stem is about a pixel wide or less, and one that straddles two
- * pixel columns reads as two faint half-bright ones: coverage text this small has its midtones
- * weighted toward solid (small_text_transfer_strength), on top of the draw-time weighting by ink.
- * Its shape, quarter-pixel positions and light hinting stay as at every other size.
- */
-inline constexpr double small_text_physical_pixel_size = 15.0;
-/** The midtone weighting baked into small glyphs (see CoverageRasterConfig::transfer_strength). */
-inline constexpr double small_text_transfer_strength = 0.6;
 
 struct CoverageRasterConfig final {
     std::uint32_t maximum_dimension = 1'024U;

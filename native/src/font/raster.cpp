@@ -346,11 +346,6 @@ rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const do
     };
     FT_Set_Transform(face, &matrix, &translation);
 
-    // Small text has its midtones weighted toward solid (see small_text_physical_pixel_size).
-    const double transfer_strength =
-        physical_pixel_size < small_text_physical_pixel_size
-            ? std::max(config.transfer_strength, small_text_transfer_strength)
-            : config.transfer_strength;
     const FT_Error load_error = FT_Load_Glyph(face, glyph, load_flags(config.hinting));
     if (load_error != FT_Err_Ok)
         freetype_error("glyph loading", load_error);
@@ -406,7 +401,7 @@ rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const do
                                     config.padding_pixels;
         for (std::uint32_t column = 0U; column < source.width; ++column) {
             destination[column] =
-                gray_value(source, source_bytes[column], transfer_strength);
+                gray_value(source, source_bytes[column], config.transfer_strength);
         }
     }
 

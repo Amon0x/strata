@@ -309,15 +309,12 @@ retain quarter-pixel horizontal positioning, and glyphs are grid-fitted vertical
 (FreeType's light hinting, as Skia's "slight"), so baselines, x-heights and horizontal bars land on
 whole pixels while stems keep their true width at every horizontal phase.
 
-Below 15 physical pixels a stem is about a pixel wide, and one that falls between two pixel columns
-would read as two faint half-bright ones: glyphs that small have their midtones weighted further
-toward solid, keeping their shape and spacing. Every platform rasterizes the same way, so text looks
-the same on each.
-
 The atlas holds plain coverage; how much each glyph contributes is decided when it is drawn, from
-the ink it is drawn in. Light ink has its midtones weighted up, the way a linear-light blend would,
-so it does not thin out over a dark surface, and dark ink is left close to its outline so it does
-not turn heavy over a light one. The same glyphs therefore serve both sides of a [tone](strata-language.md#tone)
+the ink it is drawn in. Coverage is raised to a power that falls with the ink's lightness, fitted to
+how Chromium (DirectWrite on Windows) draws the same glyphs: light ink's faint edges are lifted, so
+it does not thin out over a dark surface, and dark ink's are thinned, so it does not turn heavy over
+a light one, while fully covered pixels stay as they are. Every platform rasterizes and blends the
+same way, so text looks the same on each. The same glyphs therefore serve both sides of a [tone](strata-language.md#tone)
 change. An application chooses the faces behind the two ids, and may prefer the platform's own
 interface face; see [application manifests](desktop-hosting.md#application-manifests-and-preview).
 
