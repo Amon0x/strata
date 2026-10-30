@@ -310,7 +310,13 @@ void draw_content(WidgetRenderScope& scope) {
             image_shape(scope, value);
             continue;
         }
-        std::optional<PathShape> shape = path_shape_from_value(&value);
+        // A shape computed at runtime can be malformed; it is left out, not the frame.
+        std::optional<PathShape> shape;
+        try {
+            shape = path_shape_from_value(&value);
+        } catch (const std::invalid_argument&) {
+            continue;
+        }
         if (shape.has_value())
             run.push_back(std::move(*shape));
     }

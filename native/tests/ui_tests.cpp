@@ -2004,6 +2004,11 @@ void test_vector_shape_tessellation() {
         rejected = true;
     }
     check(rejected, "an unsupported path command must be rejected");
+    // Numbers formatted shortest, as a script computes them, may carry an exponent.
+    const ui::Path tiny = ui::Path::parse("M 1e-05 2.5E+1 C 1e-3 0, 0.5 -1e-2, 1 1");
+    check(tiny.segments().size() == 2U && tiny.segments()[0].to == ui::Point{1.0e-5, 25.0} &&
+              tiny.segments()[1].to == ui::Point{1.0, 1.0},
+          "path coordinates with exponents were not read");
 
     ui::PathShape filled;
     filled.path = parsed;

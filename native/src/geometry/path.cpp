@@ -126,6 +126,20 @@ private:
         if (offset_ == begin) {
             throw std::invalid_argument("path command is missing a number");
         }
+        // An exponent, as SVG allows and as numbers formatted shortest come out: 1e-05.
+        if (offset_ < source_.size() && (source_[offset_] == 'e' || source_[offset_] == 'E')) {
+            std::size_t exponent = offset_ + 1U;
+            if (exponent < source_.size() && (source_[exponent] == '-' || source_[exponent] == '+'))
+                ++exponent;
+            if (exponent < source_.size() &&
+                std::isdigit(static_cast<unsigned char>(source_[exponent])) != 0) {
+                offset_ = exponent;
+                while (offset_ < source_.size() &&
+                       std::isdigit(static_cast<unsigned char>(source_[offset_])) != 0) {
+                    ++offset_;
+                }
+            }
+        }
         return std::stod(std::string(source_.substr(begin, offset_ - begin)));
     }
 
