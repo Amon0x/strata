@@ -27,6 +27,31 @@ Blueprint tab, 1500×950, D3D11, uncapped, RelWithDebInfo at `973d406`:
 | Node drag | 2.0 ms (p95 2.8) | one node transform, its wires |
 | Wheel zoom | 5.65 ms (p95 11.2, ~9 ms of it glyph rasterization) | one view transform |
 
+### Status
+
+| Phase | State | What landed |
+|---|---|---|
+| 0 Gates | done | Per-frame work counters in the ABI frame info and the desktop report; `strata_benchmark_blueprint`; a `settle` scenario step |
+| 1 Frames on demand, raster off the frame | done | `idle`/`unchanged` per frame; the showcase host skips drawing unchanged frames unless a live material is shown; persistent raster pool; per-frame rescale budget |
+| 2 Layers | in part | Presentation-only frames update group table entries and keep the stream; a zooming group keeps its raster density until it settles; ZoomView reports its view at rest. Not yet: per-layer display lists, instanced drawing, delta packets |
+| 3 Canvas, layout, hit testing | in part | Hit entries kept relative to their presentation group and placed again when only groups moved. Not yet: parent-relative layout records, a Canvas primitive with culling and level of detail |
+| 4 Bindings and path state | not started | |
+| 5 Compositor thread | not started | |
+| 6 Interpreter | in part | In-place item functions; hashed, ring-kept, self-limiting memoization of every function |
+
+Blueprint, core CPU per frame, at design time and now:
+
+| Interaction | Design time | Now |
+|---|---|---|
+| Idle | 0.32 ms | 0.02 ms, no work |
+| Pan | 0.93 ms | 0.18 ms |
+| Wheel zoom | 5.65 ms (p95 11.2) | 0.38 ms (p95 2.2) |
+| Node drag | 2.0 ms | 1.48 ms |
+
+A node drag is now split between describing the page (about 40%: the page body and its
+`wireShapes` script, which recomputes every wire when any node moves), the drag handler, and the
+render, submission and packet stages (about 30%, the part that still grows with scene size).
+
 ## 2. The pipeline today
 
 Everything below runs on the host loop thread, in order, every frame something changed.
