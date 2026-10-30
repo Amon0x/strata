@@ -80,3 +80,6 @@ context-snapshot.json
 # Python tooling
 __pycache__/
 *.py[cod]
+
+# Local agent instructions
+CLAUDE.md
