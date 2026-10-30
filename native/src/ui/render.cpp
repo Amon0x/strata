@@ -740,7 +740,6 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             if (subtree_drawn && subtree_generations_match &&
                 subtree_node_matches && subtree_presentation_matches && subtree_layout_matches &&
                 subtree_status_matches && subtree_context_matches) {
-                found->second.visited = true;
                 counters.fragments_reused += retained.subtree_node_count;
                 counters.overlays_rendered += retained.subtree_overlay_count;
                 ++counters.retained_subtrees_reused;
@@ -781,7 +780,6 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                     retained.ordered_child_layout_generations[index] =
                         child_record != nullptr ? child_record->render_generation : 0U;
                 }
-                found->second.visited = true;
                 counters.fragments_reused += retained.subtree_node_count;
                 counters.overlays_rendered += retained.subtree_overlay_count;
                 ++counters.retained_subtrees_translated;
@@ -815,7 +813,6 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 retained.inherited_group == inherited_group &&
                 retained.render_portals == render_portals &&
                 retained.subtree_translation == Point{}) {
-                found->second.visited = true;
                 ++counters.fragments_reused;
                 append_fragment(output, retained.prefix, counters);
                 for (const std::uint64_t child_identity : retained.ordered_children) {
@@ -972,14 +969,12 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 Impl::snapshot(node, *record, layout),
                 std::move(fragment),
                 {},
-                true,
             };
             found =
                 implementation_->fragments.insert_or_assign(node.identity(), std::move(next)).first;
             ++counters.fragments_built;
         } else {
             found->second.presentation_translation = fragment_translation;
-            found->second.visited = true;
             ++counters.fragments_reused;
         }
         const std::size_t composition_prefix_begin = output.size();

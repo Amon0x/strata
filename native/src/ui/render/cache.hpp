@@ -138,7 +138,6 @@ struct RenderEngine::Impl final {
         LayoutSnapshot layout;
         std::vector<RenderCommand> commands;
         Point presentation_translation;
-        bool visited = false;
         std::optional<PresentationPlan> presentation = std::nullopt;
         std::optional<CompositionPlan> composition = std::nullopt;
     };

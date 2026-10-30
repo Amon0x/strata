@@ -91,8 +91,12 @@ check), so the parent costs O(children).
 - [ ] Recomposing appends runs of unchanged children as slices of the parent's previous stream (one
   slice per run, not per child) and visits only the children whose subtree, presentation or layout
   generation moved. Which children moved comes from the tree's dirty set, not from asking each child.
-- [ ] Fragment pruning no longer depends on every reused fragment being visited each frame (today
-  `visited` marks it); unchanged children skipped by a slice must stay cached.
+- [ ] Unchanged children skipped by a slice stay cached: fragments are pruned only when the tree's
+  structure changes, so skipping their visit is safe (the old `visited` mark was never read and is
+  gone).
+- [ ] Before building, profile where a reused child's ~180 ns goes: cutting its hash lookups (one
+  record lookup per child instead of three, input state read only when needed) did not move the
+  measurement, so the lookups are not it.
 - [ ] Measure: hovering across the 2,000-cell grid costs render under 0.05 ms.
 
 ## Phase 3: a cold page costs less per node
@@ -102,6 +106,8 @@ projecting themes, 3 ms reconciling, about 10 µs per node in all. Timing parts 
 by hand found no single cost: token resolution in authored styles and per-node property setup each
 take about 2 µs a node, and removing two whole-map copies a node was within noise.
 
-- [ ] Profile a cold start with a sampling profiler (Windows Performance Recorder, or the Visual
-  Studio profiler) instead of hand-placed timers, and fix what it ranks first.
+- [ ] Profile a cold start with a sampling profiler instead of hand-placed timers, and fix what it
+  ranks first. The Windows Performance Toolkit is installed (`xperf`, `wpaexporter`), but kernel
+  sampling needs an elevated shell: `wpr -start CPU`, run the page, `wpr -stop cold.etl`, from an
+  administrator prompt.
 - [ ] Measure: the hover page's first frame describes in under 15 ms.
