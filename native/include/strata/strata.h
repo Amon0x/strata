@@ -1992,7 +1992,16 @@ typedef struct strata_surface_frame_info {
  * coverage per colour channel, and its batches blend with STRATA_RENDER_BLEND_SUBPIXEL_TEXT.
  */
 #define STRATA_RENDER_PACKET_VERSION_23 UINT32_C(23)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_23
+/*
+ * Version 24 adds vector text, drawn from glyph outlines on the GPU with nothing rasterized for
+ * it. Resource record 5 appends to a Surface's vector glyph buffers (named by its id, released
+ * by record 2 like a texture): glyph records, outline segments and bands, each as where the
+ * appended part starts, how many it holds and its values. Draw modes 13 (gray) and 14 (per
+ * subpixel, blending with STRATA_RENDER_BLEND_SUBPIXEL_TEXT) measure each pixel's coverage from
+ * the buffers their batch names as its texture; <strata/render_packet.hpp> documents the layout.
+ */
+#define STRATA_RENDER_PACKET_VERSION_24 UINT32_C(24)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_24
 /*
  * The deepest balanced content-effect nesting a packet may have. It guards the decoder against a
  * malformed or hostile stream, not what a renderer can draw: the planner, the decoder and the

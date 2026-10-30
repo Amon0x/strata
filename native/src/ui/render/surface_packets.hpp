@@ -9,6 +9,7 @@
 #include "resource/runtime_images.hpp"
 #include "ui/render/packet.hpp"
 #include "ui/render/surface_textures.hpp"
+#include "ui/render/vector_glyphs.hpp"
 
 namespace strata::ui {
 
@@ -61,6 +62,8 @@ class SurfacePackets final {
     font::GlyphAtlas glyph_atlas_;
     /** Shape coverage masks, on pages of their own so shapes never evict glyphs. */
     font::GlyphAtlas shape_atlas_;
+    /** Glyphs drawn from their outlines on the GPU. */
+    VectorGlyphPool vector_glyphs_;
     SurfaceTextures textures_;
     HostRenderPacketCache cache_;
     bool release_prepared_ = false;

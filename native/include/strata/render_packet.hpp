@@ -42,6 +42,8 @@ inline constexpr std::uint32_t resource_image = 3U;
  * of the region is replaced, as an upload of the same region would replace it.
  */
 inline constexpr std::uint32_t resource_raster = 4U;
+/** An append to a Surface's vector glyph buffers (VectorGlyphBuffers), named by `texture`. */
+inline constexpr std::uint32_t resource_vector_glyphs = 5U;
 inline constexpr std::uint32_t packet_flag_geometry_payload = 1U;
 inline constexpr std::uint32_t packet_flag_geometry_patches = 2U;
 /**
@@ -77,6 +79,28 @@ inline constexpr std::uint32_t texture_sampling_nearest = 0U;
 inline constexpr std::uint32_t texture_sampling_linear = 1U;
 
 /**
+ * What a vector glyph append adds to each of a Surface's three buffers, which only grow: where the
+ * appended part starts, counted in the buffer's own elements, and the elements' little-endian
+ * bytes. Records are 32 bytes (VectorGlyphRecord in gpu/shaders.hpp: bounds in font units, then
+ * u32 segment base, band base, band count and segment count), segments 16 (float x0 y0 x1 y1,
+ * font units) and band entries 4 (u32: per glyph, band count + 1 offsets, then each band's
+ * segment indices relative to its segment base). A draw in mode 13 or 14 reads them
+ * (vectorTextCoverage in gpu/shaders.hpp).
+ */
+struct VectorGlyphBuffers final {
+    std::uint32_t first_record = 0U;
+    std::vector<std::uint8_t> records;
+    std::uint32_t first_segment = 0U;
+    std::vector<std::uint8_t> segments;
+    std::uint32_t first_band = 0U;
+    std::vector<std::uint8_t> bands;
+};
+
+inline constexpr std::size_t vector_glyph_record_bytes = 32U;
+inline constexpr std::size_t vector_glyph_segment_bytes = 16U;
+inline constexpr std::size_t vector_glyph_band_bytes = 4U;
+
+/**
  * One ordered GPU-resource mutation decoded from the current packet. An image's format is
  * texture_format_rgba8 and its bytes are width * height straight-alpha RGBA8 texels.
  */
@@ -92,6 +116,8 @@ struct ResourceOperation final {
     std::vector<std::uint8_t> bytes;
     /** A raster operation's job, validated against its region and format by the decoder. */
     RasterJob raster;
+    /** A vector glyph append's buffers (resource_vector_glyphs). */
+    VectorGlyphBuffers vector_glyphs;
 };
 
 struct Scissor final {

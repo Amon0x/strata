@@ -18,6 +18,7 @@
 #include "resource/image.hpp"
 #include "ui/render.hpp"
 #include "ui/render/submission.hpp"
+#include "ui/render/vector_glyphs.hpp"
 
 namespace strata::ui::submission_detail {
 
@@ -41,8 +42,19 @@ struct Transform final {
 
 struct PreparedGlyph final {
     Rect bounds;
+    /** An atlas glyph's texels; a vector glyph's outline bounds in font units (left, top, width, height down). */
     TextureRegion uv;
     double baseline = 0.0;
+    /**
+     * A vector glyph's record (VectorGlyphPool), and where its font units land: a point (x, y) of
+     * the outline is at pen + scale * (x + shear * y, -y), logical pixels from the run's origin.
+     */
+    std::uint32_t vector_glyph = 0U;
+    /** Its variant fitted to the pixel grid at the size it is laid out for, if it is upright. */
+    std::optional<std::uint32_t> fitted_glyph;
+    Point pen;
+    double scale = 0.0;
+    double shear = 0.0;
 };
 
 struct PreparedText final {
@@ -59,6 +71,12 @@ struct PreparedText final {
     bool shadow = false;
     /** Density beyond the display scale its glyphs were rasterized at (a zoomed group's). */
     double raster_scale = 1.0;
+    /**
+     * Its glyphs are drawn from their outlines on the GPU (VectorGlyphPool, `texture` naming the
+     * pool's buffers): exact at any scale, nothing rasterized. Per subpixel in this order, or gray.
+     */
+    bool vector = false;
+    font::SubpixelOrder vector_subpixel = font::SubpixelOrder::none;
 };
 
 using PreparedTextPtr = std::shared_ptr<const PreparedText>;
@@ -160,6 +178,14 @@ struct PreparedTextCacheEntry final {
     double raster_scale = 1.0;
     bool subpixel = false;
     bool unhinted = false;
+    /**
+     * Some of its glyphs came from the atlas: the atlas generation and the raster choices above
+     * hold them. A run drawn wholly from vector glyphs is the same at any raster scale.
+     */
+    bool atlas = true;
+    font::SubpixelOrder vector_subpixel = font::SubpixelOrder::none;
+    /** Device pixels a logical pixel of its vector glyphs is laid out at (0: not upright). */
+    double vector_scale = 0.0;
     std::vector<PreparedTextPtr> groups;
 };
 
@@ -226,6 +252,8 @@ struct PreparationCache final {
     std::uint64_t planned_atlas_generation = 0U;
     /** Where shape coverage masks pack, when the owner provides one, and its planned generation. */
     font::GlyphAtlas* shape_atlas = nullptr;
+    /** Where text drawn from outlines keeps its glyphs, when the owner provides one. */
+    VectorGlyphPool* vector_glyphs = nullptr;
     /**
      * Tiles of large shapes found empty (0), fully covered (1), or (for joined shapes) one
      * opaque colour throughout (2, the colour's RGBA packed above the low byte). They take no

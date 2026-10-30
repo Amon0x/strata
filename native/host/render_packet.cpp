@@ -125,6 +125,24 @@ class Reader final {
         input.exhausted("texture release");
         return result;
     }
+    if (kind == resource_vector_glyphs) {
+        const auto block = [&input](std::uint32_t& first, std::vector<std::uint8_t>& bytes,
+                                    const std::size_t element) {
+            first = input.u32();
+            const std::uint32_t count = input.count();
+            if (static_cast<std::uint64_t>(first) + count > std::numeric_limits<std::uint32_t>::max())
+                throw std::invalid_argument("vector glyph append exceeds its buffer's range");
+            const std::span<const std::uint8_t> values =
+                input.raw(static_cast<std::size_t>(count) * element);
+            bytes.assign(values.begin(), values.end());
+        };
+        VectorGlyphBuffers& buffers = result.vector_glyphs;
+        block(buffers.first_record, buffers.records, vector_glyph_record_bytes);
+        block(buffers.first_segment, buffers.segments, vector_glyph_segment_bytes);
+        block(buffers.first_band, buffers.bands, vector_glyph_band_bytes);
+        input.exhausted("vector glyph append");
+        return result;
+    }
     if (kind == resource_image) {
         result.format = texture_format_rgba8;
         result.sampling = input.u32();
@@ -433,6 +451,9 @@ using TextureChanges = std::map<std::string, std::vector<std::array<double, 4U>>
                                              TextureSizes& sizes) {
     TextureChanges result;
     for (const ResourceOperation& operation : operations) {
+        // Vector glyph buffers only grow: what a draw already reads stays as it was.
+        if (operation.kind == resource_vector_glyphs)
+            continue;
         std::vector<std::array<double, 4U>>& rectangles = result[operation.texture];
         if (operation.kind == resource_upload || operation.kind == resource_raster) {
             const auto size = sizes.find(operation.texture);

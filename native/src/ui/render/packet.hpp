@@ -15,7 +15,10 @@
 namespace strata::ui {
 
 /** Packet format the encoder writes. The C ABI pins it to STRATA_RENDER_PACKET_VERSION_CURRENT. */
-inline constexpr std::uint32_t render_packet_version = 23U;
+inline constexpr std::uint32_t render_packet_version = 24U;
+
+/** The resource record that appends to a Surface's vector glyph buffers (see VectorGlyphPool). */
+inline constexpr std::uint32_t packet_resource_vector_glyphs = 5U;
 
 /** A draw batch's clip-adapted blend; the C ABI pins these to STRATA_RENDER_BLEND_*. */
 enum class PacketBlend : std::uint8_t {
@@ -72,6 +75,7 @@ struct HostRenderPacketTelemetry final {
 
 class RenderCommandBuffer;
 class TextEngine;
+class VectorGlyphPool;
 
 /** Little-endian logical-command packet v3 used by command-stream inspection/tests. */
 [[nodiscard]] std::vector<std::uint8_t> encode_render_packet(const RenderCommandBuffer& commands,
@@ -130,6 +134,11 @@ class HostRenderPacketCache final {
                              std::span<const std::string> textures);
     /** The atlas shape coverage masks pack into, beside the glyph atlas; it must outlive this. */
     void set_shape_atlas(font::GlyphAtlas* atlas) noexcept;
+    /**
+     * Where text drawn from its outlines keeps its glyphs; it must outlive this. Their buffers
+     * reach the host in this cache's packets, and its terminal packet releases them.
+     */
+    void set_vector_glyphs(VectorGlyphPool* glyphs) noexcept;
     void clear() noexcept;
     [[nodiscard]] const std::vector<std::uint8_t>& packet() const noexcept;
     [[nodiscard]] const HostRenderPacketTelemetry& telemetry() const noexcept;
@@ -138,6 +147,7 @@ class HostRenderPacketCache final {
     font::SubpixelOrder text_subpixel_ = font::SubpixelOrder::none;
     RenderSubmissionCache submission_cache_;
     font::GlyphAtlas* shape_atlas_ = nullptr;
+    VectorGlyphPool* vector_glyphs_ = nullptr;
     std::vector<std::uint8_t> geometry_packet_;
     std::vector<std::uint8_t> reuse_packet_;
     std::vector<std::uint8_t> resource_packet_;

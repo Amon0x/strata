@@ -148,7 +148,8 @@ VkPipeline Renderer::Impl::pipeline(std::string_view program, Blend blend, VkFor
 
 VkDescriptorSet Renderer::Impl::descriptor_set(Slice constants,
                                                const gpu::RoundedClipConstants& clips,
-                                               Image& source, Image& backdrop) {
+                                               Image& source, Image& backdrop,
+                                               const VectorGlyphs* const vectors) {
     // An image already shader-readable has had no write since the barrier that made it so;
     // read-after-read needs no barrier, which keeps resident textures inside an open pass.
     const auto readable = [this](Image& image) {
@@ -167,10 +168,11 @@ VkDescriptorSet Renderer::Impl::descriptor_set(Slice constants,
         if (pool_index == pools.size()) {
             const VkDescriptorPoolSize sizes[]{{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3072},
                                                {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 2048},
-                                               {VK_DESCRIPTOR_TYPE_SAMPLER, 1024}};
+                                               {VK_DESCRIPTOR_TYPE_SAMPLER, 1024},
+                                               {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3072}};
             VkDescriptorPoolCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
             info.maxSets = 1024;
-            info.poolSizeCount = 3;
+            info.poolSizeCount = 4;
             info.pPoolSizes = sizes;
             VkDescriptorPool pool{};
             check(vkCreateDescriptorPool(device.device, &info, nullptr, &pool),
@@ -197,6 +199,14 @@ VkDescriptorSet Renderer::Impl::descriptor_set(Slice constants,
                                    {VK_NULL_HANDLE, backdrop.view, backdrop.layout},
                                    {source.filter == VK_FILTER_NEAREST ? nearest : linear,
                                     VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED}};
+    // Vector text reads its Surface's glyph buffers; every other draw binds an empty one.
+    VkDescriptorBufferInfo storage[3]{};
+    for (std::size_t i = 0; i < 3; ++i) {
+        const Buffer* buffer = vectors != nullptr && vectors->buffers[i] != nullptr
+                                   ? vectors->buffers[i].get()
+                                   : empty_storage.get();
+        storage[i] = {buffer->buffer, 0, VK_WHOLE_SIZE};
+    }
     VkWriteDescriptorSet writes[descriptor_bindings]{};
     for (std::uint32_t i = 0; i < descriptor_bindings; ++i) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -206,8 +216,10 @@ VkDescriptorSet Renderer::Impl::descriptor_set(Slice constants,
         writes[i].descriptorType = descriptor_type(i);
         if (i < 3)
             writes[i].pBufferInfo = &buffers[i];
-        else
+        else if (i < 6)
             writes[i].pImageInfo = &images[i - 3];
+        else
+            writes[i].pBufferInfo = &storage[i - 6];
     }
     vkUpdateDescriptorSets(device.device, descriptor_bindings, writes, 0, nullptr);
     return set;
@@ -224,7 +236,13 @@ void Renderer::Impl::draw(Target& target, std::string_view program, Blend blend,
     if (!width || !height || (batch && !batch->index_count))
         return;
     const auto selected = pipeline(program, blend, target.format, batch == nullptr);
-    const auto set = descriptor_set(constants, clips, source, backdrop);
+    // A batch of vector text names its Surface's glyph buffers as its texture.
+    const VectorGlyphs* vectors = nullptr;
+    if (batch != nullptr && batch->texture.has_value()) {
+        if (const auto found = vector_glyphs.find(*batch->texture); found != vector_glyphs.end())
+            vectors = &found->second;
+    }
+    const auto set = descriptor_set(constants, clips, source, backdrop, vectors);
     if (!open_pass || open_pass->image != target.image || open_pass->view != target.view ||
         open_pass->width != target.width || open_pass->height != target.height ||
         open_pass->format != target.format) {

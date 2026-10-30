@@ -72,12 +72,16 @@ inline gpu::RoundedClipConstants clip_constants(std::span<const host::RoundedCli
     }
     return data;
 }
-/** Descriptor set: frame, rounded-clip and presentation-group buffers; two images; a sampler. */
-inline constexpr std::uint32_t descriptor_bindings = 6;
+/**
+ * Descriptor set: frame, rounded-clip and presentation-group buffers; two images; a sampler; and
+ * the vector glyph buffers vector text reads (records, segments, bands).
+ */
+inline constexpr std::uint32_t descriptor_bindings = 9;
 inline constexpr VkDescriptorType descriptor_type(std::uint32_t binding) noexcept {
-    return binding < 3   ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-           : binding < 5 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-                         : VK_DESCRIPTOR_TYPE_SAMPLER;
+    return binding < 3    ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+           : binding < 5  ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+           : binding == 5 ? VK_DESCRIPTOR_TYPE_SAMPLER
+                          : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 }
 inline Target target_of(Image& image) {
     return {image.image, image.view, image.format, image.width, image.height, image.layout};
@@ -150,6 +154,17 @@ struct Renderer::Impl {
     std::vector<std::string_view> layer_materials;
     std::vector<const std::map<std::uint32_t, Pass>*> layer_effects;
     std::map<std::string, std::unique_ptr<Image>, std::less<>> textures;
+    /**
+     * A Surface's vector glyph buffers (records, segments, bands) in GPU memory, which only grow,
+     * beside what each holds: a full one is remade larger from it.
+     */
+    struct VectorGlyphs {
+        std::array<std::unique_ptr<Buffer>, 3> buffers;
+        std::array<std::vector<std::uint8_t>, 3> bytes;
+    };
+    std::map<std::string, VectorGlyphs, std::less<>> vector_glyphs;
+    /** What a draw without vector text binds where the vector glyph buffers go. */
+    std::unique_ptr<Buffer> empty_storage;
     /** Host-written geometry: one copy per frame slot, refreshed when the layer's content moves. */
     struct SlotGeometry {
         std::unique_ptr<Buffer> vertices, indices;
@@ -280,7 +295,10 @@ struct Renderer::Impl {
     VkRenderPass render_pass(VkFormat format);
     VkPipeline pipeline(std::string_view program, Blend blend, VkFormat format, bool full);
     VkDescriptorSet descriptor_set(Slice constants, const gpu::RoundedClipConstants& clips,
-                                   Image& source, Image& backdrop);
+                                   Image& source, Image& backdrop,
+                                   const VectorGlyphs* vectors = nullptr);
+    /** Appends a packet's vector glyphs to their Surface's buffers; true if it copied any. */
+    bool append_vector_glyphs(const host::ResourceOperation& operation);
     void draw(Target& target, std::string_view program, Blend blend, Slice constants,
               const gpu::RoundedClipConstants& clips, Image& source, Image& backdrop,
               host::Scissor scissor, const host::DrawBatch* batch = nullptr, Slice vertices = {},

@@ -18,6 +18,7 @@
 #include "font/atlas.hpp"
 #include "resource/image.hpp"
 #include "ui/render/submission.hpp"
+#include "ui/render/vector_glyphs.hpp"
 #include "ui/text.hpp"
 
 namespace strata::ui {
@@ -107,6 +108,43 @@ class Writer final {
     return std::move(output).take();
 }
 
+[[nodiscard]] std::uint32_t checked_count(std::size_t value, const char* label);
+
+/**
+ * Appends to a Surface's vector glyph buffers: the buffers' id, then for the records (32 bytes
+ * each), the segments (four floats) and the bands (one u32) in turn, where the appended part
+ * starts, how many it holds, and its little-endian values.
+ */
+[[nodiscard]] Bytes resource_payload(const std::string_view id, const VectorGlyphAppend& append) {
+    Writer output(64U + append.records.size() * sizeof(VectorGlyphRecord) +
+                  (append.segments.size() + append.bands.size()) * 4U);
+    output.text(id);
+    const auto value = [&output](const auto word) {
+        output.integer(std::bit_cast<std::uint32_t>(word));
+    };
+    output.integer(append.first_record);
+    output.integer(checked_count(append.records.size(), "vector glyph record count"));
+    for (const VectorGlyphRecord& record : append.records) {
+        value(record.left);
+        value(record.bottom);
+        value(record.right);
+        value(record.top);
+        value(record.segment_base);
+        value(record.band_base);
+        value(record.band_count);
+        value(record.segment_count);
+    }
+    output.integer(append.first_segment);
+    output.integer(checked_count(append.segments.size() / 4U, "vector glyph segment count"));
+    for (const float number : append.segments)
+        value(number);
+    output.integer(append.first_band);
+    output.integer(checked_count(append.bands.size(), "vector glyph band count"));
+    for (const std::uint32_t index : append.bands)
+        value(index);
+    return std::move(output).take();
+}
+
 void append_terminal_release(std::vector<font::AtlasOperation>& releases,
                              const std::string_view host_id) {
     if (host_id.empty()) {
@@ -126,8 +164,6 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
         {},
     });
 }
-
-[[nodiscard]] std::uint32_t checked_count(std::size_t value, const char* label);
 
 /**
  * The blend and clip coverage a draw batch is submitted with. Under a rounded clip an opaque draw
@@ -394,7 +430,11 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
               const std::uint64_t geometry_epoch, const std::span<const RenderGroup> groups,
               const std::span<const TextureUpload> texture_uploads,
               const std::span<const font::AtlasOperation> resources,
-              const bool include_geometry = true, const bool patch_geometry = false) {
+              const bool include_geometry = true, const bool patch_geometry = false,
+              const VectorGlyphPool* const vector_glyphs = nullptr,
+              const VectorGlyphAppend* const vector_append = nullptr) {
+    const bool appends_vectors = vector_glyphs != nullptr && vector_append != nullptr &&
+                                 !vector_append->empty();
     std::size_t reserve = 60U + groups.size() * 44U;
     if (include_geometry && !patch_geometry) {
         reserve += submission.vertex_bytes.size() +
@@ -423,8 +463,9 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
     if (texture_uploads.size() > std::numeric_limits<std::size_t>::max() - resources.size()) {
         throw std::length_error("render resource count exceeds size_t");
     }
-    output.integer(
-        checked_count(texture_uploads.size() + resources.size(), "render resource count"));
+    output.integer(checked_count(texture_uploads.size() + resources.size() +
+                                     (appends_vectors ? 1U : 0U),
+                                 "render resource count"));
     output.integer(include_geometry ? checked_count(submission.batches.size(), "render batch count")
                                     : 0U);
     output.integer(frame_index);
@@ -464,6 +505,10 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
     for (const TextureUpload& upload : texture_uploads) {
         const Bytes payload = resource_payload(upload);
         record(output, 3U, payload);
+    }
+    if (appends_vectors) {
+        const Bytes payload = resource_payload(vector_glyphs->id(), *vector_append);
+        record(output, packet_resource_vector_glyphs, payload);
     }
     if (include_geometry) {
         if (patch_geometry) {
@@ -625,6 +670,9 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         textures->plan(submission, !submission_reused || retrying_incomplete_frame);
     const std::span<const TextureUpload> texture_uploads =
         textures != nullptr ? textures->uploads() : std::span<const TextureUpload>{};
+    // Glyphs made for vector text since the last packet: the host appends them to its buffers.
+    const VectorGlyphAppend vector_append =
+        vector_glyphs_ != nullptr ? vector_glyphs_->pending() : VectorGlyphAppend{};
     std::vector<font::AtlasOperation> releases_and_atlas;
     std::span<const font::AtlasOperation> resources = atlas_operations;
     if (textures != nullptr && !textures->releases().empty()) {
@@ -706,7 +754,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                     .count();
         }
     }
-    if (texture_uploads.empty() && resources.empty()) {
+    if (texture_uploads.empty() && resources.empty() && vector_append.empty()) {
         if (geometry_changed) {
             current_packet_ = &geometry_packet_;
         } else {
@@ -722,9 +770,9 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         const auto resource_encode_started = profile_cold_encode
                                                  ? std::chrono::steady_clock::now()
                                                  : std::chrono::steady_clock::time_point{};
-        std::vector<std::uint8_t> next_resources =
-            encode_packet(submission, frame_index, encoded_geometry_epoch, groups_,
-                          texture_uploads, resources, geometry_changed, patch_geometry);
+        std::vector<std::uint8_t> next_resources = encode_packet(
+            submission, frame_index, encoded_geometry_epoch, groups_, texture_uploads, resources,
+            geometry_changed, patch_geometry, vector_glyphs_, &vector_append);
         static_assert(noexcept(resource_packet_.swap(next_resources)));
         resource_packet_.swap(next_resources);
         current_packet_ = &resource_packet_;
@@ -742,6 +790,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     glyph_atlas.commit_operations();
     if (shape_atlas_ != nullptr)
         shape_atlas_->commit_operations();
+    if (vector_glyphs_ != nullptr)
+        vector_glyphs_->commit();
     planned_draws_ = submission.planned_draws;
     skipped_draws_ = submission.skipped_draws;
     geometry_epoch_ = encoded_geometry_epoch;
@@ -797,6 +847,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release
     }
     for (const std::string& host_id : textures)
         append_terminal_release(operations, host_id);
+    if (vector_glyphs_ != nullptr && vector_glyphs_->sent())
+        append_terminal_release(operations, vector_glyphs_->id());
     const RenderSubmission empty_submission;
     if (geometry_epoch_ == std::numeric_limits<std::uint64_t>::max()) {
         throw std::overflow_error("render geometry epoch exhausted");
@@ -823,6 +875,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release
     glyph_atlas.commit_terminal_release();
     if (shape_atlas_ != nullptr)
         shape_atlas_->commit_terminal_release();
+    if (vector_glyphs_ != nullptr)
+        vector_glyphs_->clear();
     return resource_packet_;
 }
 
@@ -831,7 +885,15 @@ void HostRenderPacketCache::set_shape_atlas(font::GlyphAtlas* const atlas) noexc
     submission_cache_.set_shape_atlas(atlas);
 }
 
+void HostRenderPacketCache::set_vector_glyphs(VectorGlyphPool* const glyphs) noexcept {
+    vector_glyphs_ = glyphs;
+    submission_cache_.set_vector_glyphs(glyphs);
+}
+
 void HostRenderPacketCache::clear() noexcept {
+    // The host starts over: the next packet carries every vector glyph again.
+    if (vector_glyphs_ != nullptr)
+        vector_glyphs_->resend();
     submission_cache_.clear();
     geometry_packet_.clear();
     reuse_packet_.clear();

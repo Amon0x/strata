@@ -59,16 +59,77 @@ Image& Renderer::Impl::capture(Target& source, host::Scissor region) {
     return captured;
 }
 
+bool Renderer::Impl::append_vector_glyphs(const host::ResourceOperation& operation) {
+    VectorGlyphs& glyphs = vector_glyphs[operation.texture];
+    const host::VectorGlyphBuffers& append = operation.vector_glyphs;
+    const std::array<std::pair<std::uint32_t, const std::vector<std::uint8_t>*>, 3> parts{{
+        {append.first_record, &append.records},
+        {append.first_segment, &append.segments},
+        {append.first_band, &append.bands},
+    }};
+    constexpr std::array<std::size_t, 3> strides{host::vector_glyph_record_bytes,
+                                                 host::vector_glyph_segment_bytes,
+                                                 host::vector_glyph_band_bytes};
+    bool copied = false;
+    for (std::size_t index = 0; index < parts.size(); ++index) {
+        const auto [first, bytes] = parts[index];
+        std::vector<std::uint8_t>& held = glyphs.bytes[index];
+        std::unique_ptr<Buffer>& buffer = glyphs.buffers[index];
+        const std::size_t offset = static_cast<std::size_t>(first) * strides[index];
+        if (offset > held.size())
+            throw std::invalid_argument("vector glyph append leaves a gap in its buffer");
+        // Rewriting what a frame in flight may read takes a new buffer; appending does not.
+        const bool rewrites = offset < held.size();
+        held.resize(offset + bytes->size());
+        std::copy(bytes->begin(), bytes->end(),
+                  held.begin() + static_cast<std::ptrdiff_t>(offset));
+        if (buffer != nullptr && !rewrites && buffer->size >= held.size()) {
+            if (!bytes->empty()) {
+                const Slice slice = arena->upload(bytes->data(), bytes->size());
+                const VkBufferCopy region{slice.offset, offset, bytes->size()};
+                vkCmdCopyBuffer(command, slice.buffer, buffer->buffer, 1, &region);
+                copied = true;
+            }
+            continue;
+        }
+        VkDeviceSize size = std::max<VkDeviceSize>(buffer != nullptr ? buffer->size : 0U, 4096U);
+        while (size < held.size())
+            size *= 2U;
+        retire(std::move(buffer));
+        buffer = std::make_unique<Buffer>(device, size,
+                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                              VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                          true);
+        if (!held.empty()) {
+            const Slice slice = arena->upload(held.data(), held.size());
+            const VkBufferCopy region{slice.offset, 0, held.size()};
+            vkCmdCopyBuffer(command, slice.buffer, buffer->buffer, 1, &region);
+            copied = true;
+        }
+    }
+    return copied;
+}
+
 void Renderer::Impl::resources(const host::RenderPacket& packet) {
     end_pass();
+    bool vectors_copied = false;
     for (const auto& operation : packet.resources) {
         const auto& id = operation.texture;
+        if (operation.kind == host::resource_vector_glyphs) {
+            vectors_copied = append_vector_glyphs(operation) || vectors_copied;
+            continue;
+        }
         forget_live_art(operation, operation.kind != host::resource_upload &&
                                        operation.kind != host::resource_raster);
         if (operation.kind == host::resource_release) {
             if (auto it = textures.find(id); it != textures.end()) {
                 retire(std::move(it->second));
                 textures.erase(it);
+            }
+            if (auto it = vector_glyphs.find(id); it != vector_glyphs.end()) {
+                for (std::unique_ptr<Buffer>& buffer : it->second.buffers)
+                    retire(std::move(buffer));
+                vector_glyphs.erase(it);
             }
             continue;
         }
@@ -128,6 +189,15 @@ void Renderer::Impl::resources(const host::RenderPacket& packet) {
                             static_cast<std::int32_t>(operation.y), 0};
         copy.imageExtent = {operation.width, operation.height, 1};
         vkCmdCopyBufferToImage(command, slice.buffer, image.image, image.layout, 1, &copy);
+    }
+    if (vectors_copied) {
+        // The glyphs copied in are read by the frame's pixel stages.
+        VkMemoryBarrier written{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        written.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        written.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &written, 0, nullptr, 0,
+                             nullptr);
     }
 }
 

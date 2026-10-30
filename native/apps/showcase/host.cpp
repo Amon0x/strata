@@ -1932,6 +1932,7 @@ struct Host::Impl final {
         sample.present_nanos = present_nanos;
         sample.had_draws = had_draws;
         sample.presented = presented;
+        sample.unchanged = !changed;
         last_performance_sample = sample;
         ++rendered_frames;
         last_frame_had_draws = had_draws;

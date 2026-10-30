@@ -870,12 +870,22 @@ void test_surface_frames_encode_complete_packets(const std::filesystem::path& re
     check(full.frame_index == first.frame_index && full.full_geometry_payload &&
               !full.batches.empty() && !full.vertices.empty(),
           "the first Surface frame did not encode complete geometry");
-    std::vector<std::string> atlas_pages;
+    // Text is drawn from its outlines: its glyphs reach the host in the Surface's own buffers.
+    std::vector<std::string> glyph_resources;
     for (const host::ResourceOperation& operation : full.resources) {
-        if (operation.kind == host::resource_create) atlas_pages.push_back(operation.texture);
+        if (operation.kind == host::resource_create ||
+            operation.kind == host::resource_vector_glyphs) {
+            glyph_resources.push_back(operation.texture);
+        }
     }
-    check(!atlas_pages.empty() && atlas_pages.front().find("strata:test/surface-packets") != std::string::npos,
-          "text did not create a namespaced glyph atlas page");
+    check(std::ranges::any_of(full.resources,
+                              [](const host::ResourceOperation& operation) {
+                                  return operation.kind == host::resource_vector_glyphs &&
+                                         operation.texture.find("strata:test/surface-packets") !=
+                                             std::string::npos &&
+                                         !operation.vector_glyphs.records.empty();
+                              }),
+          "text did not append its glyphs to namespaced vector glyph buffers");
     const std::uint64_t epoch = full.geometry_epoch;
     const runtime::ProfilerSnapshot profile = surface.profiler().snapshot();
     check(std::ranges::any_of(profile.counters,
@@ -893,13 +903,13 @@ void test_surface_frames_encode_complete_packets(const std::filesystem::path& re
 
     const host::RenderPacket& terminal = decoder.decode(packets.prepare_release(surface));
     check(packets.release_prepared(), "the terminal packet was not recorded as prepared");
-    for (const std::string& page : atlas_pages) {
+    for (const std::string& resource : glyph_resources) {
         check(std::ranges::any_of(terminal.resources,
-                                  [&page](const host::ResourceOperation& operation) {
+                                  [&resource](const host::ResourceOperation& operation) {
                                       return operation.kind == host::resource_release &&
-                                             operation.texture == page;
+                                             operation.texture == resource;
                                   }),
-              "the terminal packet did not release glyph atlas page " + page);
+              "the terminal packet did not release glyph resource " + resource);
     }
     check(&packets.prepare_release(surface) == &packets.packet(),
           "preparing the terminal packet twice did not return the same packet");

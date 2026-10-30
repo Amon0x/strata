@@ -21,6 +21,7 @@ class GlyphAtlas;
 namespace strata::ui {
 
 class TextEngine;
+class VectorGlyphPool;
 namespace submission_detail {
 struct PreparationCache;
 }
@@ -202,6 +203,8 @@ public:
     );
     /** Packs shape coverage masks into `atlas`; without one, every shape draws as geometry. */
     void set_shape_atlas(font::GlyphAtlas* atlas) noexcept;
+    /** Where text drawn from its outlines keeps its glyphs; without one, text is rasterized. */
+    void set_vector_glyphs(VectorGlyphPool* glyphs) noexcept;
     /** Groups whose masks rasterize denser than the display (ordered by group); a change replans. */
     void set_group_raster_scales(std::vector<GroupRasterScale> scales);
     /** The last plan left text at an earlier raster scale: a later frame must plan again. */

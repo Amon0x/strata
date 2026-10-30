@@ -21,6 +21,7 @@
 #include "gpu/isolation.hpp"
 #include "gpu/layer_shaders.hpp"
 #include <strata/render_shapes.hpp>
+#include <strata/vector_text.hpp>
 
 namespace strata::headless {
 namespace {
@@ -102,8 +103,40 @@ struct PixelRect final {
         group_index < groups.size() ? groups[group_index] : host::PresentationGroup{};
     // Group translation lands on whole device pixels, as in the vertex stage.
     Vertex result;
-    const double x = read_float(bytes, base);
-    const double y = read_float(bytes, base + 4U);
+    double x = read_float(bytes, base);
+    double y = read_float(bytes, base + 4U);
+    result.u = read_float(bytes, base + 12U);
+    result.v = read_float(bytes, base + 16U);
+    const int vertex_mode =
+        static_cast<int>(std::floor(read_float(bytes, base + 24U + 14U * sizeof(float)) + 0.5F));
+    if (vertex_mode == 13 || vertex_mode == 14) {
+        // A vector glyph's quad (its outline's bounds, uv in font units) grows by two device
+        // pixels each way at whatever scale its group shows it, as in the vertex stage: value 3
+        // is its corner (bit 0 right, bit 1 top), 4-5 and 6-7 the logical pixels a font unit
+        // spans along x and y.
+        const auto value = [&](const std::size_t index) {
+            return static_cast<double>(read_float(bytes, base + 24U + index * sizeof(float)));
+        };
+        const double corner = value(3U);
+        const double outward_x = std::fmod(corner, 2.0) >= 0.5 ? 1.0 : -1.0;
+        const double outward_y = corner >= 1.5 ? 1.0 : -1.0;
+        const double along_x_x = value(4U);
+        const double along_x_y = value(5U);
+        const double along_y_x = value(6U);
+        const double along_y_y = value(7U);
+        const auto device_length = [&](const double dx, const double dy) {
+            return std::hypot((group.scale_x * dx + group.shear_x * dy) * scale_x,
+                              (group.shear_y * dx + group.scale_y * dy) * scale_y);
+        };
+        const double grow_x =
+            outward_x * 2.0 / std::max(device_length(along_x_x, along_x_y), 1.0e-6);
+        const double grow_y =
+            outward_y * 2.0 / std::max(device_length(along_y_x, along_y_y), 1.0e-6);
+        x += grow_x * along_x_x + grow_y * along_y_x;
+        y += grow_x * along_x_y + grow_y * along_y_y;
+        result.u = static_cast<float>(result.u + grow_x);
+        result.v = static_cast<float>(result.v + grow_y);
+    }
     // A group turned in depth divides by its w; the reference interpolates in screen space.
     const double w = group.place_w(x, y);
     result.x = static_cast<float>(((group.scale_x * x + group.shear_x * y) * scale_x +
@@ -112,8 +145,6 @@ struct PixelRect final {
     result.y = static_cast<float>(((group.shear_y * x + group.scale_y * y) * scale_y +
                                    std::round(group.translate_y * scale_y)) /
                                   w);
-    result.u = read_float(bytes, base + 12U);
-    result.v = read_float(bytes, base + 16U);
     result.color = Color{
         static_cast<float>(bytes[base + 20U]) / 255.0F,
         static_cast<float>(bytes[base + 21U]) / 255.0F,
@@ -689,6 +720,29 @@ void SoftwareRenderer::declare_effect_pass(const std::string_view effect_id,
 void SoftwareRenderer::apply(const host::ResourceOperation& operation) {
     if (operation.kind == 2U) {
         textures_.erase(operation.texture);
+        vector_glyphs_.erase(operation.texture);
+        return;
+    }
+    if (operation.kind == host::resource_vector_glyphs) {
+        VectorGlyphs& glyphs = vector_glyphs_[operation.texture];
+        const host::VectorGlyphBuffers& append = operation.vector_glyphs;
+        // Each buffer takes its part where it starts; a part starting at zero replaces it.
+        const auto write = [](auto& target, const std::uint32_t first, const std::size_t element,
+                              const std::vector<std::uint8_t>& bytes) {
+            using Value = typename std::decay_t<decltype(target)>::value_type;
+            const std::size_t per = element / sizeof(Value);
+            const std::size_t offset = static_cast<std::size_t>(first) * per;
+            if (offset > target.size())
+                throw std::invalid_argument("vector glyph append leaves a gap in its buffer");
+            target.resize(offset + bytes.size() / sizeof(Value));
+            if (!bytes.empty())
+                std::memcpy(target.data() + offset, bytes.data(), bytes.size());
+        };
+        write(glyphs.records, append.first_record, host::vector_glyph_record_bytes,
+              append.records);
+        write(glyphs.segments, append.first_segment, host::vector_glyph_segment_bytes,
+              append.segments);
+        write(glyphs.bands, append.first_band, host::vector_glyph_band_bytes, append.bands);
         return;
     }
     if (operation.kind == 0U) {
@@ -785,11 +839,48 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
         material_fallbacks_.push_back(material);
     }
     const Texture* texture = nullptr;
+    const VectorGlyphs* vector_glyphs = nullptr;
     if (batch.texture.has_value()) {
         const auto found = textures_.find(*batch.texture);
         if (found != textures_.end())
             texture = &found->second;
+        if (const auto vectors = vector_glyphs_.find(*batch.texture); vectors != vector_glyphs_.end())
+            vector_glyphs = &vectors->second;
     }
+    // One glyph of the batch's vector glyph buffers, as the GPU reads it; empty if out of range.
+    const auto vector_glyph = [vector_glyphs](const std::uint32_t index) {
+        host::VectorGlyphView view;
+        if (vector_glyphs == nullptr ||
+            (static_cast<std::size_t>(index) + 1U) * host::vector_glyph_record_bytes >
+                vector_glyphs->records.size()) {
+            return view;
+        }
+        std::array<std::uint32_t, 8U> fields{};
+        std::memcpy(fields.data(),
+                    vector_glyphs->records.data() + index * host::vector_glyph_record_bytes,
+                    host::vector_glyph_record_bytes);
+        view.left = std::bit_cast<float>(fields[0U]);
+        view.bottom = std::bit_cast<float>(fields[1U]);
+        view.right = std::bit_cast<float>(fields[2U]);
+        view.top = std::bit_cast<float>(fields[3U]);
+        const std::size_t segment_base = fields[4U];
+        const std::size_t band_base = fields[5U];
+        const std::uint32_t band_count = fields[6U];
+        const std::size_t segment_count = fields[7U];
+        const std::span<const float> segments(vector_glyphs->segments);
+        const std::span<const std::uint32_t> bands(vector_glyphs->bands);
+        if (band_count == 0U || band_base + band_count >= bands.size())
+            return view;
+        const std::size_t band_entries = band_count + 1U + bands[band_base + band_count];
+        if ((segment_base + segment_count) * 4U > segments.size() ||
+            band_base + band_entries > bands.size()) {
+            return view;
+        }
+        view.band_count = band_count;
+        view.segments = segments.subspan(segment_base * 4U, segment_count * 4U);
+        view.bands = bands.subspan(band_base, band_entries);
+        return view;
+    };
     // `filtered` blends texels bilinearly even on a texel-exact page (glyphs drawn off one to one).
     const auto texture_sample = [texture](const float u, const float v,
                                           const bool filtered = false) noexcept {
@@ -1044,6 +1135,35 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         host::text_coverage(sampled.blue, source.red, source.green, source.blue),
                     };
                     source.alpha *= std::max({subpixel[0U], subpixel[1U], subpixel[2U]});
+                } else if (mode == 13 || mode == 14) {
+                    // Vector text, as vectorTextCoverage measures it: where the glyph shows
+                    // upright at the size it was laid out for, its variant fitted to the pixel
+                    // grid (value 1, when it has one), else its outline (value 0).
+                    const double laid_out = std::hypot(data[6U], data[7U]) * scale_y;
+                    const double shown = dv_dy != 0.0F ? 1.0 / std::abs(dv_dy) : 0.0;
+                    const bool native = std::abs(du_dy) < 1.0e-6F && std::abs(dv_dx) < 1.0e-6F &&
+                                        std::abs(shown - laid_out) <= laid_out * 1.0e-3;
+                    const float record = native && data[1U] >= 0.0F ? data[1U] : data[0U];
+                    const std::uint32_t order =
+                        mode == 14 ? static_cast<std::uint32_t>(std::floor(data[2U] + 0.5F)) : 0U;
+                    const std::array<double, 4U> measured = host::vector_text_coverage(
+                        vector_glyph(static_cast<std::uint32_t>(std::floor(record + 0.5F))),
+                        host::VectorSample{sample_x, sample_y, u, v, du_dx, dv_dx, du_dy, dv_dy},
+                        order);
+                    if (order == 0U) {
+                        source.alpha *= host::text_coverage(static_cast<float>(measured[3U]),
+                                                            source.red, source.green, source.blue);
+                    } else {
+                        subpixel = {
+                            host::text_coverage(static_cast<float>(measured[0U]), source.red,
+                                                source.green, source.blue),
+                            host::text_coverage(static_cast<float>(measured[1U]), source.red,
+                                                source.green, source.blue),
+                            host::text_coverage(static_cast<float>(measured[2U]), source.red,
+                                                source.green, source.blue),
+                        };
+                        source.alpha *= std::max({subpixel[0U], subpixel[1U], subpixel[2U]});
+                    }
                 } else if (mode == 5) {
                     const Color sampled = texture_sample(u, v);
                     const float median =

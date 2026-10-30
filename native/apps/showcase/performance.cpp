@@ -635,11 +635,12 @@ struct PerformanceRunner::Impl final {
             invalidate("The benchmark window lost foreground focus during measurement.");
             valid = false;
         }
-        if (scenario.require_visible && !sample.presented) {
+        if (scenario.require_visible && !sample.presented && !sample.unchanged) {
             invalidate("DXGI reported an occluded presentation during measurement.");
             valid = false;
         }
-        if (scenario.require_draws && !sample.had_draws) {
+        // A frame nothing changed in is not drawn again; one that changed must draw.
+        if (scenario.require_draws && !sample.had_draws && !sample.unchanged) {
             invalidate("The measured frame contained no render draws.");
             valid = false;
         }
@@ -966,6 +967,7 @@ struct PerformanceRunner::Impl final {
             {"gpuMillis", JsonValue(millis(frame.sample.gpu_nanos))},
             {"toolingMillis", JsonValue(millis(frame.sample.tooling_nanos))},
             {"totalMillis", JsonValue(millis(frame.sample.total_nanos))},
+            {"unchanged", JsonValue(frame.sample.unchanged)},
             {"valid", JsonValue(frame.valid)},
             {"vertices", JsonValue(static_cast<std::int64_t>(frame.sample.vertices))},
             {"work", work_json(frame.sample.work)},

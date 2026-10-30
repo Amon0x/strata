@@ -256,7 +256,23 @@ decoded into the host's layer table without the copy `SurfacePacketStream::frame
 
 ### 4.5 Rasterization off the frame
 
-Glyphs and coverage masks are rasterized for a density. When a layer's scale changes:
+**Text is not rasterized.** A glyph with a TrueType outline is flattened once into straight
+segments in font units, its overlapping contours merged into one boundary and its segments grouped
+into horizontal bands (`font::build_vector_glyph`). The segments reach the GPU in per-Surface
+buffers that only grow (packet resource 5). Every frame the pixel stage measures each pixel's
+exact coverage from them, through the derivatives of the glyph position (draw modes 13 gray, 14
+per subpixel; `host::vector_text_coverage` is the CPU twin). A zoom, a turn or a fractional
+position changes only the vertex transform: text is exact in every frame, with no raster scale,
+no settle and nothing to wait for. Where a glyph shows upright at the size it was laid out for, it
+draws a variant fitted to the pixel grid at that size (stems moved whole onto the font's baseline,
+x-height and cap height; `font::fit_vector_glyph`), made once the first time the size appears; a
+zoom draws the outline as it is, so stems never jump a pixel at a time. The pixel stage only
+measures coverage: the fit inside it tripled the uber-shader's registers for every draw. ClearType
+weights the pixel's thirds with FreeType's filter. Colour glyphs, bitmap and CFF fonts, MSDF
+text and synthetic bold still go through the atlas below.
+
+Coverage masks, and the glyphs above that still use the atlas, are rasterized for a density. When
+a layer's scale changes:
 
 1. **While it moves** the layer keeps its current rasters, resampled by the GPU. Scales are
    quantized (quarter octaves), so a long zoom crosses a handful of steps, not a step per frame.
@@ -416,9 +432,10 @@ runtime change (Phase 4) after the layers it routes changes into exist.
   compare; any difference is a failure, not a warning.
 - **Determinism.** Asynchronous rasterization and frames on demand must not change headless
   captures. Headless rasterizes synchronously and drives settle deadlines from its virtual clock.
-- **Text during motion.** Quantized scales mean zooming text is briefly resampled and sharpens when
-  the zoom settles. That is the deliberate trade against `686905e`; the settle delay and step size
-  are tuned against the gate, not by eye alone.
+- **Text during motion.** Outline text is exact every frame (§4.5); what still uses the atlas
+  (colour glyphs, CFF fonts) is briefly resampled while a zoom moves and sharpens when it settles.
+  The cost moved to the pixel stage: a glyph's pixels read the segments of the bands they cross,
+  so text-dense frames are watched on the GPU timer, not only the core's.
 - **Too many layers.** Each layer is a constant-buffer entry and a draw-order boundary. Automatic
   layers are limited to canvas children, scroll and viewport content, transform or opacity motion
   and effect sources; layers that stop moving are squashed back into their parent's display list.

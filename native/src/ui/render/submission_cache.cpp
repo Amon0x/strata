@@ -103,6 +103,14 @@ void RenderSubmissionCache::set_shape_atlas(font::GlyphAtlas* const atlas) noexc
     submission_.reset();
 }
 
+void RenderSubmissionCache::set_vector_glyphs(VectorGlyphPool* const glyphs) noexcept {
+    if (preparation_cache_->vector_glyphs == glyphs)
+        return;
+    preparation_cache_->vector_glyphs = glyphs;
+    preparation_cache_->plan_current = false;
+    submission_.reset();
+}
+
 bool RenderSubmissionCache::raster_deferred() const noexcept {
     return preparation_cache_->raster_deferred;
 }

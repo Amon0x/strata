@@ -20,6 +20,8 @@
 #include "font/opentype.hpp"
 #include "font/atlas.hpp"
 #include "font/raster.hpp"
+#include "font/vector_glyph.hpp"
+#include <strata/vector_text.hpp>
 #include "resource/resource.hpp"
 #include "runtime/expression.hpp"
 #include "runtime/value.hpp"
@@ -1964,6 +1966,191 @@ void test_msdf_overlapping_contours(const std::filesystem::path& resources) {
 // A subpixel glyph holds coverage per colour channel: its stems' edges differ from channel to
 // channel, its alpha is the strongest channel, and a BGR display gets the same glyph mirrored in
 // red and blue.
+/**
+ * How far a glyph drawn from its vector outline is from FreeType's bitmap of it: the mean and the
+ * largest difference in coverage (0 to 255) over the pixels either covers.
+ */
+struct VectorParity final {
+    double total = 0.0;
+    double largest = 0.0;
+    std::size_t pixels = 0U;
+};
+
+void compare_vector_glyph(const strata::font::OpenTypeFont& font,
+                          const strata::font::FontHintZones& zones, const std::uint16_t glyph,
+                          const double size, const strata::font::SubpixelPhase phase,
+                          const strata::font::GlyphHinting hinting, VectorParity& parity) {
+    using namespace strata;
+    font::CoverageRasterConfig config;
+    config.hinting = hinting;
+    const std::optional<font::GlyphRasterBitmap> reference =
+        font::rasterize_coverage(font, glyph, size, 1.0, phase, config);
+    const std::shared_ptr<const font::GlyphOutline> outline = font.glyph_outline(glyph);
+    if (!reference.has_value() || outline == nullptr)
+        return;
+    const double scale = size / static_cast<double>(font.units_per_em());
+    const font::VectorGlyph outline_glyph =
+        font::build_vector_glyph(*outline, font.units_per_em(), zones);
+    // Hinted, the glyph fitted to the pixel grid at this size, its baseline on a whole pixel.
+    const font::VectorGlyph vector = hinting != font::GlyphHinting::none
+                                         ? font::fit_vector_glyph(outline_glyph, scale)
+                                         : outline_glyph;
+    const double phase_offset = phase.offset();
+    const font::VectorPlacement placement{scale, phase_offset, 0.0};
+    const double left = reference->plane_bounds_layout_pixels.left + phase_offset;
+    const double top = reference->plane_bounds_layout_pixels.top;
+    for (std::uint32_t row = 0U; row < reference->height; ++row) {
+        for (std::uint32_t column = 0U; column < reference->width; ++column) {
+            const double expected =
+                reference->bytes[static_cast<std::size_t>(row) * reference->width + column];
+            const double actual =
+                255.0 * font::vector_pixel_coverage(vector, placement, left + column,
+                                                    top - static_cast<double>(row) - 1.0);
+            if (expected == 0.0 && actual < 0.5)
+                continue;
+            const double difference = std::abs(expected - actual);
+            parity.total += difference;
+            parity.largest = std::max(parity.largest, difference);
+            ++parity.pixels;
+        }
+    }
+}
+
+/**
+ * A glyph drawn from its vector outline covers what FreeType's gray rasterizer covers, the same
+ * outline unhinted, to within a level or two; with the GPU's grid fit it stays close to
+ * FreeType's light hinting.
+ */
+void test_vector_glyph_parity(const std::filesystem::path& resources) {
+    using namespace strata;
+    const font::OpenTypeFont regular = font::OpenTypeFont::parse(resource::load_binary_resource(
+        resources, resource::ResourceId::parse("assets/strata/fonts/default.ttf")));
+    const font::FontHintZones zones = font::font_hint_zones(regular);
+    const std::u32string text = U"Hamburgefontsiv0123456789@&%Qgjy";
+    VectorParity unhinted;
+    VectorParity hinted;
+    for (const double size : {9.0, 11.0, 13.0, 16.0, 20.0, 28.0, 48.0, 96.0}) {
+        for (const std::uint16_t index : {std::uint16_t{0U}, std::uint16_t{1U}, std::uint16_t{2U}}) {
+            const font::SubpixelPhase phase{index, std::uint16_t{3U}};
+            for (const char32_t code_point : text) {
+                const std::uint16_t glyph = regular.glyph_id(code_point);
+                compare_vector_glyph(regular, zones, glyph, size, phase,
+                                     font::GlyphHinting::none, unhinted);
+                compare_vector_glyph(regular, zones, glyph, size, phase,
+                                     font::GlyphHinting::light, hinted);
+            }
+        }
+    }
+    const auto mean = [](const VectorParity& parity) {
+        return parity.pixels == 0U ? 0.0 : parity.total / static_cast<double>(parity.pixels);
+    };
+    std::cout << "vector glyph parity: unhinted mean " << mean(unhinted) << " largest "
+              << unhinted.largest << " over " << unhinted.pixels << " pixels; light-hinted mean "
+              << mean(hinted) << " largest " << hinted.largest << '\n';
+    check(unhinted.pixels > 1000U, "vector glyph parity compared too few pixels");
+    check(mean(unhinted) < 1.0 && unhinted.largest < 48.0,
+          "vector glyphs differ from FreeType's coverage of the same unhinted outline");
+}
+
+/**
+ * The GPU's formulation of vector text (a pixel mapped into the glyph through derivatives, the
+ * glyph read from buffer-shaped data) gives what the reference gives upright, hinted or not, gray
+ * or per subpixel; and turned, a glyph still covers its own area.
+ */
+void test_vector_text_formulation(const std::filesystem::path& resources) {
+    using namespace strata;
+    const font::OpenTypeFont regular = font::OpenTypeFont::parse(resource::load_binary_resource(
+        resources, resource::ResourceId::parse("assets/strata/fonts/default.ttf")));
+    const font::FontHintZones zones = font::font_hint_zones(regular);
+    double largest = 0.0;
+    for (const char32_t code_point : std::u32string(U"Hag3e")) {
+        const font::VectorGlyph outline = font::build_vector_glyph(
+            *regular.glyph_outline(regular.glyph_id(code_point)), regular.units_per_em(), zones);
+        for (const double size : {11.0, 16.0, 40.0}) {
+            const double scale = size / static_cast<double>(regular.units_per_em());
+            for (const bool fit : {false, true}) {
+                // As the GPU's buffers hold it: the outline, or its variant fitted at this size.
+                const font::VectorGlyph glyph =
+                    fit ? font::fit_vector_glyph(outline, scale) : outline;
+                std::vector<float> segments;
+                for (const font::VectorSegment& segment : glyph.segments)
+                    segments.insert(segments.end(),
+                                    {segment.x0, segment.y0, segment.x1, segment.y1});
+                std::vector<std::uint32_t> bands(glyph.band_offsets.begin(),
+                                                 glyph.band_offsets.end());
+                bands.insert(bands.end(), glyph.band_segments.begin(), glyph.band_segments.end());
+                const host::VectorGlyphView view{glyph.left, glyph.bottom,       glyph.right,
+                                                 glyph.top,  glyph.band_count(), segments,
+                                                 bands};
+                const font::VectorPlacement placement{scale, 0.37, 0.0};
+                for (int y = -static_cast<int>(size); y <= static_cast<int>(size * 0.5); ++y) {
+                    for (int x = -2; x <= static_cast<int>(size); ++x) {
+                        const host::VectorSample sample{
+                            x + 0.5, -(y + 0.5), (x + 0.5 - 0.37) / scale, (y + 0.5) / scale,
+                            1.0 / scale, 0.0, 0.0, -1.0 / scale};
+                        const double gray = host::vector_text_coverage(view, sample, 0U)[0];
+                        largest = std::max(largest,
+                                           std::abs(gray - font::vector_pixel_coverage(
+                                                               glyph, placement, x, y)));
+                        const std::array<double, 4> lcd =
+                            host::vector_text_coverage(view, sample, 1U);
+                        const std::array<double, 3> expected =
+                            font::vector_subpixel_coverage(glyph, placement, x, y);
+                        for (std::size_t channel = 0U; channel < 3U; ++channel)
+                            largest = std::max(largest, std::abs(lcd[channel] - expected[channel]));
+                    }
+                }
+                if (fit)
+                    continue;
+                // Turned a third of a right angle, the glyph covers the same area.
+                const double angle = 0.5;
+                const double cosine = std::cos(angle);
+                const double sine = std::sin(angle);
+                double upright = 0.0;
+                double turned = 0.0;
+                const int reach = static_cast<int>(size * 1.6);
+                for (int y = -reach; y <= reach; ++y) {
+                    for (int x = -reach; x <= reach; ++x) {
+                        const double cx = x + 0.5;
+                        const double cy = y + 0.5;
+                        upright += host::vector_text_coverage(
+                            view,
+                            {cx, cy, cx / scale, -cy / scale, 1.0 / scale, 0.0, 0.0, -1.0 / scale},
+                            0U)[0];
+                        // Device to glyph: turn back, then scale, y up.
+                        const double gx = (cosine * cx + sine * cy) / scale;
+                        const double gy = -(-sine * cx + cosine * cy) / scale;
+                        turned += host::vector_text_coverage(view,
+                                                             {cx, cy, gx, gy, cosine / scale,
+                                                              sine / scale, sine / scale,
+                                                              -cosine / scale},
+                                                             0U)[0];
+                    }
+                }
+                // Overlaps merged, a pixel's coverage is its area exactly: the sums agree to
+                // rounding.
+                check(std::abs(upright - turned) <= std::max(0.01, upright * 1.0e-4),
+                      "a turned vector glyph did not cover its own area: " +
+                          std::to_string(upright) + " upright, " + std::to_string(turned) +
+                          " turned, size " + std::to_string(size));
+            }
+            // Fitted, an H stands on the baseline and reaches the cap height on whole pixels.
+            const font::VectorGlyph fitted = font::fit_vector_glyph(outline, scale);
+            const auto whole = [scale](const float height) {
+                const double pixels = static_cast<double>(height) * scale;
+                return std::abs(pixels - std::round(pixels)) < 1.0e-3;
+            };
+            check(fitted.hints.empty() && fitted.segments.size() >= outline.segments.size() &&
+                      (code_point != U'H' || (whole(fitted.bottom) && whole(fitted.top))),
+                  "a vector glyph fitted at " + std::to_string(size) +
+                      " pixels did not land its edges on whole pixels");
+        }
+    }
+    check(largest < 1.0e-6,
+          "the GPU's vector text formulation differs from the reference: " +
+              std::to_string(largest));
+}
+
 void test_subpixel_raster(const std::filesystem::path& resources) {
     using namespace strata;
     const font::OpenTypeFont regular = font::OpenTypeFont::parse(resource::load_binary_resource(
@@ -2062,6 +2249,8 @@ int strata_test_text_font_residual(const int argument_count, const char* const* 
         test_variable_font_instance(resources);
         test_msdf_overlapping_contours(resources);
         test_subpixel_raster(resources);
+        test_vector_glyph_parity(resources);
+        test_vector_text_formulation(resources);
         std::cout << "text/font residual tests passed\n";
         return 0;
     } catch (const std::exception& error) {

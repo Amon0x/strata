@@ -334,6 +334,24 @@ set_target_properties(
 strata_target_defaults(strata_raster)
 target_compile_features(strata_raster PUBLIC cxx_std_23)
 
+# Vector text: how a pixel's coverage is measured from a glyph's outline, header only. The core
+# checks its glyph builder against it, and every CPU backend draws vector text with it.
+add_library(strata_vector_text INTERFACE)
+add_library(Strata::vector_text ALIAS strata_vector_text)
+target_include_directories(
+    strata_vector_text
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+set_target_properties(
+    strata_vector_text
+    PROPERTIES
+        EXPORT_NAME vector_text
+        STRATA_PUBLIC_HEADERS vector_text.hpp
+)
+target_compile_features(strata_vector_text INTERFACE cxx_std_23)
+
 add_library(
     strata_render_host
     STATIC
@@ -397,7 +415,7 @@ if(STRATA_ENABLE_TRACY)
     target_compile_definitions(strata_runtime PRIVATE STRATA_ENABLE_TRACY)
 endif()
 strata_add_layer(strata_resource DIRECTORIES resource PUBLIC strata_base Strata::svg)
-strata_add_layer(strata_font DIRECTORIES font PUBLIC strata_resource PRIVATE freetype)
+strata_add_layer(strata_font DIRECTORIES font PUBLIC strata_resource Strata::vector_text PRIVATE freetype)
 strata_add_layer(
     strata_ui
     DIRECTORIES ui
@@ -1681,6 +1699,7 @@ install(
         strata_render_host
         strata_raster
         strata_svg
+        strata_vector_text
         strata_base
         strata_host_support
         strata_host_session

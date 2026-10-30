@@ -161,6 +161,8 @@ void Renderer::Impl::initialize() {
     const gpu::PresentationGroupConstants identity;
     std::memcpy(identity_groups->mapped, identity.values.data(), sizeof(identity.values));
     groups = Slice{identity_groups->buffer, 0, sizeof(identity.values)};
+    empty_storage = std::make_unique<Buffer>(device, 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    std::memset(empty_storage->mapped, 0, 64);
     white = std::make_unique<Image>(device, 1, 1, VK_FORMAT_R8G8B8A8_UNORM);
     begin();
     clear(*white, {1, 1, 1, 1});

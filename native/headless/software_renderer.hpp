@@ -81,6 +81,13 @@ class SoftwareRenderer final : public CaptureRenderer {
     std::array<std::uint8_t, 4U> clear_{9U, 11U, 15U, 255U};
     std::vector<std::uint8_t> pixels_;
     std::map<std::string, Texture, std::less<>> textures_;
+    /** A Surface's vector glyph buffers, as appended (host::VectorGlyphBuffers). */
+    struct VectorGlyphs final {
+        std::vector<std::uint8_t> records;
+        std::vector<float> segments;
+        std::vector<std::uint32_t> bands;
+    };
+    std::map<std::string, VectorGlyphs, std::less<>> vector_glyphs_;
     std::vector<std::string> material_fallbacks_;
     std::map<std::string, std::vector<EffectPass>, std::less<>> effects_;
     std::map<std::uint64_t, CachedEffect> cached_effects_;

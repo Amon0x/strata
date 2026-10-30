@@ -1,5 +1,6 @@
 #include "texture_store.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -45,6 +46,25 @@ struct Texture final {
     std::uint32_t width = 0U;
     std::uint32_t height = 0U;
 };
+
+/**
+ * A Surface's vector glyph buffers (records, segments, bands): structured buffers that only grow,
+ * each beside a copy of what it holds, from which a full one is remade twice as large.
+ */
+struct VectorStore final {
+    struct Buffer final {
+        ComPtr<ID3D11Buffer> buffer;
+        ComPtr<ID3D11ShaderResourceView> view;
+        std::vector<std::uint8_t> bytes;
+        std::size_t capacity = 0U;
+    };
+    std::array<Buffer, 3U> buffers;
+};
+
+/** Bytes an element of each vector glyph buffer takes. */
+constexpr std::array<std::size_t, 3U> vector_strides{host::vector_glyph_record_bytes,
+                                                     host::vector_glyph_segment_bytes,
+                                                     host::vector_glyph_band_bytes};
 
 [[nodiscard]] DXGI_FORMAT atlas_format(const std::uint32_t format) {
     if (format == 0U || format == 2U)
@@ -152,13 +172,74 @@ struct TextureStore::Impl final {
         raster->run(live_batch, seconds);
     }
 
+    /** Writes `bytes` at element `first` of a vector glyph buffer, remaking it larger if full. */
+    void write_vectors(VectorStore::Buffer& target, const std::size_t stride,
+                       const std::uint32_t first, const std::vector<std::uint8_t>& bytes) {
+        const std::size_t offset = static_cast<std::size_t>(first) * stride;
+        if (offset > target.bytes.size())
+            throw std::invalid_argument("vector glyph append leaves a gap in its buffer");
+        const std::size_t end = offset + bytes.size();
+        target.bytes.resize(end);
+        std::copy(bytes.begin(), bytes.end(), target.bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+        const std::size_t elements = end / stride;
+        if (target.buffer != nullptr && elements <= target.capacity) {
+            if (!bytes.empty()) {
+                const D3D11_BOX box{static_cast<UINT>(offset), 0U, 0U, static_cast<UINT>(end), 1U, 1U};
+                context->UpdateSubresource(target.buffer.Get(), 0U, &box, bytes.data(), 0U, 0U);
+            }
+            return;
+        }
+        std::size_t capacity = std::max<std::size_t>(target.capacity, 256U);
+        while (capacity < elements)
+            capacity *= 2U;
+        if (capacity * stride > std::numeric_limits<UINT>::max())
+            throw std::length_error("vector glyph buffer exceeds D3D11's buffer size");
+        std::vector<std::uint8_t> initial(capacity * stride, std::uint8_t{0U});
+        std::copy(target.bytes.begin(), target.bytes.end(), initial.begin());
+        D3D11_BUFFER_DESC descriptor{};
+        descriptor.ByteWidth = static_cast<UINT>(capacity * stride);
+        descriptor.Usage = D3D11_USAGE_DEFAULT;
+        descriptor.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        descriptor.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+        descriptor.StructureByteStride = static_cast<UINT>(stride);
+        const D3D11_SUBRESOURCE_DATA data{initial.data(), 0U, 0U};
+        ComPtr<ID3D11Buffer> buffer;
+        require_hresult(device->CreateBuffer(&descriptor, &data, &buffer),
+                        "vector glyph buffer creation");
+        D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+        view.Format = DXGI_FORMAT_UNKNOWN;
+        view.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+        view.Buffer.FirstElement = 0U;
+        view.Buffer.NumElements = static_cast<UINT>(capacity);
+        ComPtr<ID3D11ShaderResourceView> resource;
+        require_hresult(device->CreateShaderResourceView(buffer.Get(), &view, &resource),
+                        "vector glyph buffer view creation");
+        target.buffer = std::move(buffer);
+        target.view = std::move(resource);
+        target.capacity = capacity;
+    }
+
+    void append_vectors(const ResourceOperation& operation) {
+        VectorStore& store = vectors[operation.texture];
+        const host::VectorGlyphBuffers& append = operation.vector_glyphs;
+        write_vectors(store.buffers[0], vector_strides[0], append.first_record, append.records);
+        write_vectors(store.buffers[1], vector_strides[1], append.first_segment, append.segments);
+        write_vectors(store.buffers[2], vector_strides[2], append.first_band, append.bands);
+    }
+
     void apply(const ResourceOperation& operation) {
+        if (operation.kind == host::resource_vector_glyphs) {
+            append_vectors(operation);
+            return;
+        }
         if (operation.kind == 2U || operation.kind == 0U || operation.kind == host::resource_image)
             forget_live(operation, true);
         else
             forget_live(operation, false);
         if (operation.kind == 2U) {
             textures.erase(operation.texture);
+            if (const auto found = vectors.find(operation.texture); found != vectors.end())
+                vectors.erase(found);
             return;
         }
         if (operation.kind == 0U) {
@@ -214,20 +295,29 @@ struct TextureStore::Impl final {
 
     void bind(const DrawBatch& batch) const {
         const Texture* selected = &white;
+        // Vector text reads its Surface's glyph buffers at t8 to t10; other draws read none.
+        std::array<ID3D11ShaderResourceView*, 3U> vector_views{};
         if (batch.texture.has_value()) {
             const auto found = textures.find(*batch.texture);
-            if (found != textures.end())
+            if (found != textures.end()) {
                 selected = &found->second;
+            } else if (const auto store = vectors.find(*batch.texture); store != vectors.end()) {
+                for (std::size_t index = 0U; index < vector_views.size(); ++index)
+                    vector_views[index] = store->second.buffers[index].view.Get();
+            }
         }
         ID3D11ShaderResourceView* const view = selected->view.Get();
         ID3D11SamplerState* const sampler = selected->sampler.Get();
         context->PSSetShaderResources(0U, 1U, &view);
         context->PSSetSamplers(0U, 1U, &sampler);
+        context->PSSetShaderResources(8U, static_cast<UINT>(vector_views.size()),
+                                      vector_views.data());
     }
 
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
     std::map<std::string, Texture, std::less<>> textures;
+    std::map<std::string, VectorStore, std::less<>> vectors;
     Texture white;
     /** Made on the first raster job, so a stream without shapes compiles no compute shaders. */
     std::unique_ptr<RasterPass> raster;

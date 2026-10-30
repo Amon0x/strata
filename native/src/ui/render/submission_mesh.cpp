@@ -396,6 +396,65 @@ void gradient_mask_geometry(
     }
 }
 
+/**
+ * A vector glyph's quad: its outline's bounds in font units at its pen, under its shear. Each
+ * corner carries the glyph's record (draw data 0), the record of its variant fitted to the pixel
+ * grid at the size it is laid out for (1; -1 for none), its subpixel order (2: 0 gray, 1 red
+ * first, 2 blue first), which corner it is (3: bit 0 right, bit 1 top, in font units) and the
+ * logical pixels a font unit spans along x (4, 5) and along y (6, 7), so the vertex stage grows
+ * the quad by whole device pixels at whatever scale it is shown.
+ */
+void vector_glyph_quad(RenderSubmission& output, const PreparedDraw& draw, const Point origin,
+                       const PreparedGlyph& glyph, const font::SubpixelOrder subpixel,
+                       const RenderColor left_color, const RenderColor right_color,
+                       std::array<float, draw_data_float_count> data,
+                       const std::uint32_t batch_base_vertex) {
+    const std::size_t offset = output.vertex_bytes.size();
+    const std::size_t global_base_size = offset / vertex_bytes;
+    if (global_base_size > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::length_error("render submission vertex count exceeds uint32");
+    }
+    const auto global_base = static_cast<std::uint32_t>(global_base_size);
+    const std::uint32_t local_base = global_base - batch_base_vertex;
+    const double z = group_depth(draw);
+    const Transform& transform = draw.transform;
+    const auto linear = [&transform](const double x, const double y) {
+        return Point{transform.m00 * x + transform.m01 * y, transform.m10 * x + transform.m11 * y};
+    };
+    const Point along_x = linear(glyph.scale, 0.0);
+    const Point along_y = linear(glyph.scale * glyph.shear, -glyph.scale);
+    data[0] = static_cast<float>(glyph.vector_glyph);
+    data[1] = glyph.fitted_glyph.has_value() ? static_cast<float>(*glyph.fitted_glyph) : -1.0F;
+    data[2] = subpixel == font::SubpixelOrder::rgb   ? 1.0F
+              : subpixel == font::SubpixelOrder::bgr ? 2.0F
+                                                     : 0.0F;
+    data[4] = static_cast<float>(along_x.x);
+    data[5] = static_cast<float>(along_x.y);
+    data[6] = static_cast<float>(along_y.x);
+    data[7] = static_cast<float>(along_y.y);
+    const double left = glyph.uv.u;
+    const double top = glyph.uv.v;
+    const double right = left + glyph.uv.width;
+    const double bottom = top + glyph.uv.height;
+    output.vertex_bytes.resize(offset + 4U * vertex_bytes);
+    std::uint8_t* const destination = output.vertex_bytes.data() + offset;
+    const auto corner = [&](const std::size_t index, const double x, const double y,
+                            const float code, const RenderColor color) {
+        data[3] = code;
+        vertex_at(destination + index * vertex_bytes, transform,
+                  origin.x + glyph.pen.x + glyph.scale * (x + glyph.shear * y),
+                  origin.y + glyph.pen.y - glyph.scale * y, z, color, x, y, data);
+    };
+    corner(0U, left, top, 2.0F, left_color);
+    corner(1U, left, bottom, 0.0F, left_color);
+    corner(2U, right, bottom, 1.0F, right_color);
+    corner(3U, right, top, 3.0F, right_color);
+    output.indices.insert(output.indices.end(), {
+        local_base, local_base + 1U, local_base + 2U,
+        local_base + 2U, local_base + 3U, local_base,
+    });
+}
+
 void text_geometry(
     RenderSubmission& output,
     const PreparedDraw& draw,
@@ -406,10 +465,14 @@ void text_geometry(
 ) {
     Point origin = text.origin;
     if (draw.transform.axis_aligned_translation() && !text.glyphs.empty()) {
-        // Glyphs land on the grid they were rasterized for: a zoomed group's is finer.
+        // Glyphs land on the grid they were rasterized for: a zoomed group's is finer. A vector
+        // glyph is measured where it lands, at any subpixel; only its baseline lands on a whole
+        // pixel, where its variant fitted to the grid was fitted.
         const double density = context.scale * text.raster_scale;
-        origin.x =
-            std::round((origin.x + draw.transform.m02) * density) / density - draw.transform.m02;
+        if (!text.vector) {
+            origin.x = std::round((origin.x + draw.transform.m02) * density) / density -
+                       draw.transform.m02;
+        }
         if (text.mode == font::GlyphRasterMode::coverage) {
             const double baseline = text.glyphs.front().baseline;
             origin.y = std::round((origin.y + baseline + draw.transform.m12) * density) / density -
@@ -453,7 +516,14 @@ void text_geometry(
             glyph.bounds.width,
             glyph.bounds.height,
         };
-        if (text.mode == font::GlyphRasterMode::color) {
+        if (text.vector) {
+            const RenderColor left_color =
+                right > left ? gradient_at(glyph.bounds.x) : text.color;
+            const RenderColor right_color =
+                right > left ? gradient_at(glyph.bounds.right()) : text.color;
+            vector_glyph_quad(output, draw, origin, glyph, text.vector_subpixel, left_color,
+                              right_color, data, batch_base_vertex);
+        } else if (text.mode == font::GlyphRasterMode::color) {
             // An emoji keeps its own colours; the run lends it only its opacity.
             quad(output, draw, bounds, RenderColor{255U, 255U, 255U, text.color.alpha}, glyph.uv,
                  data, batch_base_vertex);
@@ -1031,8 +1101,11 @@ void geometry(
     const auto snapped = [&context](const double value) {
         return std::round(value * context.scale) / context.scale;
     };
-    delta.x = snapped(run.origin.x + current.transform.m02) -
-        snapped(run.origin.x + retained.transform.m02);
+    // Vector glyphs are placed unsnapped across: they move by exactly the translation.
+    if (!run.vector) {
+        delta.x = snapped(run.origin.x + current.transform.m02) -
+            snapped(run.origin.x + retained.transform.m02);
+    }
     if (run.mode == font::GlyphRasterMode::coverage && !run.glyphs.empty()) {
         const double baseline = run.glyphs.front().baseline;
         delta.y = snapped(run.origin.y + baseline + current.transform.m12) -

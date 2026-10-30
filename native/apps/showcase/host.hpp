@@ -52,6 +52,8 @@ struct DesktopFrameSample final {
     DesktopFrameWork work;
     bool had_draws = false;
     bool presented = true;
+    /** Nothing the window shows changed, so it was not drawn again: an idle frame, not a fault. */
+    bool unchanged = false;
 };
 
 struct DesktopHostInfo final {

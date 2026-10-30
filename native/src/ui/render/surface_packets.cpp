@@ -33,8 +33,11 @@ namespace {
 SurfacePackets::SurfacePackets(std::string resource_namespace,
                                std::vector<resource::EncodedTextureResource> static_textures)
     : glyph_atlas_(resource_namespace), shape_atlas_(resource_namespace + ".shapes", shape_atlas_config()),
+      vector_glyphs_("strata:vector-glyphs/" + std::to_string(resource_namespace.size()) + ":" +
+                     resource_namespace),
       textures_(resource_namespace, std::move(static_textures)) {
     cache_.set_shape_atlas(&shape_atlas_);
+    cache_.set_vector_glyphs(&vector_glyphs_);
 }
 
 const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const SurfaceFrame& frame,

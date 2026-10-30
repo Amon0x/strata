@@ -69,25 +69,43 @@ PixelInput main(VertexInput input) {
     // Whole device pixels keep pixel-snapped glyphs and hairlines crisp while a group moves.
     float2 devicePixels = framebufferSize / max(logicalSize, 1.0);
     float2 translation = round(group.transform.zw * devicePixels) / devicePixels;
-    float2 position = input.position.xy * group.transform.xy +
-                      input.position.yx * group.opacity.zw + translation;
+    int mode = (int)floor(input.drawData3.z + 0.5);
+    float2 local = input.position.xy;
+    float2 uv = input.uv;
+    if (mode == 13 || mode == 14) {
+        // A vector glyph's quad is its outline's bounds (uv in font units). It grows here by two
+        // device pixels each way, at whatever scale and turn its group shows it, so the pixels
+        // its edge partly covers, and its subpixels' neighbours, are drawn too. drawData0.w says
+        // which corner this is (bit 0 right, bit 1 top), drawData1 the page's logical pixels a
+        // font unit spans along x and along y.
+        float corner = input.drawData0.w;
+        float2 outward = float2(fmod(corner, 2.0) >= 0.5 ? 1.0 : -1.0, corner >= 1.5 ? 1.0 : -1.0);
+        float2x2 groupLinear = float2x2(group.transform.x, group.opacity.z,
+                                        group.opacity.w, group.transform.y);
+        float2 deviceX = mul(groupLinear, input.drawData1.xy) * devicePixels;
+        float2 deviceY = mul(groupLinear, input.drawData1.zw) * devicePixels;
+        float2 grow = outward * float2(2.0 / max(length(deviceX), 1.0e-6),
+                                       2.0 / max(length(deviceY), 1.0e-6));
+        local += grow.x * input.drawData1.xy + grow.y * input.drawData1.zw;
+        uv += grow;
+    }
+    float2 position = local * group.transform.xy + local.yx * group.opacity.zw + translation;
     // A group turned in depth: the projected position is position / w, which the rasterizer
     // divides by itself, so every attribute interpolates perspective-correctly.
-    float w = max(dot(group.projection.xy, input.position.xy) + group.projection.z, 1.0e-4);
+    float w = max(dot(group.projection.xy, local) + group.projection.z, 1.0e-4);
     output.position = float4(
         position.x * 2.0 / logicalSize.x - w,
         w - position.y * 2.0 / logicalSize.y,
         0.0,
         w
     );
-    output.uv = input.uv;
+    output.uv = uv;
     // Tone belongs to ink: fills, borders, shapes and text. An image (mode 1) keeps its own colours
     // and a shadow (mode 6) stays a shadow. A rounded rect (mode 2) carries its border colour in
     // drawData2, which is toned with it.
     // A banded gradient (mode 10 with a paint) carries its band's end colour there too. A colour
     // mask (mode 11) is ink whose colours are in its texels: the pixel stage tones them, with the
     // group's tone passed in drawData1.x.
-    int mode = (int)floor(input.drawData3.z + 0.5);
     float tone = (mode == 1 || mode == 6 || mode == 11) ? 0.0 : group.opacity.y;
     output.color = float4(strataTone(input.color.rgb, tone), input.color.a);
     output.drawData0 = input.drawData0;
@@ -378,8 +396,156 @@ float4 strataGlyphTexel(float2 uv) {
 }
 
 /**
- * Subpixel text's coverage per colour channel, set by strataShade for mode 12; every other draw
- * leaves it white. The entry point turns it into the draw's per-channel alpha (strataOutput).
+ * Vector text (draw modes 13 gray and 14 per subpixel): a glyph's coverage measured per pixel from
+ * its outline, host::vector_text_coverage (<strata/vector_text.hpp>) on the GPU. The pixel's
+ * square is mapped into the glyph's font units through the derivatives of its glyph position, so
+ * a glyph scaled, turned or presented under any group transform is measured exactly where it
+ * lands, every frame, with nothing rasterized ahead of drawing.
+ *
+ * Buffers (STRATA_RENDER_PACKET_VERSION_24, the batch's texture naming them): VectorGlyphs
+ * (records), VectorSegments (x0 y0 x1 y1, font units), VectorBands (per glyph: band count + 1
+ * offsets, then each band's segment indices relative to its segment base).
+ */
+struct VectorGlyphRecord {
+    float4 bounds;
+    uint segmentBase;
+    uint bandBase;
+    uint bandCount;
+    uint segmentCount;
+};
+
+#ifdef STRATA_VULKAN
+// Vulkan numbers t registers from binding 3 (vulkan/shader.cpp): these are bindings 6 to 8.
+StructuredBuffer<VectorGlyphRecord> VectorGlyphs : register(t3);
+StructuredBuffer<float4> VectorSegments : register(t4);
+StructuredBuffer<uint> VectorBands : register(t5);
+#else
+StructuredBuffer<VectorGlyphRecord> VectorGlyphs : register(t8);
+StructuredBuffer<float4> VectorSegments : register(t9);
+StructuredBuffer<uint> VectorBands : register(t10);
+#endif
+
+/** The integral over [x0, x0 + w] of the part of the column right of x, from x0. */
+float vectorColumnArea(float x, float x0, float w) {
+    float x1 = x0 + w;
+    if (x <= x0)
+        return w * (x - x0);
+    if (x >= x1)
+        return w * w * 0.5;
+    return x1 * (x - x0) - (x * x - x0 * x0) * 0.5;
+}
+
+/**
+ * The average width of the column [x0, x0 + w] to the right of a segment running from xFrom to
+ * xTo (`span` apart) across the pixel's row; times the height it crosses, its signed area there.
+ */
+float vectorColumnShare(float xFrom, float xTo, float span, float x0, float w) {
+    return abs(span) < 1.0e-5
+        ? x0 + w - clamp(xFrom, x0, x0 + w)
+        : (vectorColumnArea(xTo, x0, w) - vectorColumnArea(xFrom, x0, w)) / span;
+}
+
+/**
+ * The coverage of the pixel by a glyph whose font-unit position at the pixel's centre is
+ * `glyphPosition`, moving `alongX` and `alongY` font units a device pixel right and down: gray
+ * coverage in every channel when `subpixel` is 0, else coverage per subpixel (red, green, blue
+ * from the left; `subpixel` 2 for blue, green, red), each the pixel's thirds weighted by
+ * FreeType's LCD filter, alpha the largest.
+ */
+float4 vectorTextCoverage(uint glyphIndex, float2 glyphPosition, float2 alongX, float2 alongY,
+                          uint subpixel) {
+    VectorGlyphRecord glyph = VectorGlyphs[glyphIndex];
+    float determinant = alongX.x * alongY.y - alongX.y * alongY.x;
+    if (abs(determinant) < 1.0e-12 || glyph.bandCount == 0u)
+        return 0.0;
+    // Font units to pixel offsets from the pixel's centre.
+    float2x2 inverse = float2x2(alongY.y, -alongY.x, -alongX.y, alongX.x) / determinant;
+    // Bands serve when a device row is a range of glyph heights; a turned glyph's row crosses
+    // every band, and reads every segment.
+    bool banded = abs(alongX.y) <= 1.0e-4 * abs(alongY.y);
+    float reach = 0.5 * abs(alongY.y) + 1.5 * abs(alongX.y);
+    float height = glyph.bounds.w - glyph.bounds.y;
+    uint bands = max(glyph.bandCount, 1u);
+    float bandHeight = height / float(bands);
+    int firstBand = banded ? clamp(int(floor((glyphPosition.y - reach - glyph.bounds.y) /
+                                             bandHeight)), 0, int(bands) - 1)
+                           : 0;
+    int lastBand = banded ? clamp(int(floor((glyphPosition.y + reach - glyph.bounds.y) /
+                                            bandHeight)), 0, int(bands) - 1)
+                          : 0;
+    // The pixel's area to the right of the outline, or its seven thirds' (two each side).
+    float gray = 0.0;
+    float4 thirdsLeft = 0.0;
+    float3 thirdsRight = 0.0;
+    const float third = 1.0 / 3.0;
+    for (int band = firstBand; band <= lastBand; ++band) {
+        float bandBottom = !banded || band == 0 ? -3.0e38 : glyph.bounds.y + bandHeight * float(band);
+        float bandTop = !banded || band == int(bands) - 1 ? 3.0e38
+                                                          : glyph.bounds.y + bandHeight * float(band + 1);
+        uint first = banded ? VectorBands[glyph.bandBase + uint(band)] : 0u;
+        uint last = banded ? VectorBands[glyph.bandBase + uint(band) + 1] : glyph.segmentCount;
+        uint indices = glyph.bandBase + bands + 1;
+        for (uint entry = first; entry < last; ++entry) {
+            uint index = banded ? VectorBands[indices + entry] : entry;
+            float4 segment = VectorSegments[glyph.segmentBase + index];
+            // The part of the segment in its band (a turned pixel takes it whole).
+            float2 a = segment.xy;
+            float2 b = segment.zw;
+            if (banded) {
+                float low = max(min(segment.y, segment.w), bandBottom);
+                float high = min(max(segment.y, segment.w), bandTop);
+                if (high <= low)
+                    continue;
+                float slope = (segment.z - segment.x) / (segment.w - segment.y);
+                a = float2(segment.x + (clamp(segment.y, low, high) - segment.y) * slope,
+                           clamp(segment.y, low, high));
+                b = float2(segment.x + (clamp(segment.w, low, high) - segment.y) * slope,
+                           clamp(segment.w, low, high));
+            }
+            // In pixel offsets, then the part crossing the pixel's row.
+            float2 da = mul(inverse, a - glyphPosition);
+            float2 db = mul(inverse, b - glyphPosition);
+            if (da.y == db.y || max(da.y, db.y) <= -0.5 || min(da.y, db.y) >= 0.5)
+                continue;
+            float yFrom = clamp(da.y, -0.5, 0.5);
+            float yTo = clamp(db.y, -0.5, 0.5);
+            float slope = (db.x - da.x) / (db.y - da.y);
+            float xFrom = da.x + (yFrom - da.y) * slope;
+            float xTo = da.x + (yTo - da.y) * slope;
+            float span = xTo - xFrom;
+            float rise = yTo - yFrom;
+            if (subpixel == 0u) {
+                gray += rise * vectorColumnShare(xFrom, xTo, span, -0.5, 1.0);
+            } else {
+                thirdsLeft += rise * float4(vectorColumnShare(xFrom, xTo, span, -0.5 - 2.0 * third, third),
+                                            vectorColumnShare(xFrom, xTo, span, -0.5 - third, third),
+                                            vectorColumnShare(xFrom, xTo, span, -0.5, third),
+                                            vectorColumnShare(xFrom, xTo, span, -0.5 + third, third));
+                thirdsRight += rise * float3(vectorColumnShare(xFrom, xTo, span, -0.5 + 2.0 * third, third),
+                                             vectorColumnShare(xFrom, xTo, span, 0.5, third),
+                                             vectorColumnShare(xFrom, xTo, span, 0.5 + third, third));
+            }
+        }
+    }
+    if (subpixel == 0u)
+        return min(abs(gray), 1.0);
+    // Each subpixel weighs its own third and two neighbours each way (FreeType's default filter).
+    float4 left = min(abs(thirdsLeft) * 3.0, 1.0);
+    float3 right = min(abs(thirdsRight) * 3.0, 1.0);
+    const float3 filter = float3(8.0, 77.0, 86.0) / 256.0;
+    float3 channels = min(float3(
+        filter.x * left.x + filter.y * left.y + filter.z * left.z + filter.y * left.w + filter.x * right.x,
+        filter.x * left.y + filter.y * left.z + filter.z * left.w + filter.y * right.x + filter.x * right.y,
+        filter.x * left.z + filter.y * left.w + filter.z * right.x + filter.y * right.y + filter.x * right.z),
+        1.0);
+    if (subpixel == 2u)
+        channels = channels.bgr;
+    return float4(channels, max(channels.r, max(channels.g, channels.b)));
+}
+
+/**
+ * Subpixel text's coverage per colour channel, set by strataShade for modes 12 and 14; every
+ * other draw leaves it white. The entry point turns it into the draw's per-channel alpha (strataOutput).
  */
 static float3 strataSubpixelCoverage = float3(1.0, 1.0, 1.0);
 
@@ -387,6 +553,9 @@ static float3 strataSubpixelCoverage = float3(1.0, 1.0, 1.0);
 float4 strataShade(PixelInput input) {
     int mode = strataDrawMode(input);
     float4 color = input.color;
+    // Vector text's footprint in font units, taken where every pixel of the quad computes it.
+    float2 glyphAlongX = ddx(input.uv);
+    float2 glyphAlongY = ddy(input.uv);
     if (mode == 1) {
         color *= Texture0.Sample(Sampler0, input.uv);
     } else if (mode == 11) {
@@ -431,6 +600,30 @@ float4 strataShade(PixelInput input) {
                                         strataTextCoverage(sampled.b, color.rgb));
         color.a *= max(strataSubpixelCoverage.r,
                        max(strataSubpixelCoverage.g, strataSubpixelCoverage.b));
+    } else if (mode == 13 || mode == 14) {
+        // Vector text. Where the glyph shows upright at the size it was laid out for, it draws
+        // its variant fitted to the pixel grid at that size (drawData0.y, when it has one); a zoom
+        // passing through sizes draws its outline as it is (drawData0.x), so its stems do not
+        // jump a pixel at a time.
+        float2 devicePixels = framebufferSize / max(logicalSize, 1.0);
+        float laidOut = length(input.drawData1.zw) * devicePixels.y;
+        float shown = abs(glyphAlongY.y) > 0.0 ? 1.0 / abs(glyphAlongY.y) : 0.0;
+        bool native = abs(glyphAlongX.y) <= 1.0e-4 * abs(glyphAlongY.y) &&
+                      abs(glyphAlongY.x) <= 1.0e-4 * abs(glyphAlongX.x) &&
+                      abs(shown - laidOut) <= laidOut * 1.0e-3;
+        float record = native && input.drawData0.y >= 0.0 ? input.drawData0.y : input.drawData0.x;
+        uint subpixel = mode == 14 ? (uint)floor(input.drawData0.z + 0.5) : 0u;
+        float4 coverage = vectorTextCoverage((uint)floor(record + 0.5), input.uv, glyphAlongX,
+                                             glyphAlongY, subpixel);
+        if (subpixel == 0u) {
+            color.a *= strataTextCoverage(coverage.a, color.rgb);
+        } else {
+            strataSubpixelCoverage = float3(strataTextCoverage(coverage.r, color.rgb),
+                                            strataTextCoverage(coverage.g, color.rgb),
+                                            strataTextCoverage(coverage.b, color.rgb));
+            color.a *= max(strataSubpixelCoverage.r,
+                           max(strataSubpixelCoverage.g, strataSubpixelCoverage.b));
+        }
     } else if (mode == 5) {
         float3 sampled = Texture0.Sample(Sampler0, input.uv).rgb;
         float signedDistance = median3(sampled.r, sampled.g, sampled.b) - 0.5;
