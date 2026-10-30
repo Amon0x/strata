@@ -332,6 +332,7 @@ void LayoutEngine::arrange(
     record.positioned = style.position != LayoutPosition::flow;
     record.portal_target = style.kind == LayoutKind::portal ? style.portal_target : std::string{};
     record.detached_from_parent_clip = style.kind == LayoutKind::portal && style.detach_from_parent_clip;
+    record.clip_shaped = style.clip_shaped;
     record.content_motion_progress = measured.content_motion_progress;
     record.content_motion_running = measured.content_motion_running;
     record.content_motion_clip = measured.content_motion_clip;

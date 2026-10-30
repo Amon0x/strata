@@ -277,6 +277,8 @@ LayoutStyle layout_style(const DescriptionNode& description) {
                             : snap == "END"    ? ScrollSnap::end
                                                : ScrollSnap::none;
     }
+    style.clip_shaped = field(layout, "clipShape") != nullptr ||
+                        scalar_property(description, "clipShape") != nullptr;
     const runtime::Value* scroll = field(layout, "scrollOffset");
     if (scroll == nullptr)
         scroll = scalar_property(description, "scrollOffset");

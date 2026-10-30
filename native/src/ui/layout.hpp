@@ -197,6 +197,8 @@ struct LayoutStyle final {
     std::optional<VirtualListSpec> virtual_list;
     std::string portal_target = "root";
     bool detach_from_parent_clip = true;
+    /** It has a `clipShape`, which cuts what is hit on and within it. */
+    bool clip_shaped = false;
     std::string anchor_target;
     std::optional<Point> anchor_point;
     LayoutAnchorSide anchor_side = LayoutAnchorSide::bottom;
@@ -359,6 +361,8 @@ struct LayoutRecord final {
     std::vector<std::size_t> materialized_child_indices;
     std::string portal_target;
     bool detached_from_parent_clip = false;
+    /** Its node has a `clipShape` (LayoutStyle::clip_shaped). */
+    bool clip_shaped = false;
     double content_motion_progress = 1.0;
     bool content_motion_running = false;
     bool content_motion_clip = false;

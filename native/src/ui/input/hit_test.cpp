@@ -111,9 +111,15 @@ namespace {
     return outlines;
 }
 
-/** The area a node's `clipShape` cuts it to, over its layout bounds; none without one. */
+/**
+ * The area a node's `clipShape` cuts it to, over its layout bounds; none without one. Layout
+ * notes which nodes have one (`clip_shaped`), so most are passed over without reading their style.
+ */
 [[nodiscard]] std::vector<std::vector<Point>> clip_outlines(const RetainedNode& node,
+                                                           const LayoutRecord& record,
                                                            const Rect bounds) {
+    if (!record.clip_shaped)
+        return {};
     return shape_outlines(node, visual_value(node, "clipShape"), true, bounds);
 }
 
@@ -122,11 +128,12 @@ namespace {
  * none leaves the whole box hittable.
  */
 [[nodiscard]] std::vector<std::vector<Point>> hit_outlines(const RetainedNode& node,
+                                                          const LayoutRecord& record,
                                                           const Rect bounds) {
     const auto found = node.description().properties.find("hitShape");
     if (found != node.description().properties.end() && found->second.value() != nullptr)
         return shape_outlines(node, found->second.value(), false, bounds);
-    return clip_outlines(node, bounds);
+    return clip_outlines(node, record, bounds);
 }
 
 [[nodiscard]] bool
@@ -1021,7 +1028,7 @@ void InputRouter::prepare_pointer_geometry() const {
             std::ranges::stable_sort(children, z_order);
         // A clip shape cuts what is hit below it as well as the node itself.
         ClipChain child_clips = clips;
-        if (std::vector<std::vector<Point>> own = clip_outlines(node, record->bounds);
+        if (std::vector<std::vector<Point>> own = clip_outlines(node, *record, record->bounds);
             !own.empty()) {
             auto chain = clips != nullptr ? std::make_shared<std::vector<ClipOutline>>(*clips)
                                           : std::make_shared<std::vector<ClipOutline>>();
@@ -1045,7 +1052,7 @@ void InputRouter::prepare_pointer_geometry() const {
             anchor,
             here.relative,
             anchor ? std::nullopt : here.relative_clip,
-            hit_outlines(node, bounds),
+            hit_outlines(node, *record, bounds),
             clips,
         });
     };
