@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -171,7 +172,7 @@ struct RenderEngine::Impl final {
     std::uint64_t fragment_tree_generation = 0U;
     /** The portals outside portals, in tree order, as of a structure and layout generation. */
     std::vector<const RetainedNode*> portals;
-    std::optional<std::pair<std::uint64_t, std::uint64_t>> portals_generations;
+    std::optional<std::array<std::uint64_t, 3U>> portals_generations;
     RenderCommandBuffer retained_base_commands;
     /**
      * The base stream plus the detached overlays last appended to it, and those overlays. A

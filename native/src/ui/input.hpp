@@ -521,6 +521,16 @@ class InputRouter final {
     [[nodiscard]] std::optional<StaticTextSelectionSnapshot>
     static_text_selection_snapshot(std::uint64_t identity) const noexcept;
     [[nodiscard]] std::vector<std::string> pending_navigation_targets() const;
+    /** A `scroll.to` that eases: the surface runs it as a scroll animation. */
+    struct ScrollAnimationIntent final {
+        std::string key;
+        std::optional<double> x;
+        std::optional<double> y;
+        std::optional<std::string> timing;
+        std::optional<std::int64_t> duration_nanos;
+    };
+    /** The eased `scroll.to` actions run since the last call, in order. */
+    [[nodiscard]] std::vector<ScrollAnimationIntent> take_scroll_animations();
     [[nodiscard]] const StatusFeedbackService& status_feedback() const noexcept;
     [[nodiscard]] NotificationService& notifications() noexcept;
     [[nodiscard]] const NotificationService& notifications() const noexcept;
@@ -1176,6 +1186,7 @@ class InputRouter final {
     std::size_t widget_click_count_ = 0U;
     std::optional<PendingFocus> pending_focus_;
     std::vector<PendingReveal> pending_reveals_;
+    std::vector<ScrollAnimationIntent> pending_scroll_animations_;
     std::map<std::uint64_t, TextEditor> editors_;
     struct EditorScroll final {
         Point offset;

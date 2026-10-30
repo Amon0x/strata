@@ -246,7 +246,8 @@ void LayoutEngine::arrange(
             if (previous == result_.records.end()) {
                 throw std::logic_error("cached arrangement lost its retained layout record");
             }
-            LayoutRecord record = previous->second;
+            // Moved where it is: a record is large, and a scrolled page moves every one it shows.
+            LayoutRecord& record = previous->second;
             const Point accumulated_translation =
                 record.translated_subtree.value_or(Point{});
             record.generation = result.generation;
@@ -268,7 +269,6 @@ void LayoutEngine::arrange(
                 child_clip.reset();
             }
             record.clip = child_clip;
-            result.records.insert_or_assign(record.identity, std::move(record));
             current_arranged_records_.insert(node->node->identity());
             if (auto entry = arrangement_cache_.find(node->node->identity());
                 entry != arrangement_cache_.end()) {

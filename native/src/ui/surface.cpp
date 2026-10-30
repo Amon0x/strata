@@ -1838,7 +1838,22 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         }
     }
 
-    // Build: re-describe when the description is stale, then bring input onto the tree.
+    // Build: re-describe when the description is stale, then bring input onto the tree. Eased
+    // `scroll.to` actions start as the scroll animations they are.
+    for (InputRouter::ScrollAnimationIntent& intent : input_.take_scroll_animations()) {
+        ScrollAnimationRequest request;
+        request.key = std::move(intent.key);
+        request.x = intent.x;
+        request.y = intent.y;
+        if (intent.timing.has_value())
+            request.timing = std::move(*intent.timing);
+        request.duration_nanos = intent.duration_nanos;
+        try {
+            static_cast<void>(animate_scroll_to(std::move(request)));
+        } catch (const std::invalid_argument&) {
+            // A blank timing or key: nothing to ease.
+        }
+    }
     advance_scroll_animations(frame_time_nanos);
     settle_scroll_snaps(frame_time_nanos);
     motion_.set_images(svg_images_.get());

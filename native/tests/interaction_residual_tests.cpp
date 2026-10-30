@@ -2739,6 +2739,63 @@ overlay VirtualRows {
     });
 }
 
+void test_scroll_to_jumps_and_eases(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Scrolled {
+  root Panel(key: "scrollto.root", layout: { kind: "COLUMN", width: 300, height: 400 }) {
+    Button(key: "scrollto.top", label: "Down", onClick: action("scroll.to", key: "scrollto.view", y: 150))
+    Scroll(key: "scrollto.view", vertical: true, horizontal: false, layout: { width: 200, height: 200 }) {
+      Panel(key: "scrollto.content", layout: { width: 200, height: 1000 })
+    }
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("scroll-to", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Scrolled", 300.0, 400.0, false);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const auto offset = [&surface] {
+        return surface->input().scroll_offset("scrollto.view").value_or(ui::Point{-1.0, -1.0}).y;
+    };
+    check(offset() == 0.0, "scroll.to fixture did not start unscrolled");
+
+    // Without a timing, the authored action jumps there, as element.scrollTo does.
+    const ui::RetainedNode* button = surface->tree().find_key("scrollto.top");
+    const ui::LayoutRecord* button_record = surface->layout().find(button->identity());
+    const ui::Point at{button_record->bounds.x + button_record->bounds.width / 2.0,
+                       button_record->bounds.y + button_record->bounds.height / 2.0};
+    std::vector<ui::SurfaceInputEvent> events;
+    events.emplace_back(ui::PointerInputEvent{at, ui::PointerEventType::press, 1, 0});
+    events.emplace_back(ui::PointerInputEvent{at, ui::PointerEventType::release, 1, 0});
+    static_cast<void>(surface->input().enqueue(std::move(events)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(offset() == 150.0, "scroll.to did not jump to its offset: " + std::to_string(offset()));
+
+    // With a timing and a duration it eases there, and past the end it stops at the end.
+    static_cast<void>(surface->dispatch_action(
+        "scroll.to",
+        object({{"key", runtime::Value(runtime::KeyValue{"scrollto.view"})},
+                {"y", runtime::Value(5000.0)},
+                {"timing", runtime::Value(std::string("standard"))},
+                {"duration", runtime::Value(400.0)}}),
+        "test", std::nullopt, runtime::Value{}));
+    for (int frame = 0; frame < 12; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    const double end =
+        surface->input().constrained_scroll_target("scrollto.view", ui::Point{0.0, 1.0e9})->y;
+    const double easing = offset();
+    check(easing > 150.0 && easing < end - 1.0,
+          "an eased scroll.to did not move through the offsets between: " +
+              std::to_string(easing));
+    for (int frame = 0; frame < 40; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    check(offset() == end,
+          "an eased scroll.to did not stop at the end of the content: " + std::to_string(offset()));
+}
+
 void test_post_layout_reveal_reaches_layout(const std::filesystem::path& resources) {
     const std::string source = R"(
 overlay Reveal {
@@ -5313,6 +5370,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_zoom_view_keys(fixture);
         test_virtual_focused_row_stays_realized(resources);
         test_post_layout_reveal_reaches_layout(resources);
+        test_scroll_to_jumps_and_eases(resources);
         test_sticky_table_header_blocks_hits(resources);
         test_subtargets_hit_in_presented_space(resources);
         test_item_grid_header_clip(resources);

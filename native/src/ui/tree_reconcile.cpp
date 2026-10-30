@@ -306,6 +306,9 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
                         &next);
                     existing->mark_dirty(reason);
                     bump_dirty_generation(reason);
+                    if (reason == DirtyReason::layout || reason == DirtyReason::style ||
+                        name == "style" || name == "$layout")
+                        ++layout_style_generation_;
                     node_layout_updated = node_layout_updated || affects_layout(reason);
                     node_updated = true;
                     existing->parsed_layout_.reset();
@@ -317,6 +320,9 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
                     const DirtyReason reason = property_reason(name, &current, nullptr);
                     existing->mark_dirty(reason);
                     bump_dirty_generation(reason);
+                    if (reason == DirtyReason::layout || reason == DirtyReason::style ||
+                        name == "style" || name == "$layout")
+                        ++layout_style_generation_;
                     node_layout_updated = node_layout_updated || affects_layout(reason);
                     node_updated = true;
                     existing->parsed_layout_.reset();

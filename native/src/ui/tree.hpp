@@ -511,6 +511,12 @@ class RetainedTree final {
     [[nodiscard]] std::shared_ptr<const RetainedDescriptionSnapshot> description_snapshot() const;
     /** Monotonic epoch for changes that can affect measurement or arrangement. */
     [[nodiscard]] std::uint64_t layout_invalidation_generation() const noexcept;
+    /**
+     * Changes whenever a node's layout or style properties change: what a node is laid out as
+     * (its kind, whether it is a portal) can change only then or with the structure, never with a
+     * scroll or a measurement.
+     */
+    [[nodiscard]] std::uint64_t layout_style_generation() const noexcept;
     [[nodiscard]] std::uint64_t dirty_generation(DirtyReason reason) const noexcept;
     [[nodiscard]] DirtyGenerationSnapshot dirty_generations() const noexcept;
     [[nodiscard]] std::size_t dirty_count() const noexcept;
@@ -578,6 +584,7 @@ class RetainedTree final {
     std::array<std::uint64_t, 11U> dirty_generations_{};
     std::uint64_t generation_ = 0U;
     std::uint64_t layout_invalidation_generation_ = 0U;
+    std::uint64_t layout_style_generation_ = 0U;
     std::uint64_t next_identity_ = 1U;
     std::map<std::string, std::vector<RetainedNode*>, std::less<>> key_index_;
     std::map<std::uint64_t, RetainedNode*> identity_index_;

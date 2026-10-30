@@ -640,11 +640,11 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         });
         implementation_->fragment_tree_generation = tree.structure_generation();
     }
-    // Finding the portals is a walk of the whole tree: done again only when its structure or
-    // something laid out (a node's kind among it) changed.
+    // Finding the portals is a walk of the whole tree: done again only when its structure, a
+    // node's layout or style (what it is laid out as), or which nodes are laid out changed.
     std::vector<const RetainedNode*>& portals = implementation_->portals;
-    const std::pair<std::uint64_t, std::uint64_t> portal_generations{
-        tree.structure_generation(), tree.layout_invalidation_generation()};
+    const std::array<std::uint64_t, 3U> portal_generations{
+        tree.structure_generation(), tree.layout_style_generation(), layout.records.size()};
     const auto collect_portals = [&ports = portals, &layout](const auto& self,
                                                              const RetainedNode& node,
                                                              const bool inside_portal) -> void {

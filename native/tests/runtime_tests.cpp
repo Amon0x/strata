@@ -367,7 +367,7 @@ void test_builtin_catalog_projects_runtime_action_contracts() {
     const strata::compiler::SchemaRegistry schema = strata::compiler::SchemaRegistry::builtins();
     const strata::runtime::RuntimeActionRegistry actions =
         strata::runtime::RuntimeActionRegistry::from_schema(schema);
-    check(actions.contracts().size() == 105U,
+    check(actions.contracts().size() == 106U,
           "built-in action inventory changed: " + std::to_string(actions.contracts().size()));
     const auto button = actions.contract("Button");
     check(button != nullptr &&

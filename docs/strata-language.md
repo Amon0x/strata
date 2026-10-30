@@ -387,6 +387,16 @@ stops scrolling: about 120 ms after the last wheel step or drag, and not while a
 eases to the nearest child's start, centre or end. Its snap points are its children, or the
 children of its one content box, so a carousel or a picker needs no extra structure.
 
+An app scrolls a view itself with `scroll.to`, as `element.scrollTo` does on the web: the keyed
+view's `x` and/or `y` offset, clamped to its range. Without a `timing` it jumps there; with one (a
+theme motion timing, optionally a `duration` in milliseconds) it eases there the way a scroll
+animation does, and with reduced motion it jumps. To bring a keyed node into view instead, use
+`reveal.request`.
+
+```strata
+Button(label: "Back to top", onClick: action("scroll.to", key: "feed", y: 0, timing: "standard"))
+```
+
 ### Masonry and canvas layouts
 
 `kind: "MASONRY"` lays its children out in equal columns, Pinterest-style: each child is as wide as

@@ -662,6 +662,9 @@ std::uint64_t RetainedTree::generation() const noexcept {
 std::uint64_t RetainedTree::layout_invalidation_generation() const noexcept {
     return layout_invalidation_generation_;
 }
+std::uint64_t RetainedTree::layout_style_generation() const noexcept {
+    return layout_style_generation_;
+}
 
 std::uint64_t RetainedTree::dirty_generation(const DirtyReason reason) const noexcept {
     return dirty_generations_[reason_index(reason)];

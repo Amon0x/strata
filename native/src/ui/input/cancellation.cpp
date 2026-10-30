@@ -70,6 +70,7 @@ InputOperationResult InputRouter::cancel_interactions() {
     widget_click_count_ = 0U;
     pending_focus_.reset();
     pending_reveals_.clear();
+    pending_scroll_animations_.clear();
     queued_inputs_.clear();
     input_queue_overflow_reported_ = false;
 

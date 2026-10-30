@@ -3137,6 +3137,18 @@ Reveal a keyed node after reconciliation and layout Payload: `strata.action-payl
 | `focus` | boolean | false | false | — |
 | `padding` | number | false | false | — |
 
+### `scroll.to`
+
+Scroll a keyed scroll view to an offset, at once or eased by a motion timing Payload: `strata.action-payload/scroll.to@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `key` | key | true | false | — |
+| `x` | number | false | false | — |
+| `y` | number | false | false | — |
+| `timing` | string | false | false | — |
+| `duration` | number | false | false | — |
+
 ### `split-change`
 
 Observe the built-in split-change interaction Payload: `no payload`. Dispatch: `optional`.

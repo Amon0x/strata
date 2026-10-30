@@ -1331,6 +1331,54 @@
       "summary": "Reveal a keyed node after reconciliation and layout"
     },
     {
+      "dispatchPolicy": "framework",
+      "id": "scroll.to",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "key",
+          "nullable": false,
+          "required": true,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "x",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "y",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timing",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "duration",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "payloadContract": "strata.action-payload/scroll.to@1",
+      "summary": "Scroll a keyed scroll view to an offset, at once or eased by a motion timing"
+    },
+    {
       "dispatchPolicy": "optional",
       "id": "split-change",
       "parameters": [],

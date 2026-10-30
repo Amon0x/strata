@@ -552,6 +552,18 @@ void add_builtin_actions(BuiltinCatalog& catalog) {
             .dispatch_policy = "framework",
             .payload_contract = "strata.action-payload/reveal.request@1",
             .summary = "Reveal a keyed node after reconciliation and layout"},
+        DeclaredAction{
+            .id = "scroll.to",
+            .parameters =
+                {DeclaredParameter{
+                     .name = "key", .type = declared_type_reference("key"), .required = true},
+                 DeclaredParameter{.name = "x", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "y", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "timing", .type = declared_type_reference("string")},
+                 DeclaredParameter{.name = "duration", .type = declared_type_reference("number")}},
+            .dispatch_policy = "framework",
+            .payload_contract = "strata.action-payload/scroll.to@1",
+            .summary = "Scroll a keyed scroll view to an offset, at once or eased by a motion timing"},
         DeclaredAction{.id = "split-change",
                        .parameters = {},
                        .dispatch_policy = "optional",

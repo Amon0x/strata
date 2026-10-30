@@ -178,7 +178,7 @@ void ContentSizeTransitions::remove(const std::uint64_t identity) noexcept {
     active_.erase(identity);
 }
 
-void ContentSizeTransitions::retain(const std::map<std::uint64_t, LayoutRecord>& records) {
+void ContentSizeTransitions::retain(const std::unordered_map<std::uint64_t, LayoutRecord>& records) {
     std::erase_if(targets_, [&records](const auto& value) { return !records.contains(value.first); });
     std::erase_if(active_, [&records](const auto& value) { return !records.contains(value.first); });
 }

@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 #include "geometry/primitives.hpp"
@@ -375,7 +376,7 @@ struct LayoutOperationCounters final {
 struct LayoutResult final {
     std::uint64_t generation = 0U;
     std::uint64_t root_identity = 0U;
-    std::map<std::uint64_t, LayoutRecord> records;
+    std::unordered_map<std::uint64_t, LayoutRecord> records;
     double scale = 1.0;
     LayoutOperationCounters operations;
     std::int64_t measure_nanos = 0;
@@ -415,7 +416,7 @@ class ContentSizeTransitions final {
     [[nodiscard]] std::size_t active_count() const noexcept;
     [[nodiscard]] std::vector<std::uint64_t> active_identities() const;
     void remove(std::uint64_t identity) noexcept;
-    void retain(const std::map<std::uint64_t, LayoutRecord>& records);
+    void retain(const std::unordered_map<std::uint64_t, LayoutRecord>& records);
     void clear() noexcept;
 
   private:

@@ -27,6 +27,10 @@
 namespace strata::ui {
 using namespace input_detail;
 
+std::vector<InputRouter::ScrollAnimationIntent> InputRouter::take_scroll_animations() {
+    return std::exchange(pending_scroll_animations_, {});
+}
+
 std::optional<runtime::ActionDispatchOutcome> InputRouter::execute_surface_action(
     const runtime::ActionEvent& event,
     const runtime::Action& action,
@@ -116,6 +120,45 @@ std::optional<runtime::ActionDispatchOutcome> InputRouter::execute_surface_actio
             number_value(action.payload.field("padding"), 6.0),
             0U,
         });
+        return surface_outcome(runtime::ActionDispatchStatus::handled);
+    }
+    if (id == "scroll.to") {
+        // As element.scrollTo does on the web: an offset on either axis, at once, or eased by a
+        // motion timing (and a duration in milliseconds) the way a scroll animation is.
+        const std::string* key = string_value(action.payload.field("key"));
+        const auto axis = [&action](const std::string_view name) -> std::optional<double> {
+            const runtime::Value* value = action.payload.field(name);
+            return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())
+                       ? std::optional<double>(*value->number())
+                       : std::nullopt;
+        };
+        const std::optional<double> x = axis("x");
+        const std::optional<double> y = axis("y");
+        const std::optional<Point> current =
+            key != nullptr ? scroll_offset(*key) : std::optional<Point>{};
+        if (!current.has_value() || (!x.has_value() && !y.has_value())) {
+            return surface_outcome(
+                runtime::ActionDispatchStatus::failed,
+                "scroll.to requires an attached scroll view's key and an x or y offset.");
+        }
+        const std::string* timing = string_value(action.payload.field("timing"));
+        const std::optional<double> duration = axis("duration");
+        if (timing != nullptr || duration.has_value()) {
+            pending_scroll_animations_.push_back(ScrollAnimationIntent{
+                *key, x, y,
+                timing != nullptr ? std::optional<std::string>(*timing) : std::nullopt,
+                duration.has_value() && *duration > 0.0
+                    ? std::optional<std::int64_t>(
+                          static_cast<std::int64_t>(std::llround(*duration * 1'000'000.0)))
+                    : std::nullopt,
+            });
+            return surface_outcome(runtime::ActionDispatchStatus::handled);
+        }
+        const std::optional<Point> target = constrained_scroll_target(
+            *key, Point{x.value_or(current->x), y.value_or(current->y)});
+        if (!target.has_value() || *target == *current)
+            return surface_outcome(runtime::ActionDispatchStatus::ignored);
+        static_cast<void>(scroll_to(*key, *target, result));
         return surface_outcome(runtime::ActionDispatchStatus::handled);
     }
     if (id.starts_with("tree.")) return execute_tree_action(action, result);
