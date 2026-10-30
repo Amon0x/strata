@@ -162,9 +162,8 @@ class RepeaterIndexableSequence final : public runtime::IndexableSequence {
 [[nodiscard]] bool repeater_dependencies_current(const DescriptionSequenceGeneration& previous,
                                                  const runtime::ExpressionScope& scope,
                                                  const runtime::ExpressionRuntime& expressions) {
-    for (const auto& [name, value] : previous.lexical_dependencies) {
-        const ExpressionValue* current = scope.find(name);
-        if (current == nullptr || !runtime::same_expression_value(*current, value.value))
+    for (const auto& [read, seen] : previous.lexical_dependencies) {
+        if (!runtime::lexical_read_current(scope, read, seen.value))
             return false;
     }
     for (const auto& [canonical, dependency] : previous.host_dependencies) {
@@ -622,14 +621,38 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
     // The functions the block declares close over its scope, which grows as its states and
     // derived values are declared: a call reads what is declared by then, a handler all of it.
     std::shared_ptr<runtime::FunctionGroup> functions;
-    for (const runtime::ProgramStatement& statement : statements) {
-        if (statement.kind != runtime::StatementKind::function)
-            continue;
-        if (functions == nullptr) {
-            functions = std::make_shared<runtime::FunctionGroup>();
-            functions->program = program.shared_from_this();
+    if (std::ranges::any_of(statements, [](const runtime::ProgramStatement& statement) {
+            return statement.kind == runtime::StatementKind::function;
+        })) {
+        const auto declare = [&program, &statements] {
+            auto made = std::make_shared<runtime::FunctionGroup>();
+            made->program = program.shared_from_this();
+            for (const runtime::ProgramStatement& statement : statements) {
+                if (statement.kind == runtime::StatementKind::function)
+                    made->functions.emplace_back(statement.name, statement.function);
+            }
+            return made;
+        };
+        // The body's group for the block, kept from its last description; a block the body
+        // runs again at the same path in one description has a group for each run.
+        Frame* const body = frame();
+        if (body == nullptr) {
+            functions = declare();
+        } else {
+            ComponentInstance& instance = *body->instance;
+            std::string slot = std::to_string(block);
+            slot += '\n';
+            slot += enclosing.instance_path();
+            if (!instance.function_groups.contains(slot)) {
+                const auto kept = instance.previous_function_groups.find(slot);
+                functions = kept != instance.previous_function_groups.end()
+                                ? std::move(kept->second)
+                                : declare();
+                instance.function_groups.emplace(std::move(slot), functions);
+            } else {
+                functions = declare();
+            }
         }
-        functions->functions.emplace_back(statement.name, statement.function);
     }
     if (functions != nullptr) {
         Scope& declaring = extend();
@@ -989,11 +1012,8 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
             // The kept generation still rests on what its filter and keys read, and whoever
             // holds this Repeater reads those values with it.
             runtime::DependencyRecorder& holder = *dependencies.upstream();
-            for (const auto& [name, value] : stamp.lexical_dependencies) {
-                static_cast<void>(value);
-                if (const ExpressionValue* current = scope.expressions.find(name))
-                    holder.lexical(name, *current);
-            }
+            for (const auto& [read, seen] : stamp.lexical_dependencies)
+                holder.lexical(read, seen.value);
             for (const auto& [canonical, dependency] : stamp.host_dependencies) {
                 static_cast<void>(canonical);
                 holder.host(dependency);
@@ -1076,11 +1096,94 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
     return RepeaterChildren{std::move(provider), std::move(sequence), std::move(stamp)};
 }
 
+void DescriptionBuilder::body_effect() noexcept {
+    if (Frame* const current = frame(); current != nullptr)
+        ++current->effects;
+}
+
 std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runtime::CallId id,
                                                                       const Scope& scope) {
     const runtime::ProgramCall& call = program().call(id);
     if (call.component)
         return build_component_call(call, scope);
+    Frame* const body = frame();
+    // A call generating rows, or handing its widget row templates, is described each time.
+    if (body == nullptr || call.lazy_rows ||
+        std::ranges::any_of(program().arguments(call), &runtime::ProgramCallArgument::row_template))
+        return build_widget_call(id, scope);
+    ComponentInstance& instance = *body->instance;
+    std::string slot = std::to_string(id);
+    slot += '\n';
+    slot += scope.instance_path();
+    if (const auto known = instance.previous_widget_calls.find(slot);
+        known != instance.previous_widget_calls.end()) {
+        WidgetCall& last = known->second;
+        const bool current =
+            last.node != nullptr && last.widgets_revision == widgets_.revision() &&
+            last.widget_defaults == scope.widget_defaults &&
+            std::ranges::all_of(last.lexical,
+                                [&scope](const auto& read) {
+                                    return runtime::lexical_read_current(
+                                        scope.expressions, read.first, read.second.value);
+                                }) &&
+            std::ranges::all_of(last.host,
+                                [&](const auto& read) {
+                                    return expressions_->read_host_dependency(
+                                               read.second.key, scope.expressions) == read.second;
+                                }) &&
+            std::ranges::all_of(last.children, [this](const ChildRef& child) {
+                const ComponentInstance* held = find_instance(child.id);
+                return held != nullptr && !held->dirty && held->emitted == child.seen;
+            });
+        if (current) {
+            // What the call read, and the instances it holds, are the body's again.
+            runtime::DependencyRecorder& reads = expression_reads();
+            for (const auto& [read, seen] : last.lexical)
+                reads.lexical(read, seen.value);
+            for (const auto& [path, read] : last.host) {
+                static_cast<void>(path);
+                reads.host(read);
+            }
+            for (const ChildRef& child : last.children) {
+                ComponentInstance& held = *find_instance(child.id);
+                held.last_used_epoch = epoch_;
+                hold_child(held);
+            }
+            std::shared_ptr<const DescriptionNode> node = last.node;
+            instance.widget_calls.insert_or_assign(std::move(slot), std::move(last));
+            instance.previous_widget_calls.erase(known);
+            return node;
+        }
+    }
+    // What the call reads of the scope it is made in: a name its own blocks bind is not one.
+    runtime::DependencyRecorder reads(&expression_reads(), runtime::DependencyRecorder::Keep::first,
+                                      runtime::DependencyRecorder::Keep::first);
+    reads.keep_only_reads_of(&scope.expressions);
+    const std::size_t effects = body->effects;
+    const std::size_t children = body->children.size();
+    const std::size_t diagnostics = diagnostics_.size();
+    const std::size_t reports = transaction_ != nullptr ? transaction_->reports.size() : 0U;
+    std::shared_ptr<const DescriptionNode> node;
+    {
+        const RecordingScope recording(recording_, &reads);
+        node = build_widget_call(id, scope);
+    }
+    if (body->effects == effects && diagnostics_.size() == diagnostics &&
+        (transaction_ == nullptr || transaction_->reports.size() == reports)) {
+        WidgetCall made{node, widgets_.revision(), scope.widget_defaults,
+                        std::move(reads.lexical_reads()),
+                        std::move(reads.host_reads()),
+                        std::vector<ChildRef>(body->children.begin() +
+                                                  static_cast<std::ptrdiff_t>(children),
+                                              body->children.end())};
+        instance.widget_calls.insert_or_assign(std::move(slot), std::move(made));
+    }
+    return node;
+}
+
+std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_widget_call(const runtime::CallId id,
+                                                                             const Scope& scope) {
+    const runtime::ProgramCall& call = program().call(id);
     DescriptionNode::Properties properties;
     // Room for the arguments and the few properties description adds ($layout, defaults).
     properties.reserve(call.arguments_count + 4U);
@@ -1426,13 +1529,64 @@ DescriptionBuilder::build_component_call(const runtime::ProgramCall& call, const
     const std::string& type = call.type;
     const std::string& source_path = call.path;
     const std::span<const runtime::ProgramCallArgument> call_arguments = program.arguments(call);
+    // A call without content, to a component declaring no widget defaults, whose arguments read
+    // only what is unchanged since they were last evaluated, has the inputs it had: it is placed
+    // again without evaluating them.
+    const bool skippable = call.children == runtime::no_program_id &&
+                           program.widget_defaults(component).empty();
+    // A loop counts the keys called in it: a call placed again without being made would not
+    // count its own, so whatever holds it is made each time.
+    if (call.key_argument != runtime::no_program_id && scope.loop.has_value())
+        body_effect();
+    std::optional<std::string> skip_key;
+    // Computed once: a keyed path counts the occurrences of its key.
+    std::optional<std::string> skip_path;
+    if (skippable && call.key_argument != runtime::no_program_id)
+        skip_key = key_from_value(evaluate(call_arguments[call.key_argument].value,
+                                           scope.expressions));
+    if (skippable) {
+        const std::string& path =
+            skip_path.emplace(keyed_instance_path(scope, type, skip_key, source_path));
+        ComponentInstance& known = this->instance(InstanceKind::component, type + "\n" + path,
+                                                  frame() != nullptr ? frame()->instance : nullptr);
+        if (known.root != nullptr && !known.dirty && known.argument_lexical.has_value() &&
+            known.component_index == call.component_index && known.source_path == source_path &&
+            known.argument_widget_defaults == scope.widget_defaults &&
+            same_contextual_host_roots(known.contextual_host_roots) &&
+            std::ranges::all_of(*known.argument_lexical, [&scope](const auto& read) {
+                return runtime::lexical_read_current(scope.expressions, read.first,
+                                                     read.second.value);
+            }) &&
+            std::ranges::all_of(known.argument_host, [&](const auto& read) {
+                return expressions_->read_host_dependency(read.second.key, scope.expressions) ==
+                       read.second;
+            })) {
+            // What the arguments read, the caller reads too.
+            for (const auto& [read, seen] : *known.argument_lexical)
+                expression_reads().lexical(read, seen.value);
+            for (const auto& [path_key, read] : known.argument_host) {
+                static_cast<void>(path_key);
+                expression_reads().host(read);
+            }
+            known.last_used_epoch = epoch_;
+            emit(known);
+            hold_child(known);
+            return known.emitted;
+        }
+    }
+    runtime::DependencyRecorder argument_reads(&expression_reads(),
+                                               runtime::DependencyRecorder::Keep::first,
+                                               runtime::DependencyRecorder::Keep::first);
     std::vector<ExpressionValue> arguments;
-    arguments.reserve(call_arguments.size());
-    for (const runtime::ProgramCallArgument& argument : call_arguments)
-        arguments.push_back(evaluate(argument.value, scope.expressions));
     std::vector<DescriptionBehavior> behaviors;
-    if (call.has_behaviors)
-        behaviors = build_behaviors(call, scope.expressions);
+    {
+        const RecordingScope recording(recording_, &argument_reads);
+        arguments.reserve(call_arguments.size());
+        for (const runtime::ProgramCallArgument& argument : call_arguments)
+            arguments.push_back(evaluate(argument.value, scope.expressions));
+        if (call.has_behaviors)
+            behaviors = build_behaviors(call, scope.expressions);
+    }
     const std::optional<std::string> key = call.key_argument != runtime::no_program_id
                                                ? key_from_value(arguments[call.key_argument])
                                                : std::nullopt;
@@ -1489,7 +1643,10 @@ DescriptionBuilder::build_component_call(const runtime::ProgramCall& call, const
     ComponentInputs inputs;
     inputs.reserve(parameter_arguments.size() + arguments.size());
     Scope instance = component_scope(
-        component, keyed_instance_path(scope, type, key, source_path), scope,
+        component,
+        skip_path.has_value() ? std::move(*skip_path)
+                              : keyed_instance_path(scope, type, key, source_path),
+        scope,
         projection_scope.widget_defaults, supplied, &inputs);
     // Arguments no parameter takes, and the widget defaults the body sees, describe it too.
     for (std::uint32_t index = 0U; index < arguments.size(); ++index) {
@@ -1516,6 +1673,13 @@ DescriptionBuilder::build_component_call(const runtime::ProgramCall& call, const
         called.source_path == source_path && same_inputs(called.inputs, inputs) &&
         same_contextual_host_roots(called.contextual_host_roots);
     called.scope = std::move(instance);
+    if (skippable) {
+        called.argument_lexical = std::move(argument_reads.lexical_reads());
+        called.argument_host = std::move(argument_reads.host_reads());
+        called.argument_widget_defaults = scope.widget_defaults;
+    } else {
+        called.argument_lexical.reset();
+    }
     if (current) {
         called.last_used_epoch = epoch_;
     } else {
@@ -1571,6 +1735,7 @@ DescriptionBuilder::build_component_template(const std::string_view component_na
                                "' lost its declaration");
     }
     const runtime::ProgramComponent& component = program().component(*index);
+    body_effect();
     std::shared_ptr<const Scope::WidgetDefaults> defaults = caller.widget_defaults;
     if (const std::span<const runtime::ProgramWidgetDefault> declared =
             program().widget_defaults(component);
@@ -1647,20 +1812,25 @@ void DescriptionBuilder::bind_state_scope(const std::string_view runtime_scope,
     Frame* const current = frame();
     if (current == nullptr)
         return;
+    ++current->effects;
     current->bindings.insert_or_assign(
         runtime::StateAddress{std::string(runtime_scope), std::string(state_name)},
         StateBindingEffect{std::string(declaration_scope), std::string(address_scope)});
 }
 
 void DescriptionBuilder::own_state_scope(const std::string_view scope) {
-    if (Frame* const current = frame(); current != nullptr)
+    if (Frame* const current = frame(); current != nullptr) {
+        ++current->effects;
         current->owned_scopes.insert(std::string(scope));
+    }
 }
 
 void DescriptionBuilder::observe_state_value(const runtime::StateAddress& address,
                                              const runtime::Value& value) {
-    if (Frame* const current = frame(); current != nullptr)
+    if (Frame* const current = frame(); current != nullptr) {
+        ++current->effects;
         current->reads.state.insert_or_assign(address, value);
+    }
 }
 
 runtime::DependencyRecorder& DescriptionBuilder::expression_reads() noexcept {
@@ -1677,6 +1847,7 @@ void DescriptionBuilder::observe_retained_value(const RetainedQuery& query,
     Frame* const current = frame();
     if (current == nullptr)
         return;
+    ++current->effects;
     std::optional<runtime::Value> observed =
         value != nullptr ? std::optional(*value) : std::nullopt;
     std::vector<RetainedRead>& reads = current->reads.retained;
@@ -1746,8 +1917,10 @@ runtime::Value DescriptionBuilder::require_value(const ExpressionValue& value,
     if (value.collection() != nullptr)
         return (*value.collection())->items;
     const std::optional<std::string_view> expression_path = source.find("path").string();
-    if (Frame* const current = frame(); current != nullptr)
+    if (Frame* const current = frame(); current != nullptr) {
+        ++current->effects;
         current->reads.raised_errors = true;
+    }
     diagnostics_.push_back(runtime::RuntimeDiagnostic{
         "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
         "Description expression did not produce a scalar value.",
@@ -1766,6 +1939,7 @@ void DescriptionBuilder::append_diagnostics(runtime::ExpressionRuntime& expressi
         std::ranges::any_of(expressions.diagnostics(), [](const runtime::RuntimeDiagnostic& item) {
             return item.severity == runtime::DiagnosticSeverity::error;
         })) {
+        ++current->effects;
         current->reads.raised_errors = true;
     }
     diagnostics_.insert(diagnostics_.end(), expressions.diagnostics().begin(),

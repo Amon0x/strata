@@ -353,14 +353,27 @@ struct Names final {
     }
     if (first.frame() == second.frame())
         return true;
-    // Only what the body reads can differ in effect.
-    for (const Symbol name : left.program->free_variables(left.declaration())) {
-        const ExpressionValue* first_value = first.find(name);
-        const ExpressionValue* second_value = second.find(name);
+    // Only what the body reads can differ in effect: of a name it reads only fields of, those.
+    for (const LexicalRead& read : left.program->captures(left.declaration())) {
+        const ExpressionValue* first_value = first.find(read.name);
+        const ExpressionValue* second_value = second.find(read.name);
         if ((first_value == nullptr) != (second_value == nullptr))
             return false;
-        if (first_value != nullptr && !same_expression_value(*first_value, *second_value))
+        if (first_value == nullptr)
+            continue;
+        if (read.path.empty()) {
+            if (!same_expression_value(*first_value, *second_value))
+                return false;
+            continue;
+        }
+        const std::optional<ExpressionValue> first_field =
+            project_lexical_read(*first_value, read.path);
+        const std::optional<ExpressionValue> second_field =
+            project_lexical_read(*second_value, read.path);
+        if (first_field.has_value() != second_field.has_value() ||
+            (first_field.has_value() && !same_expression_value(*first_field, *second_field))) {
             return false;
+        }
     }
     return true;
 }
@@ -800,24 +813,62 @@ std::string canonical_host_dependency_path(const std::span<const HostPathSegment
 ExpressionRuntime::ExpressionRuntime(const HostStore& host, const RuntimeActionRegistry& actions)
     : host_(host), actions_(actions) {}
 
-void DependencyRecorder::record_lexical(const Symbol name, const ExpressionValue& value) {
-    if (!hidden_.empty() && std::ranges::find(hidden_, name) != hidden_.end())
+void DependencyRecorder::record_lexical(const LexicalRead& read, const ExpressionValue& value) {
+    if (!hidden_.empty() && std::ranges::find(hidden_, read.name) != hidden_.end())
         return;
     if (upstream_ != nullptr)
-        upstream_->lexical(name, value);
+        upstream_->lexical(read, value);
     if (lexical_ == Keep::none)
         return;
-    if (outer_ != nullptr) {
-        const ExpressionValue* const bound = outer_->find(name);
-        if (bound == nullptr || !same_expression_value(*bound, value))
-            return;
-    }
+    if (outer_ != nullptr && !lexical_read_current(*outer_, read, value))
+        return;
     if (lexical_ == Keep::latest) {
-        kept().lexical.insert_or_assign(name, capture_expression_dependency(value));
-    } else if (kept().lexical.try_emplace(name, capture_expression_dependency(value)).second &&
-               ordered_) {
-        kept_->order.push_back(Read{name, nullptr});
+        kept().lexical.insert_or_assign(read, capture_expression_dependency(value));
+    } else if (const auto [kept_read, inserted] =
+                   kept().lexical.try_emplace(read, capture_expression_dependency(value));
+               inserted && ordered_) {
+        kept_->order.push_back(Read{&kept_read->first, nullptr});
     }
+}
+
+std::optional<ExpressionValue> project_lexical_read(const ExpressionValue& value,
+                                                    const std::string_view path) {
+    if (path.empty())
+        return value;
+    std::optional<ExpressionValue> projected;
+    const ExpressionValue* at = &value;
+    std::size_t begin = 0U;
+    while (begin < path.size()) {
+        const std::size_t end = path.find(lexical_path_separator, begin);
+        const std::string_view field = path.substr(begin, end - begin);
+        begin = end + 1U;
+        if (const auto* object = at->object()) {
+            const ExpressionValue* found = (**object).field(field);
+            if (found == nullptr)
+                return std::nullopt;
+            projected = *found;
+        } else if (const Value* data = at->value()) {
+            const Value* found = data->field(field);
+            if (found == nullptr)
+                return std::nullopt;
+            projected = ExpressionValue(*found);
+        } else {
+            return std::nullopt;
+        }
+        at = &*projected;
+    }
+    return projected;
+}
+
+bool lexical_read_current(const ExpressionScope& scope, const LexicalRead& read,
+                          const ExpressionValue& seen) {
+    const ExpressionValue* const bound = scope.find(read.name);
+    if (bound == nullptr)
+        return false;
+    if (read.path.empty())
+        return same_expression_value(*bound, seen);
+    const std::optional<ExpressionValue> field = project_lexical_read(*bound, read.path);
+    return field.has_value() && same_expression_value(*field, seen);
 }
 
 void DependencyRecorder::record_host(const ExpressionHostDependency& dependency) {
@@ -887,6 +938,7 @@ void ExpressionRuntime::clear_caches() noexcept {
     dynamic_host_paths_.clear();
     constant_functions_.clear();
     constant_values_.clear();
+    memoized_calls_.clear();
 }
 
 ExpressionHostDependency
@@ -1077,6 +1129,22 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
             ComponentTemplateValue{node.text, std::move(arguments), Value(node.text)}));
     }
     case ExpressionKind::lambda:
+        // A lambda is as current as the values it captures: they are what it read.
+        if (node.function != no_program_id) {
+            for (const LexicalRead& read : program.captures(program.function(node.function))) {
+                const ExpressionValue* captured = scope.find(read.name);
+                if (captured == nullptr)
+                    continue;
+                if (read.path.empty()) {
+                    reads.lexical(read, *captured);
+                } else if (const std::optional<ExpressionValue> field =
+                               project_lexical_read(*captured, read.path)) {
+                    reads.lexical(read, *field);
+                } else {
+                    reads.lexical(read.name, *captured);
+                }
+            }
+        }
         return ExpressionValue(std::make_shared<const LambdaValue>(LambdaValue{
             program.shared_from_this(),
             expression,
@@ -1282,6 +1350,22 @@ ExpressionValue ExpressionRuntime::evaluate_property(const Program& program,
                     report(node, scope, "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
                            "Host path selected by the expression is not available.");
                 return ExpressionValue{};
+            }
+        }
+    }
+    // A field of a variable's record is read on its own: whatever reads `node.kind` depends on
+    // the kind, not on the rest of the node.
+    if (const LexicalRead* read = program.field_read(node)) {
+        const ProgramExpression* base = &node;
+        while (base->kind == ExpressionKind::property)
+            base = &program.expression(base->first);
+        // Only a bound value has fields; anything else is read and reported as before.
+        if (scope.find(base->name) != nullptr) {
+            DependencyRecorder unrecorded;
+            const ExpressionValue whole = evaluate_variable(program, *base, scope, unrecorded);
+            if (std::optional<ExpressionValue> field = project_lexical_read(whole, read->path)) {
+                reads.lexical(*read, *field);
+                return std::move(*field);
             }
         }
     }
@@ -2267,18 +2351,30 @@ Value ExpressionRuntime::evaluate_lambda(const LambdaValue& lambda, const Value&
                              DependencyRecorder::Keep::none);
     const ProgramFunction& function = lambda.declaration();
     const Program& program = *lambda.program;
-    if (!function.script && function.body != no_program_id && lambda.group == nullptr &&
-        function.parameters_count == 1U) {
-        const Symbol parameter = program.parameters(function).front().name;
+    // An item function with an expression body, the common case, binds its item and evaluates:
+    // no call machinery per item.
+    const std::span<const ProgramFunctionParameter> parameters = program.parameters(function);
+    if (function.body != no_program_id && lambda.group == nullptr && !parameters.empty() &&
+        std::ranges::all_of(parameters, [](const ProgramFunctionParameter& parameter) {
+            return parameter.default_value == no_program_id;
+        })) {
+        const Symbol parameter = parameters.front().name;
         ExpressionScope nested = lambda.captured;
         ScopeFrame frame;
-        frame.hides_parent_states = true;
-        frame.bindings.push_back(ScopeBinding{parameter, true, ScopeStateBinding::inherit,
-                                              ExpressionValue(input), nullptr});
+        frame.hides_parent_states = !function.script;
+        frame.bindings.reserve(parameters.size());
+        for (std::size_t index = 0U; index < parameters.size(); ++index) {
+            frame.bindings.push_back(ScopeBinding{
+                parameters[index].name, true,
+                function.script ? ScopeStateBinding::cleared : ScopeStateBinding::inherit,
+                index == 0U ? ExpressionValue(input) : ExpressionValue{}, nullptr});
+            reads.hide(parameters[index].name);
+        }
         nested.push(std::move(frame));
-        nested.set_component_path(lambda.captured.component_path() + "/" +
-                                  std::string(parameter.name()));
-        reads.hide(parameter);
+        if (!function.script) {
+            nested.set_component_path(lambda.captured.component_path() + "/" +
+                                      std::string(parameter.name()));
+        }
         return require_value(evaluate_node(program, function.body, nested, reads),
                              program.expression(function.body), nested);
     }
@@ -2338,8 +2434,7 @@ ExpressionScope ExpressionRuntime::function_scope(
     ScopeFrame frame;
     // A helper's item function sees no state binding; a script function reads and writes states.
     frame.hides_parent_states = !declaration.script;
-    std::string path = scope.component_path();
-    if (!declaration.name.name().empty()) path += "/" + std::string(declaration.name.name());
+    frame.bindings.reserve(parameters.size());
     for (std::size_t index = 0U; index < parameters.size(); ++index) {
         const ProgramFunctionParameter& parameter = parameters[index];
         reads.hide(parameter.name);
@@ -2361,7 +2456,6 @@ ExpressionScope ExpressionRuntime::function_scope(
                                               value.value_or(ExpressionValue{}), nullptr});
     }
     scope.push(std::move(frame));
-    scope.set_component_path(std::move(path));
     return scope;
 }
 
@@ -2424,10 +2518,8 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
             bool current = true;
             for (const CollectionDependencyRead& read : cached.dependency_order) {
                 if (read.kind == CollectionDependencyKind::lexical) {
-                    const ExpressionValue* value = scope.find(read.name);
-                    if (value == nullptr ||
-                        !same_expression_value(*value,
-                                               cached.lexical_dependencies.at(read.name).value)) {
+                    if (!lexical_read_current(scope, read.lexical,
+                                              cached.lexical_dependencies.at(read.lexical).value)) {
                         current = false;
                         break;
                     }
@@ -2445,7 +2537,8 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
             // Whoever reads the view reads what it was derived from.
             for (const CollectionDependencyRead& read : cached.dependency_order) {
                 if (read.kind == CollectionDependencyKind::lexical)
-                    upstream.lexical(read.name, cached.lexical_dependencies.at(read.name).value);
+                    upstream.lexical(read.lexical,
+                                     cached.lexical_dependencies.at(read.lexical).value);
                 else
                     upstream.host(cached.host_dependencies.at(read.host_key));
             }
@@ -2666,7 +2759,7 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
         dependency_order.push_back(CollectionDependencyRead{
             read.host != nullptr ? CollectionDependencyKind::host
                                  : CollectionDependencyKind::lexical,
-            read.name,
+            read.lexical != nullptr ? *read.lexical : LexicalRead{},
             read.host != nullptr ? *read.host : std::string{},
         });
     }

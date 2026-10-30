@@ -162,6 +162,15 @@ DescriptionBuilder::describe_body(ComponentInstance& instance,
     Frame recording;
     recording.instance = &instance;
     recording.outer = outer;
+    // The calls and function groups of the last description are what this one may keep.
+    instance.previous_widget_calls = std::exchange(instance.widget_calls, {});
+    instance.previous_function_groups = std::exchange(instance.function_groups, {});
+    // The body's reads are its own, whatever records the call describing it.
+    struct Isolated final {
+        runtime::DependencyRecorder*& slot;
+        runtime::DependencyRecorder* previous;
+        ~Isolated() { slot = previous; }
+    } isolated{recording_, std::exchange(recording_, nullptr)};
     // A row's inputs are the values of its enclosing scope it read: a read of a name the row
     // binds itself (a state, a derived value, a nested loop's item) reads no input.
     recording.expression_reads =
@@ -991,6 +1000,7 @@ bool DescriptionBuilder::observes_retained_value(const RetainedNode& node,
 DescriptionBuilder::ComponentInstance&
 DescriptionBuilder::generator(const Scope& scope, const runtime::ProgramCall& call,
                               const std::optional<std::string>& key) {
+    body_effect();
     std::string identity = "generator\n" + scope.instance_path() + "\n" + call.path;
     if (key.has_value())
         identity += "\n" + *key;
@@ -1128,8 +1138,7 @@ bool DescriptionBuilder::row_current(const ComponentInstance& row, const RowSour
     probe.push(item_frame(source.item, source.sequence->item_at(index), source.index,
                           source.sequence->source_index_at(index)));
     return std::ranges::all_of(row.outer_reads, [&probe](const auto& read) {
-        const ExpressionValue* const current = probe.find(read.first);
-        return current != nullptr && runtime::same_expression_value(*current, read.second.value);
+        return runtime::lexical_read_current(probe, read.first, read.second.value);
     });
 }
 

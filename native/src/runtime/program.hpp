@@ -142,6 +142,26 @@ struct ProgramHostPath final {
  * - material: `text` (the material id), `arguments` (its parameters, named), `material_call`.
  * - unknown: `text` (the portable kind).
  */
+/**
+ * A read of a name: of all of its value, or of a field within it, as `node.kind` reads only the
+ * kind. `path` holds the fields from the outermost in, each ended by a unit separator; it is
+ * empty for a read of the whole value.
+ */
+struct LexicalRead final {
+    Symbol name;
+    std::string path;
+
+    [[nodiscard]] friend bool operator==(const LexicalRead&, const LexicalRead&) = default;
+    [[nodiscard]] friend bool operator<(const LexicalRead& left, const LexicalRead& right) {
+        if (left.name != right.name)
+            return left.name < right.name;
+        return left.path < right.path;
+    }
+};
+
+/** The separator ending each field of a LexicalRead's path. */
+inline constexpr char lexical_path_separator = '\x1f';
+
 struct ProgramExpression final {
     ExpressionKind kind = ExpressionKind::unknown;
     UnaryOperator unary = UnaryOperator::negate;
@@ -166,9 +186,20 @@ struct ProgramExpression final {
     std::uint32_t free_variables_count = 0U;
     /** A lambda's function, or a function variable's. */
     std::uint32_t function = no_program_id;
+    /** A property chain over a variable: the field it reads (see Program::field_read). */
+    std::uint32_t field_read = no_program_id;
     /** The portable expression, for diagnostics and its authored range. */
     data::JsonView source;
 };
+
+class Program;
+/**
+ * The read a property chain over a variable makes: `a.b.c` reads field c of field b of a.
+ * None when the chain reads a host path or does not end in a variable.
+ */
+struct ProgramExpression;
+[[nodiscard]] std::optional<LexicalRead> program_field_read(const Program& program,
+                                                            const ProgramExpression& expression);
 
 struct ProgramFunctionParameter final {
     Symbol name;
@@ -191,6 +222,15 @@ struct ProgramFunction final {
     bool script = false;
     std::uint32_t free_variables_begin = 0U;
     std::uint32_t free_variables_count = 0U;
+    /** The names its block declares (locals, loop items, caught values, functions). */
+    std::uint32_t declared_begin = 0U;
+    std::uint32_t declared_count = 0U;
+    /**
+     * What it reads from where it is declared, field by field where it reads only fields: two
+     * closures of it differ only where these differ.
+     */
+    std::uint32_t captures_begin = 0U;
+    std::uint32_t captures_count = 0U;
     data::JsonView source;
 };
 
@@ -504,6 +544,16 @@ class Program final : public std::enable_shared_from_this<Program> {
         return {free_variables_.data() + function.free_variables_begin,
                 function.free_variables_count};
     }
+    [[nodiscard]] std::span<const Symbol> declared(const ProgramFunction& function) const {
+        return {free_variables_.data() + function.declared_begin, function.declared_count};
+    }
+    /** The field a property chain over a variable reads, if it is one. */
+    [[nodiscard]] const LexicalRead* field_read(const ProgramExpression& node) const {
+        return node.field_read != no_program_id ? &field_reads_[node.field_read] : nullptr;
+    }
+    [[nodiscard]] std::span<const LexicalRead> captures(const ProgramFunction& function) const {
+        return {captures_.data() + function.captures_begin, function.captures_count};
+    }
     /** A function declared at the top of a module, by name. */
     [[nodiscard]] std::optional<std::uint32_t> function_index(std::string_view name) const;
 
@@ -519,6 +569,8 @@ class Program final : public std::enable_shared_from_this<Program> {
     std::vector<ProgramExpression> expressions_;
     std::vector<ProgramArgument> arguments_;
     std::vector<Symbol> free_variables_;
+    std::vector<LexicalRead> captures_;
+    std::vector<LexicalRead> field_reads_;
     std::vector<ProgramHostPath> host_paths_;
     std::vector<ProgramActionOrigin> origins_;
     std::vector<ProgramBlock> blocks_;

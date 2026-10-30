@@ -4855,7 +4855,7 @@ overlay IndexedDependencyRepeater {
             builder.build(runtime::LayerRole::overlay, "CollectionMetadata");
         const std::shared_ptr<const ui::DescriptionNode> one_repeater = one.root->children->at(0U);
         const auto one_view =
-            one_repeater->virtual_sequence_generation->lexical_dependencies.find(runtime::Symbol::intern("view"));
+            one_repeater->virtual_sequence_generation->lexical_dependencies.find(runtime::LexicalRead{runtime::Symbol::intern("view"), {}});
         check(one_repeater->virtual_sequence->key_at(0U) == "one.row" &&
                   one_view !=
                       one_repeater->virtual_sequence_generation->lexical_dependencies.end() &&
@@ -4878,7 +4878,7 @@ overlay IndexedDependencyRepeater {
         const std::shared_ptr<const ui::DescriptionNode> two_repeater = two.root->children->at(0U);
         check(two_repeater->virtual_sequence != one_repeater->virtual_sequence &&
                   two_repeater->virtual_sequence->key_at(0U) == "many.row" &&
-                  dependency_collection(two_repeater->virtual_sequence_generation->lexical_dependencies.at(runtime::Symbol::intern("view"))).total == 2U,
+                  dependency_collection(two_repeater->virtual_sequence_generation->lexical_dependencies.at(runtime::LexicalRead{runtime::Symbol::intern("view"), {}})).total == 2U,
               "equal Repeater items hid a changed external CollectionView total");
         static_cast<void>(metadata_retained.reconcile(two.root));
         builder.set_retained_tree(&metadata_retained);
@@ -4978,7 +4978,7 @@ overlay IndexedDependencyRepeater {
             builder.build(runtime::LayerRole::overlay, "LexicalCollectionSource");
         const std::shared_ptr<const ui::DescriptionNode> one_repeater = one.root->children->at(0U);
         const auto lexical =
-            one_repeater->virtual_sequence_generation->lexical_dependencies.find(runtime::Symbol::intern("item"));
+            one_repeater->virtual_sequence_generation->lexical_dependencies.find(runtime::LexicalRead{runtime::Symbol::intern("item"), {}});
         check(one_repeater->virtual_sequence->count() == 1U &&
                   one_repeater->virtual_sequence->key_at(0U) == "A" &&
                   one_repeater->virtual_sequence_generation->source.kind() ==
@@ -7896,8 +7896,9 @@ overlay Main { root Root() }
     const ui::DescriptionLayersBuildResult second = builder.build_layers(main);
     const std::shared_ptr<const ui::DescriptionNode>& before = first.roots.at(0U);
     const std::shared_ptr<const ui::DescriptionNode>& after = second.roots.at(0U);
-    check(second.diagnostics.empty() && second.described_nodes == 3U,
-          "a host change described more than the component that read it");
+    // The face and its value text read the clock; the label is placed again as it was.
+    check(second.diagnostics.empty() && second.described_nodes == 2U,
+          "a host change described more than the calls that read it");
     check(second.layer_state_scopes.at(0U) == first.layer_state_scopes.at(0U),
           "patching a component's ancestors lost the state scopes they own");
     check(find(find, after, "share.raw") == find(find, before, "share.raw") &&

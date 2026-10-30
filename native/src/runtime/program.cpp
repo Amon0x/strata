@@ -354,6 +354,12 @@ class ProgramLowering final {
             node.kind = ExpressionKind::unknown;
             node.text = std::string(kind);
         }
+        if (node.kind == ExpressionKind::property) {
+            if (std::optional<LexicalRead> read = program_field_read(program_, node)) {
+                node.field_read = static_cast<std::uint32_t>(program_.field_reads_.size());
+                program_.field_reads_.push_back(std::move(*read));
+            }
+        }
         program_.expressions_.push_back(std::move(node));
         return static_cast<ExpressionId>(program_.expressions_.size() - 1U);
     }
@@ -390,13 +396,15 @@ class ProgramLowering final {
             result.block = this->block(block, {});
         std::vector<Symbol> free;
         if (result.body != no_program_id) collect_free_variables(result.body, free);
+        std::vector<Symbol> declared;
         if (result.block != no_program_id) {
             collect_block_free_variables(result.block, free);
-            std::vector<Symbol> declared;
             collect_block_declarations(result.block, declared);
             std::erase_if(free, [&declared](const Symbol name) {
                 return std::ranges::find(declared, name) != declared.end();
             });
+            std::ranges::sort(declared);
+            declared.erase(std::ranges::unique(declared).begin(), declared.end());
         }
         for (const ProgramFunctionParameter& parameter : parameters) {
             if (parameter.default_value != no_program_id)
@@ -410,6 +418,35 @@ class ProgramLowering final {
         result.free_variables_begin = static_cast<std::uint32_t>(program_.free_variables_.size());
         result.free_variables_count = static_cast<std::uint32_t>(free.size());
         program_.free_variables_.insert(program_.free_variables_.end(), free.begin(), free.end());
+        result.declared_begin = static_cast<std::uint32_t>(program_.free_variables_.size());
+        result.declared_count = static_cast<std::uint32_t>(declared.size());
+        program_.free_variables_.insert(program_.free_variables_.end(), declared.begin(),
+                                        declared.end());
+        // What it reads where it is declared, by field where only fields are read.
+        std::vector<LexicalRead> captures;
+        if (result.body != no_program_id) collect_reads(result.body, captures);
+        if (result.block != no_program_id) collect_block_reads(result.block, captures);
+        for (const ProgramFunctionParameter& parameter : parameters) {
+            if (parameter.default_value != no_program_id)
+                collect_reads(parameter.default_value, captures);
+        }
+        std::erase_if(captures, [&free](const LexicalRead& read) {
+            return !std::ranges::binary_search(free, read.name);
+        });
+        std::sort(captures.begin(), captures.end());
+        captures.erase(std::unique(captures.begin(), captures.end()), captures.end());
+        // A read of the whole value covers the reads of its fields.
+        std::vector<Symbol> whole;
+        for (const LexicalRead& read : captures) {
+            if (read.path.empty())
+                whole.push_back(read.name);
+        }
+        std::erase_if(captures, [&whole](const LexicalRead& read) {
+            return !read.path.empty() && std::ranges::binary_search(whole, read.name);
+        });
+        result.captures_begin = static_cast<std::uint32_t>(program_.captures_.size());
+        result.captures_count = static_cast<std::uint32_t>(captures.size());
+        program_.captures_.insert(program_.captures_.end(), captures.begin(), captures.end());
         result.parameters_begin = static_cast<std::uint32_t>(program_.function_parameters_.size());
         result.parameters_count = static_cast<std::uint32_t>(parameters.size());
         program_.function_parameters_.insert(program_.function_parameters_.end(),
@@ -707,6 +744,66 @@ class ProgramLowering final {
                 collect_block_declarations(
                     program_.branches_[statement.branches_begin + branch].block, names);
         }
+    }
+
+    /** collect_block_free_variables, by field where only fields are read (see LexicalRead). */
+    void collect_block_reads(const BlockId id, std::vector<LexicalRead>& reads) const {
+        const ProgramBlock& block = program_.blocks_[id];
+        for (std::uint32_t index = 0U; index < block.statements_count; ++index) {
+            const ProgramStatement& statement = program_.statements_[block.statements_begin + index];
+            for (const ExpressionId expression :
+                 {statement.expression, statement.filter, statement.target}) {
+                if (expression != no_program_id) collect_reads(expression, reads);
+            }
+            for (const BlockId nested : {statement.block, statement.otherwise}) {
+                if (nested != no_program_id) collect_block_reads(nested, reads);
+            }
+            for (std::uint32_t branch = 0U; branch < statement.branches_count; ++branch) {
+                const ProgramWhenBranch& when = program_.branches_[statement.branches_begin + branch];
+                if (when.match != no_program_id) collect_reads(when.match, reads);
+                collect_block_reads(when.block, reads);
+            }
+            if (statement.function != no_program_id) {
+                const std::span<const LexicalRead> nested =
+                    program_.captures(program_.functions_[statement.function]);
+                reads.insert(reads.end(), nested.begin(), nested.end());
+            }
+        }
+    }
+
+    /** collect_free_variables, by field where only fields are read (see LexicalRead). */
+    void collect_reads(const ExpressionId id, std::vector<LexicalRead>& reads) const {
+        const ProgramExpression& node = program_.expressions_[id];
+        switch (node.kind) {
+        case ExpressionKind::variable:
+            reads.push_back(LexicalRead{node.name, {}});
+            return;
+        case ExpressionKind::property:
+            if (const LexicalRead* read = program_.field_read(node)) {
+                reads.push_back(*read);
+                return;
+            }
+            break;
+        case ExpressionKind::lambda: {
+            if (node.function != no_program_id) {
+                const std::span<const LexicalRead> nested =
+                    program_.captures(program_.functions_[node.function]);
+                reads.insert(reads.end(), nested.begin(), nested.end());
+            } else {
+                for (const Symbol name : program_.free_variables(node))
+                    reads.push_back(LexicalRead{name, {}});
+            }
+            return;
+        }
+        default:
+            break;
+        }
+        for (const ExpressionId child : {node.first, node.second, node.third}) {
+            if (child != no_program_id)
+                collect_reads(child, reads);
+        }
+        for (std::uint32_t index = 0U; index < node.arguments_count; ++index)
+            collect_reads(program_.arguments_[node.arguments_begin + index].value, reads);
     }
 
     /** Every name a lambda body reads, including those its own lambdas read from it. */
@@ -1062,6 +1159,30 @@ const ProgramLayer* Program::overlay(const std::string_view name) const {
 const ProgramStyle* Program::style(const std::string_view name) const {
     const auto found = style_indexes_.find(name);
     return found != style_indexes_.end() ? &styles_[found->second] : nullptr;
+}
+
+std::optional<LexicalRead> program_field_read(const Program& program,
+                                              const ProgramExpression& expression) {
+    std::vector<const std::string*> fields;
+    for (const ProgramExpression* at = &expression;;) {
+        const ProgramExpression& node = *at;
+        if (node.host != no_program_id)
+            return std::nullopt;
+        if (node.kind == ExpressionKind::variable) {
+            if (fields.empty())
+                return std::nullopt;
+            LexicalRead read{node.name, {}};
+            for (auto field = fields.rbegin(); field != fields.rend(); ++field) {
+                read.path += **field;
+                read.path += lexical_path_separator;
+            }
+            return read;
+        }
+        if (node.kind != ExpressionKind::property || node.first == no_program_id)
+            return std::nullopt;
+        fields.push_back(&node.text);
+        at = &program.expression(node.first);
+    }
 }
 
 } // namespace strata::runtime

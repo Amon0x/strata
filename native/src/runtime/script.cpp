@@ -133,8 +133,9 @@ class Nesting final {
 class ScriptMachine final {
   public:
     ScriptMachine(ExpressionRuntime& runtime, ScriptRun* handler, std::vector<ScriptFrame>& frames,
-                  const bool may_wait)
-        : runtime_(runtime), handler_(handler), frames_(frames), may_wait_(may_wait) {}
+                  const bool may_wait, DependencyRecorder* reads = nullptr)
+        : runtime_(runtime), handler_(handler), frames_(frames), may_wait_(may_wait),
+          reads_(reads) {}
 
     /** Calls a function with a block body: a frame in the scope its parameters are bound in. */
     void enter(std::shared_ptr<const LambdaValue> function, ExpressionScope scope) {
@@ -198,6 +199,9 @@ class ScriptMachine final {
     [[nodiscard]] ExpressionValue evaluate(const std::size_t frame, const ExpressionId expression,
                                            const ExpressionScope& scope) {
         Nesting scripting(runtime_.scripting_);
+        // What the statements read is what the call depends on (see ExpressionRuntime::invoke).
+        if (reads_ != nullptr)
+            return runtime_.evaluate_node(program(frame), expression, scope, *reads_);
         DependencyRecorder ignored;
         return runtime_.evaluate_node(program(frame), expression, scope, ignored);
     }
@@ -693,6 +697,7 @@ class ScriptMachine final {
     ScriptRun* handler_;
     std::vector<ScriptFrame>& frames_;
     bool may_wait_;
+    DependencyRecorder* reads_;
     bool waiting_ = false;
     std::uint64_t steps_ = 0U;
     ExpressionValue result_;
@@ -771,6 +776,13 @@ ExpressionValue ExpressionRuntime::invoke(const LambdaValue& function,
         if (known != constant_values_.end())
             return known->second;
     }
+    const ProgramFunction& declaration = function.declaration();
+    // A function with statements, called outside a handler, gives the same value while what it
+    // reads is unchanged: a rebuild reuses its last value instead of running it again.
+    if (!constant && active_run_ == nullptr && declaration.block != no_program_id &&
+        !declaration.asynchronous) {
+        return memoized(function, std::move(positional), std::move(named), reads);
+    }
     ExpressionValue value = invoke_once(function, std::move(positional), std::move(named), reads);
     if (constant) {
         constant_values_.insert_or_assign(
@@ -779,19 +791,84 @@ ExpressionValue ExpressionRuntime::invoke(const LambdaValue& function,
     return value;
 }
 
+ExpressionValue ExpressionRuntime::memoized(const LambdaValue& function,
+                                            std::vector<ExpressionValue> positional,
+                                            std::vector<std::pair<Symbol, ExpressionValue>> named,
+                                            DependencyRecorder& reads) {
+    const ExpressionScope& closure =
+        function.group != nullptr ? function.group->scope : function.captured;
+    const std::string& owner = closure.component_path();
+    std::vector<MemoizedCall>& calls =
+        memoized_calls_[ProgramNodeKey{function.program->serial(), function.function}];
+    const auto same_arguments = [&](const MemoizedCall& call) {
+        return call.owner == owner && call.positional.size() == positional.size() &&
+               call.named.size() == named.size() &&
+               std::ranges::equal(call.positional, positional, same_expression_value) &&
+               std::ranges::equal(call.named, named, [](const auto& left, const auto& right) {
+                   return left.first == right.first &&
+                          same_expression_value(left.second, right.second);
+               });
+    };
+    const auto current = [&](const MemoizedCall& call) {
+        for (const auto& [read, seen] : call.lexical) {
+            if (!lexical_read_current(closure, read, seen.value))
+                return false;
+        }
+        for (const auto& [path, read] : call.host) {
+            static_cast<void>(path);
+            if (read_host_dependency(read.key, closure) != read)
+                return false;
+        }
+        return true;
+    };
+    for (auto call = calls.begin(); call != calls.end(); ++call) {
+        if (!same_arguments(*call) || !current(*call))
+            continue;
+        // What the call read, the expression calling it read too.
+        for (const auto& [read, seen] : call->lexical)
+            reads.lexical(read, seen.value);
+        for (const auto& [path, read] : call->host) {
+            static_cast<void>(path);
+            reads.host(read);
+        }
+        return call->result;
+    }
+    // The function's own parameters and locals are not what it depends on.
+    DependencyRecorder recorded(&reads, DependencyRecorder::Keep::first,
+                                DependencyRecorder::Keep::first);
+    for (const Symbol name : function.program->declared(function.declaration()))
+        recorded.hide(name);
+    MemoizedCall call{owner, positional, named, {}, {}, {}};
+    call.result = invoke_once(function, std::move(positional), std::move(named), recorded);
+    call.lexical = std::move(recorded.lexical_reads());
+    call.host = std::move(recorded.host_reads());
+    // A few calls per function and owner are kept, the newest last.
+    constexpr std::size_t kept_calls = 64U;
+    if (calls.size() >= kept_calls)
+        calls.erase(calls.begin());
+    calls.push_back(std::move(call));
+    return calls.back().result;
+}
+
 ExpressionValue ExpressionRuntime::invoke_once(
     const LambdaValue& function, std::vector<ExpressionValue> positional,
     std::vector<std::pair<Symbol, ExpressionValue>> named, DependencyRecorder& reads) {
     Nesting depth(call_depth_);
     const ProgramFunction& declaration = function.declaration();
+    // The call's parameters and locals are its own: reads of them are hidden from the caller's
+    // recorder, and only from this call's, so a caller's own names stay visible.
+    DependencyRecorder call_reads(&reads, DependencyRecorder::Keep::none,
+                                  DependencyRecorder::Keep::none);
+    for (const Symbol name : function.program->declared(declaration))
+        call_reads.hide(name);
     ExpressionScope scope =
-        function_scope(function, std::move(positional), std::move(named), reads);
+        function_scope(function, std::move(positional), std::move(named), call_reads);
     if (declaration.body != no_program_id)
-        return evaluate_node(*function.program, declaration.body, scope, reads);
+        return evaluate_node(*function.program, declaration.body, scope, call_reads);
     if (declaration.block == no_program_id)
         return ExpressionValue{};
     std::vector<ScriptFrame> frames;
-    ScriptMachine machine(*this, active_run_, frames, false);
+    ScriptMachine machine(*this, active_run_, frames, false, &call_reads);
     machine.enter(std::make_shared<const LambdaValue>(function), std::move(scope));
     static_cast<void>(machine.run());
     return machine.result();

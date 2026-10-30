@@ -472,6 +472,14 @@ struct ExpressionDependencyValue final {
 };
 
 [[nodiscard]] ExpressionDependencyValue capture_expression_dependency(const ExpressionValue& value);
+
+/** The field of `value` a read's path names, all of it for an empty path; none if it has none. */
+[[nodiscard]] std::optional<ExpressionValue> project_lexical_read(const ExpressionValue& value,
+                                                                 std::string_view path);
+class ExpressionScope;
+/** Whether the read gives in `scope` what it gave: `seen`. */
+[[nodiscard]] bool lexical_read_current(const ExpressionScope& scope, const LexicalRead& read,
+                                        const ExpressionValue& seen);
 [[nodiscard]] ExpressionValue restore_expression_dependency(const ExpressionDependencyValue& value);
 
 /**
@@ -487,11 +495,13 @@ class DependencyRecorder final {
     /** Which reads of one name or host path a recorder keeps; it forwards every read. */
     enum class Keep : std::uint8_t { none, first, latest };
 
-    using LexicalReads = std::map<Symbol, ExpressionDependencyValue>;
+    /** By name, and field where only a field was read (see LexicalRead). */
+    using LexicalReads = std::map<LexicalRead, ExpressionDependencyValue>;
     using HostReads = std::map<std::string, ExpressionHostDependency, std::less<>>;
     /** A kept read, in the order reads were first kept: a lexical name or a host path key. */
     struct Read final {
-        Symbol name;
+        /** The key of a lexical read in lexical_reads(); none for a host read. */
+        const LexicalRead* lexical = nullptr;
         /** The key of a host read in host_reads(); none for a lexical read. */
         const std::string* host = nullptr;
     };
@@ -523,7 +533,12 @@ class DependencyRecorder final {
 
     void lexical(Symbol name, const ExpressionValue& value) {
         if (upstream_ != nullptr || lexical_ != Keep::none)
-            record_lexical(name, value);
+            record_lexical(LexicalRead{name, {}}, value);
+    }
+    /** A read of the field `read.path` names, which gave `value`. */
+    void lexical(const LexicalRead& read, const ExpressionValue& value) {
+        if (upstream_ != nullptr || lexical_ != Keep::none)
+            record_lexical(read, value);
     }
     void host(const ExpressionHostDependency& dependency) {
         if (upstream_ != nullptr || host_ != Keep::none)
@@ -556,7 +571,7 @@ class DependencyRecorder final {
             kept_ = std::make_unique<Kept>();
         return *kept_;
     }
-    void record_lexical(Symbol name, const ExpressionValue& value);
+    void record_lexical(const LexicalRead& read, const ExpressionValue& value);
     void record_host(const ExpressionHostDependency& dependency);
 
     DependencyRecorder* upstream_ = nullptr;
@@ -614,7 +629,7 @@ class ExpressionRuntime final {
 
     struct CollectionDependencyRead final {
         CollectionDependencyKind kind;
-        Symbol name;
+        LexicalRead lexical;
         std::string host_key;
     };
 
@@ -697,6 +712,10 @@ class ExpressionRuntime final {
                                          std::vector<ExpressionValue> positional,
                                          std::vector<std::pair<Symbol, ExpressionValue>> named,
                                          DependencyRecorder& reads);
+    [[nodiscard]] ExpressionValue memoized(const LambdaValue& function,
+                                           std::vector<ExpressionValue> positional,
+                                           std::vector<std::pair<Symbol, ExpressionValue>> named,
+                                           DependencyRecorder& reads);
     [[nodiscard]] ExpressionValue invoke_once(const LambdaValue& function,
                                               std::vector<ExpressionValue> positional,
                                               std::vector<std::pair<Symbol, ExpressionValue>> named,
@@ -759,6 +778,21 @@ class ExpressionRuntime final {
      * one, and its value once known, by program and function.
      */
     std::unordered_map<ProgramNodeKey, bool, ProgramNodeKeyHash> constant_functions_;
+    /**
+     * A call outside a handler, with what it read: its arguments, the names it read from where
+     * its function was declared, and the host paths. While all of them are as they were, the
+     * call gives the same value, so a rebuild reuses it instead of running the function again.
+     */
+    struct MemoizedCall final {
+        std::string owner;
+        std::vector<ExpressionValue> positional;
+        std::vector<std::pair<Symbol, ExpressionValue>> named;
+        DependencyRecorder::LexicalReads lexical;
+        DependencyRecorder::HostReads host;
+        ExpressionValue result;
+    };
+    std::unordered_map<ProgramNodeKey, std::vector<MemoizedCall>, ProgramNodeKeyHash>
+        memoized_calls_;
     std::unordered_map<ProgramNodeKey, ExpressionValue, ProgramNodeKeyHash> constant_values_;
     /** Whether a declared function's value never changes: see constant_functions_. */
     [[nodiscard]] bool constant_function(const LambdaValue& function);

@@ -102,7 +102,7 @@ struct DescriptionMaterialization final {
 struct DescriptionSequenceGeneration final {
     std::uint64_t active_unit = 0U;
     runtime::ExpressionDependencyValue source;
-    std::map<runtime::Symbol, runtime::ExpressionDependencyValue> lexical_dependencies;
+    runtime::DependencyRecorder::LexicalReads lexical_dependencies;
     std::map<std::string, runtime::ExpressionHostDependency, std::less<>> host_dependencies;
 
     [[nodiscard]] friend bool operator==(const DescriptionSequenceGeneration&,

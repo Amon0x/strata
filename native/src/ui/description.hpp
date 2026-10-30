@@ -202,6 +202,16 @@ class DescriptionBuilder final {
 
     struct RowSource;
 
+    /** A widget call's output and what it was described from; see ComponentInstance. */
+    struct WidgetCall final {
+        std::shared_ptr<const DescriptionNode> node;
+        std::uint64_t widgets_revision = 0U;
+        std::shared_ptr<const Scope::WidgetDefaults> widget_defaults;
+        runtime::DependencyRecorder::LexicalReads lexical;
+        runtime::DependencyRecorder::HostReads host;
+        std::vector<ChildRef> children;
+    };
+
     struct ComponentInstance final {
         InstanceId id = 0U;
         InstanceKind kind = InstanceKind::component;
@@ -226,6 +236,14 @@ class DescriptionBuilder final {
         std::string name;
 
         InstanceReads reads;
+        /**
+         * What the call's arguments and behaviors read when they were last evaluated, and the
+         * widget defaults it was called under: while all of them are as they were, the inputs are
+         * too, and the call is not evaluated again.
+         */
+        std::optional<runtime::DependencyRecorder::LexicalReads> argument_lexical;
+        runtime::DependencyRecorder::HostReads argument_host;
+        std::shared_ptr<const Scope::WidgetDefaults> argument_widget_defaults;
         /** The body's output, and the output as the caller places it. */
         std::shared_ptr<const DescriptionNode> root;
         CallSite call_site;
@@ -278,7 +296,24 @@ class DescriptionBuilder final {
         // the enclosing scope its body read.
         std::shared_ptr<const RowSource> row_source;
         std::size_t row_index = 0U;
-        std::map<runtime::Symbol, runtime::ExpressionDependencyValue> outer_reads;
+        runtime::DependencyRecorder::LexicalReads outer_reads;
+
+        /**
+         * The widget calls the body made, by call and instance path, with what each read and the
+         * instances it holds: while all of that is as it was, a call gives the node it gave, and
+         * a rebuild of the body places it again instead of describing it. The last description's
+         * calls, and the ones this description made so far.
+         */
+        std::unordered_map<std::string, WidgetCall> widget_calls;
+        std::unordered_map<std::string, WidgetCall> previous_widget_calls;
+        /**
+         * The functions each block of the body declares, by block and instance path, kept from
+         * one description to the next and closing over the block's newest scope: a lambda in a
+         * node kept from an earlier description calls them with today's values.
+         */
+        std::unordered_map<std::string, std::shared_ptr<runtime::FunctionGroup>> function_groups;
+        std::unordered_map<std::string, std::shared_ptr<runtime::FunctionGroup>>
+            previous_function_groups;
     };
 
     /** The body being described, and what it records. */
@@ -296,6 +331,12 @@ class DescriptionBuilder final {
         const runtime::ExpressionScope* outer = nullptr;
         /** What the body's expressions read: host paths, and a row's reads of `outer`. */
         runtime::DependencyRecorder expression_reads;
+        /**
+         * Counts what a widget call can do to the body besides reading and holding instances:
+         * declaring states, reading retained values, generating rows, raising errors. A call
+         * that did any of it is described again each time.
+         */
+        std::size_t effects = 0U;
     };
 
     /** A state a body declared, to be stored when the build that described it commits. */
@@ -370,6 +411,10 @@ class DescriptionBuilder final {
     retained_widget(const RetainedQuery& query) const noexcept;
     [[nodiscard]] std::shared_ptr<const DescriptionNode> build_call(runtime::CallId call,
                                                                     const Scope& scope);
+    [[nodiscard]] std::shared_ptr<const DescriptionNode> build_widget_call(runtime::CallId call,
+                                                                           const Scope& scope);
+    /** Counts an effect of the body being described on it (see Frame::effects). */
+    void body_effect() noexcept;
     [[nodiscard]] std::shared_ptr<const DescriptionNode>
     build_component_call(const runtime::ProgramCall& call, const Scope& scope);
     [[nodiscard]] std::shared_ptr<const DescriptionNode>
