@@ -76,7 +76,12 @@ struct WidgetFrameInfo final {
     bool reduced_motion = false;
 };
 using WidgetFrameHook = std::function<void(WidgetInputScope& scope, const WidgetFrameInfo& frame)>;
-enum class WidgetFrameCost { paint, layout };
+/**
+ * What advancing a widget's frame changes: its drawing (paint), its size or position (layout), or
+ * only presentation it set itself, a transform or a view its children are drawn under, which
+ * leaves its drawing as it was (presentation).
+ */
+enum class WidgetFrameCost { paint, layout, presentation };
 using WidgetDescriptionHook = std::function<void(WidgetDescriptionScope& scope)>;
 using WidgetParticipationHook = bool (*)(const RetainedNode& node) noexcept;
 using WidgetSubtargetsHook =

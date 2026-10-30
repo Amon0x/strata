@@ -298,6 +298,97 @@ bool RenderEngine::Impl::base_matches(const RetainedTree& tree, const LayoutResu
            retained_status_generation == input.status_feedback().generation();
 }
 
+bool RenderEngine::Impl::presentation_frame(const RetainedTree& tree, const LayoutResult& layout,
+                                            const InputRouter& input, const MotionRuntime& motion,
+                                            const WidgetRegistry& widgets,
+                                            const RenderGenerationToken& generations) {
+    if (!retained_base_generations.has_value() || *retained_base_generations != generations ||
+        retained_tree_generation != tree.generation() ||
+        retained_layout_generation != layout.generation ||
+        retained_status_generation != input.status_feedback().generation() ||
+        flights_last_frame || motion.shared_flights() || tree.dirty_count() == 0U) {
+        return false;
+    }
+    struct Update final {
+        std::uint64_t identity = 0U;
+        MotionTransform transform;
+        double opacity = 1.0;
+        std::optional<double> tone;
+    };
+    std::vector<Update> updates;
+    for (const RetainedNode* node : tree.dirty_nodes()) {
+        const auto fragment = fragments.find(node->identity());
+        const auto presentation = presented.find(node->identity());
+        // A node not drawn last frame cannot be drawn by changing a table entry.
+        if (fragment == fragments.end() || presentation == presented.end())
+            return false;
+        const LayoutRecord* record = layout.find(node->identity());
+        if (record == nullptr)
+            return false;
+        const CachedFragment& cached = fragment->second;
+        const WidgetLifecycle* lifecycle = widgets.find(node->description().type);
+        if (!fragment_generations_match(cached.node_generations, node->dirty_generations()) ||
+            cached.motion != fragment_motion_snapshot(motion.computed_values(node->identity())) ||
+            (lifecycle != nullptr && lifecycle->present.depends_on_motion_progress &&
+             cached.node_generations.animation != node->dirty_generations().animation) ||
+            cached.focused != input.focused(node->identity()) ||
+            cached.focus_visible != input.focus_visible(node->identity()) ||
+            cached.hovered != input.hovered(node->identity()) ||
+            cached.active != input.active(node->identity())) {
+            return false;
+        }
+        const Presented& was = presentation->second;
+        const MotionTransform transform = local_presentation_transform(*node, motion, record->bounds);
+        const double opacity = local_presentation_opacity(*node, &motion);
+        const std::optional<double> tone = local_presentation_tone(*node, motion);
+        const bool grouped = tone.has_value() || motion_presentation_group(*node, motion) ||
+                             presentation_in_depth(*node, motion) ||
+                             parent_content_view(*node).has_value();
+        // Joining or leaving a group changes the stream; outside a group the presentation is
+        // baked into it, so it must be as it was.
+        if (grouped != was.grouped)
+            return false;
+        if (!was.grouped) {
+            if (transform != was.local_transform || opacity != was.local_opacity || tone != was.tone)
+                return false;
+            continue;
+        }
+        if (!groups.contains(node->identity()))
+            return false;
+        updates.push_back(Update{node->identity(), transform, opacity, tone});
+    }
+    for (const Update& update : updates) {
+        Presented& was = presented.at(update.identity);
+        RenderGroup& entry = groups.at(update.identity);
+        const MotionTransform effective =
+            concatenate_presentation_transform(was.inherited_transform, update.transform);
+        entry = RenderGroup{entry.index,          was.inherited_group,
+                            effective.scale_x,    effective.scale_y,
+                            effective.translate_x, effective.translate_y,
+                            was.inherited_opacity * update.opacity,
+                            update.tone.value_or(-1.0),
+                            effective.shear_x,    effective.shear_y,
+                            effective.project_x,  effective.project_y,
+                            effective.project_w};
+        was.local_transform = update.transform;
+        was.local_opacity = update.opacity;
+        was.tone = update.tone;
+    }
+    std::vector<RenderGroup> table;
+    table.reserve(groups.size());
+    for (const auto& [identity, group] : groups) {
+        static_cast<void>(identity);
+        table.push_back(group);
+    }
+    std::ranges::sort(table, {}, &RenderGroup::index);
+    retained_base_commands.set_groups(std::move(table));
+    retained_presentation_generation =
+        tree.root() != nullptr ? tree.root()->subtree_presentation_generation() : 0U;
+    // Composition holds the old table: compose again over the updated base.
+    retained_composed_commands.clear();
+    return true;
+}
+
 void RenderEngine::Impl::retain_base(const RetainedTree& tree, const LayoutResult& layout,
                                      const InputRouter& input,
                                      const RenderGenerationToken& generations,
@@ -381,7 +472,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         }
     };
 
-    if (implementation_->base_matches(tree, layout, input, motion, generations)) {
+    if (implementation_->base_matches(tree, layout, input, motion, generations) ||
+        implementation_->presentation_frame(tree, layout, input, motion, widgets, generations)) {
         // Overlays are drawn into a scratch stream first: when they match the last frame's, the
         // composed stream is shared rather than the whole base copied again.
         output = RenderCommandBuffer{};
@@ -406,6 +498,9 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
 
     if (implementation_->fragment_tree_generation != tree.generation()) {
         std::erase_if(implementation_->fragments, [&tree](const auto& entry) {
+            return tree.find_identity(entry.first) == nullptr;
+        });
+        std::erase_if(implementation_->presented, [&tree](const auto& entry) {
             return tree.find_identity(entry.first) == nullptr;
         });
         implementation_->fragment_tree_generation = tree.generation();
@@ -649,6 +744,10 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
              presentation_in_depth(node, motion) || parent_content_view(node).has_value())) {
             group = implementation_->acquire_group(node.identity());
         }
+        implementation_->presented.insert_or_assign(
+            node.identity(),
+            Impl::Presented{transform, local_opacity, tone, group != 0U, inherited_transform,
+                            inherited_opacity, inherited_group});
         if (group != 0U) {
             implementation_->groups.insert_or_assign(
                 node.identity(),
@@ -1230,6 +1329,7 @@ void RenderEngine::Impl::publish_groups(RenderCommandBuffer& output) {
 }
 
 void RenderEngine::clear() {
+    implementation_->presented.clear();
     implementation_->groups.clear();
     implementation_->free_group_indices.clear();
     implementation_->next_group_index = 1U;

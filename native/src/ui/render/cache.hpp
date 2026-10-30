@@ -139,6 +139,21 @@ struct RenderEngine::Impl final {
     };
 
     std::unordered_map<std::uint64_t, CachedFragment> fragments;
+    /**
+     * What a node's presentation was drawn from: its own transform, opacity and tone, its group,
+     * and what it inherited. A frame that changes only presentation recomputes group entries from
+     * these instead of drawing the tree again (see presentation_frame).
+     */
+    struct Presented final {
+        MotionTransform local_transform;
+        double local_opacity = 1.0;
+        std::optional<double> tone;
+        bool grouped = false;
+        MotionTransform inherited_transform;
+        double inherited_opacity = 1.0;
+        std::uint32_t inherited_group = 0U;
+    };
+    std::unordered_map<std::uint64_t, Presented> presented;
     /** Presentation groups by node identity; indices stay stable while a group persists. */
     std::unordered_map<std::uint64_t, RenderGroup> groups;
     std::vector<std::uint32_t> free_group_indices;
@@ -167,6 +182,15 @@ struct RenderEngine::Impl final {
     [[nodiscard]] bool base_matches(const RetainedTree& tree, const LayoutResult& layout,
                                     const InputRouter& input, const MotionRuntime& motion,
                                     const RenderGenerationToken& generations) const noexcept;
+    /**
+     * A frame whose every change is presentation (a transform, an opacity or a tone) on a group,
+     * or a change that leaves its node's own presentation as it was: the retained stream stands,
+     * and only those groups' table entries are computed again. Returns whether it applied.
+     */
+    [[nodiscard]] bool presentation_frame(const RetainedTree& tree, const LayoutResult& layout,
+                                          const InputRouter& input, const MotionRuntime& motion,
+                                          const WidgetRegistry& widgets,
+                                          const RenderGenerationToken& generations);
 
     void retain_base(const RetainedTree& tree, const LayoutResult& layout, const InputRouter& input,
                      const RenderGenerationToken& generations, const RenderCommandBuffer& commands);

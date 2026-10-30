@@ -151,6 +151,8 @@ class HostRenderPacketCache final {
     bool frame_encoding_incomplete_ = false;
     /** When each scaled group's scale last moved, while it settles. */
     std::map<std::uint32_t, std::chrono::steady_clock::time_point> scale_moved_;
+    /** The density each scaled group was last rasterized at, kept while its scale moves. */
+    std::map<std::uint32_t, GroupRasterScale> held_scales_;
     bool scales_settling_ = false;
     bool terminal_release_prepared_ = false;
     std::uint64_t geometry_epoch_ = 0U;

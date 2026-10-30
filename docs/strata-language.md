@@ -429,13 +429,16 @@ the wheel (or a sideways swipe) pans. Pressing the view focuses it; then `+` or 
 goes back to the content's own size, Shift+1 fits all of it, and the arrows pan (Shift: five times
 as far). `minZoom` and `maxZoom` bound it (0.1 and 8 by default).
 Everything inside stays live: presses, hover and hit testing follow the zoomed content, so buttons
-on a zoomed canvas click. Text and shapes are rasterized again at the zoom they show (stepping by
-quarter octaves while a zoom eases, exactly once it rests), so they stay sharp rather than
-magnified.
+on a zoomed canvas click. While a zoom moves, the content is resampled from what was last drawn;
+once it rests, text and shapes are rasterized again at exactly the zoom they show, so they stay
+sharp rather than magnified. A zoom that moves an octave or more before resting steps its
+rasterization on the way.
 
 `view` (`{x, y, zoom}`: where the content's top-left shows, relative to where it is laid out, and
 its scale) with `onViewChange`, or `bind` to a state, lets the app read and restore it; a `view` the
-app sets is eased to. `zoom.fit {key, padding}` eases to show all of the content (padding 24 by
+app sets is eased to. The app hears of the view once it comes to rest (a pan released, an eased
+zoom arrived), not on every frame of the gesture; `liveView: true` reports every frame, for an app
+that draws something following the view as it moves. `zoom.fit {key, padding}` eases to show all of the content (padding 24 by
 default) and `zoom.reset {key}` back to its own size; with no key they act on the first ZoomView.
 `persistenceKey` keeps an uncontrolled view across runs. `panButton` chooses what drags the view:
 `"primary"` (the default) on the canvas itself or content that does not take the pointer;

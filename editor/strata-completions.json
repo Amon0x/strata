@@ -22444,6 +22444,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "liveView",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "layout",
           "nullable": false,
           "required": false,

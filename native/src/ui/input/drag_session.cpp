@@ -361,8 +361,10 @@ void InputRouter::advance_widget_frames(InputOperationResult& result) {
             throw;
         }
         advancing_widget_frame_identity_.reset();
-        static_cast<void>(tree_->mark(
-            identity, cost == WidgetFrameCost::layout ? DirtyReason::layout : DirtyReason::paint));
+        static_cast<void>(tree_->mark(identity, cost == WidgetFrameCost::layout ? DirtyReason::layout
+                                                : cost == WidgetFrameCost::presentation
+                                                    ? DirtyReason::animation
+                                                    : DirtyReason::paint));
         if (reduced_motion_)
             current->second.pending = false;
         if (!current->second.pending) {

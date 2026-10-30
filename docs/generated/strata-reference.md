@@ -2476,6 +2476,7 @@ Children: `true` · Capabilities: —
 | `onViewChange` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `panButton` | string | false | false | — |
+| `liveView` | boolean | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
 | `style` | style | false | false | — |

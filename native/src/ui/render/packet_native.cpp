@@ -518,9 +518,10 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     const auto cold_encode_started = profile_cold_encode ? std::chrono::steady_clock::now()
                                                          : std::chrono::steady_clock::time_point{};
     // A scaled group rasterizes its masks and text at its density, so a zoomed group stays sharp
-    // rather than magnified. A new group, or one whose scale has held a moment, is exact; one
-    // whose scale is moving takes the nearest quarter octave, so a zoom rasterizes again only a
-    // few times on its way, and what it shows meanwhile is resampled.
+    // rather than magnified. A new group, or one whose scale has held a moment, is exact. One
+    // whose scale is moving keeps the density it was rasterized at, resampled by the GPU, so a
+    // zoom or pinch changes only the group's transform; it steps to the nearest quarter octave
+    // only once the scale has moved an octave from it, where resampling would show.
     {
         std::vector<RenderGroup> composed;
         static_cast<void>(compose_groups(commands.groups(), composed));
@@ -560,14 +561,30 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
             const bool moving = moved != scale_moved_.end() && now - moved->second < scale_settle;
             if (moving)
                 scales_settling = true;
-            const double x = moving ? stepped(group.scale_x) : group.scale_x;
-            const double y = moving ? stepped(group.scale_y) : group.scale_y;
-            // A resting group rasterizes at its exact scale, however close to one; a moving one's
-            // masks and text only at its step.
-            const double text = moving ? std::max(x, y) : std::max(group.scale_x, group.scale_y);
-            if (x != 1.0 || y != 1.0 || text != 1.0)
-                scales.push_back(GroupRasterScale{group.index, x, y, text});
+            GroupRasterScale scale{group.index, group.scale_x, group.scale_y,
+                                   std::max(group.scale_x, group.scale_y)};
+            if (moving) {
+                const auto held = held_scales_.find(group.index);
+                const GroupRasterScale kept =
+                    held != held_scales_.end() ? held->second
+                                               : GroupRasterScale{group.index, 1.0, 1.0, 1.0};
+                const auto near = [](const double held_value, const double value) {
+                    return std::abs(std::log2(value / held_value)) < 1.0;
+                };
+                scale = near(kept.x, group.scale_x) && near(kept.y, group.scale_y) &&
+                                near(kept.text, scale.text)
+                            ? kept
+                            : GroupRasterScale{group.index, stepped(group.scale_x),
+                                               stepped(group.scale_y),
+                                               std::max(stepped(group.scale_x),
+                                                        stepped(group.scale_y))};
+            }
+            if (scale.x != 1.0 || scale.y != 1.0 || scale.text != 1.0)
+                scales.push_back(scale);
         }
+        held_scales_.clear();
+        for (const GroupRasterScale& scale : scales)
+            held_scales_.emplace(scale.group, scale);
         submission_cache_.set_group_raster_scales(std::move(scales));
         scales_settling_ = scales_settling;
         std::ranges::sort(turned);

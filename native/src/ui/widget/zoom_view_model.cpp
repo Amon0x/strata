@@ -22,6 +22,10 @@ namespace {
 using Fields = std::vector<std::pair<std::string, runtime::Value>>;
 
 /** An eased zoom or fit in flight: where it is going, and the cursor it zooms about. */
+// The view's bookkeeping (the eased-to target, a pan in progress, the view last reported, a view
+// settling) draws nothing itself: it is written with the animation lane, which keeps frames
+// coming without making the canvas's own drawing stale, so a moving view stays a presentation
+// change (only its children's group transforms move).
 constexpr std::string_view target_value = "$zoomTarget";
 /** A pan in progress: the pointer, where it pressed and the view it pressed on. */
 constexpr std::string_view pan_value = "$zoomPan";
@@ -83,22 +87,44 @@ constexpr double key_pan_step = 40.0;
 }
 
 /**
- * Shows `view` now: the children are presented under it (they are marked so their drawing and hit
- * regions follow) and the change is reported through `onViewChange`.
+ * Reports the view shown now through `onViewChange` (and so to a `bind`), unless it was the last
+ * one reported. A moving view is reported when it comes to rest: a pan or an eased zoom changes
+ * the view every frame, and the app reading it would be described again every frame for a value
+ * it only needs once the gesture ends. `liveView: true` reports every frame instead.
  */
-void show(WidgetInputScope& scope, const ZoomViewport& view) {
-    if (zoom_view_current(scope.node()) == view && scope.retained(content_view_value) != nullptr) {
+void report(WidgetInputScope& scope, const bool moving) {
+    const runtime::Value* live = scope.property("liveView");
+    if (moving && !(live != nullptr && live->boolean() != nullptr && *live->boolean()))
         return;
-    }
-    scope.set_retained(content_view_value, view_value(view), DirtyReason::animation);
-    scope.invalidate_children(DirtyReason::animation);
-    scope.set_retained(reported_value, view_value(view), DirtyReason::input);
-    // Reported only to an app that listens: an animated zoom changes the view every frame.
+    const ZoomViewport view = zoom_view_current(scope.node());
+    const std::optional<ZoomViewport> reported = view_from(scope.retained(reported_value));
+    if (reported.has_value() && *reported == view)
+        return;
+    scope.set_retained(reported_value, view_value(view), DirtyReason::animation);
+    // Reported only to an app that listens.
     const auto listener = scope.node().description().properties.find("onViewChange");
     if (listener != scope.node().description().properties.end() &&
         listener->second.action() != nullptr) {
         scope.value_changed("onViewChange", "view-changed", view_value(view));
     }
+}
+
+/** Whether the view is still moving: an eased zoom is under way, or a pan holds the pointer. */
+[[nodiscard]] bool moving(const WidgetInputScope& scope) {
+    const runtime::Value* pan = scope.retained(pan_value);
+    return scope.retained(target_value) != nullptr || (pan != nullptr && pan->object() != nullptr);
+}
+
+/**
+ * Shows `view` now: the children are presented under it (they are marked so their drawing and hit
+ * regions follow), and the app hears of it once the view is at rest.
+ */
+void show(WidgetInputScope& scope, const ZoomViewport& view) {
+    if (zoom_view_current(scope.node()) != view || scope.retained(content_view_value) == nullptr) {
+        scope.set_retained(content_view_value, view_value(view), DirtyReason::animation);
+        scope.invalidate_children(DirtyReason::animation);
+    }
+    report(scope, moving(scope));
 }
 
 /** Eases the view to `target`, about `anchor` when zooming at a point. */
@@ -117,8 +143,8 @@ void ease_to(WidgetInputScope& scope, const ZoomViewport& target,
         fields.emplace_back("focusX", runtime::Value((anchor->x - current.x) / current.zoom));
         fields.emplace_back("focusY", runtime::Value((anchor->y - current.y) / current.zoom));
     }
-    scope.set_retained(target_value, runtime::Value(std::move(fields)), DirtyReason::input);
-    static_cast<void>(scope.request_frame(WidgetFrameCost::paint));
+    scope.set_retained(target_value, runtime::Value(std::move(fields)), DirtyReason::animation);
+    static_cast<void>(scope.request_frame(WidgetFrameCost::presentation));
 }
 
 /** The view being eased to, when one is: the end a further wheel notch builds on. */
@@ -172,9 +198,9 @@ bool zoom_view_pointer(WidgetInputScope& scope) {
                 {"middle", runtime::Value(middle)},
                 {"panned", runtime::Value(false)},
             }),
-            DirtyReason::input);
+            DirtyReason::animation);
         // A press catches an eased zoom where it is.
-        scope.set_retained(target_value, runtime::Value{}, DirtyReason::input);
+        scope.set_retained(target_value, runtime::Value{}, DirtyReason::animation);
         return middle;
     }
     if (!panning)
@@ -190,7 +216,7 @@ bool zoom_view_pointer(WidgetInputScope& scope) {
             if (!scope.press_moved_beyond_slop())
                 return false;
             if (!scope.claim_gesture()) {
-                scope.set_retained(pan_value, runtime::Value{}, DirtyReason::input);
+                scope.set_retained(pan_value, runtime::Value{}, DirtyReason::animation);
                 return false;
             }
         }
@@ -208,13 +234,15 @@ bool zoom_view_pointer(WidgetInputScope& scope) {
                 if (name == "panned")
                     value = runtime::Value(true);
             }
-            scope.set_retained(pan_value, runtime::Value(std::move(fields)), DirtyReason::input);
+            scope.set_retained(pan_value, runtime::Value(std::move(fields)), DirtyReason::animation);
         }
         show(scope, next);
         return true;
     }
     if (pointer->type == PointerEventType::release || pointer->type == PointerEventType::cancel) {
-        scope.set_retained(pan_value, runtime::Value{}, DirtyReason::input);
+        scope.set_retained(pan_value, runtime::Value{}, DirtyReason::animation);
+        // The pan has ended: the view it left is the app's now.
+        report(scope, moving(scope));
         return panned || middle;
     }
     return false;
@@ -242,7 +270,7 @@ bool zoom_view_event(WidgetInputScope& scope) {
     if (wheel.modifiers.shift || (wheel.delta_y == 0.0 && wheel.delta_x != 0.0)) {
         const double across = wheel.modifiers.shift ? wheel.delta_y + wheel.delta_x : wheel.delta_x;
         const double down = wheel.modifiers.shift ? 0.0 : wheel.delta_y;
-        scope.set_retained(target_value, runtime::Value{}, DirtyReason::input);
+        scope.set_retained(target_value, runtime::Value{}, DirtyReason::animation);
         show(scope, ZoomViewport{base.x + across * wheel_pan_step, base.y + down * wheel_pan_step,
                                  base.zoom});
         scope.consume();
@@ -264,7 +292,7 @@ void zoom_view_frame(WidgetInputScope& scope, const WidgetFrameInfo& frame) {
         // frame, the content is rasterized at exactly that zoom rather than the nearest step a
         // moving zoom takes (the frame hook marks the node to be drawn).
         if (scope.retained(settling_value) != nullptr)
-            scope.set_retained(settling_value, runtime::Value{}, DirtyReason::input);
+            scope.set_retained(settling_value, runtime::Value{}, DirtyReason::animation);
         return;
     }
     const ZoomViewport current = zoom_view_current(scope.node());
@@ -288,14 +316,14 @@ void zoom_view_frame(WidgetInputScope& scope, const WidgetFrameInfo& frame) {
     const bool arrived = std::abs(std::log(next.zoom / target->zoom)) < 1.0e-3 &&
                          std::abs(next.x - target->x) < 0.25 && std::abs(next.y - target->y) < 0.25;
     if (arrived) {
-        scope.set_retained(target_value, runtime::Value{}, DirtyReason::input);
+        scope.set_retained(target_value, runtime::Value{}, DirtyReason::animation);
         show(scope, *target);
-        scope.set_retained(settling_value, runtime::Value(true), DirtyReason::input);
-        static_cast<void>(scope.request_frame(WidgetFrameCost::paint));
+        scope.set_retained(settling_value, runtime::Value(true), DirtyReason::animation);
+        static_cast<void>(scope.request_frame(WidgetFrameCost::presentation));
         return;
     }
     show(scope, next);
-    static_cast<void>(scope.request_frame(WidgetFrameCost::paint));
+    static_cast<void>(scope.request_frame(WidgetFrameCost::presentation));
 }
 
 /** Shows all of the content, `padding` clear of the edges, easing there. */
@@ -385,7 +413,7 @@ bool zoom_view_synchronize(WidgetInputScope& scope) {
         show(scope, wanted);
         return true;
     }
-    scope.set_retained(reported_value, view_value(*controlled), DirtyReason::input);
+    scope.set_retained(reported_value, view_value(*controlled), DirtyReason::animation);
     ease_to(scope, wanted);
     return true;
 }
