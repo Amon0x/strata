@@ -21,6 +21,10 @@ enum class ChartKind { line, area, bar, scatter, pie, donut };
 /** How a numeric axis places values: evenly, or by their logarithm (equal ratios, equal steps). */
 enum class ChartAxisScale { linear, log };
 
+/** Where an axis marks its values along its line: nowhere, at its ticks, or at every multiple
+ * of each power of ten a log axis passes (a linear axis: fifths of its tick step). */
+enum class ChartAxisMarks { none, ticks, all };
+
 /** Where a chart's legend sits: centred below, or in a row above at its start or end. */
 enum class ChartLegendPlace { bottom, top_start, top_end };
 
@@ -32,13 +36,21 @@ struct ChartAxisSpec final {
     /** Where ticks and gridlines go; chosen evenly when empty. */
     std::vector<double> ticks;
     std::string title;
+    /** Its ticks' labels are drawn. */
+    bool labels = true;
+    ChartAxisMarks marks = ChartAxisMarks::none;
+    /** Space from the axis line to its labels, and from them (or its marks) to its title. */
+    std::optional<double> label_gap;
+    std::optional<double> title_gap;
 };
 
-/** A point at a numeric x, and the label drawn above it, if any. */
+/** A point at a numeric x, the label drawn above it, and the range around it (an error bar). */
 struct ChartXYPoint final {
     double x = 0.0;
     double y = 0.0;
     std::string label;
+    std::optional<double> low;
+    std::optional<double> high;
 };
 
 /**
@@ -91,6 +103,7 @@ struct ChartState final {
     std::optional<RenderColor> marker_outline;
     std::optional<RenderColor> grid_color;
     std::optional<RenderColor> axis_color;
+    std::optional<RenderColor> error_bar_color;
     /** Space between the legend and the plot; the legend's own default when unset. */
     std::optional<double> legend_gap;
     /**
@@ -167,6 +180,11 @@ struct ChartNumericAxis final {
     double minimum = 0.0;
     double maximum = 1.0;
     std::vector<double> ticks;
+    /** Where marks go along the axis line. */
+    std::vector<double> marks;
+    bool labels = true;
+    double label_gap = 0.0;
+    double title_gap = 0.0;
 
     /** How far along the axis a value is, 0 at its minimum and 1 at its maximum. */
     [[nodiscard]] double fraction(double value) const noexcept;

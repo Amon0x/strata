@@ -4421,10 +4421,13 @@ void test_chart_draws_points_in_along_a_log_axis(const std::filesystem::path& re
 animation DrawIn { from { reveal: 0 } to { reveal: 1 } duration: 1000ms; easing: "linear"; fillMode: "FORWARDS"; }
 overlay Cost {
   root Panel(key: "cost.root", layout: { kind: "COLUMN", width: 480, height: 320 }) {
-    Chart(key: "cost.chart", enter: DrawIn, markerRadius: 5, showLegend: false,
-          xAxis: { scale: "LOG", min: 0.5, max: 200, title: "Cost" }, yAxis: { title: "Score" },
+    Chart(key: "cost.chart", enter: DrawIn, markerRadius: 5, showLegend: false, showAxes: true,
+          axisColor: #0000FF, errorBarColor: #00FF00,
+          xAxis: { scale: "LOG", min: 0.5, max: 200, labels: false, marks: "ALL", title: "Cost" },
+          yAxis: { title: "Score" },
           series: [{ name: "Model", color: #FF0000,
-                     points: [{ x: 1, y: 1, label: "Low" }, { x: 10, y: 2 }, { x: 100, y: 3 }] }],
+                     points: [{ x: 1, y: 1, label: "Low" }, { x: 10, y: 2, low: 1.5, high: 2.5 },
+                              { x: 100, y: 3 }] }],
           layout: { width: 480, height: 320 })
   }
 }
@@ -4438,14 +4441,26 @@ overlay Cost {
         const runtime::ColorValue* color = paint.has_value() ? paint->color() : nullptr;
         return color != nullptr && color->red == 255U && color->green == 0U && color->alpha > 0U;
     };
-    // The series' line (its right end) and the centres of its points drawn so far.
+    // The series' line (its right end), the centres of its points drawn so far, its error bars
+    // and the x axis' marks.
     struct Drawn final {
         std::optional<double> line_end;
         std::vector<double> points;
+        std::vector<ui::Rect> bars;
+        std::size_t marks = 0U;
     };
     const auto drawn = [&] {
         Drawn result;
         for (const ui::RenderCommand& command : surface->render_commands().commands()) {
+            if (const auto* rect = std::get_if<ui::SolidRectRenderCommand>(&command);
+                rect != nullptr && rect->fill.color() != nullptr) {
+                const runtime::ColorValue& color = *rect->fill.color();
+                if (color.green == 255U && color.red == 0U && rect->bounds.height > 0.0)
+                    result.bars.push_back(rect->bounds);
+                else if (color.blue == 255U && color.red == 0U && rect->bounds.width == 1.0 &&
+                         rect->bounds.height == 5.0)
+                    ++result.marks;
+            }
             const auto* path = std::get_if<ui::PathRenderCommand>(&command);
             if (path == nullptr)
                 continue;
@@ -4459,8 +4474,11 @@ overlay Cost {
     };
     static_cast<void>(surface->frame(now));
     const Drawn start = drawn();
-    check(!start.line_end.has_value() && start.points.empty(),
-          "a Chart drawing in showed its line or points before the reveal began");
+    check(!start.line_end.has_value() && start.points.empty() && start.bars.empty(),
+          "a Chart drawing in showed its line, points or error bars before the reveal began");
+    // 0.5 to 0.9, 1 to 9, 10 to 90, 100 and 200: every whole multiple of each power of ten.
+    check(start.marks == 25U, "a log x axis did not mark every multiple of each power of ten: " +
+                                  std::to_string(start.marks));
     for (int frame = 0; frame < 25; ++frame)
         static_cast<void>(surface->frame(now += 20'000'000));
     const Drawn middle = drawn();
@@ -4469,6 +4487,10 @@ overlay Cost {
     const Drawn end = drawn();
     check(end.points.size() == 3U && end.line_end.has_value(),
           "a Chart that had drawn in did not show its line and all three points");
+    check(end.bars.size() == 1U &&
+              std::abs(end.bars.front().x + 0.5 - end.points[1]) < 1.0 &&
+              end.bars.front().height > 10.0,
+          "a point's low and high did not draw one error bar through it");
     // On a log axis 1, 10 and 100 are evenly spaced.
     check(std::abs((end.points[1] - end.points[0]) - (end.points[2] - end.points[1])) < 0.5,
           "a log x axis did not space 1, 10 and 100 evenly");

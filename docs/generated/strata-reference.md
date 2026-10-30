@@ -189,7 +189,7 @@ Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
-| `series` | list of { color?: color, name?: string, points?: list of { label?: string, x: number, y: number }, values?: list of number } | false | false | — |
+| `series` | list of { color?: color, name?: string, points?: list of { high?: number, label?: string, low?: number, x: number, y: number }, values?: list of number } | false | false | — |
 | `key` | key | false | false | — |
 | `kind` | "AREA" \| "BAR" \| "DONUT" \| "LINE" \| "PIE" \| "SCATTER" | false | false | — |
 | `labels` | list of any | false | false | — |
@@ -202,8 +202,8 @@ Children: `false` · Capabilities: —
 | `showPoints` | boolean | false | false | — |
 | `valueSuffix` | string | false | false | — |
 | `decimals` | number | false | false | — |
-| `xAxis` | { max?: number, min?: number, scale?: "LINEAR" \| "LOG", ticks?: list of number, title?: string } | false | false | — |
-| `yAxis` | { max?: number, min?: number, scale?: "LINEAR" \| "LOG", ticks?: list of number, title?: string } | false | false | — |
+| `xAxis` | { labelGap?: number, labels?: boolean, marks?: "ALL" \| "NONE" \| "TICKS", max?: number, min?: number, scale?: "LINEAR" \| "LOG", ticks?: list of number, title?: string, titleGap?: number } | false | false | — |
+| `yAxis` | { labelGap?: number, labels?: boolean, marks?: "ALL" \| "NONE" \| "TICKS", max?: number, min?: number, scale?: "LINEAR" \| "LOG", ticks?: list of number, title?: string, titleGap?: number } | false | false | — |
 | `legendPosition` | "BOTTOM" \| "TOP_END" \| "TOP_START" | false | false | — |
 | `showAxes` | boolean | false | false | — |
 | `lineWidth` | number | false | false | — |
@@ -211,6 +211,7 @@ Children: `false` · Capabilities: —
 | `markerOutline` | color | false | true | — |
 | `gridColor` | color | false | true | — |
 | `axisColor` | color | false | true | — |
+| `errorBarColor` | color | false | true | — |
 | `legendGap` | number | false | false | — |
 | `tickStyle` | style | false | false | — |
 | `titleStyle` | style | false | false | — |

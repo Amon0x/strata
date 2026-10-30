@@ -7112,7 +7112,7 @@
           "name": "series",
           "nullable": false,
           "required": false,
-          "type": "list of { color?: color, name?: string, points?: list of { label?: string, x: number, y: number }, values?: list of number }"
+          "type": "list of { color?: color, name?: string, points?: list of { high?: number, label?: string, low?: number, x: number, y: number }, values?: list of number }"
         },
         {
           "aliases": [],
@@ -7223,7 +7223,7 @@
           "name": "xAxis",
           "nullable": false,
           "required": false,
-          "type": "{ max?: number, min?: number, scale?: \"LINEAR\" | \"LOG\", ticks?: list of number, title?: string }"
+          "type": "{ labelGap?: number, labels?: boolean, marks?: \"ALL\" | \"NONE\" | \"TICKS\", max?: number, min?: number, scale?: \"LINEAR\" | \"LOG\", ticks?: list of number, title?: string, titleGap?: number }"
         },
         {
           "aliases": [],
@@ -7231,7 +7231,7 @@
           "name": "yAxis",
           "nullable": false,
           "required": false,
-          "type": "{ max?: number, min?: number, scale?: \"LINEAR\" | \"LOG\", ticks?: list of number, title?: string }"
+          "type": "{ labelGap?: number, labels?: boolean, marks?: \"ALL\" | \"NONE\" | \"TICKS\", max?: number, min?: number, scale?: \"LINEAR\" | \"LOG\", ticks?: list of number, title?: string, titleGap?: number }"
         },
         {
           "aliases": [],
@@ -7289,6 +7289,14 @@
           "aliases": [],
           "enumValues": [],
           "name": "axisColor",
+          "nullable": true,
+          "required": false,
+          "type": "color"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "errorBarColor",
           "nullable": true,
           "required": false,
           "type": "color"

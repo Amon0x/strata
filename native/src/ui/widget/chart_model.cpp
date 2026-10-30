@@ -33,6 +33,8 @@ constexpr double x_label_height = 18.0;
 constexpr double axis_label_gap = 12.0;
 constexpr double x_title_gap = 15.0;
 constexpr double y_title_gap = 20.0;
+/** How far an axis' marks reach out from its line. */
+constexpr double axis_mark_length = 5.0;
 /** Degrees between the points of a slice outline. */
 constexpr double outline_step = 6.0;
 
@@ -85,6 +87,21 @@ constexpr double outline_step = 6.0;
     if (const runtime::Value* title = value->field("title");
         title != nullptr && title->string() != nullptr)
         spec.title = *title->string();
+    if (const runtime::Value* labels = value->field("labels");
+        labels != nullptr && labels->boolean() != nullptr)
+        spec.labels = *labels->boolean();
+    if (const runtime::Value* marks = value->field("marks");
+        marks != nullptr && marks->string() != nullptr) {
+        spec.marks = *marks->string() == "ALL"     ? ChartAxisMarks::all
+                     : *marks->string() == "TICKS" ? ChartAxisMarks::ticks
+                                                   : ChartAxisMarks::none;
+    }
+    if (const std::optional<double> gap = finite(value->field("labelGap"));
+        gap.has_value() && *gap >= 0.0)
+        spec.label_gap = *gap;
+    if (const std::optional<double> gap = finite(value->field("titleGap"));
+        gap.has_value() && *gap >= 0.0)
+        spec.title_gap = *gap;
     return spec;
 }
 
@@ -379,7 +396,8 @@ ChartState chart_state(const RetainedNode& node) {
                     const runtime::Value* label = point.field("label");
                     item.points.push_back(ChartXYPoint{
                         *x, *y,
-                        label != nullptr && label->string() != nullptr ? *label->string() : ""});
+                        label != nullptr && label->string() != nullptr ? *label->string() : "",
+                        finite(point.field("low")), finite(point.field("high"))});
                 }
                 state.numeric = true;
             }
@@ -437,6 +455,7 @@ ChartState chart_state(const RetainedNode& node) {
     state.marker_outline = color_of(property(node, "markerOutline"));
     state.grid_color = color_of(property(node, "gridColor"));
     state.axis_color = color_of(property(node, "axisColor"));
+    state.error_bar_color = color_of(property(node, "errorBarColor"));
     if (const std::optional<double> gap = finite(property(node, "legendGap"));
         gap.has_value() && *gap >= 0.0)
         state.legend_gap = *gap;
@@ -507,8 +526,8 @@ double ChartProjection::x(const std::size_t index) const noexcept {
 namespace {
 
 /** A numeric axis' range and ticks: the authored ones, else the data's, padded, with even ticks. */
-[[nodiscard]] ChartNumericAxis numeric_axis(const ChartAxisSpec& spec, double low, double high,
-                                            const double length, const bool zero_based) {
+[[nodiscard]] ChartNumericAxis numeric_ticks(const ChartAxisSpec& spec, double low, double high,
+                                             const double length, const bool zero_based) {
     ChartNumericAxis axis;
     axis.scale = spec.scale;
     const bool log = spec.scale == ChartAxisScale::log;
@@ -572,6 +591,40 @@ namespace {
     return axis;
 }
 
+/**
+ * A numeric axis laid out: numeric_ticks' range and ticks, its marks, and its gaps (the authored
+ * ones, else `title_gap` for its title).
+ */
+[[nodiscard]] ChartNumericAxis numeric_axis(const ChartAxisSpec& spec, const double low,
+                                            const double high, const double length,
+                                            const bool zero_based, const double title_gap) {
+    ChartNumericAxis axis = numeric_ticks(spec, low, high, length, zero_based);
+    axis.labels = spec.labels;
+    axis.label_gap = spec.label_gap.value_or(axis_label_gap);
+    axis.title_gap = spec.title_gap.value_or(title_gap);
+    if (spec.marks == ChartAxisMarks::ticks) {
+        axis.marks = axis.ticks;
+    } else if (spec.marks == ChartAxisMarks::all && axis.scale == ChartAxisScale::log) {
+        for (int power = static_cast<int>(std::floor(std::log10(axis.minimum)));
+             power <= static_cast<int>(std::ceil(std::log10(axis.maximum))) &&
+             axis.marks.size() < 400U;
+             ++power) {
+            for (int multiple = 1; multiple <= 9; ++multiple) {
+                const double mark = multiple * std::pow(10.0, power);
+                if (mark >= axis.minimum * (1.0 - 1.0e-9) && mark <= axis.maximum * (1.0 + 1.0e-9))
+                    axis.marks.push_back(mark);
+            }
+        }
+    } else if (spec.marks == ChartAxisMarks::all && axis.ticks.size() >= 2U) {
+        const double step = (axis.ticks[1] - axis.ticks[0]) / 5.0;
+        const double first = axis.ticks.front() - step * std::floor((axis.ticks.front() - axis.minimum) / step + 1.0e-9);
+        for (double mark = first; mark <= axis.maximum + step * 1.0e-6 && axis.marks.size() < 400U;
+             mark += step)
+            axis.marks.push_back(mark);
+    }
+    return axis;
+}
+
 /** A tick's label: on the y axis with the chart's decimals and suffix. */
 [[nodiscard]] std::string chart_axis_label(const double value, const ChartState& state,
                                            const bool vertical) {
@@ -596,31 +649,35 @@ void numeric_projection(const ChartState& state, const Rect area, const ChartTex
                 x_low = std::min(x_low, point.x);
                 x_high = std::max(x_high, point.x);
             }
-            y_low = std::min(y_low, point.y);
-            y_high = std::max(y_high, point.y);
+            y_low = std::min({y_low, point.y, point.low.value_or(point.y)});
+            y_high = std::max({y_high, point.y, point.high.value_or(point.y)});
         }
     }
-    // Room for the axis titles, the x labels and the y labels' gutter, then the plot.
+    // Room for the axis titles, the x labels (or marks) and the y labels' gutter, then the plot.
+    const ChartAxisSpec& x_spec = state.x_axis;
+    const ChartAxisSpec& y_spec = state.y_axis;
+    const double x_marks = x_spec.marks != ChartAxisMarks::none ? axis_mark_length : 0.0;
+    const double y_marks = y_spec.marks != ChartAxisMarks::none ? axis_mark_length : 0.0;
     double left = area.x;
     double bottom = area.bottom();
-    if (!state.y_axis.title.empty())
-        left += title_height + y_title_gap;
-    if (!state.x_axis.title.empty())
-        bottom -= title_height + x_title_gap;
-    bottom -= tick_height + axis_label_gap;
+    if (!y_spec.title.empty())
+        left += title_height + y_spec.title_gap.value_or(y_title_gap);
+    if (!x_spec.title.empty())
+        bottom -= title_height + x_spec.title_gap.value_or(x_title_gap);
+    bottom -= x_spec.labels ? tick_height + x_spec.label_gap.value_or(axis_label_gap) : x_marks;
     const double top = area.y;
-    projection.y_axis =
-        numeric_axis(state.y_axis, y_low, y_high, std::max(1.0, bottom - top), true);
+    projection.y_axis = numeric_axis(y_spec, y_low, y_high, std::max(1.0, bottom - top), true,
+                                     y_title_gap);
     double gutter = 0.0;
     for (const double tick : projection.y_axis.ticks)
         gutter = std::max(gutter, measure(chart_axis_label(tick, state, true), state.tick_style).width);
-    projection.gutter = gutter + axis_label_gap;
+    projection.gutter = y_spec.labels ? gutter + projection.y_axis.label_gap : y_marks;
     left += projection.gutter;
     // The right keeps room for half a label centred under a tick at the plot's end.
     projection.plot = Rect{left, top, std::max(1.0, area.right() - 14.0 - left),
                            std::max(1.0, bottom - top)};
-    projection.x_axis =
-        numeric_axis(state.x_axis, x_low, x_high, projection.plot.width, false);
+    projection.x_axis = numeric_axis(x_spec, x_low, x_high, projection.plot.width, false,
+                                     x_title_gap);
 }
 
 } // namespace
@@ -641,9 +698,12 @@ ChartProjection chart_projection(const ChartState& state, const Rect bounds,
     projection.round_swatches =
         state.numeric && (state.marker_radius.has_value() || state.points ||
                           state.kind == ChartKind::scatter);
-    const double swatch = projection.round_swatches
-                              ? std::max(legend_swatch, 2.0 * state.marker_radius.value_or(5.0))
-                              : legend_swatch;
+    // Round swatches are the legend text's size, and never smaller than the points.
+    const double swatch =
+        projection.round_swatches
+            ? std::max({legend_swatch, 2.0 * state.marker_radius.value_or(5.0),
+                        0.8 * measure("0", state.legend_style).height})
+            : legend_swatch;
     if (state.legend) {
         std::vector<ChartLegendEntry> entries;
         if (state.circular()) {
@@ -1100,29 +1160,47 @@ void numeric_content(WidgetRenderScope& scope, ChartState& state, ChartProjectio
         const double y = std::floor(y_of(tick));
         if (state.grid && !(state.axes && std::abs(y - std::floor(plot.bottom())) < 0.5))
             scope.solid_rect(Rect{plot.x, y, plot.width, 1.0}, Paint(grid));
-        chart_text(scope, chart_axis_label(tick, state, true), state.tick_style,
-                   Point{plot.x - projection.gutter, y + 0.5 - tick_height * 0.5}, ticks,
-                   projection.gutter - axis_label_gap, WidgetTextAlignment::end);
+        if (y_axis.labels) {
+            chart_text(scope, chart_axis_label(tick, state, true), state.tick_style,
+                       Point{plot.x - projection.gutter, y + 0.5 - tick_height * 0.5}, ticks,
+                       projection.gutter - y_axis.label_gap, WidgetTextAlignment::end);
+        }
     }
     if (state.axes) {
         scope.solid_rect(Rect{std::floor(plot.x), plot.y, 1.0, plot.height + 1.0}, Paint(axis));
         scope.solid_rect(Rect{plot.x, std::floor(plot.bottom()), plot.width, 1.0}, Paint(axis));
     }
-    for (const double tick : x_axis.ticks) {
-        const std::string text = chart_axis_label(tick, state, false);
-        const double width = measure(text, state.tick_style).width + 8.0;
-        chart_text(scope, text, state.tick_style,
-                   Point{x_of(tick) - width * 0.5, plot.bottom() + axis_label_gap}, ticks, width,
-                   WidgetTextAlignment::center);
+    // Marks reach out from each axis line: down from the x axis, left from the y axis.
+    for (const double mark : x_axis.marks) {
+        scope.solid_rect(Rect{std::floor(x_of(mark)), std::floor(plot.bottom()) + 1.0, 1.0,
+                              axis_mark_length},
+                         Paint(axis));
+    }
+    for (const double mark : y_axis.marks) {
+        scope.solid_rect(Rect{std::floor(plot.x) - axis_mark_length, std::floor(y_of(mark)),
+                              axis_mark_length, 1.0},
+                         Paint(axis));
+    }
+    if (x_axis.labels) {
+        for (const double tick : x_axis.ticks) {
+            const std::string text = chart_axis_label(tick, state, false);
+            const double width = measure(text, state.tick_style).width + 8.0;
+            chart_text(scope, text, state.tick_style,
+                       Point{x_of(tick) - width * 0.5, plot.bottom() + x_axis.label_gap}, ticks,
+                       width, WidgetTextAlignment::center);
+        }
     }
     if (!state.x_axis.title.empty()) {
+        const double under = x_axis.labels ? x_axis.label_gap + tick_height
+                             : x_axis.marks.empty() ? 0.0
+                                                    : axis_mark_length;
         chart_text(scope, state.x_axis.title, state.title_style,
-                   Point{plot.x, plot.bottom() + axis_label_gap + tick_height + x_title_gap},
-                   titles, plot.width, WidgetTextAlignment::center);
+                   Point{plot.x, plot.bottom() + under + x_axis.title_gap}, titles, plot.width,
+                   WidgetTextAlignment::center);
     }
     if (!state.y_axis.title.empty()) {
         // Turned a quarter to read upward, centred on the plot's height left of the labels.
-        const Point centre{plot.x - projection.gutter - y_title_gap - title_height * 0.5,
+        const Point centre{plot.x - projection.gutter - y_axis.title_gap - title_height * 0.5,
                            plot.y + plot.height * 0.5};
         scope.push_transform(TransformPushRenderCommand{0.0, 1.0, centre.x - centre.y, -1.0, 0.0,
                                                         centre.y + centre.x});
@@ -1143,8 +1221,7 @@ void numeric_content(WidgetRenderScope& scope, ChartState& state, ChartProjectio
         double drawn = 0.0;
     };
     std::vector<Drawn> drawn(state.series.size());
-    // The first series is the one to read: it draws last, over the others.
-    for (std::size_t index = state.series.size(); index-- > 0U;) {
+    for (std::size_t index = 0U; index < state.series.size(); ++index) {
         const ChartSeries& series = state.series[index];
         if (series.hidden)
             continue;
@@ -1159,6 +1236,44 @@ void numeric_content(WidgetRenderScope& scope, ChartState& state, ChartProjectio
             line.arrivals.push_back(length);
         }
         line.drawn = length * reveal;
+    }
+    // How far a point has appeared, 0 to 1, as its line comes within a few radii of it.
+    const double ramp = std::max(1.0, radius * 3.0);
+    const auto appeared = [&](const Drawn& line, const std::size_t point) {
+        const double appear =
+            reveal >= 1.0 ? 1.0
+                          : std::clamp((line.drawn - line.arrivals[point]) / ramp + 1.0, 0.0,
+                                       1.0) * (reveal > 0.0 ? 1.0 : 0.0);
+        return appear * appear * (3.0 - 2.0 * appear);
+    };
+    // Error bars under everything, each growing out of its point as the point appears.
+    for (std::size_t index = 0U; index < state.series.size(); ++index) {
+        const ChartSeries& series = state.series[index];
+        if (series.hidden)
+            continue;
+        const RenderColor bar =
+            with_alpha(state.error_bar_color.value_or(with_alpha(series.color, 0.35)),
+                       series.weight);
+        for (std::size_t point = 0U; point < series.points.size(); ++point) {
+            const ChartXYPoint& value = series.points[point];
+            if (!value.low.has_value() && !value.high.has_value())
+                continue;
+            const double eased = appeared(drawn[index], point);
+            if (eased <= 0.0)
+                continue;
+            const Point at = drawn[index].points[point];
+            const double top = at.y + (y_of(value.high.value_or(value.y)) - at.y) * eased;
+            const double bottom = at.y + (y_of(value.low.value_or(value.y)) - at.y) * eased;
+            scope.solid_rect(Rect{std::floor(at.x), top, 1.0, std::max(0.0, bottom - top)},
+                             Paint(bar));
+        }
+    }
+    // The first series is the one to read: it draws last, over the others.
+    for (std::size_t index = state.series.size(); index-- > 0U;) {
+        const ChartSeries& series = state.series[index];
+        if (series.hidden)
+            continue;
+        Drawn& line = drawn[index];
         if (state.kind == ChartKind::scatter || line.points.size() < 2U || line.drawn <= 0.0)
             continue;
         std::vector<Point> partial{line.points.front()};
@@ -1176,21 +1291,16 @@ void numeric_content(WidgetRenderScope& scope, ChartState& state, ChartProjectio
         }
         stroke_polyline(scope, partial, with_alpha(series.color, series.weight), state.line_width);
     }
-    // Points over every line, each growing in as its line comes within a few radii of it.
-    const double ramp = std::max(1.0, radius * 3.0);
+    // Points over every line, each growing in as its line reaches it.
     for (std::size_t index = state.series.size(); index-- > 0U;) {
         const ChartSeries& series = state.series[index];
         const Drawn& line = drawn[index];
         if (series.hidden)
             continue;
         for (std::size_t point = 0U; point < line.points.size(); ++point) {
-            const double appear =
-                reveal >= 1.0 ? 1.0
-                              : std::clamp((line.drawn - line.arrivals[point]) / ramp + 1.0, 0.0,
-                                           1.0) * (reveal > 0.0 ? 1.0 : 0.0);
-            if (appear <= 0.0)
+            const double eased = appeared(line, point);
+            if (eased <= 0.0)
                 continue;
-            const double eased = appear * appear * (3.0 - 2.0 * appear);
             if (markers && radius > 0.0) {
                 StrokeStyle ring;
                 ring.width = 1.0;
