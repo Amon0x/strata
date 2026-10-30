@@ -1283,6 +1283,7 @@ void test_render_submission_changed_draws_match_full_plan(
         ui::RenderColor fill{40U, 90U, 160U, 255U};
         double opacity = 1.0;
         double label_y = 30.0;
+        double chip_scale = 1.0;
     };
     // A HUD-like stream: a moved bar with a rounded clip, a clock, a fill that grows, a scoped
     // fade, a grouped chip, and a label that can move out of its clip.
@@ -1311,7 +1312,18 @@ void test_render_submission_changed_draws_match_full_plan(
         result.append(ui::GroupPushRenderCommand{7U});
         result.append(ui::SolidRectRenderCommand{
             ui::Rect{300.0, 20.0, 30.0, 12.0}, ui::RenderColor{10U, 200U, 10U, 255U}});
+        // Text a group moves, and text a static transform scales: what each run sees changes
+        // with the scopes around it, not with the run.
+        result.append(ui::TextRunRenderCommand{
+            ui::Point{300.0, 50.0}, ui::RenderColor{220U, 220U, 220U, 255U}, 12.0,
+            run(frame.clock)});
         result.append(ui::GroupPopRenderCommand{});
+        result.append(ui::TransformPushRenderCommand{frame.chip_scale, 0.0, 500.0, 0.0,
+                                                     frame.chip_scale, 20.0});
+        result.append(ui::TextRunRenderCommand{
+            ui::Point{0.0, 12.0}, ui::RenderColor{220U, 220U, 220U, 255U}, 12.0,
+            run(frame.clock)});
+        result.append(ui::TransformPopRenderCommand{});
         return result;
     };
     std::vector<Frame> frames(1U);
@@ -1329,6 +1341,8 @@ void test_render_submission_changed_draws_match_full_plan(
     next([](Frame& frame) { frame.label_y = 400.0; });
     next([](Frame& frame) { frame.label_y = 30.0; frame.clock = "1:03"; });
     next([](Frame& frame) { frame.bar_x = 3.0; frame.clip_width = 190.0; frame.opacity = 1.0; });
+    next([](Frame& frame) { frame.chip_scale = 2.0; });
+    next([](Frame& frame) { frame.clock = "1:04"; });
 
     // One atlas: glyph placement and texture names are the atlas's, not the plan's.
     font::GlyphAtlas atlas("submission-changed-draws");
