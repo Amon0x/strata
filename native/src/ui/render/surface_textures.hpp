@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "resource/image.hpp"
+#include "resource/lottie.hpp"
 #include "resource/runtime_images.hpp"
 
 namespace strata::ui {
@@ -34,8 +35,12 @@ class SurfaceTextures final {
     SurfaceTextures(std::string host_namespace,
                     std::vector<resource::EncodedTextureResource> static_textures);
 
-    /** Adopts the runtime's images; true while the next packet must carry texture changes. */
-    bool sync(const resource::RuntimeImageStore& images);
+    /**
+     * Adopts the runtime's images, and the images its Lottie animations decoded as they loaded;
+     * true while the next packet must carry texture changes.
+     */
+    bool sync(const resource::RuntimeImageStore& images,
+              const resource::LottieLibrary* lottie = nullptr);
     [[nodiscard]] std::span<const resource::TextureResourceDescriptor> descriptors() const noexcept {
         return descriptors_;
     }
@@ -76,6 +81,7 @@ class SurfaceTextures final {
     std::vector<std::vector<std::uint8_t>> decoded_;
     std::vector<std::string> releases_;
     std::uint64_t store_generation_ = 0U;
+    std::uint64_t lottie_generation_ = 0U;
     bool synced_ = false;
     bool changed_ = false;
 };

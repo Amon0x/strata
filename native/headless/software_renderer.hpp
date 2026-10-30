@@ -81,10 +81,14 @@ class SoftwareRenderer final : public CaptureRenderer {
 
     void apply(const host::ResourceOperation& operation);
     void draw(const host::DrawBatch& batch, const host::RenderPacket& packet);
-    void blur(const host::BlurBatch& batch);
+    /** Blurs as a GPU blur pass does; `radius_x`/`radius_y` (logical) override the batch's. */
+    void blur(const host::BlurBatch& batch, double radius_x = -1.0, double radius_y = -1.0);
     void blur_downsampled(const host::BlurBatch& batch, std::uint32_t left, std::uint32_t top,
                           std::uint32_t right, std::uint32_t bottom, std::uint32_t downsample,
-                          const std::vector<std::uint8_t>& clipped_original);
+                          const std::vector<std::uint8_t>& clipped_original, double radius_x,
+                          double radius_y);
+    /** Runs a content layer's built-in filters over the isolated pixels, as the GPUs do. */
+    void apply_layer_filters(const host::EffectBatch& effect);
     void apply_effect(const host::EffectBatch& effect);
     [[nodiscard]] const std::vector<EffectPass>* program_of(
         const host::EffectBatch& effect) const noexcept;

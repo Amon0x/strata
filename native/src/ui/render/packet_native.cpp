@@ -250,6 +250,23 @@ struct IdTables final {
         for (std::uint32_t index = 0U; index < batch.effect->packed_parameter_count; ++index) {
             output.number(batch.effect->packed_parameters[index]);
         }
+        const bool content = batch.kind == SubmissionBatchKind::content_effect_begin;
+        if (!content && (batch.effect->composite != LayerComposite::source_over ||
+                         !batch.effect->filters.empty())) {
+            throw std::logic_error("only a content effect composites or filters as a layer");
+        }
+        if (batch.effect->filters.size() > maximum_layer_filters)
+            throw std::length_error("render layer has more filters than a packet carries");
+        output.integer(static_cast<std::uint32_t>(batch.effect->composite));
+        output.integer(static_cast<std::uint32_t>(batch.effect->filters.size()));
+        for (const LayerFilter& filter : batch.effect->filters) {
+            if (filter.values.size() > maximum_layer_filter_values)
+                throw std::length_error("render layer filter has more values than it carries");
+            output.integer(static_cast<std::uint32_t>(filter.kind));
+            output.integer(static_cast<std::uint32_t>(filter.values.size()));
+            for (const double value : filter.values)
+                output.number(std::isfinite(value) ? value : 0.0);
+        }
     }
     return std::move(output).take();
 }

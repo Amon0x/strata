@@ -776,27 +776,54 @@ Lottie(source: "assets/app/reveal.json", playing: playing, progress: scrub,
 Playback runs on the widget's own clock, frame by frame, at the display's rate; reduced motion
 holds the current frame.
 
-Supported: the composition's size, rate and in/out points; shape, solid, null and precomposition
-layers with parenting, in/out points, start time, stretch and time remapping; transforms (anchor,
-position, also with separate x and y, scale, rotation, opacity, skew and skew axis, auto-orient);
-hold, linear and bezier keyframes with per-dimension easing, spatial bezier paths for positions
-(moving evenly along their arc) and keyframed paths. Shapes: groups with their own transforms,
-rectangles (rounded), ellipses, stars and polygons (with roundness), paths; fills and strokes
-(colour, opacity, fill rule, width, caps, joins, miter limit, dashes with offset); linear and
-radial gradient fills and strokes with colour and opacity stops; trim paths (start, end, offset,
-simultaneous or individual); repeaters (copies, offset, transform, start and end opacity, above
-or below); round corners; merge paths (merge, add, subtract, intersect, exclude). Masks: add,
-subtract, intersect, lighten, darken and difference, inverted, with opacity and expansion. Track
-mattes: alpha, alpha inverted, luma and luma inverted, by the layer above or by `tp`, the matte's
-own masks and opacity included; a precomposition is clipped to its box.
+Supported: the composition's size, rate and in/out points; shape, solid, null, image, text and
+precomposition layers with parenting, in/out points, start time, stretch and time remapping;
+transforms (anchor, position, also with separate x and y, scale, rotation, opacity, skew and skew
+axis, auto-orient); hold, linear and bezier keyframes with per-dimension easing, spatial bezier
+paths for positions (moving evenly along their arc) and keyframed paths. Shapes: groups with their
+own transforms, rectangles (rounded), ellipses, stars and polygons (with roundness), paths; fills
+and strokes (colour, opacity, fill rule, width, caps, joins, miter limit, dashes with offset);
+linear and radial gradient fills and strokes with colour and opacity stops; trim paths (start, end,
+offset, simultaneous or individual); repeaters (copies, offset, transform, start and end opacity,
+above or below); round corners; merge paths (merge, add, subtract, intersect, exclude).
 
-Masks and mattes are resolved as geometry: the masked content and its mask or matte shapes are
-intersected into regions of equal coverage, each drawn as a filled path, so their edges are as
-exact as any other path's. A matte's shapes count by their colour and alpha; a gradient in a matte
-counts by its mean. Mask feather, layer blend modes, layer effects, text and image layers,
-expressions and 3D are not played: those layers and properties are left out. Layer opacity fades
-each of the layer's paints (overlapping paints in one layer show through each other), as most
-Lottie players do.
+- Masks: add, subtract, intersect, lighten, darken and difference, inverted, with opacity,
+  expansion and feather (keyframable, a Gaussian blur of the mask's edge that far each way).
+- Track mattes: alpha, alpha inverted, luma and luma inverted, by the layer above or by `tp`. The
+  matte layer is drawn as any layer is (its masks, opacity, effects, gradients, images and text
+  included) and keeps the layer by its alpha or luminance pixel by pixel.
+- Layer opacity fades the layer (or precomposition) as one picture: paints that overlap within it
+  do not show through each other.
+- Blend modes (`bm`): normal, multiply, screen, overlay, darken, lighten, color dodge, color burn,
+  hard light, soft light, difference, exclusion, hue, saturation, color, luminosity and add, against
+  what is under the layer within its composition. A precomposition is drawn apart, so its layers
+  blend within it, and it is clipped to its box.
+- Layer effects, in order: Fill, Tint, Tritone, Levels (individual controls), Drop Shadow
+  (colour, opacity, direction, distance, softness, shadow only) and Gaussian Blur (blurriness,
+  both, horizontal or vertical); other effects are skipped. Effects act on the masked layer before
+  its matte, as in After Effects.
+- Image layers (`ty: 2`): PNG, JPEG, GIF (first frame) or WebP assets embedded as data URIs
+  (`e: 1`) or in files named relative to the animation (`u` + `p`), decoded once as the animation
+  loads.
+- Text layers (`ty: 5`): the text document (keyframed documents switch at their times) with font,
+  size, fill and stroke colours, stroke width and stroke over fill, tracking, line height, baseline
+  shift, caps and justification, as point text or paragraph text wrapped in its box. Fonts come
+  from the composition's `fonts` list, matched to an installed font by PostScript name, else by
+  family and style; letters it lacks fall back as other text does, and glyphs the composition
+  exports (`chars`) are drawn in place of the font's. Text animators with range selectors (start,
+  end, offset and amount, in percent or index; based on letters, letters excluding spaces, words or
+  lines; square, ramp up, ramp down, triangle, round and smooth shapes with ease high and low)
+  change position, anchor, scale, rotation, opacity, fill and stroke colour, stroke width and
+  tracking.
+
+Each paint is a vector path command, so a shape that only moves, turns or scales keeps its outline.
+Masks resolve as geometry where that is exact: the masked content and its mask shapes are
+intersected into regions of equal coverage. A layer that must be seen as one picture (to fade,
+blend, run effects, take a matte or a feathered mask) is drawn apart as an isolated layer and
+composited by the renderer on every backend; an animation with blend modes or effects is itself
+drawn apart and cut to the widget's box. Expressions (they need a JavaScript engine) and 3D layers
+and cameras are not played, as in other native players (Skottie, rlottie): expressions keep their
+property's keyframed value and 3D layers draw flat.
 
 ### Talking to the operating system
 
@@ -1517,7 +1544,14 @@ rather than a claim of shader fidelity. Packet v16 carries ordered backdrop/cont
 current/surface backdrop selection, active rounded-clip geometry, effect refresh-rate policy, a
 backdrop probe token, and a bounded sixteen-float parameter block; presentation groups carry tone
 beside their transform and opacity.
-The public decoder rejects malformed clip/effect state, caps nested `CONTENT` effects at four
+A `CONTENT` effect is an isolated layer, and since packet v21 the engine can composite it as
+more than a plain fade: after its declared passes it runs built-in filters (a blur with separate
+x and y radii, a colour matrix, a luminance gradient map, per-channel levels, and a drop shadow)
+and combines with what is under it by a composite operator: source-over, the fifteen W3C blend
+modes, plus, destination-in and -out by alpha or luminance (a matte), and channel-wise maximum,
+minimum and difference (coverage masks). Every backend, the reference renderer included, runs
+these the same way; `Lottie` draws its blend modes, mattes, feathered masks and effects with them.
+The public decoder rejects malformed clip/effect state, caps nested `CONTENT` effects at eight
 levels, and caps rounded clip stacks at sixteen.
 
 ## Local retained and derived state

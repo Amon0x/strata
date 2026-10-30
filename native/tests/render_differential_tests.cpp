@@ -342,6 +342,8 @@ enum class Geometry { complete, patch, retained };
     glass.integer(std::uint64_t{0U});
     glass.number(6.0); // a 4px blur reads 4 + 2 logical pixels beyond its bounds
     glass.integer(0U);
+    glass.integer(std::uint32_t{STRATA_LAYER_COMPOSITE_SOURCE_OVER}); // no layer processing
+    glass.integer(0U);
     packet.record(2U, glass);
     return packet.bytes;
 }

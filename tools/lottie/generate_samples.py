@@ -13,11 +13,23 @@ reveal     masks (add, subtract, expansion, opacity), alpha and luma track matte
            with time remap, a dot following a spatial bezier with auto-orient, skew
 badge      a polystar with round corners and hold keyframes, a radial gradient, dashes with
            a moving offset, merge paths (subtract) and a polygon
+blend      layer blend modes (multiply, screen, overlay, difference, add) and a layer faded as
+           one picture
+feather    a feathered mask sweeping over a card, and an inverted feathered vignette
+matte      a gradient luma matte wiping stripes in, and a gradient alpha matte
+type       text layers in a system font: a range selector's wave of position, scale and colour,
+           and a typewriter reveal
+photo      image layers, one embedded as a data URI and one a file beside the animation, under
+           a rounded mask with a drop shadow
+effects    layer effects: drop shadow, an animated gaussian blur, fill, tint, tritone and levels
 """
 
+import base64
 import json
 import math
 import pathlib
+import struct
+import zlib
 
 OUT = pathlib.Path(__file__).resolve().parents[2] / "src/main/resources/assets/strata/lottie"
 
@@ -363,10 +375,238 @@ def badge():
         layer(1, "badge", [donut, medal, ring, hexagon], op, ks=layer_ks(p=(100, 100)))])
 
 
+def png(width, height, pixel):
+    """A PNG of `pixel(x, y) -> (r, g, b, a)` bytes."""
+    rows = b"".join(b"\x00" + b"".join(bytes(pixel(x, y)) for x in range(width))
+                    for y in range(height))
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) +
+            chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
+
+
+def sunset_png():
+    """A small sunset: a sky gradient, a sun and hills, for the image layers."""
+    size = 96
+
+    def pixel(x, y):
+        t = y / (size - 1)
+        sky = (int(255 * (0.98 - 0.5 * t)), int(255 * (0.55 + 0.1 * t)), int(255 * (0.35 + 0.5 * t)))
+        sun = math.hypot(x - 60, y - 44)
+        if sun < 16:
+            sky = (255, 236, 160)
+        hill = 70 + 8 * math.sin(x / 9.0)
+        if y > hill:
+            sky = (40, int(90 + 40 * math.sin(x / 13.0)), 80)
+        return sky + (255,)
+    return png(size, size, pixel)
+
+
+def solid_layer(index, name, color, w, h, op, ks=None, **extra):
+    base = {"ddd": 0, "ind": index, "ty": 1, "nm": name, "sr": 1, "ks": ks or layer_ks(),
+            "ao": 0, "sc": color, "sw": w, "sh": h, "ip": 0, "op": op, "st": 0, "bm": 0}
+    base.update(extra)
+    return base
+
+
+def effect(type_, *controls):
+    return {"ty": type_, "en": 1, "ef": [{"ty": 0, "v": c if isinstance(c, dict) else value(c)}
+                                        for c in controls]}
+
+
+def mask(points, mode="a", inverted=False, feather=0, opacity=100, expansion=0):
+    # A keyframed outline comes as a property ({"a": 1, "k": ...}); a fixed one is wrapped in one.
+    return {"mode": mode, "inv": inverted, "pt": points if "k" in points else value(points),
+            "o": value(opacity), "x": value(expansion),
+            "f": feather if isinstance(feather, dict) else value([feather, feather])}
+
+
+def blend():
+    op = 180
+    backdrop = group("backdrop", rect((200, 200)),
+                     gradient("gf", [(0, "#0f172a"), (0.5, "#1e3a8a"), (1, "#0ea5e9")], (-100, -100),
+                              (100, 100)))
+    layers = []
+    # Four discs circling over the backdrop, each blending by its own mode.
+    for index, (mode, color, phase) in enumerate([(1, "#f97316", 0), (2, "#a855f7", 90),
+                                                  (3, "#22c55e", 180), (10, "#f43f5e", 270)]):
+        angle = [phase, phase + 360]
+        disc = group("disc", ellipse((92, 92)), fill(rgb(color)))
+        layers.append(layer(index + 1, f"blend {mode}", [disc], op,
+                            ks=layer_ks(p=(100, 100), a=(-34, 0), r=keys((0, angle[0]), (op, angle[1]), ease=LINEAR)),
+                            bm=mode))
+    # Overlapping squares faded as one picture: the overlap is no darker than the rest.
+    pair = [group("left", rect((56, 56), p=(-16, 0), r=8), fill(rgb("#fde047"))),
+            group("right", rect((56, 56), p=(16, 0), r=8), fill(rgb("#fde047")))]
+    layers.append(layer(5, "faded pair", pair, op, ks=layer_ks(p=(100, 100), o=keys((0, 30), (90, 80), (op, 30)))))
+    # A glow added (Add) over everything.
+    glow = group("glow", ellipse((60, 60)), gradient("gf", [(0, "#ffffff"), (1, "#000000")], (0, 0), (30, 0), t=2))
+    layers.insert(0, layer(6, "add glow", [glow], op, ks=layer_ks(p=keys((0, [40, 40, 0]), (90, [160, 160, 0]), (op, [40, 40, 0]))), bm=16))
+    layers.append(layer(7, "backdrop", [backdrop], op, ks=layer_ks(p=(100, 100))))
+    return composition("blend", 200, 200, op, layers)
+
+
+def feather():
+    op = 150
+    card = group("card", rect((180, 180), r=22),
+                 gradient("gf", [(0, "#fb7185"), (0.5, "#f59e0b"), (1, "#22d3ee")], (-90, -90), (90, 90)))
+    stripes = group("lines", rect((180, 6)), fill(rgb("#ffffff"), o=35))
+    repeater = {"ty": "rp", "c": value(12), "o": value(-6), "m": 1,
+                "tr": {"ty": "tr", "a": value([0, 0]), "p": value([0, 16]), "s": value([100, 100]),
+                       "r": value(0), "so": value(100), "eo": value(100)}}
+    lines = group("stripes", stripes, repeater, r=-30)
+    # A spot light: a circular mask whose feather softens as it sweeps across the card.
+    spot = mask(keys((0, [oval(-50, -30, 46, 46)]), (75, [oval(50, 20, 46, 46)]),
+                     (op, [oval(-50, -30, 46, 46)])),
+                feather=keys((0, [4, 4]), (75, [36, 36]), (op, [4, 4])))
+    content = layer(2, "revealed", [lines, card], op, ks=layer_ks(p=(100, 100)),
+                    masksProperties=[spot])
+    # A vignette: an inverted, feathered ellipse darkens the edges of the whole picture.
+    vignette = solid_layer(1, "vignette", "#020617", 200, 200, op,
+                           masksProperties=[mask(oval(100, 100, 84, 84), inverted=True, feather=30, opacity=85)])
+    dim = layer(3, "dim card", [group("card", rect((180, 180), r=22), fill(rgb("#334155")))], op,
+                ks=layer_ks(p=(100, 100)))
+    return composition("feather", 200, 200, op, [vignette, content, dim])
+
+
+def matte():
+    op = 150
+    # A luma matte: white fading to black over its right quarter slides across, so the stripes
+    # fade in along its soft edge and out again.
+    wipe = group("wipe", rect((800, 200)),
+                 gradient("gf", [(0, "#ffffff"), (0.75, "#ffffff"), (1, "#000000")], (-400, 0), (400, 0)))
+    wipe_layer = layer(1, "wipe matte", [wipe], op,
+                       ks=layer_ks(p=keys((0, [-300, 100, 0]), (75, [80, 100, 0]), (op, [-300, 100, 0]))), td=1)
+    bar = group("bar", rect((14, 260)), fill(rgb("#38bdf8")))
+    repeater = {"ty": "rp", "c": value(12), "o": value(-6), "m": 1,
+                "tr": {"ty": "tr", "a": value([0, 0]), "p": value([24, 0]), "s": value([100, 100]),
+                       "r": value(0), "so": value(100), "eo": value(60)}}
+    stripes = layer(2, "stripes", [group("stripes", bar, repeater)], op, ks=layer_ks(p=(100, 100), r=20), tt=3)
+    # An alpha matte whose alpha is a radial gradient: a soft-edged window onto a card.
+    window = group("window", ellipse((150, 150)),
+                   gradient("gf", [(0, "#ffffff"), (1, "#ffffff")], (0, 0), (75, 0), t=2,
+                            opacity_stops=[(0, 1), (0.6, 1), (1, 0)]))
+    window_layer = layer(3, "window matte", [window], op,
+                         ks=layer_ks(p=(100, 100), s=keys((0, [70, 70, 100]), (75, [120, 120, 100]), (op, [70, 70, 100]))), td=1)
+    card = layer(4, "card", [group("card", rect((200, 200)),
+                                   gradient("gf", [(0, "#c084fc"), (1, "#f472b6")], (-100, -100), (100, 100)))],
+                 op, ks=layer_ks(p=(100, 100)), tt=1)
+    return composition("matte", 200, 200, op, [wipe_layer, stripes, window_layer, card])
+
+
+FONTS = {"list": [{"fName": "SegoeUI-Bold", "fFamily": "Segoe UI", "fStyle": "Bold", "ascent": 74},
+                  {"fName": "SegoeUI", "fFamily": "Segoe UI", "fStyle": "Regular", "ascent": 74}]}
+
+
+def text_layer(index, name, document, op, ks, animators=(), **extra):
+    base = {"ddd": 0, "ind": index, "ty": 5, "nm": name, "sr": 1, "ks": ks, "ao": 0, "ip": 0,
+            "op": op, "st": 0, "bm": 0,
+            "t": {"d": {"k": document}, "p": {}, "m": {"g": 1, "a": value([0, 0])},
+                  "a": list(animators)}}
+    base.update(extra)
+    return base
+
+
+def document(text, size, font="SegoeUI-Bold", color=(1, 1, 1), justify=2, tracking=0, stroke=None):
+    doc = {"s": size, "f": font, "t": text, "j": justify, "tr": tracking, "lh": size * 1.2,
+           "ls": 0, "fc": list(color)}
+    if stroke:
+        doc.update({"sc": list(stroke[0]), "sw": stroke[1], "of": True})
+    return doc
+
+
+def selector(start=0, end=100, offset=0, shape=1, based_on=1, units=1, amount=100):
+    def prop(x):
+        return x if isinstance(x, dict) else value(x)
+    return {"t": 0, "xe": value(0), "ne": value(0), "a": prop(amount), "b": based_on, "rn": 0,
+            "sh": shape, "s": prop(start), "e": prop(end), "o": prop(offset), "r": units,
+            "sm": value(100)}
+
+
+def type_():
+    op = 180
+    wave = {"nm": "wave", "s": selector(start=0, end=34, offset=keys((0, -40), (op, 100), ease=LINEAR), shape=5),
+            "a": {"p": value([0, -16]), "s": value([125, 125]), "fc": value([0.99, 0.8, 0.2, 1])}}
+    title = text_layer(1, "title", [{"s": document("STRATA", 40, tracking=60,
+                                                    stroke=((0.05, 0.1, 0.2), 2)), "t": 0}], op,
+                       layer_ks(p=(100, 86)), [wave])
+    typing = {"nm": "typewriter", "s": selector(start=keys((0, 0), (120, 100), ease=LINEAR), end=100),
+              "a": {"o": value(0)}}
+    caption = text_layer(2, "caption", [{"s": document("plays text layers", 18, font="SegoeUI",
+                                                       color=(0.75, 0.85, 1.0)), "t": 0},
+                                        {"s": document("in system fonts", 18, font="SegoeUI",
+                                                       color=(0.6, 1.0, 0.8)), "t": 120}], op,
+                         layer_ks(p=(100, 140)), [typing])
+    backdrop = layer(3, "backdrop", [group("bg", rect((200, 200), r=24),
+                                           gradient("gf", [(0, "#1e1b4b"), (1, "#0f766e")], (0, -100), (0, 100)))],
+                     op, ks=layer_ks(p=(100, 100)))
+    result = composition("type", 200, 200, op, [title, caption, backdrop])
+    result["fonts"] = FONTS
+    return result
+
+
+def photo():
+    op = 150
+    data = "data:image/png;base64," + base64.b64encode(sunset_png()).decode("ascii")
+    assets = [{"id": "embedded", "w": 96, "h": 96, "e": 1, "u": "", "p": data},
+              {"id": "file", "w": 96, "h": 96, "e": 0, "u": "images/", "p": "sunset.png"}]
+    shadow = effect(25, value([0, 0, 0, 1]), 170, 135, 8, 14)
+    rounded = mask(path([(14, 0), (82, 0), (96, 14), (96, 82), (82, 96), (14, 96), (0, 82), (0, 14)]))
+    embedded = {"ddd": 0, "ind": 1, "ty": 2, "nm": "embedded", "refId": "embedded", "sr": 1,
+                "ks": layer_ks(p=keys((0, [62, 70, 0]), (75, [62, 58, 0]), (op, [62, 70, 0])), a=(48, 48),
+                               r=keys((0, -8), (75, -2), (op, -8))),
+                "ao": 0, "ip": 0, "op": op, "st": 0, "bm": 0, "masksProperties": [rounded],
+                "ef": [shadow]}
+    referenced = {"ddd": 0, "ind": 2, "ty": 2, "nm": "file", "refId": "file", "sr": 1,
+                  "ks": layer_ks(p=(138, 132), a=(48, 48), r=6, s=(90, 90)),
+                  "ao": 0, "ip": 0, "op": op, "st": 0, "bm": 0, "masksProperties": [rounded],
+                  "ef": [shadow]}
+    return composition("photo", 200, 200, op, [embedded, referenced], assets=assets)
+
+
+def effects():
+    op = 160
+    # A drop shadow under a moving card.
+    card = layer(1, "card", [group("card", rect((70, 50), r=10), fill(rgb("#f8fafc")))], op,
+                 ks=layer_ks(p=keys((0, [56, 44, 0]), (80, [60, 36, 0]), (op, [56, 44, 0]))),
+                 ef=[effect(25, value([0.02, 0.05, 0.15, 1]), 200, 150, keys((0, 3), (80, 12), (op, 3)), 16)])
+    # A blur breathing in and out.
+    blurred = layer(2, "blurred", [group("dots", ellipse((40, 40)), fill(rgb("#38bdf8")),
+                                         p=(0, 0)), group("dot", ellipse((24, 24), p=(24, 10)),
+                                                          fill(rgb("#f472b6")))], op,
+                    ks=layer_ks(p=(146, 44)), ef=[effect(29, keys((0, 0), (80, 14), (op, 0)), 1, 0)])
+    rainbow = group("rainbow", rect((70, 60), r=8),
+                    gradient("gf", [(0, "#ef4444"), (0.33, "#eab308"), (0.66, "#22c55e"), (1, "#3b82f6")],
+                             (-35, 0), (35, 0)))
+    # Tint (black to navy, white to gold), tritone and levels on the same rainbow.
+    tint = layer(3, "tint", [rainbow], op, ks=layer_ks(p=(56, 116)),
+                 ef=[effect(20, value([0.05, 0.08, 0.3, 1]), value([1, 0.85, 0.4, 1]), keys((0, 0), (80, 100), (op, 0)))])
+    tritone = layer(4, "tritone", [rainbow], op, ks=layer_ks(p=(146, 116)),
+                    ef=[effect(23, value([1, 0.95, 0.85, 1]), value([0.85, 0.3, 0.5, 1]), value([0.1, 0.05, 0.25, 1]), 0)])
+    composite = [0.15, 0.85, keys((0, 0.6), (80, 1.8), (op, 0.6)), 0, 1]
+    channel = [0, 1, 1, 0, 1]
+    controls = [0, 0, 0] + composite + [0, 0] + channel + [0, 0] + channel + [0, 0] + channel + [0, 0] + channel
+    leveled = layer(5, "levels", [rainbow], op, ks=layer_ks(p=(56, 172), s=(100, 60)), ef=[effect(24, *controls)])
+    filled = layer(6, "fill", [group("star", {"ty": "sr", "sy": 1, "d": 1, "p": value([0, 0]), "pt": value(5),
+                                              "r": keys((0, 0), (op, 72), ease=LINEAR), "or": value(26), "ir": value(12),
+                                              "os": value(0), "is": value(0)},
+                                     gradient("gf", [(0, "#ffffff"), (1, "#64748b")], (0, -26), (0, 26)))],
+                   op, ks=layer_ks(p=(146, 172)), ef=[effect(21, 0, 0, value([0.2, 0.9, 0.6, 1]), 0, 0, 0, 1)])
+    return composition("effects", 200, 200, op, [card, blurred, tint, tritone, leveled, filled])
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "images").mkdir(parents=True, exist_ok=True)
+    (OUT / "images" / "sunset.png").write_bytes(sunset_png())
     for name, build in [("spinner", spinner), ("success", success), ("like", like),
-                        ("toggle", toggle), ("reveal", reveal), ("badge", badge)]:
+                        ("toggle", toggle), ("reveal", reveal), ("badge", badge),
+                        ("blend", blend), ("feather", feather), ("matte", matte),
+                        ("type", type_), ("photo", photo), ("effects", effects)]:
         document = build()
         text = json.dumps(document, separators=(",", ":"))
         (OUT / f"{name}.json").write_text(text + "\n", encoding="utf-8", newline="\n")

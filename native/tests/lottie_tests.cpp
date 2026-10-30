@@ -8,7 +8,9 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <numbers>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -385,23 +387,127 @@ void test_frames(const std::filesystem::path& resources) {
               near(ui::lottie_frame(ui::LottieSegment{30.0, 0.0}, 0.25), 22.5, 1.0e-12),
           "segments map positions to frames, backwards too");
 
-    // Every sample animation parses and draws its frames.
-    for (const char* const name : {"spinner", "success", "like", "toggle", "reveal", "badge"}) {
-        const std::filesystem::path file =
-            resources / "assets" / "strata" / "lottie" / (std::string(name) + ".json");
-        std::ifstream input(file, std::ios::binary);
-        check(input.good(), "a sample animation is missing: " + file.string());
-        const std::string json{std::istreambuf_iterator<char>(input), {}};
-        const model::Animation sample = model::parse(json);
+    // Every sample animation loads (its images decoded) and draws its frames.
+    const resource::LottieLibrary library([&resources](const std::string_view id) {
+        std::ifstream input(resources / std::filesystem::path(std::string(id)), std::ios::binary);
+        if (!input.good())
+            throw std::invalid_argument("missing resource");
+        return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(input), {});
+    });
+    for (const char* const name : {"spinner", "success", "like", "toggle", "reveal", "badge",
+                                   "blend", "feather", "matte", "type", "photo", "effects"}) {
+        const std::string id = std::string("assets/strata/lottie/") + name + ".json";
+        const std::shared_ptr<const model::Animation> sample = library.find(id);
+        check(sample != nullptr, "a sample animation does not load: " + library.error(id));
         std::size_t drawn = 0U;
-        for (double frame = sample.in_frame; frame < sample.out_frame; frame += 7.0) {
+        for (double frame = sample->in_frame; frame < sample->out_frame; frame += 7.0) {
             commands.clear();
-            geo::append_frame(commands, sample, frame, ui::Rect{0.0, 0.0, 300.0, 300.0},
+            geo::append_frame(commands, *sample, frame, ui::Rect{0.0, 0.0, 300.0, 300.0},
                               ui::Rect{0.0, 0.0, 300.0, 300.0});
-            drawn += count_paths(commands);
+            drawn += count_paths(commands) +
+                     static_cast<std::size_t>(
+                         std::ranges::count_if(commands, [](const ui::RenderCommand& command) {
+                             return std::holds_alternative<ui::ImageRenderCommand>(command);
+                         }));
         }
         check(drawn > 0U, std::string("a sample animation draws: ") + name);
     }
+    check(library.images().size() == 2U && library.image_generation() == 2U,
+          "the photo sample's embedded and file images are decoded once");
+}
+
+/** The content effects (isolated layers) a frame opens, in order. */
+[[nodiscard]] std::vector<ui::EffectState> layers(const std::vector<ui::RenderCommand>& commands) {
+    std::vector<ui::EffectState> result;
+    for (const ui::RenderCommand& command : commands) {
+        if (const auto* push = std::get_if<ui::ContentEffectPushRenderCommand>(&command))
+            result.push_back(push->effect);
+    }
+    return result;
+}
+
+void test_layers() {
+    // Blend modes, feather, effects, images and text parse into the model.
+    const std::string square =
+        R"("shapes":[{"ty":"rc","p":{"a":0,"k":[50,50]},"s":{"a":0,"k":[60,60]},"r":{"a":0,"k":0}},{"ty":"rc","p":{"a":0,"k":[70,50]},"s":{"a":0,"k":[60,60]},"r":{"a":0,"k":0}},{"ty":"fl","c":{"a":0,"k":[1,1,1,1]},"o":{"a":0,"k":100}}])";
+    const model::Animation animation = model::parse(document(
+        R"([{"ty":4,"ind":1,"ip":0,"op":60,"st":0,"bm":1,"ks":{"o":{"a":0,"k":50}},)" + square +
+            R"(,"masksProperties":[{"mode":"a","inv":false,"o":{"a":0,"k":100},"x":{"a":0,"k":0},"f":{"a":0,"k":[6,6]},
+                "pt":{"a":0,"k":{"c":true,"v":[[0,0],[100,0],[100,100],[0,100]],"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]]}}}],
+            "ef":[{"ty":29,"en":1,"ef":[{"ty":0,"v":{"a":0,"k":10}},{"ty":7,"v":{"a":0,"k":2}}]},
+                  {"ty":99,"en":1,"ef":[]},
+                  {"ty":21,"en":0,"ef":[]}]},
+          {"ty":2,"ind":2,"refId":"pixel","ip":0,"op":60,"st":0,"ks":{}},
+          {"ty":5,"ind":3,"ip":0,"op":60,"st":0,"ks":{},"t":{"d":{"k":[{"t":0,"s":{"t":"Hi","f":"ArialMT","s":20,"fc":[1,0,0]}},{"t":30,"s":{"t":"Bye","f":"ArialMT","s":20,"fc":[1,0,0]}}]},
+            "a":[{"s":{"s":{"a":0,"k":0},"e":{"a":0,"k":50},"o":{"a":0,"k":0},"r":1,"b":3,"sh":2},"a":{"o":{"a":0,"k":0}}}]}}])",
+        R"([{"id":"pixel","w":1,"h":1,"e":1,"u":"","p":"data:image/png;base64,iVBORw0KGgo="}])"));
+    const model::Layer& shape = animation.root.layers[0];
+    check(shape.blend_mode == 1 && near(shape.masks[0].feather.point(0.0).x, 6.0, 1.0e-12),
+          "a layer's blend mode and a mask's feather are read");
+    check(shape.effects.size() == 2U && shape.effects[0].type == model::effect_gaussian_blur &&
+              near(shape.effects[0].scalar(0U, 0.0, 0.0), 10.0, 1.0e-12),
+          "enabled effects are kept with their controls, disabled ones dropped");
+    check(animation.layered && animation.filter_reach >= 9.0,
+          "an animation that blends and blurs is drawn apart, reaching as far as its blur");
+    check(animation.images.size() == 1U && animation.images[0].embedded &&
+              animation.root.layers[1].image == std::optional<std::size_t>{0U},
+          "an image layer names its embedded asset");
+    const model::TextData& text = animation.root.layers[2].text;
+    check(text.documents.size() == 2U && text.document(10.0)->text == "Hi" &&
+              text.document(45.0)->text == "Bye" && text.animators.size() == 1U &&
+              text.animators[0].selector.based_on == 3 && text.animators[0].opacity.has_value(),
+          "text documents switch at their times and animators keep their selectors");
+    const std::optional<std::vector<std::uint8_t>> bytes =
+        model::data_uri_bytes("data:image/png;base64,iVBORw0KGgo=");
+    check(bytes.has_value() &&
+              *bytes == std::vector<std::uint8_t>{0x89U, 'P', 'N', 'G', 0x0DU, 0x0AU, 0x1AU, 0x0AU},
+          "a base64 data URI decodes to its bytes");
+
+    // The frame: the whole animation one layer cut to the box, the blended layer a multiply layer
+    // at its opacity carrying its blur (in widget pixels), and its feathered mask a
+    // destination-in layer blurred by its feather.
+    std::vector<ui::RenderCommand> commands;
+    geo::append_frame(commands, animation, 0.0, ui::Rect{0.0, 0.0, 400.0, 200.0},
+                      ui::Rect{0.0, 0.0, 400.0, 200.0});
+    const std::vector<ui::EffectState> opened = layers(commands);
+    check(opened.size() >= 3U && opened[0].composite == ui::LayerComposite::source_over,
+          "a blending animation is drawn apart");
+    const auto multiply = std::ranges::find_if(opened, [](const ui::EffectState& effect) {
+        return effect.composite == ui::LayerComposite::multiply;
+    });
+    check(multiply != opened.end() && near(multiply->opacity, 0.5, 1.0e-12) &&
+              multiply->filters.size() == 1U &&
+              multiply->filters[0].kind == ui::LayerFilterKind::blur &&
+              near(multiply->filters[0].values[0], 18.0, 1.0e-9) &&
+              near(multiply->filters[0].values[1], 0.0, 1.0e-12),
+          "a blended layer composites by its mode at its opacity, with its horizontal blur");
+    const auto feather = std::ranges::find_if(opened, [](const ui::EffectState& effect) {
+        return effect.composite == ui::LayerComposite::destination_in;
+    });
+    check(feather != opened.end() && feather->filters.size() == 1U &&
+              near(feather->filters[0].values[0], 6.0 * 1.14 * 2.0, 1.0e-9),
+          "a feathered mask keeps its layer through a blurred coverage layer");
+
+    // Opacity on one paint needs no layer; on two overlapping paints it does.
+    const auto opacity_layers = [](const std::string& shapes) {
+        const model::Animation faded = model::parse(
+            document(R"([{"ty":4,"ind":1,"ip":0,"op":60,"st":0,"ks":{"o":{"a":0,"k":50}},)" +
+                     shapes + "}]"));
+        std::vector<ui::RenderCommand> output;
+        geo::append_frame(output, faded, 0.0, ui::Rect{0.0, 0.0, 200.0, 100.0},
+                          ui::Rect{0.0, 0.0, 200.0, 100.0});
+        return layers(output).size();
+    };
+    check(
+        opacity_layers(
+            R"("shapes":[{"ty":"rc","p":{"a":0,"k":[50,50]},"s":{"a":0,"k":[60,60]},"r":{"a":0,"k":0}},{"ty":"fl","c":{"a":0,"k":[1,1,1,1]},"o":{"a":0,"k":100}}])") ==
+            0U,
+        "one faded paint draws in place");
+    check(
+        opacity_layers(
+            R"("shapes":[{"ty":"gr","it":[{"ty":"rc","p":{"a":0,"k":[50,50]},"s":{"a":0,"k":[60,60]},"r":{"a":0,"k":0}},{"ty":"fl","c":{"a":0,"k":[1,1,1,1]},"o":{"a":0,"k":100}}]},{"ty":"rc","p":{"a":0,"k":[70,50]},"s":{"a":0,"k":[60,60]},"r":{"a":0,"k":0}},{"ty":"fl","c":{"a":0,"k":[1,0,0,1]},"o":{"a":0,"k":100}}])") ==
+            1U,
+        "overlapping faded paints fade as one layer");
 }
 
 } // namespace
@@ -415,6 +521,7 @@ int strata_test_lottie(const int argument_count, const char* const* const argume
         test_keyframes();
         test_geometry();
         test_frames(arguments[1]);
+        test_layers();
         std::cout << "strata_lottie_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {

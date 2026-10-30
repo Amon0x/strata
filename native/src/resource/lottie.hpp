@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -14,14 +15,16 @@
 #include <variant>
 #include <vector>
 
+#include "resource/runtime_images.hpp"
+
 namespace strata::resource::lottie {
 
 /**
  * A Lottie (Bodymovin) animation, parsed once into typed properties so a frame is evaluated by
  * arithmetic alone: no JSON is read after parsing. Coordinates are the composition's own units
  * (y down), times are frames, colours are 0-1 channels and percentages stay percentages, exactly
- * as After Effects exports them. Expressions, text, 3D, effects, blend modes and image layers are
- * not part of the model: their layers are skipped.
+ * as After Effects exports them. Expressions (which need a JavaScript engine) and 3D layers and
+ * cameras are not part of the model, as in other native players: 3D layers draw flat.
  */
 struct Vec2 final {
     double x = 0.0;
@@ -257,13 +260,141 @@ struct ShapeItem final {
     ShapeContent content;
 };
 
-/** A mask: `mode` is Lottie's letter (a add, s subtract, i intersect, l, d, f, n none). */
+/**
+ * A mask: `mode` is Lottie's letter (a add, s subtract, i intersect, l, d, f, n none). Feather
+ * blurs its edge by that many layer pixels each way (x, y).
+ */
 struct Mask final {
     char mode = 'a';
     bool inverted = false;
     ShapeProperty path;
     Property opacity{{100.0}};
     Property expansion{{0.0}};
+    Property feather{{0.0, 0.0}};
+};
+
+/** Lottie's effect types (`ty`) a player draws; the rest are skipped. */
+inline constexpr int effect_tint = 20;
+inline constexpr int effect_fill = 21;
+inline constexpr int effect_tritone = 23;
+inline constexpr int effect_levels = 24;
+inline constexpr int effect_drop_shadow = 25;
+inline constexpr int effect_gaussian_blur = 29;
+
+/**
+ * A layer effect (`ef`): its type and its controls' values (`ef[].v`) in order, a colour as four
+ * channels and a checkbox or menu as a number. Disabled effects are not kept.
+ */
+struct Effect final {
+    int type = 0;
+    std::vector<Property> values;
+    [[nodiscard]] double scalar(std::size_t index, double frame, double fallback) const noexcept;
+    [[nodiscard]] std::array<double, 4> color(std::size_t index, double frame) const noexcept;
+};
+
+/** One text document a text layer shows from its time on (`t.d.k[].s`). */
+struct TextDocument final {
+    std::string text;
+    /** The font's name (`f`), looked up in Animation::fonts. */
+    std::string font;
+    double size = 10.0;
+    std::optional<std::array<double, 3>> fill;
+    std::optional<std::array<double, 3>> stroke;
+    double stroke_width = 0.0;
+    bool stroke_over_fill = false;
+    /** Thousandths of an em between letters. */
+    double tracking = 0.0;
+    double line_height = 0.0;
+    /** 0 left, 1 right, 2 centre, 3-6 justified (the last line left, right, centred, full). */
+    int justify = 0;
+    double baseline_shift = 0.0;
+    /** 0 as typed, 1 all caps, 2 small caps. */
+    int caps = 0;
+    /** Paragraph text: its box's size and top-left (`sz`, `ps`); point text has none. */
+    std::optional<Vec2> box_size;
+    Vec2 box_position;
+};
+
+struct TextDocumentKeyframe final {
+    double time = 0.0;
+    TextDocument document;
+};
+
+/**
+ * A text animator's range selector: which letters it acts on and how much. Start, end and offset
+ * are percentages (units 1) or indices (units 2) of the units it counts (based on 1 letters, 2
+ * letters but spaces, 3 words, 4 lines); `shape` 1 square, 2 ramp up, 3 ramp down, 4 triangle,
+ * 5 round, 6 smooth; ease high and low shape its ramps.
+ */
+struct TextSelector final {
+    Property start{{0.0}};
+    Property end{{100.0}};
+    Property offset{{0.0}};
+    Property amount{{100.0}};
+    Property ease_high{{0.0}};
+    Property ease_low{{0.0}};
+    int units = 1;
+    int based_on = 1;
+    int shape = 1;
+};
+
+/** A text animator: the letter properties it changes, by as much as its selector picks. */
+struct TextAnimator final {
+    TextSelector selector;
+    std::optional<Property> anchor;
+    std::optional<Property> position;
+    std::optional<Property> scale;
+    std::optional<Property> rotation;
+    std::optional<Property> opacity;
+    std::optional<Property> fill_color;
+    std::optional<Property> stroke_color;
+    std::optional<Property> stroke_width;
+    std::optional<Property> tracking;
+};
+
+/** A text layer's text: its documents over time, its animators and their grouping alignment. */
+struct TextData final {
+    std::vector<TextDocumentKeyframe> documents;
+    std::vector<TextAnimator> animators;
+    /** Anchor point grouping alignment (`m.a`), percent of a letter's size. */
+    Property alignment{{0.0, 0.0}};
+    [[nodiscard]] const TextDocument* document(double frame) const noexcept;
+};
+
+/** A font the composition names (`fonts.list`): its name, family, style and ascent. */
+struct Font final {
+    std::string name;
+    std::string family;
+    std::string style;
+    /** Percent of the font size above the baseline; zero when not exported. */
+    double ascent = 0.0;
+};
+
+/**
+ * A letter's outline exported with the composition (`chars`): drawn at `size` 100, advancing by
+ * `width` at that size. A player uses it in place of the font's own glyph.
+ */
+struct GlyphShape final {
+    std::string character;
+    std::string family;
+    std::string style;
+    double width = 0.0;
+    std::vector<ShapeItem> shapes;
+};
+
+/**
+ * An image asset: its size and where its pixels come from, a data URI (`embedded`) or a file next
+ * to the animation (`directory` + `file`). The library fills `texture`, the id the image is drawn
+ * by, once it has decoded it.
+ */
+struct ImageAsset final {
+    std::string id;
+    double width = 0.0;
+    double height = 0.0;
+    std::string directory;
+    std::string file;
+    bool embedded = false;
+    std::string texture;
 };
 
 enum class LayerType { precomp, solid, image, null, shape, text, other };
@@ -290,6 +421,16 @@ struct Layer final {
     std::vector<Mask> masks;
     /** Shape layers. */
     std::vector<ShapeItem> shapes;
+    /**
+     * How the layer composites onto the layers under it (`bm`): 0 normal, 1-15 the blend modes
+     * from multiply to luminosity in After Effects' order, 16 add.
+     */
+    int blend_mode = 0;
+    std::vector<Effect> effects;
+    /** Image layers: the asset (an index into Animation::images). */
+    std::optional<std::size_t> image;
+    /** Text layers. */
+    TextData text;
     /** Precomposition layers: the asset (an index into Animation::precomps), size and remap. */
     std::optional<std::size_t> precomp;
     double width = 0.0;
@@ -301,6 +442,9 @@ struct Layer final {
 
 struct Composition final {
     std::vector<Layer> layers;
+    /** Whether any of its layers blends (`bm`), so it must be drawn apart to blend within itself.
+     */
+    bool blends = false;
 };
 
 /** A parsed animation: its composition, its frame range and rate, and its precompositions. */
@@ -313,10 +457,23 @@ struct Animation final {
     std::string name;
     Composition root;
     std::vector<Composition> precomps;
+    std::vector<ImageAsset> images;
+    std::vector<Font> fonts;
+    std::vector<GlyphShape> glyphs;
+    /**
+     * The furthest any effect or feathered mask reaches beyond what it draws, in composition
+     * units, at the most any keyframe asks: how far its layers' pixels must extend past the box.
+     */
+    double filter_reach = 0.0;
+    /** Whether any layer blends, has effects or a feathered mask: its frames draw apart. */
+    bool layered = false;
 };
 
 /** Parses a Lottie JSON document; throws std::invalid_argument describing what is wrong. */
 [[nodiscard]] Animation parse(std::string_view json);
+
+/** The bytes of a `data:` URI's payload (base64 or not); nothing when it is not one. */
+[[nodiscard]] std::optional<std::vector<std::uint8_t>> data_uri_bytes(std::string_view uri);
 
 } // namespace strata::resource::lottie
 
@@ -325,7 +482,9 @@ namespace strata::resource {
 /**
  * The surface's Lottie animations by resource id, each loaded through the host's resource loader
  * and parsed once, the first time anything asks for it. A failure is remembered too, so a missing
- * or malformed file is read only once. Safe to call from any thread.
+ * or malformed file is read only once. An animation's images, embedded or in files beside it, are
+ * decoded as it loads and kept as runtime images (`lottie:<id>#<asset>`), which Surfaces upload as
+ * they do the host's. Safe to call from any thread.
  */
 class LottieLibrary final {
   public:
@@ -337,15 +496,22 @@ class LottieLibrary final {
     [[nodiscard]] std::shared_ptr<const lottie::Animation> find(std::string_view id) const;
     /** Why `find` gave null for `id`, or empty when it did not (or was not asked). */
     [[nodiscard]] std::string error(std::string_view id) const;
+    /** The images decoded so far, and a generation that advances whenever one is added. */
+    [[nodiscard]] std::vector<std::shared_ptr<const RuntimeImage>> images() const;
+    [[nodiscard]] std::uint64_t image_generation() const noexcept;
 
   private:
     struct Entry final {
         std::shared_ptr<const lottie::Animation> animation;
         std::string error;
     };
+    /** Decodes the animation's images and names each by its texture id (under the lock). */
+    void load_images(std::string_view id, lottie::Animation& animation) const;
     Loader loader_;
     mutable std::mutex mutex_;
     mutable std::map<std::string, Entry, std::less<>> entries_;
+    mutable std::vector<std::shared_ptr<const RuntimeImage>> images_;
+    mutable std::atomic<std::uint64_t> image_generation_{0U};
 };
 
 } // namespace strata::resource

@@ -1742,6 +1742,16 @@ component LottiePage() {
         LottieSample(source: "assets/strata/lottie/reveal.json", note: "Masks and track mattes", sampleKey: "lottie.reveal")
       }
     }
+    Card(title: "LAYERS: BLEND MODES, FEATHER, MATTES, TEXT, IMAGES, EFFECTS") {
+      Panel(style: style(ActionRow, gap: 14)) {
+        LottieSample(source: "assets/strata/lottie/blend.json", note: "Blend modes, group opacity", sampleKey: "lottie.blend")
+        LottieSample(source: "assets/strata/lottie/feather.json", note: "Feathered masks", sampleKey: "lottie.feather")
+        LottieSample(source: "assets/strata/lottie/matte.json", note: "Gradient mattes", sampleKey: "lottie.matte")
+        LottieSample(source: "assets/strata/lottie/type.json", note: "Text and animators", sampleKey: "lottie.type")
+        LottieSample(source: "assets/strata/lottie/photo.json", note: "Image layers", sampleKey: "lottie.photo")
+        LottieSample(source: "assets/strata/lottie/effects.json", note: "Shadow, blur, tint, levels", sampleKey: "lottie.effects")
+      }
+    }
     Card(title: "PLAYBACK: PAUSE, SCRUB, SPEED") {
       Panel(style: style(ActionRow, gap: 18, alignItems: "CENTER")) {
         Panel(style: LottieTile) {
@@ -3623,7 +3633,7 @@ component ExpectedText(selectedPage: string) {
   } else if selectedPage == "NET" {
     Text(text: "Run python tools/net/demo_server.py first. Fetch GETs a JSON list over HTTP (WinHTTP, on a worker: the frame never waits) and shows it; POST echo sends JSON and shows what came back. Connect opens a WebSocket: Send and Send JSON reach the server, which echoes to everyone connected and says the time every ten seconds; /bye makes it close. Write, Append, Read and List work in a temp folder; Watch reports every change there as it happens, and Trash note moves the note to the recycle bin. Click plays a short sound each press, overlapping when fast; Chime, and a music loop you can pause, speed up and mute.", wrapMode: "WORD")
   } else if selectedPage == "LOTTIE" {
-    Text(text: "Six After Effects animations, written as Lottie JSON, play on their own: trim paths on a gradient stroke, a bouncy overshoot, a repeater burst, a morphing path, masks (add, subtract, expansion), alpha and luma track mattes inside a time-remapped precomposition, round corners, dashes and merged paths. Each frame is drawn as vector paths, crisp at any size. Pause stops where it is and the slider follows; drag the slider to scrub, playing or paused, and Play carries on from there. Speed plays it slower, faster or backwards. Switch plays the toggle's on or off segment once and counts each completion.", wrapMode: "WORD")
+    Text(text: "Twelve After Effects animations, written as Lottie JSON, play on their own: trim paths on a gradient stroke, a bouncy overshoot, a repeater burst, a morphing path, masks (add, subtract, expansion), alpha and luma track mattes inside a time-remapped precomposition, round corners, dashes and merged paths. The layers row blends discs by multiply, screen, overlay, difference and add, fades two overlapping squares as one (their overlap no darker), sweeps a feathered spot over a card under a soft vignette, wipes stripes in through a gradient luma matte, waves and types text in Segoe UI, shows an embedded and a file image under rounded masks with drop shadows, and runs blur, tint, tritone, levels and fill effects. Each frame is drawn as vector paths, crisp at any size. Pause stops where it is and the slider follows; drag the slider to scrub, playing or paused, and Play carries on from there. Speed plays it slower, faster or backwards. Switch plays the toggle's on or off segment once and counts each completion.", wrapMode: "WORD")
   } else if selectedPage == "CONTENT" {
     Text(text: "The wheel, pie and checker are conic gradients; the radar and both cards below spin theirs with paintRotate on an endless linear animation, while the GPU draws the same sweep the reference renderer does. Borders take any paint and keep every corner's rounding. Pick a language: the code is tokenized once and stays selectable; the 4,000-line file scrolls without stalling, select-all copies all of it, and the line numbers stay pinned as it scrolls sideways; fitted to its content it is as tall as its lines and the page realizes only the rows it shows. The Markdown's fenced blocks use the same highlighter. The formats table ticks with the wall clock every second.", wrapMode: "WORD")
   } else if selectedPage == "SYSTEM" {

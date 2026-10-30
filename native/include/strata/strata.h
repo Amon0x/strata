@@ -1878,9 +1878,15 @@ typedef struct strata_surface_frame_info {
  * Surface); a u64 backdrop probe token (zero = none; a host that can measure reports the captured
  * backdrop's mean luma back through strata_surface_report_backdrop); f64 read reach (how far
  * outside its bounds, in logical pixels, the effect's output depends on what was drawn before it);
- * a u32 packed-parameter count; and up to sixteen f64 values. Content effects require backdrop
- * source 0 and probe 0. Content-end carries only the common prefix. Rounded clip stacks are
- * limited to sixteen entries; authored CONTENT effect isolation is limited to four layers.
+ * a u32 packed-parameter count; and up to sixteen f64 values; then a u32 layer composite
+ * (STRATA_LAYER_COMPOSITE_*) and a u32 filter count (at most eight), each filter a u32
+ * STRATA_LAYER_FILTER_*, a u32 value count (at most 24) and that many f64 values. A content effect
+ * is an isolated layer: its content is drawn alone, filtered by its declared passes and then by
+ * its built-in filters in order, and composited onto what is under it by its composite operator,
+ * scaled by its opacity and masked to its bounds. Backdrop effects carry composite 0 and no
+ * filters. Content effects require backdrop source 0 and probe 0. Content-end carries only the
+ * common prefix. Rounded clip stacks are limited to sixteen entries; CONTENT effect isolation is
+ * limited to eight layers.
  *
  * Resource payloads begin with a texture-id string. Atlas create/upload/raster then carry u32
  * format (0 = R8, 1 = RGBA8, 2 = R8 sampled bilinearly) and u32 x/y/width/height; upload adds u32
@@ -1941,7 +1947,13 @@ typedef struct strata_surface_frame_info {
  * and a banded gradient draw encodes its paint as 1 + kind + 3 * extend, kind 2 being conic.
  */
 #define STRATA_RENDER_PACKET_VERSION_20 UINT32_C(20)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_20
+/*
+ * Version 21 composites content effects as layers: each backdrop/content-begin effect payload ends
+ * with a u32 STRATA_LAYER_COMPOSITE_* and its built-in filters, and content effects nest eight
+ * deep.
+ */
+#define STRATA_RENDER_PACKET_VERSION_21 UINT32_C(21)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_21
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES UINT32_C(2)
@@ -1953,6 +1965,57 @@ typedef struct strata_surface_frame_info {
  * authored effect passes clamp their samples to it (the HLSL prelude's effectSampleReach).
  */
 #define STRATA_EFFECT_SAMPLE_REACH 64.0
+
+/*
+ * How a content effect's layer combines with what is under it. SOURCE_OVER is ordinary
+ * compositing; MULTIPLY to LUMINOSITY are the W3C compositing blend modes, composited source-over
+ * (Cs and Cb straight, co = cs (1 - ab) + cb (1 - as) + as ab B(Cb, Cs)). The destination operators
+ * keep what is under the layer scaled by the layer's alpha, or by the Rec. 709 luminance of its
+ * premultiplied colour, inverted for OUT, and draw nothing of the layer itself. The channel
+ * operators combine premultiplied channels, alpha included, by maximum, minimum or absolute
+ * difference. PLUS adds premultiplied channels, clamped. Each result is mixed with what was
+ * under it by the bounds mask and rounded clips.
+ */
+#define STRATA_LAYER_COMPOSITE_SOURCE_OVER UINT32_C(0)
+#define STRATA_LAYER_COMPOSITE_MULTIPLY UINT32_C(1)
+#define STRATA_LAYER_COMPOSITE_SCREEN UINT32_C(2)
+#define STRATA_LAYER_COMPOSITE_OVERLAY UINT32_C(3)
+#define STRATA_LAYER_COMPOSITE_DARKEN UINT32_C(4)
+#define STRATA_LAYER_COMPOSITE_LIGHTEN UINT32_C(5)
+#define STRATA_LAYER_COMPOSITE_COLOR_DODGE UINT32_C(6)
+#define STRATA_LAYER_COMPOSITE_COLOR_BURN UINT32_C(7)
+#define STRATA_LAYER_COMPOSITE_HARD_LIGHT UINT32_C(8)
+#define STRATA_LAYER_COMPOSITE_SOFT_LIGHT UINT32_C(9)
+#define STRATA_LAYER_COMPOSITE_DIFFERENCE UINT32_C(10)
+#define STRATA_LAYER_COMPOSITE_EXCLUSION UINT32_C(11)
+#define STRATA_LAYER_COMPOSITE_HUE UINT32_C(12)
+#define STRATA_LAYER_COMPOSITE_SATURATION UINT32_C(13)
+#define STRATA_LAYER_COMPOSITE_COLOR UINT32_C(14)
+#define STRATA_LAYER_COMPOSITE_LUMINOSITY UINT32_C(15)
+#define STRATA_LAYER_COMPOSITE_DESTINATION_IN UINT32_C(16)
+#define STRATA_LAYER_COMPOSITE_DESTINATION_OUT UINT32_C(17)
+#define STRATA_LAYER_COMPOSITE_DESTINATION_IN_LUMINANCE UINT32_C(18)
+#define STRATA_LAYER_COMPOSITE_DESTINATION_OUT_LUMINANCE UINT32_C(19)
+#define STRATA_LAYER_COMPOSITE_CHANNEL_MAXIMUM UINT32_C(20)
+#define STRATA_LAYER_COMPOSITE_CHANNEL_MINIMUM UINT32_C(21)
+#define STRATA_LAYER_COMPOSITE_CHANNEL_DIFFERENCE UINT32_C(22)
+#define STRATA_LAYER_COMPOSITE_PLUS UINT32_C(23)
+
+/*
+ * A content effect layer's built-in filters, run in order over its straight-alpha colour. Lengths
+ * are presented logical pixels. BLUR {radius x, radius y} blurs as a blur batch of that radius
+ * does, each way. COLOR_MATRIX {20}: red, green, blue and alpha each become a row of five weights
+ * over (r, g, b, a, 1). GRADIENT_MAP {mix, count, count x (offset, r, g, b)} maps Rec. 709
+ * luminance through up to five stops, mixed in by `mix`. LEVELS {20}: per channel input black,
+ * input white, gamma, output black, output white. DROP_SHADOW {r, g, b, opacity, offset x,
+ * offset y, radius, shadow only} draws the layer's alpha in that colour, blurred and moved, under
+ * the layer (or alone).
+ */
+#define STRATA_LAYER_FILTER_BLUR UINT32_C(1)
+#define STRATA_LAYER_FILTER_COLOR_MATRIX UINT32_C(2)
+#define STRATA_LAYER_FILTER_GRADIENT_MAP UINT32_C(3)
+#define STRATA_LAYER_FILTER_LEVELS UINT32_C(4)
+#define STRATA_LAYER_FILTER_DROP_SHADOW UINT32_C(5)
 
 /*
  * A draw batch's blend, already adapted to its rounded clips: an opaque draw under a rounded clip

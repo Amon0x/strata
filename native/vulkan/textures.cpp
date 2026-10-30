@@ -20,6 +20,13 @@ Image& Renderer::Impl::temporary(std::uint32_t width, std::uint32_t height, VkFo
     return *scratch.back().image;
 }
 
+void Renderer::Impl::recycle(Image& image) {
+    for (auto& entry : scratch) {
+        if (entry.image.get() == &image && entry.used == scratch_frame)
+            entry.used = scratch_frame - 1U;
+    }
+}
+
 void Renderer::Impl::barrier(Target& target, VkImageLayout next) {
     end_pass();
     transition(command, target.image, target.layout, next);

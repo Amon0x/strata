@@ -111,6 +111,7 @@ struct BlurPlan final {
     PixelRect scaled_effect;
     TargetKey targets;
     float radius = 0.5F;
+    float radius_y = 0.5F;
 };
 
 [[nodiscard]] std::uint32_t clipped_edge(const long double value, const std::uint32_t maximum,
@@ -128,8 +129,8 @@ struct BlurPlan final {
 [[nodiscard]] std::optional<BlurPlan> plan(const BlurBatch& batch,
                                            const std::uint32_t framebuffer_width,
                                            const std::uint32_t framebuffer_height,
-                                           const double logical_width,
-                                           const double logical_height) {
+                                           const double logical_width, const double logical_height,
+                                           const double radius_x, const double radius_y) {
     if (batch.radius <= 0.0 || batch.width <= 0.0 || batch.height <= 0.0 ||
         framebuffer_width == 0U || framebuffer_height == 0U || !std::isfinite(logical_width) ||
         !std::isfinite(logical_height) || logical_width <= 0.0 || logical_height <= 0.0) {
@@ -185,12 +186,22 @@ struct BlurPlan final {
         std::max(1U, downsampled(effect.width)),
         std::max(1U, downsampled(effect.height)),
     };
+    // A pass of radius under one half samples only its centre: no blur that way.
+    const auto reduced_radius = [&](const double radius) {
+        if (radius < 0.0)
+            return static_cast<float>(std::clamp(physical_radius / downsample, 0.5L, 32.0L));
+        const long double physical = static_cast<long double>(radius) * std::max(scale_x, scale_y);
+        return physical <= 0.0L
+                   ? 0.0F
+                   : static_cast<float>(std::clamp(physical / downsample, 0.5L, 32.0L));
+    };
     return BlurPlan{
         effect,
         source,
         scaled_effect,
         TargetKey{source.width, source.height, target_width, target_height, downsample},
-        static_cast<float>(std::clamp(physical_radius / downsample, 0.5L, 32.0L)),
+        reduced_radius(radius_x),
+        reduced_radius(radius_y),
     };
 }
 
@@ -393,9 +404,10 @@ struct BlurPass::Impl final {
     execute(const BlurBatch& batch, ID3D11Texture2D* const back_buffer,
             ID3D11RenderTargetView* const output, const std::uint32_t framebuffer_width,
             const std::uint32_t framebuffer_height, const double logical_width,
-            const double logical_height) {
+            const double logical_height, const double radius_x, const double radius_y) {
         const std::optional<BlurPlan> blur =
-            plan(batch, framebuffer_width, framebuffer_height, logical_width, logical_height);
+            plan(batch, framebuffer_width, framebuffer_height, logical_width, logical_height,
+                 radius_x, radius_y);
         if (!blur.has_value())
             return {};
         if (back_buffer == nullptr || output == nullptr) {
@@ -432,7 +444,7 @@ struct BlurPass::Impl final {
         pass(target.write.target.Get(), target.read.view.Get(), nullptr, whole_target, whole_target,
              blur->targets.target_width, blur->targets.target_height, 1.0F, 0.0F, blur->radius);
         pass(target.read.target.Get(), target.write.view.Get(), nullptr, whole_target, whole_target,
-             blur->targets.target_width, blur->targets.target_height, 0.0F, 1.0F, blur->radius);
+             blur->targets.target_width, blur->targets.target_height, 0.0F, 1.0F, blur->radius_y);
         const UvRect effect_uv{
             static_cast<float>(blur->scaled_effect.x) / blur->targets.target_width,
             static_cast<float>(blur->scaled_effect.y) / blur->targets.target_height,
@@ -500,10 +512,12 @@ BlurPassTelemetry BlurPass::execute(const BlurBatch& batch, ID3D11Texture2D* con
                                     ID3D11RenderTargetView* const target,
                                     const std::uint32_t framebuffer_width,
                                     const std::uint32_t framebuffer_height,
-                                    const double logical_width, const double logical_height) {
+                                    const double logical_width, const double logical_height,
+                                    const double radius_x, const double radius_y) {
     const auto started = std::chrono::steady_clock::now();
-    BlurPassTelemetry telemetry = impl_->execute(batch, back_buffer, target, framebuffer_width,
-                                                 framebuffer_height, logical_width, logical_height);
+    BlurPassTelemetry telemetry =
+        impl_->execute(batch, back_buffer, target, framebuffer_width, framebuffer_height,
+                       logical_width, logical_height, radius_x, radius_y);
     telemetry.nanos =
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                        std::chrono::steady_clock::now() - started)

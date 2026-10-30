@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -22,7 +24,7 @@ class Surface;
 namespace strata::host {
 
 /** Maximum balanced CONTENT-effect nesting accepted by the packet and bundled renderers. */
-inline constexpr std::size_t maximum_content_effect_depth = 4U;
+inline constexpr std::size_t maximum_content_effect_depth = 8U;
 inline constexpr std::size_t maximum_rounded_clip_depth = 16U;
 
 inline constexpr std::uint32_t resource_create = 0U;
@@ -233,6 +235,60 @@ struct BlurBatch final {
     [[nodiscard]] friend bool operator==(const BlurBatch&, const BlurBatch&) = default;
 };
 
+/** How a content effect's layer composites (STRATA_LAYER_COMPOSITE_*). */
+enum class LayerComposite : std::uint32_t {
+    source_over = STRATA_LAYER_COMPOSITE_SOURCE_OVER,
+    multiply = STRATA_LAYER_COMPOSITE_MULTIPLY,
+    screen = STRATA_LAYER_COMPOSITE_SCREEN,
+    overlay = STRATA_LAYER_COMPOSITE_OVERLAY,
+    darken = STRATA_LAYER_COMPOSITE_DARKEN,
+    lighten = STRATA_LAYER_COMPOSITE_LIGHTEN,
+    color_dodge = STRATA_LAYER_COMPOSITE_COLOR_DODGE,
+    color_burn = STRATA_LAYER_COMPOSITE_COLOR_BURN,
+    hard_light = STRATA_LAYER_COMPOSITE_HARD_LIGHT,
+    soft_light = STRATA_LAYER_COMPOSITE_SOFT_LIGHT,
+    difference = STRATA_LAYER_COMPOSITE_DIFFERENCE,
+    exclusion = STRATA_LAYER_COMPOSITE_EXCLUSION,
+    hue = STRATA_LAYER_COMPOSITE_HUE,
+    saturation = STRATA_LAYER_COMPOSITE_SATURATION,
+    color = STRATA_LAYER_COMPOSITE_COLOR,
+    luminosity = STRATA_LAYER_COMPOSITE_LUMINOSITY,
+    destination_in = STRATA_LAYER_COMPOSITE_DESTINATION_IN,
+    destination_out = STRATA_LAYER_COMPOSITE_DESTINATION_OUT,
+    destination_in_luminance = STRATA_LAYER_COMPOSITE_DESTINATION_IN_LUMINANCE,
+    destination_out_luminance = STRATA_LAYER_COMPOSITE_DESTINATION_OUT_LUMINANCE,
+    channel_maximum = STRATA_LAYER_COMPOSITE_CHANNEL_MAXIMUM,
+    channel_minimum = STRATA_LAYER_COMPOSITE_CHANNEL_MINIMUM,
+    channel_difference = STRATA_LAYER_COMPOSITE_CHANNEL_DIFFERENCE,
+    plus = STRATA_LAYER_COMPOSITE_PLUS,
+};
+inline constexpr std::uint32_t layer_composite_count = 24U;
+
+/** A content effect layer's built-in filter (STRATA_LAYER_FILTER_*). */
+enum class LayerFilterKind : std::uint32_t {
+    blur = STRATA_LAYER_FILTER_BLUR,
+    color_matrix = STRATA_LAYER_FILTER_COLOR_MATRIX,
+    gradient_map = STRATA_LAYER_FILTER_GRADIENT_MAP,
+    levels = STRATA_LAYER_FILTER_LEVELS,
+    drop_shadow = STRATA_LAYER_FILTER_DROP_SHADOW,
+};
+inline constexpr std::size_t maximum_layer_filters = 8U;
+inline constexpr std::size_t maximum_layer_filter_values = 24U;
+
+/**
+ * One built-in filter, its lengths already presented through the batch's group (logical pixels of
+ * the decoded frame). See STRATA_LAYER_FILTER_* for what each value means.
+ */
+struct LayerFilter final {
+    LayerFilterKind kind = LayerFilterKind::blur;
+    std::vector<double> values;
+    [[nodiscard]] double value(const std::size_t index,
+                               const double fallback = 0.0) const noexcept {
+        return index < values.size() ? values[index] : fallback;
+    }
+    [[nodiscard]] friend bool operator==(const LayerFilter&, const LayerFilter&) = default;
+};
+
 enum class EffectBatchKind : std::uint32_t {
     backdrop = 2U,
     content_begin = 3U,
@@ -287,6 +343,25 @@ struct EffectBatch final {
      * otherwise it evaluates the effect again. Revisions are never reused within a decoder.
      */
     std::uint64_t sample_revision = 0U;
+    /**
+     * A content effect's layer: the built-in filters its pixels run through after its declared
+     * passes, in order, and how it then combines with what is under it.
+     */
+    LayerComposite composite = LayerComposite::source_over;
+    std::vector<LayerFilter> filters;
+    /** The widest distance, in logical pixels, its filters read beyond a pixel (blurs, shadows). */
+    [[nodiscard]] double filter_reach() const noexcept {
+        double reach = 0.0;
+        for (const LayerFilter& filter : filters) {
+            if (filter.kind == LayerFilterKind::blur) {
+                reach = std::max({reach, filter.value(0U), filter.value(1U)});
+            } else if (filter.kind == LayerFilterKind::drop_shadow) {
+                reach = std::max(reach, filter.value(6U) + std::max(std::abs(filter.value(4U)),
+                                                                    std::abs(filter.value(5U))));
+            }
+        }
+        return reach;
+    }
     [[nodiscard]] friend bool operator==(const EffectBatch&, const EffectBatch&) = default;
 };
 

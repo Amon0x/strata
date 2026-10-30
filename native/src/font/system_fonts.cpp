@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <set>
@@ -158,8 +159,80 @@ class Catalog final {
         return SystemFont{id_of(*path), *face};
     }
 
+    [[nodiscard]] std::optional<SystemFont> font_family(const std::string_view name,
+                                                        const std::string_view family,
+                                                        const int weight, const bool italic) {
+        const std::scoped_lock lock(mutex_);
+        enumerate();
+        index_names();
+        const std::string wanted_name = lower(std::string(name));
+        const std::string wanted_family = lower(std::string(family));
+        const Named* best = nullptr;
+        int best_score = std::numeric_limits<int>::max();
+        for (const Named& entry : named_) {
+            int score = 0;
+            if (!wanted_name.empty() &&
+                (entry.postscript == wanted_name || entry.full == wanted_name)) {
+                score = -1;
+            } else if (!wanted_family.empty() && entry.family == wanted_family) {
+                score = std::abs(entry.weight - weight) + (entry.italic != italic ? 1000 : 0);
+            } else {
+                continue;
+            }
+            if (score < best_score) {
+                best_score = score;
+                best = &entry;
+            }
+        }
+        if (best == nullptr)
+            return std::nullopt;
+        const std::optional<OpenTypeFont> face = load(best->path);
+        if (!face.has_value())
+            return std::nullopt;
+        return SystemFont{id_of(best->path), *face};
+    }
+
   private:
     using Ranges = std::vector<std::pair<std::uint32_t, std::uint32_t>>;
+
+    /** A font file's names, lower case, and its weight and slant. */
+    struct Named final {
+        std::filesystem::path path;
+        std::string family;
+        std::string full;
+        std::string postscript;
+        int weight = 400;
+        bool italic = false;
+    };
+
+    /** Reads every font's names once, keeping the names rather than the fonts. */
+    void index_names() {
+        if (named_indexed_)
+            return;
+        named_indexed_ = true;
+        for (const std::filesystem::path& path : files_) {
+            try {
+                const std::optional<OpenTypeFont> face = map(path);
+                if (!face.has_value())
+                    continue;
+                const FontMetadata& metadata = face->metadata();
+                const std::string subfamily = lower(metadata.subfamily);
+                named_.push_back(Named{
+                    path,
+                    lower(metadata.family),
+                    lower(metadata.full_name),
+                    lower(metadata.postscript_name),
+                    metadata.weight_class != 0U ? static_cast<int>(metadata.weight_class)
+                    : (metadata.style_flags & font_style_bold) != 0U ? 700
+                                                                     : 400,
+                    (metadata.style_flags & font_style_italic) != 0U ||
+                        subfamily.find("italic") != std::string::npos ||
+                        subfamily.find("oblique") != std::string::npos,
+                });
+            } catch (const std::exception&) {
+            }
+        }
+    }
 
     [[nodiscard]] static std::string id_of(const std::filesystem::path& path) {
         return "system:" + lower(path.filename().string());
@@ -317,6 +390,8 @@ class Catalog final {
     std::map<std::filesystem::path, OpenTypeFont> loaded_;
     std::map<std::filesystem::path, Ranges> coverage_;
     std::set<std::uint32_t> missing_;
+    std::vector<Named> named_;
+    bool named_indexed_ = false;
 };
 
 [[nodiscard]] Catalog& catalog() {
@@ -340,6 +415,12 @@ std::optional<SystemFont> system_font_for(const std::uint32_t code_point) {
 
 std::optional<SystemFont> system_font_named(const std::string_view file) {
     return catalog().font_named(file);
+}
+
+std::optional<SystemFont> system_font_family(const std::string_view name,
+                                             const std::string_view family, const int weight,
+                                             const bool italic) {
+    return catalog().font_family(name, family, weight, italic);
 }
 
 } // namespace strata::font

@@ -174,6 +174,77 @@ enum class EffectBackdropSource : std::uint32_t {
  */
 inline constexpr double default_effect_refresh_rate = 0.0;
 
+/**
+ * How an isolated layer (a CONTENT effect) combines with what is already drawn under it, once its
+ * filters and passes have run. `source_over` is ordinary compositing. The blend modes from
+ * `multiply` to `luminosity` are the W3C compositing blend modes, composited source-over. The
+ * destination operators keep what is under the layer, scaled by the layer's alpha or by the
+ * luminance of its premultiplied colour (inverted for `_out`), and draw nothing of the layer
+ * itself: a matte. The channel operators combine premultiplied colour channel by channel,
+ * alpha included (a coverage mask's lighten, darken and difference). `plus` adds
+ * premultiplied colour, clamped (plus-lighter, After Effects' Add).
+ */
+enum class LayerComposite : std::uint32_t {
+    source_over = 0U,
+    multiply = 1U,
+    screen = 2U,
+    overlay = 3U,
+    darken = 4U,
+    lighten = 5U,
+    color_dodge = 6U,
+    color_burn = 7U,
+    hard_light = 8U,
+    soft_light = 9U,
+    difference = 10U,
+    exclusion = 11U,
+    hue = 12U,
+    saturation = 13U,
+    color = 14U,
+    luminosity = 15U,
+    destination_in = 16U,
+    destination_out = 17U,
+    destination_in_luminance = 18U,
+    destination_out_luminance = 19U,
+    channel_maximum = 20U,
+    channel_minimum = 21U,
+    channel_difference = 22U,
+    plus = 23U,
+};
+inline constexpr std::uint32_t layer_composite_count = 24U;
+
+/**
+ * One built-in filter an isolated layer runs over its pixels, in order, before it composites.
+ * Colours are straight (unpremultiplied) 0-1 channels; lengths are logical pixels in the space the
+ * layer is drawn in.
+ *  - `blur` {radius x, radius y}: a Gaussian blur reaching that far each way, as BlurRegion's
+ *    radius does (sigma a third of it); either may be zero.
+ *  - `color_matrix` {20}: each of red, green, blue and alpha becomes a row of five weights
+ *    applied to (r, g, b, a, 1).
+ *  - `gradient_map` {mix, count, then count stops of offset, r, g, b}: the colour's Rec. 709
+ *    luminance picks a colour from the stops (up to five), mixed into the colour by `mix`.
+ *  - `levels` {20}: per channel (red, green, blue, alpha) input black, input white, gamma, output
+ *    black and output white: (x - in black) / (in white - in black), clamped, raised to 1/gamma,
+ *    mapped onto output black to white.
+ *  - `drop_shadow` {r, g, b, opacity, offset x, offset y, radius, shadow only}: the layer's alpha
+ *    in that colour, blurred by radius and moved by the offset, drawn under the layer (or alone).
+ */
+enum class LayerFilterKind : std::uint32_t {
+    blur = 1U,
+    color_matrix = 2U,
+    gradient_map = 3U,
+    levels = 4U,
+    drop_shadow = 5U,
+};
+/** The most values one filter carries, and the most filters one layer runs. */
+inline constexpr std::size_t maximum_layer_filter_values = 24U;
+inline constexpr std::size_t maximum_layer_filters = 8U;
+
+struct LayerFilter final {
+    LayerFilterKind kind = LayerFilterKind::blur;
+    std::vector<double> values;
+    [[nodiscard]] friend bool operator==(const LayerFilter&, const LayerFilter&) = default;
+};
+
 struct EffectState final {
     std::string id;
     EffectInput input = EffectInput::backdrop;
@@ -195,6 +266,13 @@ struct EffectState final {
      * only while nothing within this reach changes.
      */
     double read_reach = 0.0;
+    /**
+     * A CONTENT effect's built-in processing: the filters its pixels run through after its
+     * declared passes, and how it then composites. A layer that composites other than
+     * source-over is evaluated every frame (its refresh rate is ignored).
+     */
+    LayerComposite composite = LayerComposite::source_over;
+    std::vector<LayerFilter> filters{};
     [[nodiscard]] friend bool operator==(const EffectState&, const EffectState&) = default;
 };
 

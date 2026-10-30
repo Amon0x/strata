@@ -148,6 +148,13 @@ void Renderer::Impl::initialize() {
                 std::string(gpu::rounded_clip_hlsl) + std::string(gpu::composite_pixel));
     add_program("cached_composite",
                 std::string(gpu::rounded_clip_hlsl) + std::string(gpu::cached_composite_pixel));
+    add_program("layer_filter",
+                std::string(gpu::layer_prelude) + std::string(gpu::layer_filter_pixel));
+    add_program("layer_shadow",
+                std::string(gpu::layer_prelude) + std::string(gpu::layer_shadow_pixel));
+    add_program("layer_composite", std::string(gpu::rounded_clip_hlsl) +
+                                       std::string(gpu::layer_prelude) +
+                                       std::string(gpu::layer_composite_pixel));
     identity_groups = std::make_unique<Buffer>(device, sizeof(gpu::PresentationGroupConstants),
                                                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     const gpu::PresentationGroupConstants identity;
@@ -167,7 +174,8 @@ void Renderer::Impl::add_program(const std::string& name, const std::string& sou
 void Renderer::Impl::prune_programs() {
     const auto used = [&](const std::string& name) {
         if (name == "builtin" || name == "blur" || name == "composite" ||
-            name == "cached_composite")
+            name == "cached_composite" || name == "layer_filter" || name == "layer_shadow" ||
+            name == "layer_composite")
             return true;
         for (const auto& [id, program] : materials) {
             (void)id;

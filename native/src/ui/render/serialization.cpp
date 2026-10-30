@@ -194,14 +194,34 @@ using data::JsonValue;
                                                                        : "BACKDROP";
     const std::string_view backdrop_source =
         value.backdrop_source == EffectBackdropSource::surface ? "SURFACE" : "CURRENT";
-    return object({
-        {"backdropSource", JsonValue(std::string(backdrop_source))},
-        {"id", JsonValue(value.id)},
-        {"input", JsonValue(std::string(input))},
-        {"opacity", JsonValue(value.opacity)},
-        {"refreshRate", JsonValue(value.refresh_rate)},
-        {"parameters", array(std::move(parameters))},
-    });
+    JsonValue::Object result;
+    data::append_json_entries(result,
+                              {
+                                  {"backdropSource", JsonValue(std::string(backdrop_source))},
+                                  {"id", JsonValue(value.id)},
+                                  {"input", JsonValue(std::string(input))},
+                                  {"opacity", JsonValue(value.opacity)},
+                                  {"refreshRate", JsonValue(value.refresh_rate)},
+                                  {"parameters", array(std::move(parameters))},
+                              });
+    // A layer's built-in processing appears only when it has any, so plain effects read as before.
+    if (value.composite != LayerComposite::source_over || !value.filters.empty()) {
+        std::vector<JsonValue> filters;
+        filters.reserve(value.filters.size());
+        for (const LayerFilter& filter : value.filters) {
+            std::vector<JsonValue> values;
+            values.reserve(filter.values.size());
+            for (const double entry : filter.values)
+                values.emplace_back(entry);
+            filters.push_back(object({
+                {"kind", JsonValue(static_cast<std::int64_t>(filter.kind))},
+                {"values", array(std::move(values))},
+            }));
+        }
+        result.emplace_back("composite", JsonValue(static_cast<std::int64_t>(value.composite)));
+        result.emplace_back("filters", array(std::move(filters)));
+    }
+    return JsonValue(std::move(result));
 }
 
 [[nodiscard]] JsonValue draw(const std::string& kind,

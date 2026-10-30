@@ -685,6 +685,25 @@ void present(const SubmissionBatch& local, const std::vector<PresentationGroup>&
             output.radii[corner] = effect->radii[corner] * radius_scale;
         output.opacity = effect->opacity * group.opacity;
         output.tone = group.tone;
+        // Filter lengths move with the group as its bounds do.
+        output.filters = effect->filters;
+        const double along_x = std::hypot(group.scale_x, group.shear_y);
+        const double along_y = std::hypot(group.shear_x, group.scale_y);
+        const double area =
+            std::sqrt(std::abs(group.scale_x * group.scale_y - group.shear_x * group.shear_y));
+        for (LayerFilter& filter : output.filters) {
+            std::vector<double>& values = filter.values;
+            if (filter.kind == LayerFilterKind::blur && values.size() >= 2U) {
+                values[0] *= along_x;
+                values[1] *= along_y;
+            } else if (filter.kind == LayerFilterKind::drop_shadow && values.size() >= 7U) {
+                const double x = values[4];
+                const double y = values[5];
+                values[4] = group.scale_x * x + group.shear_x * y;
+                values[5] = group.shear_y * x + group.scale_y * y;
+                values[6] *= area;
+            }
+        }
         output.rounded_clips = effect->rounded_clips;
         mask_turned_group(group, effect->x, effect->y, effect->width, effect->height,
                           effect->radii, output.rounded_clips);
@@ -1086,6 +1105,35 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
                 if (!std::isfinite(effect.parameters[parameter])) {
                     throw std::invalid_argument("render effect parameter is not finite");
                 }
+            }
+            const std::uint32_t composite = batch.u32();
+            const std::uint32_t filter_count = batch.u32();
+            if (composite >= layer_composite_count || filter_count > maximum_layer_filters) {
+                throw std::invalid_argument("render layer composite or filters are unknown");
+            }
+            if (effect.kind == EffectBatchKind::backdrop &&
+                (composite != STRATA_LAYER_COMPOSITE_SOURCE_OVER || filter_count != 0U)) {
+                throw std::invalid_argument("backdrop effects cannot composite as layers");
+            }
+            effect.composite = static_cast<LayerComposite>(composite);
+            effect.filters.reserve(filter_count);
+            for (std::uint32_t filter_index = 0U; filter_index < filter_count; ++filter_index) {
+                LayerFilter filter;
+                const std::uint32_t filter_kind = batch.u32();
+                const std::uint32_t value_count = batch.u32();
+                if (filter_kind < STRATA_LAYER_FILTER_BLUR ||
+                    filter_kind > STRATA_LAYER_FILTER_DROP_SHADOW ||
+                    value_count > maximum_layer_filter_values) {
+                    throw std::invalid_argument("render layer filter is unknown");
+                }
+                filter.kind = static_cast<LayerFilterKind>(filter_kind);
+                filter.values.resize(value_count);
+                for (double& value : filter.values) {
+                    value = batch.number();
+                    if (!std::isfinite(value))
+                        throw std::invalid_argument("render layer filter value is not finite");
+                }
+                effect.filters.push_back(std::move(filter));
             }
             result.batches.emplace_back(std::move(effect));
         } else if (kind == 4U) {

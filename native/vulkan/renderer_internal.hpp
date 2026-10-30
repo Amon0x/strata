@@ -3,8 +3,9 @@
 #include "gpu/blur_shaders.hpp"
 #include "gpu/clip.hpp"
 #include "gpu/effect_policy.hpp"
-#include "gpu/groups.hpp"
 #include "gpu/effect_shaders.hpp"
+#include "gpu/groups.hpp"
+#include "gpu/layer_shaders.hpp"
 #include "gpu/shaders.hpp"
 #include "resources.hpp"
 #include "shader.hpp"
@@ -288,7 +289,21 @@ struct Renderer::Impl {
      * unblurred pixels through `clips`.
      */
     void blur(Target& image, host::Scissor area, double physical_radius, std::uint32_t downsample,
-              std::span<const host::RoundedClip> clips = {});
+              std::span<const host::RoundedClip> clips = {}, double physical_radius_x = -1.0,
+              double physical_radius_y = -1.0);
+    /**
+     * Hands a temporary image back for another use this frame once everything that reads it has
+     * been recorded; its next use transitions it, and every transition is a full barrier.
+     */
+    void recycle(Image& image);
+    /** The constants every layer program shares for `effect` on `target`. */
+    gpu::LayerConstants layer_constants(const host::EffectBatch& effect, const Target& target);
+    /**
+     * Runs a content layer's built-in filters over `current` within `region`, returning the
+     * image holding the result; temporaries it takes are added to `taken`.
+     */
+    Image* run_filters(const host::EffectBatch& effect, const Target& destination, Image* current,
+                       host::Scissor region, std::vector<Image*>& taken);
     static void validate_target(const RenderTarget& target, const FrameOptions& options);
     /** Device pixels per logical pixel on `target`; blur radii are authored in logical pixels. */
     [[nodiscard]] double pixel_scale(const Target& target) const noexcept {

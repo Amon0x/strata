@@ -38,6 +38,9 @@ std::size_t Renderer::prepare(VkFormat format) {
     impl_->pipeline("blur", Blend::opaque, format, true);
     impl_->pipeline("composite", Blend::premultiplied_alpha, format, true);
     impl_->pipeline("cached_composite", Blend::premultiplied_alpha, format, true);
+    impl_->pipeline("layer_filter", Blend::opaque, format, true);
+    impl_->pipeline("layer_shadow", Blend::opaque, format, true);
+    impl_->pipeline("layer_composite", Blend::opaque, format, true);
     for (const auto& [id, passes] : impl_->effects) {
         (void)id;
         for (const auto& [index, pass] : passes) {

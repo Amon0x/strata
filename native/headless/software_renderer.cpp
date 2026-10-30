@@ -17,6 +17,8 @@
 #include <vector>
 
 #include "gpu/effect_policy.hpp"
+#include "gpu/effect_shaders.hpp"
+#include "gpu/layer_shaders.hpp"
 #include <strata/render_shapes.hpp>
 
 namespace strata::headless {
@@ -293,6 +295,260 @@ struct PixelRect final {
     return static_cast<std::uint8_t>(std::lround(saturate(value) * 255.0F));
 }
 
+/**
+ * The taps of one blur pass from the centre out, as the GPU blur shader weighs them: a Gaussian of
+ * a third of the radius, cut at the radius. A radius under one half is the centre alone.
+ */
+[[nodiscard]] std::vector<double> blur_weights(const double radius) {
+    if (radius < 0.5)
+        return {1.0};
+    const auto reach = static_cast<std::uint32_t>(std::ceil(radius));
+    const double sigma = std::max(radius / 3.0, 0.5);
+    const double inverse_two_sigma_squared = 0.5 / (sigma * sigma);
+    std::vector<double> weights(reach + 1U);
+    for (std::uint32_t offset = 0U; offset <= reach; ++offset) {
+        const double distance = static_cast<double>(offset);
+        const double coverage = std::clamp(radius + 0.5 - distance, 0.0, 1.0);
+        weights[offset] = std::exp(-distance * distance * inverse_two_sigma_squared) * coverage;
+    }
+    return weights;
+}
+
+using Rgba = std::array<float, 4U>;
+
+[[nodiscard]] Rgba straight(const Rgba color) noexcept {
+    if (!(color[3] > 0.00001F))
+        return Rgba{};
+    return Rgba{color[0] / color[3], color[1] / color[3], color[2] / color[3], color[3]};
+}
+
+[[nodiscard]] float luminance(const float red, const float green, const float blue) noexcept {
+    return 0.2126F * red + 0.7152F * green + 0.0722F * blue;
+}
+
+/** A layer filter's colour programs, as gpu::layer_filter_pixel runs them (premultiplied in/out).
+ */
+[[nodiscard]] Rgba filter_color(const std::uint32_t kind, const std::span<const float, 24U> values,
+                                const Rgba premultiplied) noexcept {
+    const Rgba color = straight(premultiplied);
+    Rgba result = color;
+    const auto value = [&values](const std::size_t index) { return values[index]; };
+    if (kind == 2U) {
+        for (std::size_t row = 0U; row < 4U; ++row) {
+            result[row] = value(row * 5U) * color[0] + value(row * 5U + 1U) * color[1] +
+                          value(row * 5U + 2U) * color[2] + value(row * 5U + 3U) * color[3] +
+                          value(row * 5U + 4U);
+        }
+    } else if (kind == 3U) {
+        const float level = saturate(luminance(color[0], color[1], color[2]));
+        const auto count = static_cast<std::uint32_t>(std::clamp(value(1U), 0.0F, 5.0F));
+        std::array<float, 3U> mapped{};
+        if (count > 0U) {
+            std::array<float, 3U> previous{value(3U), value(4U), value(5U)};
+            float previous_offset = value(2U);
+            mapped = previous;
+            if (level > previous_offset) {
+                bool found = false;
+                for (std::uint32_t stop = 1U; stop < count && !found; ++stop) {
+                    const std::size_t at = 2U + stop * 4U;
+                    const float offset = value(at);
+                    const std::array<float, 3U> stop_color{value(at + 1U), value(at + 2U),
+                                                           value(at + 3U)};
+                    if (level <= offset) {
+                        const float span = offset - previous_offset;
+                        const float t = span > 0.00001F ? (level - previous_offset) / span : 1.0F;
+                        for (std::size_t channel_index = 0U; channel_index < 3U; ++channel_index)
+                            mapped[channel_index] =
+                                previous[channel_index] +
+                                (stop_color[channel_index] - previous[channel_index]) * t;
+                        found = true;
+                    } else {
+                        previous = stop_color;
+                        previous_offset = offset;
+                        mapped = previous;
+                    }
+                }
+            }
+        }
+        const float mix = saturate(value(0U));
+        for (std::size_t channel_index = 0U; channel_index < 3U; ++channel_index)
+            result[channel_index] =
+                color[channel_index] + (mapped[channel_index] - color[channel_index]) * mix;
+    } else if (kind == 4U) {
+        for (std::size_t channel_index = 0U; channel_index < 4U; ++channel_index) {
+            const std::size_t first = channel_index * 5U;
+            const float black = value(first);
+            const float white = value(first + 1U);
+            const float gamma = std::max(value(first + 2U), 0.00001F);
+            const float span = white - black;
+            float x = std::abs(span) > 0.00001F ? saturate((color[channel_index] - black) / span)
+                                                : (color[channel_index] >= black ? 1.0F : 0.0F);
+            x = std::pow(x, 1.0F / gamma);
+            result[channel_index] = value(first + 3U) + (value(first + 4U) - value(first + 3U)) * x;
+        }
+    } else if (kind == 6U) {
+        result = Rgba{value(0U), value(1U), value(2U), color[3] * value(3U)};
+    }
+    for (float& component : result)
+        component = saturate(component);
+    return Rgba{result[0] * result[3], result[1] * result[3], result[2] * result[3], result[3]};
+}
+
+[[nodiscard]] float hard_light(const float backdrop, const float source) noexcept {
+    return source <= 0.5F ? backdrop * 2.0F * source
+                          : backdrop + (2.0F * source - 1.0F) - backdrop * (2.0F * source - 1.0F);
+}
+
+[[nodiscard]] float soft_light(const float backdrop, const float source) noexcept {
+    if (source <= 0.5F)
+        return backdrop - (1.0F - 2.0F * source) * backdrop * (1.0F - backdrop);
+    const float d = backdrop <= 0.25F ? ((16.0F * backdrop - 12.0F) * backdrop + 4.0F) * backdrop
+                                      : std::sqrt(backdrop);
+    return backdrop + (2.0F * source - 1.0F) * (d - backdrop);
+}
+
+[[nodiscard]] float color_dodge(const float backdrop, const float source) noexcept {
+    if (backdrop <= 0.0F)
+        return 0.0F;
+    if (source >= 1.0F)
+        return 1.0F;
+    return std::min(1.0F, backdrop / (1.0F - source));
+}
+
+[[nodiscard]] float color_burn(const float backdrop, const float source) noexcept {
+    if (backdrop >= 1.0F)
+        return 1.0F;
+    if (source <= 0.0F)
+        return 0.0F;
+    return 1.0F - std::min(1.0F, (1.0F - backdrop) / source);
+}
+
+using Rgb = std::array<float, 3U>;
+
+[[nodiscard]] float lum(const Rgb& c) noexcept {
+    return 0.3F * c[0] + 0.59F * c[1] + 0.11F * c[2];
+}
+
+[[nodiscard]] Rgb clip_color(Rgb c) noexcept {
+    const float l = lum(c);
+    const float n = std::min({c[0], c[1], c[2]});
+    const float x = std::max({c[0], c[1], c[2]});
+    if (n < 0.0F) {
+        for (float& v : c)
+            v = l + (v - l) * l / std::max(l - n, 0.00001F);
+    }
+    if (x > 1.0F) {
+        for (float& v : c)
+            v = l + (v - l) * (1.0F - l) / std::max(x - l, 0.00001F);
+    }
+    return c;
+}
+
+[[nodiscard]] Rgb set_lum(Rgb c, const float l) noexcept {
+    const float d = l - lum(c);
+    for (float& v : c)
+        v += d;
+    return clip_color(c);
+}
+
+[[nodiscard]] float sat(const Rgb& c) noexcept {
+    return std::max({c[0], c[1], c[2]}) - std::min({c[0], c[1], c[2]});
+}
+
+[[nodiscard]] Rgb set_sat(Rgb c, const float s) noexcept {
+    const float high = std::max({c[0], c[1], c[2]});
+    const float low = std::min({c[0], c[1], c[2]});
+    const float span = high - low;
+    if (span <= 0.00001F)
+        return Rgb{};
+    for (float& v : c)
+        v = (v - low) * s / span;
+    return c;
+}
+
+[[nodiscard]] Rgb blend(const Rgb& cb, const Rgb& cs, const std::uint32_t mode) noexcept {
+    Rgb result{};
+    const auto each = [&](const auto& function) {
+        for (std::size_t index = 0U; index < 3U; ++index)
+            result[index] = function(cb[index], cs[index]);
+        return result;
+    };
+    switch (mode) {
+    case 1U:
+        return each([](const float b, const float s) { return b * s; });
+    case 2U:
+        return each([](const float b, const float s) { return b + s - b * s; });
+    case 3U:
+        return each([](const float b, const float s) { return hard_light(s, b); });
+    case 4U:
+        return each([](const float b, const float s) { return std::min(b, s); });
+    case 5U:
+        return each([](const float b, const float s) { return std::max(b, s); });
+    case 6U:
+        return each(color_dodge);
+    case 7U:
+        return each(color_burn);
+    case 8U:
+        return each(hard_light);
+    case 9U:
+        return each(soft_light);
+    case 10U:
+        return each([](const float b, const float s) { return std::abs(b - s); });
+    case 11U:
+        return each([](const float b, const float s) { return b + s - 2.0F * b * s; });
+    case 12U:
+        return set_lum(set_sat(cs, sat(cb)), lum(cb));
+    case 13U:
+        return set_lum(set_sat(cb, sat(cs)), lum(cb));
+    case 14U:
+        return set_lum(cs, lum(cb));
+    default:
+        return set_lum(cb, lum(cs));
+    }
+}
+
+/** A layer and what is under it combined by `mode`, as gpu::layer_composite_pixel does. */
+[[nodiscard]] Rgba layer_composite(const Rgba& s, const Rgba& d,
+                                   const std::uint32_t mode) noexcept {
+    Rgba result{};
+    if (mode == 0U) {
+        for (std::size_t index = 0U; index < 4U; ++index)
+            result[index] = s[index] + d[index] * (1.0F - s[3]);
+        return result;
+    }
+    if (mode <= 15U) {
+        const Rgba straight_s = straight(s);
+        const Rgba straight_d = straight(d);
+        const Rgb cs{saturate(straight_s[0]), saturate(straight_s[1]), saturate(straight_s[2])};
+        const Rgb cb{saturate(straight_d[0]), saturate(straight_d[1]), saturate(straight_d[2])};
+        const Rgb mixed = blend(cb, cs, mode);
+        for (std::size_t index = 0U; index < 3U; ++index) {
+            result[index] = s[index] * (1.0F - d[3]) + d[index] * (1.0F - s[3]) +
+                            s[3] * d[3] * saturate(mixed[index]);
+        }
+        result[3] = s[3] + d[3] - s[3] * d[3];
+        return result;
+    }
+    const float level = saturate(luminance(s[0], s[1], s[2]));
+    const float scale = mode == 16U   ? s[3]
+                        : mode == 17U ? 1.0F - s[3]
+                        : mode == 18U ? level
+                                      : 1.0F - level;
+    for (std::size_t index = 0U; index < 4U; ++index) {
+        if (mode <= 19U)
+            result[index] = d[index] * scale;
+        else if (mode == 20U)
+            result[index] = std::max(s[index], d[index]);
+        else if (mode == 21U)
+            result[index] = std::min(s[index], d[index]);
+        else if (mode == 23U)
+            result[index] = std::min(s[index] + d[index], 1.0F);
+        else
+            result[index] = std::abs(s[index] - d[index]);
+    }
+    return result;
+}
+
 [[nodiscard]] Color interpolate_color(const Vertex& a, const Vertex& b, const Vertex& c,
                                       const float wa, const float wb, const float wc) noexcept {
     return Color{
@@ -351,6 +607,22 @@ void composite_filtered_pixels(std::vector<std::uint8_t>& destination,
                 static_cast<float>(1.0 / scale_y)
             );
             const std::size_t pixel = (static_cast<std::size_t>(y) * width + x) * 4U;
+            if (effect.composite != host::LayerComposite::source_over) {
+                Rgba layer{};
+                Rgba under{};
+                for (std::size_t index = 0U; index < 4U; ++index) {
+                    layer[index] = static_cast<float>(source(x, y, index)) / 255.0F *
+                                   static_cast<float>(effect.opacity);
+                    under[index] = static_cast<float>(destination[pixel + index]) / 255.0F;
+                }
+                const Rgba combined =
+                    layer_composite(layer, under, static_cast<std::uint32_t>(effect.composite));
+                const float mixed = effect_mask * clip_mask;
+                for (std::size_t index = 0U; index < 4U; ++index)
+                    destination[pixel + index] =
+                        channel(under[index] + (combined[index] - under[index]) * mixed);
+                continue;
+            }
             const float coverage =
                 effect_mask * clip_mask * static_cast<float>(effect.opacity);
             const float alpha = static_cast<float>(source(x, y, 3U)) / 255.0F * coverage;
@@ -884,7 +1156,8 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
     }
 }
 
-void SoftwareRenderer::blur(const host::BlurBatch& batch) {
+void SoftwareRenderer::blur(const host::BlurBatch& batch, const double radius_x,
+                            const double radius_y) {
     if (batch.radius <= 0.0 || batch.width <= 0.0 || batch.height <= 0.0)
         return;
     const double scale_x = static_cast<double>(width_) / logical_width_;
@@ -931,7 +1204,8 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
     }
     const std::uint32_t downsample = std::clamp(batch.downsample, 1U, 8U);
     if (downsample > 1U) {
-        blur_downsampled(batch, left, top, right, bottom, downsample, clipped_original);
+        blur_downsampled(batch, left, top, right, bottom, downsample, clipped_original, radius_x,
+                         radius_y);
         return;
     }
     const double physical_radius = std::clamp(batch.radius * std::max(scale_x, scale_y), 0.5, 32.0);
@@ -944,14 +1218,18 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
         std::min<std::uint64_t>(static_cast<std::uint64_t>(bottom) + radius, height_));
     const std::uint32_t source_width = source_right - source_left;
     const std::uint32_t source_height = source_bottom - source_top;
-    const double sigma = std::max(physical_radius / 3.0, 0.5);
-    const double inverse_two_sigma_squared = 0.5 / (sigma * sigma);
-    std::vector<double> weights(radius + 1U);
-    for (std::uint32_t offset = 0U; offset <= radius; ++offset) {
-        const double distance = static_cast<double>(offset);
-        const double coverage = std::clamp(physical_radius + 0.5 - distance, 0.0, 1.0);
-        weights[offset] = std::exp(-distance * distance * inverse_two_sigma_squared) * coverage;
-    }
+    // Each way may blur by its own radius (a layer's blur); a radius of zero leaves that way be,
+    // as a GPU pass under one half samples only its centre.
+    const auto directional = [&](const double logical) {
+        return logical < 0.0
+                   ? physical_radius
+                   : (logical <= 0.0 ? 0.0
+                                     : std::clamp(logical * std::max(scale_x, scale_y), 0.5, 32.0));
+    };
+    const std::vector<double> weights_x = blur_weights(directional(radius_x));
+    const std::vector<double> weights_y = blur_weights(directional(radius_y));
+    const auto reach_x = static_cast<std::int64_t>(weights_x.size()) - 1;
+    const auto reach_y = static_cast<std::int64_t>(weights_y.size()) - 1;
     std::vector<std::uint8_t> horizontal(static_cast<std::size_t>(source_width) * source_height *
                                          4U);
     for (std::uint32_t row = 0U; row < source_height; ++row) {
@@ -959,12 +1237,11 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
             const std::size_t target = (static_cast<std::size_t>(row) * source_width + column) * 4U;
             std::array<double, 4U> sums{};
             double total_weight = 0.0;
-            for (std::int64_t offset = -static_cast<std::int64_t>(radius);
-                 offset <= static_cast<std::int64_t>(radius); ++offset) {
+            for (std::int64_t offset = -reach_x; offset <= reach_x; ++offset) {
                 const std::uint32_t sample_column = static_cast<std::uint32_t>(
                     std::clamp<std::int64_t>(static_cast<std::int64_t>(column) + offset, 0,
                                              static_cast<std::int64_t>(source_width) - 1));
-                const double weight = weights[static_cast<std::size_t>(std::abs(offset))];
+                const double weight = weights_x[static_cast<std::size_t>(std::abs(offset))];
                 const std::size_t source = (static_cast<std::size_t>(source_top + row) * width_ +
                                             source_left + sample_column) *
                                            4U;
@@ -986,12 +1263,11 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
             const std::size_t target = (static_cast<std::size_t>(row) * width_ + column) * 4U;
             std::array<double, 4U> sums{};
             double total_weight = 0.0;
-            for (std::int64_t offset = -static_cast<std::int64_t>(radius);
-                 offset <= static_cast<std::int64_t>(radius); ++offset) {
+            for (std::int64_t offset = -reach_y; offset <= reach_y; ++offset) {
                 const std::uint32_t sample_row = static_cast<std::uint32_t>(
                     std::clamp<std::int64_t>(static_cast<std::int64_t>(local_y) + offset, 0,
                                              static_cast<std::int64_t>(source_height) - 1));
-                const double weight = weights[static_cast<std::size_t>(std::abs(offset))];
+                const double weight = weights_y[static_cast<std::size_t>(std::abs(offset))];
                 const std::size_t source =
                     (static_cast<std::size_t>(sample_row) * source_width + local_x) * 4U;
                 for (std::size_t component = 0U; component < 4U; ++component) {
@@ -1040,7 +1316,8 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
 void SoftwareRenderer::blur_downsampled(const host::BlurBatch& batch, const std::uint32_t left,
                                         const std::uint32_t top, const std::uint32_t right,
                                         const std::uint32_t bottom, const std::uint32_t downsample,
-                                        const std::vector<std::uint8_t>& clipped_original) {
+                                        const std::vector<std::uint8_t>& clipped_original,
+                                        const double radius_x, const double radius_y) {
     const double scale_x = static_cast<double>(width_) / logical_width_;
     const double scale_y = static_cast<double>(height_) / logical_height_;
     const double physical_radius = batch.radius * std::max(scale_x, scale_y);
@@ -1098,17 +1375,17 @@ void SoftwareRenderer::blur_downsampled(const host::BlurBatch& batch, const std:
         }
     }
 
-    const double reduced_radius = std::clamp(physical_radius / downsample, 0.5, 32.0);
-    const std::uint32_t radius = static_cast<std::uint32_t>(std::ceil(reduced_radius));
-    const double sigma = std::max(reduced_radius / 3.0, 0.5);
-    const double inverse_two_sigma_squared = 0.5 / (sigma * sigma);
-    std::vector<double> weights(radius + 1U);
-    for (std::uint32_t offset = 0U; offset <= radius; ++offset) {
-        const double distance = static_cast<double>(offset);
-        const double coverage = std::clamp(reduced_radius + 0.5 - distance, 0.0, 1.0);
-        weights[offset] = std::exp(-distance * distance * inverse_two_sigma_squared) * coverage;
-    }
+    const auto reduced_radius = [&](const double logical) {
+        if (logical < 0.0)
+            return std::clamp(physical_radius / downsample, 0.5, 32.0);
+        const double physical = logical * std::max(scale_x, scale_y);
+        return physical <= 0.0 ? 0.0 : std::clamp(physical / downsample, 0.5, 32.0);
+    };
+    const std::vector<double> weights_x = blur_weights(reduced_radius(radius_x));
+    const std::vector<double> weights_y = blur_weights(reduced_radius(radius_y));
     const auto pass = [&](const std::vector<double>& input, const bool horizontal) {
+        const std::vector<double>& weights = horizontal ? weights_x : weights_y;
+        const auto radius = static_cast<std::uint32_t>(weights.size() - 1U);
         std::vector<double> output(input.size());
         for (std::uint32_t y = 0U; y < reduced_height; ++y) {
             for (std::uint32_t x = 0U; x < reduced_width; ++x) {
@@ -1277,6 +1554,114 @@ void SoftwareRenderer::composite_cached_effect(const host::EffectBatch& effect,
         });
 }
 
+void SoftwareRenderer::apply_layer_filters(const host::EffectBatch& effect) {
+    if (effect.filters.empty())
+        return;
+    const double scale_x = static_cast<double>(width_) / logical_width_;
+    const double scale_y = static_cast<double>(height_) / logical_height_;
+    const double scale = std::max(scale_x, scale_y);
+    const double reach = effect.filter_reach();
+    // As the GPU renderers: filters work over the bounds grown by the sample reach, or by twice
+    // the filters' own reach when that is further.
+    const double margin = std::ceil(std::max(
+        gpu::effect_sample_reach * scale, std::clamp(std::ceil(reach * 2.0 * scale), 1.0, 512.0)));
+    const auto edge = [](const double value, const std::uint32_t limit) {
+        return static_cast<std::uint32_t>(std::clamp(value, 0.0, static_cast<double>(limit)));
+    };
+    const std::uint32_t left = edge(std::floor(effect.x * scale_x) - margin, width_);
+    const std::uint32_t top = edge(std::floor(effect.y * scale_y) - margin, height_);
+    const std::uint32_t right =
+        edge(std::ceil((effect.x + effect.width) * scale_x) + margin, width_);
+    const std::uint32_t bottom =
+        edge(std::ceil((effect.y + effect.height) * scale_y) + margin, height_);
+    const auto blur_layer = [&](const double radius_x, const double radius_y) {
+        if (!(radius_x > 0.0) && !(radius_y > 0.0))
+            return;
+        const double widest = std::max(radius_x, radius_y);
+        blur(host::BlurBatch{effect.source_order, host::Scissor{0U, 0U, width_, height_},
+                             effect.x - reach, effect.y - reach, effect.width + reach * 2.0,
+                             effect.height + reach * 2.0, widest,
+                             gpu::layer_blur_downsample(widest * scale)},
+             std::max(0.0, radius_x), std::max(0.0, radius_y));
+    };
+    const auto pixel_of = [this](const std::vector<std::uint8_t>& image, const std::uint32_t x,
+                                 const std::uint32_t y) {
+        const std::size_t at = (static_cast<std::size_t>(y) * width_ + x) * 4U;
+        return Rgba{image[at] / 255.0F, image[at + 1U] / 255.0F, image[at + 2U] / 255.0F,
+                    image[at + 3U] / 255.0F};
+    };
+    const auto store = [this](std::vector<std::uint8_t>& image, const std::uint32_t x,
+                              const std::uint32_t y, const Rgba& color) {
+        const std::size_t at = (static_cast<std::size_t>(y) * width_ + x) * 4U;
+        for (std::size_t index = 0U; index < 4U; ++index)
+            image[at + index] = channel(color[index]);
+    };
+    for (const host::LayerFilter& filter : effect.filters) {
+        std::array<float, 24U> values{};
+        for (std::size_t index = 0U; index < filter.values.size() && index < values.size(); ++index)
+            values[index] = static_cast<float>(filter.values[index]);
+        if (filter.kind == host::LayerFilterKind::blur) {
+            blur_layer(filter.value(0U), filter.value(1U));
+        } else if (filter.kind == host::LayerFilterKind::drop_shadow) {
+            const std::vector<std::uint8_t> layer = pixels_;
+            std::vector<std::uint8_t> shadow(pixels_.size(), 0U);
+            for (std::uint32_t y = top; y < bottom; ++y) {
+                for (std::uint32_t x = left; x < right; ++x)
+                    store(shadow, x, y, filter_color(6U, values, pixel_of(layer, x, y)));
+            }
+            pixels_ = std::move(shadow);
+            const double radius = std::max(0.0, filter.value(6U));
+            blur_layer(radius, radius);
+            shadow = std::move(pixels_);
+            pixels_ = layer;
+            const double offset_x = filter.value(4U) * scale_x;
+            const double offset_y = filter.value(5U) * scale_y;
+            const bool alone = filter.value(7U) > 0.5;
+            // Bilinear, clamped to the image, as the GPU sampler reads the shifted shadow.
+            const auto shifted = [&](const std::uint32_t x, const std::uint32_t y) {
+                const double sx = std::clamp(static_cast<double>(x) - offset_x, 0.0,
+                                             static_cast<double>(width_ - 1U));
+                const double sy = std::clamp(static_cast<double>(y) - offset_y, 0.0,
+                                             static_cast<double>(height_ - 1U));
+                const auto x0 = static_cast<std::uint32_t>(sx);
+                const auto y0 = static_cast<std::uint32_t>(sy);
+                const std::uint32_t x1 = std::min(x0 + 1U, width_ - 1U);
+                const std::uint32_t y1 = std::min(y0 + 1U, height_ - 1U);
+                const auto fx = static_cast<float>(sx - x0);
+                const auto fy = static_cast<float>(sy - y0);
+                const Rgba a = pixel_of(shadow, x0, y0);
+                const Rgba b = pixel_of(shadow, x1, y0);
+                const Rgba c = pixel_of(shadow, x0, y1);
+                const Rgba d = pixel_of(shadow, x1, y1);
+                Rgba result{};
+                for (std::size_t index = 0U; index < 4U; ++index) {
+                    result[index] = (a[index] * (1.0F - fx) + b[index] * fx) * (1.0F - fy) +
+                                    (c[index] * (1.0F - fx) + d[index] * fx) * fy;
+                }
+                return result;
+            };
+            for (std::uint32_t y = top; y < bottom; ++y) {
+                for (std::uint32_t x = left; x < right; ++x) {
+                    const Rgba under = shifted(x, y);
+                    const Rgba over = pixel_of(layer, x, y);
+                    Rgba result = under;
+                    if (!alone) {
+                        for (std::size_t index = 0U; index < 4U; ++index)
+                            result[index] = over[index] + under[index] * (1.0F - over[3]);
+                    }
+                    store(pixels_, x, y, result);
+                }
+            }
+        } else {
+            const auto kind = static_cast<std::uint32_t>(filter.kind);
+            for (std::uint32_t y = top; y < bottom; ++y) {
+                for (std::uint32_t x = left; x < right; ++x)
+                    store(pixels_, x, y, filter_color(kind, values, pixel_of(pixels_, x, y)));
+            }
+        }
+    }
+}
+
 void SoftwareRenderer::composite_effect(std::vector<std::uint8_t> foreground,
                                         std::vector<std::uint8_t> backdrop,
                                         const host::EffectBatch& effect) {
@@ -1364,6 +1749,7 @@ void SoftwareRenderer::render(const host::RenderPacket& packet,
             content_effects.pop_back();
             if (effect_refresh_due(content.effect, true, time_nanoseconds)) {
                 apply_effect(content.effect);
+                apply_layer_filters(content.effect);
                 if (content.effect.refresh_rate > 0.0) {
                     capture_effect(content.effect, true, time_nanoseconds);
                 }

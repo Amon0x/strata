@@ -140,11 +140,13 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                         throw std::length_error("content effect stack overflow");
                     // Authored passes read what is behind the content as the backdrop; it is
                     // captured only when the effect refreshes this frame.
+                    // A layer composited by an operator reads it too.
                     Image* backdrop = nullptr;
                     if (!reusable(*effect_batch, true, target) &&
-                        std::ranges::any_of(passes(*effect_batch), [](const auto& entry) {
-                            return entry.second.kind == 1;
-                        }))
+                        (effect_batch->composite != host::LayerComposite::source_over ||
+                         std::ranges::any_of(passes(*effect_batch), [](const auto& entry) {
+                             return entry.second.kind == 1;
+                         })))
                         backdrop = &capture(target, sample_region(*effect_batch, target));
                     auto& content = temporary(target.width, target.height, target.format);
                     clear(content);
@@ -166,6 +168,10 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                 content.image->layout = target.layout;
                 target = content.parent;
                 effect(target, content.batch, true, content.image, content.backdrop);
+                // Its content has been composited: later layers this frame may reuse the images.
+                recycle(*content.image);
+                if (content.backdrop != nullptr)
+                    recycle(*content.backdrop);
             }
         }
         if (!stack.empty())

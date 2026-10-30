@@ -161,6 +161,51 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
           "content effect isolation markers did not round-trip in order");
 }
 
+/**
+ * A content effect composited as a layer carries its operator and its built-in filters, their
+ * lengths carried through the transform it is drawn under as its bounds are.
+ */
+void test_layer_composite_round_trip(const std::filesystem::path& resources) {
+    using namespace strata;
+    ui::RenderCommandBuffer commands;
+    ui::EffectState layer;
+    layer.id = "strata:layer";
+    layer.input = ui::EffectInput::content;
+    layer.opacity = 0.5;
+    layer.composite = ui::LayerComposite::multiply;
+    layer.filters = {
+        ui::LayerFilter{ui::LayerFilterKind::blur, {3.0, 0.0}},
+        ui::LayerFilter{ui::LayerFilterKind::drop_shadow, {0.0, 0.0, 0.0, 0.5, 4.0, 2.0, 6.0, 0.0}},
+        ui::LayerFilter{ui::LayerFilterKind::gradient_map,
+                        {1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0}},
+    };
+    commands.append(ui::TransformPushRenderCommand{2.0, 0.0, 5.0, 0.0, 2.0, 7.0});
+    commands.append(ui::ContentEffectPushRenderCommand{ui::Rect{0.0, 0.0, 40.0, 30.0}, {}, layer});
+    commands.append(ui::SolidRectRenderCommand{ui::Rect{0.0, 0.0, 40.0, 30.0},
+                                               ui::RenderColor{30U, 80U, 140U, 255U}});
+    commands.append(ui::ContentEffectPopRenderCommand{});
+    commands.append(ui::TransformPopRenderCommand{});
+
+    host::RenderPacketDecoder decoder;
+    const host::RenderPacket packet = decoder.decode(encode(commands, resources));
+    const auto* content = std::get_if<host::EffectBatch>(&packet.batches.front());
+    check(content != nullptr && content->kind == host::EffectBatchKind::content_begin &&
+              content->composite == host::LayerComposite::multiply && content->opacity == 0.5 &&
+              content->width == 80.0 && content->height == 60.0,
+          "a layer's composite operator or bounds did not round-trip");
+    check(content->filters.size() == 3U &&
+              content->filters[0U].kind == host::LayerFilterKind::blur &&
+              content->filters[0U].values == std::vector<double>{6.0, 0.0} &&
+              content->filters[1U].kind == host::LayerFilterKind::drop_shadow &&
+              content->filters[1U].value(4U) == 8.0 && content->filters[1U].value(5U) == 4.0 &&
+              content->filters[1U].value(6U) == 12.0 &&
+              content->filters[2U].kind == host::LayerFilterKind::gradient_map &&
+              content->filters[2U].values.size() == 10U,
+          "a layer's filters did not round-trip in presented lengths");
+    check(content->filter_reach() == 12.0 + 8.0,
+          "a layer's filter reach is not its widest blur or shadow");
+}
+
 void test_rounded_clip_batches_round_trip(const std::filesystem::path& resources) {
     using namespace strata;
     ui::RenderCommandBuffer commands;
@@ -1002,6 +1047,7 @@ int strata_test_render_packet(const int argument_count, const char* const* const
         if (argument_count < 2)
             throw std::invalid_argument("resource root is required");
         test_effect_batches_round_trip(arguments[1]);
+        test_layer_composite_round_trip(arguments[1]);
         test_rounded_clip_batches_round_trip(arguments[1]);
         test_large_scale_rounded_clip_round_trip(arguments[1]);
         test_invalid_effect_refresh_rate_is_rejected(arguments[1]);

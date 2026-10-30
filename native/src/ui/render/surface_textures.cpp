@@ -16,7 +16,8 @@ SurfaceTextures::SurfaceTextures(std::string host_namespace,
     rebuild();
 }
 
-bool SurfaceTextures::sync(const resource::RuntimeImageStore& images) {
+bool SurfaceTextures::sync(const resource::RuntimeImageStore& images,
+                           const resource::LottieLibrary* const lottie) {
     // A streamed animation that moved to its next frame uploads it.
     for (std::size_t index = 0U; index < static_.size() && index < sources_.size(); ++index) {
         const std::shared_ptr<resource::ImageStream>& stream = static_[index].stream;
@@ -25,14 +26,21 @@ bool SurfaceTextures::sync(const resource::RuntimeImageStore& images) {
             changed_ = true;
         }
     }
-    if (synced_ && images.generation() == store_generation_)
+    const std::uint64_t lottie_generation = lottie != nullptr ? lottie->image_generation() : 0U;
+    if (synced_ && images.generation() == store_generation_ &&
+        lottie_generation == lottie_generation_)
         return changed_;
     synced_ = true;
     store_generation_ = images.generation();
+    lottie_generation_ = lottie_generation;
     runtime_.clear();
     runtime_.reserve(images.images().size());
     for (const auto& [id, image] : images.images())
         runtime_.push_back(image);
+    if (lottie != nullptr) {
+        for (std::shared_ptr<const resource::RuntimeImage>& image : lottie->images())
+            runtime_.push_back(std::move(image));
+    }
     std::vector<resource::TextureResourceDescriptor> previous = std::move(descriptors_);
     rebuild();
     changed_ = changed_ || previous != descriptors_;

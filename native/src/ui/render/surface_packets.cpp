@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "resource/svg_image.hpp"
 #include "runtime/profiler.hpp"
 #include "ui/surface.hpp"
 
@@ -42,7 +43,9 @@ const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const 
         throw std::logic_error("a released Surface cannot encode another packet");
     }
     const auto started = std::chrono::steady_clock::now();
-    const bool textures_changed = textures_.sync(images);
+    const resource::SvgImageRegistry* const registry = surface.svg_images();
+    const bool textures_changed =
+        textures_.sync(images, registry != nullptr ? registry->lottie() : nullptr);
     const bool settled = frame.operations.render.nodes_visited == 0U &&
                          frame.operations.render.commands_emitted == 0U && !textures_changed;
     if (!settled || !cache_.reuse(frame.frame_index)) {

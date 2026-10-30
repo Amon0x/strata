@@ -30,7 +30,7 @@ namespace {
 
 constexpr double transform_epsilon = 0.000001;
 constexpr std::uint16_t coverage_subpixel_divisions = 4U;
-constexpr std::size_t maximum_content_effect_depth = 4U;
+constexpr std::size_t maximum_content_effect_depth = 8U;
 
 [[nodiscard]] bool rounded(const CornerRadii radii) noexcept {
     return radii.top_left > 0.0 || radii.top_right > 0.0 ||
@@ -2318,6 +2318,27 @@ class Planner final {
 
     [[nodiscard]] EffectState scoped_effect(EffectState effect) const {
         effect.opacity *= opacity_;
+        if (effect.composite != LayerComposite::source_over)
+            effect.refresh_rate = 0.0;
+        // A layer's filter lengths are in the space it is drawn in: carried into presented
+        // logical pixels as its bounds are.
+        const double along_x = std::hypot(transform_.m00, transform_.m10);
+        const double along_y = std::hypot(transform_.m01, transform_.m11);
+        const double area =
+            std::sqrt(std::abs(transform_.m00 * transform_.m11 - transform_.m01 * transform_.m10));
+        for (LayerFilter& filter : effect.filters) {
+            std::vector<double>& values = filter.values;
+            if (filter.kind == LayerFilterKind::blur && values.size() >= 2U) {
+                values[0] *= along_x;
+                values[1] *= along_y;
+            } else if (filter.kind == LayerFilterKind::drop_shadow && values.size() >= 7U) {
+                const double x = values[4];
+                const double y = values[5];
+                values[4] = transform_.m00 * x + transform_.m01 * y;
+                values[5] = transform_.m10 * x + transform_.m11 * y;
+                values[6] *= area;
+            }
+        }
         return effect;
     }
     [[nodiscard]] std::vector<SubmissionRoundedClip> batch_rounded_clips() const {

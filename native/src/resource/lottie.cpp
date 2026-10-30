@@ -1,6 +1,7 @@
 #include "resource/lottie.hpp"
 
 #include "data/json.hpp"
+#include "resource/image.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -508,8 +509,144 @@ void shape_items(const JsonValue* const list, std::vector<ShapeItem>& output,
     return static_cast<std::int64_t>(std::llround(*real));
 }
 
+/** A layer's enabled effects (`ef`), each control's value in order. */
+[[nodiscard]] std::vector<Effect> effects(const JsonValue* const list) {
+    std::vector<Effect> result;
+    if (list == nullptr || list->array() == nullptr)
+        return result;
+    for (const JsonValue& entry : *list->array()) {
+        if (entry.object() == nullptr)
+            continue;
+        if (entry.find("en") != nullptr && !flag(entry, "en"))
+            continue;
+        Effect effect;
+        effect.type = static_cast<int>(number_or(entry, "ty", -1.0));
+        if (const JsonValue* controls = entry.find("ef");
+            controls != nullptr && controls->array() != nullptr) {
+            for (const JsonValue& control : *controls->array()) {
+                if (control.object() == nullptr) {
+                    effect.values.emplace_back(std::vector<double>{0.0});
+                    continue;
+                }
+                Property value = property(control.find("v"), {0.0});
+                // A colour control (type 2) may carry 0-255 channels as old exports do.
+                if (number_or(control, "ty", -1.0) == 2.0)
+                    normalize_color(value);
+                effect.values.push_back(std::move(value));
+            }
+        }
+        result.push_back(std::move(effect));
+    }
+    return result;
+}
+
+/** A text colour (`fc`, `sc`): three channels, from 0-1 or old 0-255 exports. */
+[[nodiscard]] std::optional<std::array<double, 3>> text_color(const JsonValue* const value) {
+    const std::vector<double> channels = numbers(value);
+    if (channels.size() < 3U)
+        return std::nullopt;
+    const double largest = std::max({channels[0], channels[1], channels[2]});
+    const double scale = largest > 1.0 + 1.0e-6 ? 1.0 / 255.0 : 1.0;
+    return std::array<double, 3>{channels[0] * scale, channels[1] * scale, channels[2] * scale};
+}
+
+[[nodiscard]] TextDocument text_document(const JsonValue& value) {
+    TextDocument result;
+    if (const std::string* content = text(value, "t"); content != nullptr)
+        result.text = *content;
+    if (const std::string* font = text(value, "f"); font != nullptr)
+        result.font = *font;
+    result.size = number_or(value, "s", 10.0);
+    result.fill = text_color(value.find("fc"));
+    result.stroke = text_color(value.find("sc"));
+    result.stroke_width = number_or(value, "sw", 0.0);
+    result.stroke_over_fill = flag(value, "of");
+    result.tracking = number_or(value, "tr", 0.0);
+    result.line_height = number_or(value, "lh", result.size * 1.2);
+    result.justify = static_cast<int>(number_or(value, "j", 0.0));
+    result.baseline_shift = number_or(value, "ls", 0.0);
+    result.caps = static_cast<int>(number_or(value, "ca", 0.0));
+    const std::vector<double> box = numbers(value.find("sz"));
+    if (box.size() >= 2U) {
+        result.box_size = Vec2{box[0], box[1]};
+        const std::vector<double> at = numbers(value.find("ps"));
+        if (at.size() >= 2U)
+            result.box_position = Vec2{at[0], at[1]};
+    }
+    return result;
+}
+
+[[nodiscard]] TextData text_data(const JsonValue* const value) {
+    TextData result;
+    if (value == nullptr || value->object() == nullptr)
+        return result;
+    if (const JsonValue* documents = value->find("d"); documents != nullptr) {
+        const JsonValue* frames = documents->find("k");
+        if (frames != nullptr && frames->array() != nullptr) {
+            for (const JsonValue& frame : *frames->array()) {
+                const JsonValue* start = frame.object() != nullptr ? frame.find("s") : nullptr;
+                if (start == nullptr || start->object() == nullptr)
+                    continue;
+                result.documents.push_back(
+                    TextDocumentKeyframe{number_or(frame, "t", 0.0), text_document(*start)});
+            }
+        }
+    }
+    std::ranges::stable_sort(result.documents, {}, &TextDocumentKeyframe::time);
+    if (const JsonValue* options = value->find("m"); options != nullptr && options->object())
+        result.alignment = property(options->find("a"), {0.0, 0.0});
+    if (const JsonValue* animators = value->find("a");
+        animators != nullptr && animators->array() != nullptr) {
+        for (const JsonValue& entry : *animators->array()) {
+            if (entry.object() == nullptr)
+                continue;
+            TextAnimator animator;
+            if (const JsonValue* selector = entry.find("s");
+                selector != nullptr && selector->object() != nullptr) {
+                animator.selector.start = property(selector->find("s"), {0.0});
+                animator.selector.end = property(selector->find("e"), {100.0});
+                animator.selector.offset = property(selector->find("o"), {0.0});
+                animator.selector.amount = property(selector->find("a"), {100.0});
+                animator.selector.ease_high = property(selector->find("xe"), {0.0});
+                animator.selector.ease_low = property(selector->find("ne"), {0.0});
+                animator.selector.units = static_cast<int>(number_or(*selector, "r", 1.0));
+                animator.selector.based_on = static_cast<int>(number_or(*selector, "b", 1.0));
+                animator.selector.shape = static_cast<int>(number_or(*selector, "sh", 1.0));
+            }
+            if (const JsonValue* properties = entry.find("a");
+                properties != nullptr && properties->object() != nullptr) {
+                const auto optional = [&](const std::string_view key,
+                                          std::vector<double> fallback) -> std::optional<Property> {
+                    const JsonValue* field = properties->find(key);
+                    if (field == nullptr)
+                        return std::nullopt;
+                    return property(field, std::move(fallback));
+                };
+                animator.anchor = optional("a", {0.0, 0.0});
+                animator.position = optional("p", {0.0, 0.0});
+                animator.scale = optional("s", {100.0, 100.0});
+                animator.rotation = optional("r", {0.0});
+                if (!animator.rotation.has_value())
+                    animator.rotation = optional("rz", {0.0});
+                animator.opacity = optional("o", {100.0});
+                animator.fill_color = optional("fc", {0.0, 0.0, 0.0, 1.0});
+                if (animator.fill_color.has_value())
+                    normalize_color(*animator.fill_color);
+                animator.stroke_color = optional("sc", {0.0, 0.0, 0.0, 1.0});
+                if (animator.stroke_color.has_value())
+                    normalize_color(*animator.stroke_color);
+                animator.stroke_width = optional("sw", {0.0});
+                animator.tracking = optional("t", {0.0});
+            }
+            result.animators.push_back(std::move(animator));
+        }
+    }
+    return result;
+}
+
 [[nodiscard]] Layer layer(const JsonValue& value,
-                          const std::map<std::string, std::size_t, std::less<>>& assets) {
+                          const std::map<std::string, std::size_t, std::less<>>& assets,
+                          const std::map<std::string, std::size_t, std::less<>>& images) {
     if (value.object() == nullptr)
         throw std::invalid_argument("a layer must be an object");
     Layer result;
@@ -541,12 +678,26 @@ void shape_items(const JsonValue* const list, std::vector<ShapeItem>& output,
             mask.path = shape_property(entry.find("pt"));
             mask.opacity = property(entry.find("o"), {100.0});
             mask.expansion = property(entry.find("x"), {0.0});
+            mask.feather = property(entry.find("f"), {0.0, 0.0});
             result.masks.push_back(std::move(mask));
         }
     }
+    result.blend_mode = static_cast<int>(number_or(value, "bm", 0.0));
+    if (result.blend_mode < 0 || result.blend_mode > 16)
+        result.blend_mode = 0;
+    result.effects = effects(value.find("ef"));
     switch (result.type) {
     case LayerType::shape:
         shape_items(value.find("shapes"), result.shapes, 0U);
+        break;
+    case LayerType::image:
+        if (const std::string* reference = text(value, "refId"); reference != nullptr) {
+            if (const auto found = images.find(*reference); found != images.end())
+                result.image = found->second;
+        }
+        break;
+    case LayerType::text:
+        result.text = text_data(value.find("t"));
         break;
     case LayerType::precomp: {
         result.width = number_or(value, "w", 0.0);
@@ -572,14 +723,57 @@ void shape_items(const JsonValue* const list, std::vector<ShapeItem>& output,
 
 [[nodiscard]] Composition
 composition(const JsonValue* const layers,
-            const std::map<std::string, std::size_t, std::less<>>& assets) {
+            const std::map<std::string, std::size_t, std::less<>>& assets,
+            const std::map<std::string, std::size_t, std::less<>>& images) {
     Composition result;
     if (layers == nullptr || layers->array() == nullptr)
         return result;
     result.layers.reserve(layers->array()->size());
-    for (const JsonValue& entry : *layers->array())
-        result.layers.push_back(layer(entry, assets));
+    for (const JsonValue& entry : *layers->array()) {
+        result.layers.push_back(layer(entry, assets, images));
+        result.blends = result.blends || result.layers.back().blend_mode != 0;
+    }
     return result;
+}
+
+/** The largest magnitude a property takes at any keyframe, over its first `count` components. */
+[[nodiscard]] double largest(const Property& value, const std::size_t count = 8U) noexcept {
+    double result = 0.0;
+    const auto scan = [&](const std::vector<double>& values) {
+        for (std::size_t index = 0U; index < values.size() && index < count; ++index)
+            result = std::max(result, std::abs(values[index]));
+    };
+    scan(value.constant_);
+    for (const Keyframe& keyframe : value.keyframes_) {
+        scan(keyframe.start);
+        scan(keyframe.end);
+    }
+    return result;
+}
+
+/**
+ * How far a layer's effects and feathered masks reach past what it draws, in its own units, at
+ * the most any keyframe asks (the factors the scene draws them by, a little over).
+ */
+[[nodiscard]] double layer_reach(const Layer& entry) noexcept {
+    double reach = 0.0;
+    for (const Mask& mask : entry.masks)
+        reach = std::max(reach, largest(mask.feather, 2U) * 1.2);
+    for (const Effect& effect : entry.effects) {
+        const auto at = [&effect](const std::size_t index) {
+            return index < effect.values.size() ? largest(effect.values[index], 1U) : 0.0;
+        };
+        if (effect.type == effect_gaussian_blur)
+            reach = std::max(reach, at(0U) * 0.9);
+        else if (effect.type == effect_drop_shadow)
+            reach = std::max(reach, at(3U) + at(4U) * 0.75);
+    }
+    return reach;
+}
+
+[[nodiscard]] bool supported_effect(const int type) noexcept {
+    return type == effect_tint || type == effect_fill || type == effect_tritone ||
+           type == effect_levels || type == effect_drop_shadow || type == effect_gaussian_blur;
 }
 
 /** Whether precomposition `index` reaches itself through its layers. */
@@ -802,6 +996,76 @@ BezierShape ShapeProperty::evaluate(const double frame) const {
     return result;
 }
 
+double Effect::scalar(const std::size_t index, const double frame,
+                      const double fallback) const noexcept {
+    return index < values.size() ? values[index].scalar(frame) : fallback;
+}
+
+std::array<double, 4> Effect::color(const std::size_t index, const double frame) const noexcept {
+    std::array<double, 4> result{0.0, 0.0, 0.0, 1.0};
+    if (index < values.size()) {
+        values[index].evaluate(frame, result);
+        if (values[index].dimension() < 4U)
+            result[3] = 1.0;
+    }
+    return result;
+}
+
+const TextDocument* TextData::document(const double frame) const noexcept {
+    // Text documents hold until the next one starts.
+    const TextDocument* result = documents.empty() ? nullptr : &documents.front().document;
+    for (const TextDocumentKeyframe& keyframe : documents) {
+        if (keyframe.time <= frame)
+            result = &keyframe.document;
+    }
+    return result;
+}
+
+std::optional<std::vector<std::uint8_t>> data_uri_bytes(const std::string_view uri) {
+    if (!uri.starts_with("data:"))
+        return std::nullopt;
+    const std::size_t comma = uri.find(',');
+    if (comma == std::string_view::npos)
+        return std::nullopt;
+    const std::string_view header = uri.substr(5U, comma - 5U);
+    const std::string_view payload = uri.substr(comma + 1U);
+    std::vector<std::uint8_t> result;
+    if (!header.ends_with(";base64")) {
+        result.assign(payload.begin(), payload.end());
+        return result;
+    }
+    const auto decode = [](const char c) -> int {
+        if (c >= 'A' && c <= 'Z')
+            return c - 'A';
+        if (c >= 'a' && c <= 'z')
+            return c - 'a' + 26;
+        if (c >= '0' && c <= '9')
+            return c - '0' + 52;
+        if (c == '+' || c == '-')
+            return 62;
+        if (c == '/' || c == '_')
+            return 63;
+        return -1;
+    };
+    result.reserve(payload.size() * 3U / 4U);
+    std::uint32_t buffer = 0U;
+    int bits = 0;
+    for (const char c : payload) {
+        if (c == '=')
+            break;
+        const int value = decode(c);
+        if (value < 0)
+            continue;
+        buffer = (buffer << 6U) | static_cast<std::uint32_t>(value);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            result.push_back(static_cast<std::uint8_t>((buffer >> bits) & 0xFFU));
+        }
+    }
+    return result;
+}
+
 Vec2 Transform::position_at(const double frame) const noexcept {
     if (split_position)
         return Vec2{position_x.scalar(frame), position_y.scalar(frame)};
@@ -836,23 +1100,89 @@ Animation parse(const std::string_view json) {
         throw std::invalid_argument("a Lottie composition needs a layers array");
     // Precompositions may refer to each other, so every id is known before any is read.
     std::map<std::string, std::size_t, std::less<>> assets;
+    std::map<std::string, std::size_t, std::less<>> images;
     std::vector<const JsonValue*> precomp_sources;
     if (const JsonValue* list = document.find("assets");
         list != nullptr && list->array() != nullptr) {
         for (const JsonValue& asset : *list->array()) {
-            if (asset.object() == nullptr || asset.find("layers") == nullptr)
+            if (asset.object() == nullptr)
                 continue;
             const std::string* id = text(asset, "id");
-            if (id == nullptr || assets.contains(*id))
+            if (id == nullptr || assets.contains(*id) || images.contains(*id))
                 continue;
+            if (asset.find("layers") == nullptr) {
+                // An image: a data URI (`e` 1, or a `p` that is one) or a file beside the
+                // animation, `u` its folder.
+                const std::string* file = text(asset, "p");
+                if (file == nullptr)
+                    continue;
+                ImageAsset image;
+                image.id = *id;
+                image.width = number_or(asset, "w", 0.0);
+                image.height = number_or(asset, "h", 0.0);
+                image.file = *file;
+                if (const std::string* folder = text(asset, "u"); folder != nullptr)
+                    image.directory = *folder;
+                image.embedded = flag(asset, "e") || file->starts_with("data:");
+                images.emplace(*id, result.images.size());
+                result.images.push_back(std::move(image));
+                continue;
+            }
             assets.emplace(*id, precomp_sources.size());
             precomp_sources.push_back(asset.find("layers"));
         }
     }
     result.precomps.reserve(precomp_sources.size());
     for (const JsonValue* layers : precomp_sources)
-        result.precomps.push_back(composition(layers, assets));
-    result.root = composition(document.find("layers"), assets);
+        result.precomps.push_back(composition(layers, assets, images));
+    result.root = composition(document.find("layers"), assets, images);
+    if (const JsonValue* fonts = document.find("fonts"); fonts != nullptr && fonts->object()) {
+        if (const JsonValue* list = fonts->find("list"); list != nullptr && list->array()) {
+            for (const JsonValue& entry : *list->array()) {
+                if (entry.object() == nullptr)
+                    continue;
+                Font font;
+                if (const std::string* name = text(entry, "fName"); name != nullptr)
+                    font.name = *name;
+                if (const std::string* family = text(entry, "fFamily"); family != nullptr)
+                    font.family = *family;
+                if (const std::string* style = text(entry, "fStyle"); style != nullptr)
+                    font.style = *style;
+                font.ascent = number_or(entry, "ascent", 0.0);
+                result.fonts.push_back(std::move(font));
+            }
+        }
+    }
+    if (const JsonValue* chars = document.find("chars"); chars != nullptr && chars->array()) {
+        for (const JsonValue& entry : *chars->array()) {
+            if (entry.object() == nullptr)
+                continue;
+            GlyphShape glyph;
+            if (const std::string* character = text(entry, "ch"); character != nullptr)
+                glyph.character = *character;
+            if (const std::string* family = text(entry, "fFamily"); family != nullptr)
+                glyph.family = *family;
+            if (const std::string* style = text(entry, "style"); style != nullptr)
+                glyph.style = *style;
+            glyph.width = number_or(entry, "w", 0.0);
+            if (const JsonValue* data = entry.find("data"); data != nullptr && data->object())
+                shape_items(data->find("shapes"), glyph.shapes, 0U);
+            result.glyphs.push_back(std::move(glyph));
+        }
+    }
+    const auto survey = [&result](const Composition& entry) {
+        for (const Layer& item : entry.layers) {
+            result.filter_reach = std::max(result.filter_reach, layer_reach(item));
+            const bool feathered = std::ranges::any_of(
+                item.masks, [](const Mask& mask) { return largest(mask.feather, 2U) > 0.0; });
+            const bool effected = std::ranges::any_of(
+                item.effects, [](const Effect& effect) { return supported_effect(effect.type); });
+            result.layered = result.layered || item.blend_mode != 0 || feathered || effected;
+        }
+    };
+    survey(result.root);
+    for (const Composition& entry : result.precomps)
+        survey(entry);
     std::vector<int> state(result.precomps.size(), 0);
     for (std::size_t index = 0U; index < result.precomps.size(); ++index) {
         if (cyclic(result, index, state))
@@ -877,8 +1207,10 @@ std::shared_ptr<const lottie::Animation> LottieLibrary::find(const std::string_v
     } else {
         try {
             const std::vector<std::uint8_t> bytes = loader_(id);
-            entry.animation = std::make_shared<const lottie::Animation>(lottie::parse(
-                std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size())));
+            lottie::Animation parsed = lottie::parse(
+                std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+            load_images(id, parsed);
+            entry.animation = std::make_shared<const lottie::Animation>(std::move(parsed));
         } catch (const std::exception& error) {
             entry.error = std::string(id) + ": " + error.what();
         }
@@ -886,6 +1218,57 @@ std::shared_ptr<const lottie::Animation> LottieLibrary::find(const std::string_v
     std::shared_ptr<const lottie::Animation> animation = entry.animation;
     entries_.emplace(std::string(id), std::move(entry));
     return animation;
+}
+
+void LottieLibrary::load_images(const std::string_view id, lottie::Animation& animation) const {
+    // Files are named relative to the animation's own folder.
+    const std::size_t slash = id.rfind('/');
+    const std::string folder =
+        slash == std::string_view::npos ? std::string{} : std::string(id.substr(0U, slash + 1U));
+    for (lottie::ImageAsset& image : animation.images) {
+        try {
+            std::vector<std::uint8_t> encoded;
+            if (image.embedded) {
+                std::optional<std::vector<std::uint8_t>> bytes = lottie::data_uri_bytes(image.file);
+                if (!bytes.has_value())
+                    continue;
+                encoded = std::move(*bytes);
+            } else {
+                std::string directory = image.directory;
+                while (directory.starts_with('/'))
+                    directory.erase(0U, 1U);
+                if (!directory.empty() && !directory.ends_with('/'))
+                    directory += '/';
+                encoded = loader_(folder + directory + image.file);
+            }
+            const ImageInfo info = inspect_image(encoded);
+            std::vector<std::uint8_t> pixels = decode_image_rgba8(encoded, info.dimensions);
+            auto decoded = std::make_shared<RuntimeImage>();
+            decoded->id = "lottie:" + std::string(id) + "#" + image.id;
+            decoded->dimensions = info.dimensions;
+            decoded->pixels = std::move(pixels);
+            decoded->revision = image_generation_.load() + 1U;
+            image.texture = decoded->id;
+            if (!(image.width > 0.0) || !(image.height > 0.0)) {
+                image.width = info.dimensions.width;
+                image.height = info.dimensions.height;
+            }
+            images_.push_back(std::move(decoded));
+            image_generation_.fetch_add(1U);
+        } catch (const std::exception&) {
+            // An image that cannot be read draws nothing; the rest of the animation plays.
+            image.texture.clear();
+        }
+    }
+}
+
+std::vector<std::shared_ptr<const RuntimeImage>> LottieLibrary::images() const {
+    const std::scoped_lock lock(mutex_);
+    return images_;
+}
+
+std::uint64_t LottieLibrary::image_generation() const noexcept {
+    return image_generation_.load();
 }
 
 std::string LottieLibrary::error(const std::string_view id) const {

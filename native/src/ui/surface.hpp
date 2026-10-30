@@ -366,6 +366,10 @@ class Surface final {
     [[nodiscard]] NotificationService& notifications() noexcept;
     [[nodiscard]] const NotificationService& notifications() const noexcept;
     [[nodiscard]] const TextEngine* text_engine() const noexcept;
+    /** The images and animations its widgets draw by id, or null for a surface without any. */
+    [[nodiscard]] const resource::SvgImageRegistry* svg_images() const noexcept {
+        return svg_images_.get();
+    }
     [[nodiscard]] const RenderCommandBuffer& render_commands() const noexcept;
     [[nodiscard]] std::vector<runtime::LayerSnapshot> layer_snapshot() const;
     [[nodiscard]] bool inspect_select(std::string_view key);

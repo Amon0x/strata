@@ -38,4 +38,13 @@ void prepare_system_fonts();
 /** The system font with this file name (`bahnschrift.ttf`, any case); nothing when none is. */
 [[nodiscard]] std::optional<SystemFont> system_font_named(std::string_view file);
 
+/**
+ * The system font a design names: by its PostScript or full name (`Arial-BoldMT`, `Arial Bold`),
+ * else the face of `family` (any case) nearest `weight` (100-900) and slant. Nothing when no
+ * installed font has that name or family. Every font is read for its names once, the first time
+ * any is asked for.
+ */
+[[nodiscard]] std::optional<SystemFont>
+system_font_family(std::string_view name, std::string_view family, int weight, bool italic);
+
 } // namespace strata::font

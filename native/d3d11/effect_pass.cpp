@@ -5,6 +5,7 @@
 #include "effect_pass.hpp"
 #include "gpu/effect_policy.hpp"
 #include "gpu/effect_shaders.hpp"
+#include "gpu/layer_shaders.hpp"
 
 #include <algorithm>
 #include <array>
@@ -100,6 +101,8 @@ struct EffectPassRenderer::Impl final {
         Target backdrop;
         Target ping;
         Target pong;
+        /** A layer's drop shadow while it is drawn and blurred. */
+        Target shadow;
     };
     struct Pass final {
         std::uint32_t kind = 0U;
@@ -187,6 +190,21 @@ struct EffectPassRenderer::Impl final {
                                                   cached_composite_code->GetBufferSize(), nullptr,
                                                   &cached_composite),
                         "D3D11 cached effect composite shader creation");
+        const auto layer_shader = [this](const std::string& source,
+                                         ComPtr<ID3D11PixelShader>& output,
+                                         const char* const operation) {
+            const ComPtr<ID3DBlob> code = compile_shader(source, "main", "ps_5_0");
+            require_hresult(device->CreatePixelShader(code->GetBufferPointer(),
+                                                      code->GetBufferSize(), nullptr, &output),
+                            operation);
+        };
+        layer_shader(std::string(gpu::layer_prelude) + std::string(gpu::layer_filter_pixel),
+                     layer_filter, "D3D11 layer filter shader creation");
+        layer_shader(std::string(gpu::layer_prelude) + std::string(gpu::layer_shadow_pixel),
+                     layer_shadow, "D3D11 layer shadow shader creation");
+        layer_shader(std::string(rounded_clip_hlsl) + std::string(gpu::layer_prelude) +
+                         std::string(gpu::layer_composite_pixel),
+                     layer_composite, "D3D11 layer composite shader creation");
         const ComPtr<ID3DBlob> probe_code = compile_shader(backdrop_probe_pixel, "main", "ps_5_0");
         require_hresult(device->CreatePixelShader(probe_code->GetBufferPointer(),
                                                   probe_code->GetBufferSize(), nullptr,
@@ -221,6 +239,9 @@ struct EffectPassRenderer::Impl final {
         constants_descriptor.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         require_hresult(device->CreateBuffer(&constants_descriptor, nullptr, &constants),
                         "D3D11 effect constant buffer creation");
+        constants_descriptor.ByteWidth = sizeof(gpu::LayerConstants);
+        require_hresult(device->CreateBuffer(&constants_descriptor, nullptr, &layer_constants),
+                        "D3D11 layer constant buffer creation");
         D3D11_SAMPLER_DESC sampler_descriptor{};
         sampler_descriptor.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         sampler_descriptor.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -450,7 +471,7 @@ struct EffectPassRenderer::Impl final {
             throw std::length_error("D3D11 content effect nesting exceeds the packet limit");
         }
         if (!processing.has_value()) {
-            processing.emplace(Workspace{target(), target(), target(), target()});
+            processing.emplace(Workspace{target(), target(), target(), target(), target()});
         }
         return *processing;
     }
@@ -690,7 +711,9 @@ struct EffectPassRenderer::Impl final {
         const double scale = std::max(scale_x, scale_y);
         const double reach = std::ceil(std::max(
             gpu::effect_sample_reach * scale,
-            std::clamp(std::ceil(widest_blur(effect) * scale), 1.0, 256.0)));
+            std::clamp(
+                std::ceil(std::max(widest_blur(effect), effect.filter_reach() * 2.0) * scale), 1.0,
+                512.0)));
         const auto bounded = [](const double value, const std::uint32_t limit) {
             return static_cast<UINT>(std::clamp(value, 0.0, static_cast<double>(limit)));
         };
@@ -702,6 +725,143 @@ struct EffectPassRenderer::Impl final {
             bounded(std::ceil((effect.y + effect.height) * scale_y) + reach, height),
             1U,
         };
+    }
+
+    /** The constants every layer program shares: target, bounds and corner radii in pixels. */
+    [[nodiscard]] gpu::LayerConstants layer_values(const host::EffectBatch& effect,
+                                                   const double logical_width,
+                                                   const double logical_height) const noexcept {
+        const double scale_x = logical_width > 0.0 ? width / logical_width : 1.0;
+        const double scale_y = logical_height > 0.0 ? height / logical_height : 1.0;
+        gpu::LayerConstants values;
+        values.logical_size[0] = static_cast<float>(logical_width);
+        values.logical_size[1] = static_cast<float>(logical_height);
+        values.target_size[0] = static_cast<float>(width);
+        values.target_size[1] = static_cast<float>(height);
+        values.bounds[0] = static_cast<float>(effect.x * scale_x);
+        values.bounds[1] = static_cast<float>(effect.y * scale_y);
+        values.bounds[2] = static_cast<float>(effect.width * scale_x);
+        values.bounds[3] = static_cast<float>(effect.height * scale_y);
+        const double radius_scale = std::sqrt(std::abs(scale_x * scale_y));
+        for (std::size_t index = 0U; index < effect.radii.size(); ++index)
+            values.radii[index] = static_cast<float>(effect.radii[index] * radius_scale);
+        values.opacity = static_cast<float>(effect.opacity);
+        return values;
+    }
+
+    /** Draws one layer program over `scissor` of `destination`, replacing what is there. */
+    void draw_layer(ID3D11PixelShader* const shader, ID3D11ShaderResourceView* const source,
+                    ID3D11ShaderResourceView* const backdrop,
+                    ID3D11RenderTargetView* const destination, const D3D11_RECT scissor,
+                    const gpu::LayerConstants& values,
+                    const std::span<const host::RoundedClip> clips) const {
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        require_hresult(
+            context->Map(layer_constants.Get(), 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped),
+            "D3D11 layer constant mapping");
+        std::memcpy(mapped.pData, &values, sizeof(values));
+        context->Unmap(layer_constants.Get(), 0U);
+        ID3D11ShaderResourceView* resources[]{source, backdrop != nullptr ? backdrop : source};
+        ID3D11Buffer* constant_buffers[]{layer_constants.Get()};
+        ID3D11SamplerState* samplers[]{sampler.Get()};
+        const D3D11_VIEWPORT viewport{
+            0.0F, 0.0F, static_cast<float>(width), static_cast<float>(height), 0.0F, 1.0F,
+        };
+        context->OMSetRenderTargets(1U, &destination, nullptr);
+        context->OMSetBlendState(replace_blend.Get(), nullptr, UINT32_MAX);
+        context->RSSetState(rasterizer.Get());
+        context->RSSetViewports(1U, &viewport);
+        context->RSSetScissorRects(1U, &scissor);
+        context->IASetInputLayout(nullptr);
+        context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        context->VSSetShader(vertex.Get(), nullptr, 0U);
+        context->PSSetShader(shader, nullptr, 0U);
+        rounded_clips->bind(clips, RoundedClipMode::premultiplied_alpha);
+        context->PSSetConstantBuffers(0U, 1U, constant_buffers);
+        context->PSSetSamplers(0U, 1U, samplers);
+        context->PSSetShaderResources(0U, 2U, resources);
+        context->Draw(3U, 0U);
+        ID3D11ShaderResourceView* cleared[]{nullptr, nullptr};
+        context->PSSetShaderResources(0U, 2U, cleared);
+        context->OMSetRenderTargets(0U, nullptr, nullptr);
+    }
+
+    /**
+     * Blurs `target` in place over the layer's bounds widened by `reach` logical pixels, by
+     * `radius_x` and `radius_y` logical pixels each way.
+     */
+    void blur_layer(const host::EffectBatch& effect, Target& target, const double radius_x,
+                    const double radius_y, const double reach, const double logical_width,
+                    const double logical_height, EffectPassTelemetry& telemetry) {
+        if (!(radius_x > 0.0) && !(radius_y > 0.0))
+            return;
+        const double scale_x = logical_width > 0.0 ? width / logical_width : 1.0;
+        const double scale_y = logical_height > 0.0 ? height / logical_height : 1.0;
+        const double physical = std::max(radius_x, radius_y) * std::max(scale_x, scale_y);
+        const host::BlurBatch batch{
+            effect.source_order,
+            host::Scissor{0U, 0U, width, height},
+            effect.x - reach,
+            effect.y - reach,
+            effect.width + reach * 2.0,
+            effect.height + reach * 2.0,
+            std::max(radius_x, radius_y),
+            gpu::layer_blur_downsample(physical),
+        };
+        context->OMSetRenderTargets(0U, nullptr, nullptr);
+        const BlurPassTelemetry measured =
+            blur.execute(batch, target.texture.Get(), target.target.Get(), width, height,
+                         logical_width, logical_height, radius_x, radius_y);
+        telemetry.passes += measured.passes;
+    }
+
+    /**
+     * Runs a content layer's built-in filters over `current` in order, within `region` (its
+     * sample region), and returns the target holding the result.
+     */
+    [[nodiscard]] Target* run_filters(const host::EffectBatch& effect, Workspace& work,
+                                      Target* current, const D3D11_BOX region,
+                                      const double logical_width, const double logical_height,
+                                      EffectPassTelemetry& telemetry) {
+        const double scale_x = logical_width > 0.0 ? width / logical_width : 1.0;
+        const double scale_y = logical_height > 0.0 ? height / logical_height : 1.0;
+        const D3D11_RECT area{static_cast<LONG>(region.left), static_cast<LONG>(region.top),
+                              static_cast<LONG>(region.right), static_cast<LONG>(region.bottom)};
+        const double reach = effect.filter_reach();
+        const auto next_of = [&work](const Target* const used) {
+            return used == &work.ping ? &work.pong : &work.ping;
+        };
+        for (const host::LayerFilter& filter : effect.filters) {
+            gpu::LayerConstants values = layer_values(effect, logical_width, logical_height);
+            for (std::size_t index = 0U; index < filter.values.size() && index < 24U; ++index)
+                values.values[index] = static_cast<float>(filter.values[index]);
+            if (filter.kind == host::LayerFilterKind::blur) {
+                blur_layer(effect, *current, filter.value(0U), filter.value(1U), reach,
+                           logical_width, logical_height, telemetry);
+            } else if (filter.kind == host::LayerFilterKind::drop_shadow) {
+                values.kind = gpu::layer_shadow_source_kind;
+                draw_layer(layer_filter.Get(), current->view.Get(), nullptr,
+                           work.shadow.target.Get(), area, values, {});
+                const double radius = std::max(0.0, filter.value(6U));
+                blur_layer(effect, work.shadow, radius, radius, reach, logical_width,
+                           logical_height, telemetry);
+                values.offset[0] = static_cast<float>(filter.value(4U) * scale_x);
+                values.offset[1] = static_cast<float>(filter.value(5U) * scale_y);
+                Target* const next = next_of(current);
+                draw_layer(layer_shadow.Get(), current->view.Get(), work.shadow.view.Get(),
+                           next->target.Get(), area, values, {});
+                current = next;
+                telemetry.passes += 2U;
+            } else {
+                values.kind = static_cast<std::uint32_t>(filter.kind);
+                Target* const next = next_of(current);
+                draw_layer(layer_filter.Get(), current->view.Get(), nullptr, next->target.Get(),
+                           area, values, {});
+                current = next;
+                ++telemetry.passes;
+            }
+        }
+        return current;
     }
 
     [[nodiscard]] EffectPassTelemetry
@@ -779,8 +939,9 @@ struct EffectPassRenderer::Impl final {
         // widest blur, so that region is all the workspace has to hold. Capturing the whole
         // framebuffer instead makes every effect cost the window's area rather than its own.
         const bool samples_backdrop =
-            program != nullptr &&
-            std::ranges::any_of(*program, [](const Pass& pass) { return pass.kind == 1U; });
+            (program != nullptr &&
+             std::ranges::any_of(*program, [](const Pass& pass) { return pass.kind == 1U; })) ||
+            effect.composite != host::LayerComposite::source_over;
         const D3D11_BOX region = sample_region(effect, logical_width, logical_height);
         Target* current = &work.capture;
         if (resolved_source != current->texture.Get()) {
@@ -829,6 +990,10 @@ struct EffectPassRenderer::Impl final {
                 }
             }
         }
+        if (content && !effect.filters.empty()) {
+            current = run_filters(effect, work, current, region, logical_width, logical_height,
+                                  telemetry);
+        }
         if (rate_limited) {
             context->OMSetRenderTargets(0U, nullptr, nullptr);
             ID3D11ShaderResourceView* unbound[]{nullptr, nullptr};
@@ -849,6 +1014,12 @@ struct EffectPassRenderer::Impl final {
             cached->second.revision = effect.sample_revision;
             draw_cached(cached->second, destination, effect, logical_width, logical_height,
                         frame_seconds);
+        } else if (effect.composite != host::LayerComposite::source_over) {
+            gpu::LayerConstants values = layer_values(effect, logical_width, logical_height);
+            values.kind = static_cast<std::uint32_t>(effect.composite);
+            values.opacity = static_cast<float>(effect.opacity);
+            draw_layer(layer_composite.Get(), current->view.Get(), direct_backdrop, destination,
+                       clip, values, effect.rounded_clips);
         } else {
             draw_pass(composite.Get(), current->view.Get(), direct_backdrop, destination, effect,
                       logical_width, logical_height, frame_seconds, composite_blend.Get());
@@ -873,7 +1044,11 @@ struct EffectPassRenderer::Impl final {
     ComPtr<ID3D11VertexShader> vertex;
     ComPtr<ID3D11PixelShader> composite;
     ComPtr<ID3D11PixelShader> cached_composite;
+    ComPtr<ID3D11PixelShader> layer_filter;
+    ComPtr<ID3D11PixelShader> layer_shadow;
+    ComPtr<ID3D11PixelShader> layer_composite;
     ComPtr<ID3D11Buffer> constants;
+    ComPtr<ID3D11Buffer> layer_constants;
     ComPtr<ID3D11SamplerState> sampler;
     ComPtr<ID3D11RasterizerState> rasterizer;
     ComPtr<ID3D11BlendState> replace_blend;

@@ -33,10 +33,15 @@ class BlurPass final {
     BlurPass& operator=(const BlurPass&) = delete;
 
     void resize(std::uint32_t width, std::uint32_t height, DXGI_FORMAT format);
+    /**
+     * Blurs the batch's region of `back_buffer` into `target`. `radius_x` and `radius_y`, when
+     * given (logical pixels), blur each way by its own radius in place of the batch's.
+     */
     [[nodiscard]] BlurPassTelemetry
     execute(const host::BlurBatch& batch, ID3D11Texture2D* back_buffer,
             ID3D11RenderTargetView* target, std::uint32_t framebuffer_width,
-            std::uint32_t framebuffer_height, double logical_width, double logical_height);
+            std::uint32_t framebuffer_height, double logical_width, double logical_height,
+            double radius_x = -1.0, double radius_y = -1.0);
 
   private:
     struct Impl;
