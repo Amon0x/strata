@@ -66,6 +66,26 @@ enum class TokenType {
     greater_equal,
     question_question,
     arrow,
+    /** `=>`: a StrataScript lambda's arrow. */
+    fat_arrow,
+    plus_equal,
+    minus_equal,
+    star_equal,
+    slash_equal,
+    percent_equal,
+    /** `...`: spread in a list or record literal. */
+    ellipsis,
+    /** `|`: between the options of a union type. */
+    pipe,
+    /**
+     * A template string, `` `text ${expression} text` ``, lexed in pieces around its
+     * expressions: the whole of one without any (`template_full`), or the text up to the first
+     * (`template_head`), between two (`template_middle`) and after the last (`template_tail`).
+     */
+    template_full,
+    template_head,
+    template_middle,
+    template_tail,
     error,
     end_of_file,
 };
@@ -104,6 +124,8 @@ private:
     void scan_trivia();
     void scan_block_comment();
     void scan_string();
+    /** A template's text, from its backtick or the `}` closing an expression in it. */
+    void scan_template(bool head);
     void scan_color();
     void scan_number();
     void scan_digits();
@@ -129,6 +151,10 @@ private:
     bool keep_trivia_ = true;
     std::size_t start_ = 0U;
     std::size_t current_ = 0U;
+    /** Braces open outside templates' text, to tell the `}` that ends an expression in one. */
+    std::size_t brace_depth_ = 0U;
+    /** For each template expression being lexed, the brace depth it opened at. */
+    std::vector<std::size_t> template_depths_;
 };
 
 [[nodiscard]] std::string_view token_type_name(TokenType type) noexcept;

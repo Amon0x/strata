@@ -130,6 +130,116 @@ private:
                        nullptr);
     }
 
+    void declaration_node(const TypeDeclaration& declared) {
+        model_.declaration_placements.push_back(
+            Placement{"/type/" + declared.name, "type " + declared.name});
+    }
+
+    void declaration_node(const FunctionDeclaration& function) {
+        const std::string path = "/function/" + function.name;
+        const std::string runtime = "function " + function.name;
+        model_.declaration_placements.push_back(Placement{path, runtime});
+        function_place(function, path, runtime);
+    }
+
+    void function_place(const FunctionDeclaration& function, const std::string& path,
+                        const std::string& runtime) {
+        const auto info = model_.functions.find(&function);
+        for (std::size_t index = 0U; index < function.parameters.size(); ++index) {
+            const Parameter& parameter = function.parameters[index];
+            if (parameter.default_value == nullptr) continue;
+            expression(*parameter.default_value,
+                       child(child(child(path, "parameter"), parameter.name), "default"),
+                       runtime + "(" + parameter.name + ")",
+                       info != model_.functions.end() ? info->second.parameters[index].type.get()
+                                                      : nullptr);
+        }
+        if (function.expression_body != nullptr)
+            expression(*function.expression_body, child(path, "body"), runtime, nullptr);
+        if (function.block_body != nullptr)
+            script_block(*function.block_body, child(path, "body"), runtime);
+    }
+
+    /** A StrataScript block: each statement, and the expressions it holds, under its index. */
+    void script_block(const Block& block, const std::string& path, const std::string& runtime) {
+        place(block.id, path, runtime);
+        for (std::size_t index = 0U; index < block.statements.size(); ++index) {
+            const Statement& statement = *block.statements[index];
+            const std::string at = child(path, std::to_string(index));
+            place(statement.id, at, runtime);
+            std::visit([&](const auto& node) { script_statement(node, at, runtime); },
+                       statement.node);
+        }
+    }
+
+    void script_statement(const LetStatement& let, const std::string& path,
+                          const std::string& runtime) {
+        expression(*let.initializer, child(path, "initializer"), runtime + "/" + let.name,
+                   nullptr);
+    }
+    void script_statement(const AssignmentStatement& assignment, const std::string& path,
+                          const std::string& runtime) {
+        expression(*assignment.target, child(path, "target"), runtime, nullptr);
+        expression(*assignment.value, child(path, "value"), runtime, nullptr);
+    }
+    void script_statement(const ExpressionStatement& effect, const std::string& path,
+                          const std::string& runtime) {
+        expression(*effect.expression, child(path, "expression"), runtime, nullptr);
+    }
+    void script_statement(const WhileStatement& repeat, const std::string& path,
+                          const std::string& runtime) {
+        expression(*repeat.condition, child(path, "condition"), runtime + "/while", nullptr);
+        script_block(*repeat.block, child(path, "body"), runtime + "/while");
+    }
+    void script_statement(const ReturnStatement& returned, const std::string& path,
+                          const std::string& runtime) {
+        if (returned.value != nullptr)
+            expression(*returned.value, child(path, "value"), runtime, nullptr);
+    }
+    void script_statement(const ThrowStatement& thrown, const std::string& path,
+                          const std::string& runtime) {
+        expression(*thrown.value, child(path, "value"), runtime, nullptr);
+    }
+    void script_statement(const TryStatement& attempt, const std::string& path,
+                          const std::string& runtime) {
+        script_block(*attempt.block, child(path, "try"), runtime + "/try");
+        script_block(*attempt.catch_block, child(path, "catch"), runtime + "/catch");
+    }
+    void script_statement(const IfStatement& conditional, const std::string& path,
+                          const std::string& runtime) {
+        expression(*conditional.condition, child(path, "condition"), runtime + "/if", nullptr);
+        script_block(*conditional.then_block, child(path, "then"), runtime + "/then");
+        if (conditional.else_block != nullptr)
+            script_block(*conditional.else_block, child(path, "else"), runtime + "/else");
+    }
+    void script_statement(const WhenStatement& when, const std::string& path,
+                          const std::string& runtime) {
+        expression(*when.subject, child(path, "subject"), runtime + "/when", nullptr);
+        for (std::size_t index = 0U; index < when.branches.size(); ++index) {
+            const WhenBranch& branch = when.branches[index];
+            const std::string branch_path = child(child(path, "branch"), std::to_string(index));
+            const std::string branch_runtime = runtime + "/when[" + std::to_string(index) + "]";
+            if (branch.match != nullptr)
+                expression(*branch.match, child(branch_path, "match"), branch_runtime, nullptr);
+            script_block(*branch.block, branch_path, branch_runtime);
+        }
+    }
+    void script_statement(const ForStatement& loop, const std::string& path,
+                          const std::string& runtime) {
+        expression(*loop.collection, child(path, "collection"), runtime + "/for", nullptr);
+        if (loop.filter != nullptr)
+            expression(*loop.filter, child(path, "filter"), runtime + "/for/filter", nullptr);
+        script_block(*loop.block, child(path, "body"), runtime + "/" + loop.item_name);
+    }
+    void script_statement(const FunctionStatement& function, const std::string& path,
+                          const std::string& runtime) {
+        function_place(function.function, child(path, "function"),
+                       runtime + "/" + function.function.name);
+    }
+    /** The rest hold no expression, or never occur in a script block. */
+    template <typename Node>
+    void script_statement(const Node&, const std::string&, const std::string&) {}
+
     void declaration_node(const AnimationDeclaration& animation) {
         // Animations lower from their validated data, so their expressions have no placement.
         model_.declaration_placements.push_back(
@@ -201,6 +311,9 @@ private:
                 }
                 this->block(*loop->block, child(statement_path, "body"),
                             runtime + "/" + loop->item_name);
+            } else if (const auto* function = std::get_if<FunctionStatement>(&statement.node)) {
+                function_place(function->function, child(statement_path, "function"),
+                               runtime + "/" + function->function.name);
             }
         }
     }
@@ -311,8 +424,12 @@ private:
                     const std::string& runtime, const SemanticType* expected) {
         place(expression.id, path, runtime);
         // Every placed expression gets its type, including ones no check needed to ask about.
-        static_cast<void>(oracle_.type_of(expression));
+        const SemanticTypePtr type = oracle_.type_of(expression);
         ExpressionFacts& facts = analysis_.facts(expression);
+        if (type->kind == SemanticTypeKind::function && accepts_kind(expected, SemanticTypeKind::action)) {
+            facts.handler = true;
+            expected = nullptr;
+        }
         if (const auto* property = std::get_if<PropertyAccessExpression>(&expression.node)) {
             if (const auto* receiver = std::get_if<IdentifierExpression>(&property->receiver->node);
                 receiver != nullptr && receiver->name == "theme") {
@@ -433,8 +550,20 @@ private:
             return;
         }
         if (const auto* lambda = std::get_if<LambdaExpression>(&expression.node)) {
-            this->expression(*lambda->body, child(path, "body"),
-                             runtime + "/" + lambda->parameter_name, nullptr);
+            std::string scope = runtime;
+            for (const LambdaParameter& parameter : lambda->parameters) scope += "/" + parameter.name;
+            if (lambda->body != nullptr)
+                this->expression(*lambda->body, child(path, "body"), scope, nullptr);
+            if (lambda->block != nullptr) script_block(*lambda->block, child(path, "block"), scope);
+            return;
+        }
+        if (const auto* spread = std::get_if<SpreadExpression>(&expression.node)) {
+            this->expression(*spread->operand, child(path, "operand"), runtime, nullptr);
+            return;
+        }
+        if (const auto* awaited = std::get_if<AwaitExpression>(&expression.node)) {
+            this->expression(*awaited->operand, child(path, "operand"), runtime, nullptr);
+            return;
         }
     }
 
@@ -451,6 +580,19 @@ private:
                         : call.arguments[index].name.value_or("#" + std::to_string(index));
                 this->expression(*call.arguments[index].value, child(path, name),
                                  runtime + "." + name,
+                                 parameter != nullptr ? parameter->type.get() : nullptr);
+            }
+            return;
+        }
+        if (resolved.kind == CallKind::function) {
+            for (std::size_t index = 0U; index < call.arguments.size(); ++index) {
+                const SchemaParameter* parameter = resolved.arguments[index].parameter;
+                const std::string segment = parameter != nullptr
+                                                ? parameter->name
+                                                : call.arguments[index].name.value_or(
+                                                      std::to_string(index));
+                this->expression(*call.arguments[index].value, child(path, segment),
+                                 runtime + "." + segment,
                                  parameter != nullptr ? parameter->type.get() : nullptr);
             }
             return;

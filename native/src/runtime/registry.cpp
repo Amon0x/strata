@@ -85,6 +85,7 @@ ValueSchemaPtr runtime_schema(const compiler::SemanticType& type) {
     case SemanticTypeKind::action:
     case SemanticTypeKind::component:
     case SemanticTypeKind::lambda:
+    case SemanticTypeKind::function:
     case SemanticTypeKind::component_template:
         return ValueSchema::any();
     }

@@ -630,6 +630,20 @@ class InputRouter final {
     [[nodiscard]] runtime::ActionDispatchOutcome
     execute_composition(const runtime::ActionEvent& event, const runtime::ActionValue& composition,
                         const RetainedNode& node, InputOperationResult& result);
+    /** What a script handler's run does to the application; defined with execute_script. */
+    struct ScriptHost;
+    /** Runs a script handler with the event; one that awaits an answer resumes when it comes. */
+    [[nodiscard]] runtime::ActionDispatchOutcome
+    execute_script(const runtime::ActionEvent& event, const runtime::ActionValue& handler,
+                   const RetainedNode& node, InputOperationResult& result);
+    /** Reports how a script run ended, and keeps a waiting one for its answer. */
+    [[nodiscard]] runtime::ActionDispatchOutcome
+    script_outcome(runtime::ExpressionRuntime& scripts, runtime::ScriptOutcome outcome,
+                   const ScriptHost& host);
+    /** Resumes a waiting script run with its platform request's answer. */
+    void resume_script(const std::shared_ptr<runtime::ScriptRun>& run, std::uint64_t node_identity,
+                       const runtime::ActionEvent& event, runtime::Value answer,
+                       InputOperationResult& result);
     [[nodiscard]] runtime::ActionDispatchOutcome execute_tree_action(const runtime::Action& action,
                                                                      InputOperationResult& result);
     [[nodiscard]] runtime::ActionDispatchOutcome
@@ -936,6 +950,19 @@ class InputRouter final {
     std::set<std::uint64_t> hovered_;
     /** Nodes `strata.pointer` last told the pointer was over them. */
     std::set<std::uint64_t> pointer_trackers_;
+    /**
+     * `strata.pointer` observers a held press began over, by pointer: they hear it until it is
+     * released, wherever it goes, as a marquee or a wire being drawn needs.
+     */
+    std::map<std::int32_t, std::set<std::uint64_t>> pointer_captures_;
+    /** The last press, to count the clicks of a double or triple click. */
+    struct PointerClick final {
+        Point position;
+        std::int64_t timestamp_nanos = 0;
+        std::int32_t button = 0;
+        std::int32_t count = 0;
+    };
+    PointerClick last_pointer_click_;
     std::optional<Point> hover_position_;
     /** What the last post-layout hover refresh saw; a refresh with the same key is skipped. */
     struct HoverRefreshKey final {
@@ -975,10 +1002,15 @@ class InputRouter final {
         std::shared_ptr<const runtime::ActionValue> action;
     };
     std::vector<PendingDelay> pending_delays_;
-    /** The `next` of a `then` action, waiting for its platform request's answer. */
+    /**
+     * The `next` of a `then` action, or a script handler that awaits, waiting for its platform
+     * request's answer.
+     */
     struct PendingContinuation final {
         std::uint64_t node_identity = 0U;
         std::shared_ptr<const runtime::ActionValue> action;
+        std::shared_ptr<runtime::ScriptRun> script = nullptr;
+        runtime::ActionEvent event = {};
     };
     std::map<std::uint64_t, PendingContinuation> pending_continuations_;
     std::uint64_t next_platform_request_ = 0U;

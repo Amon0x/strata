@@ -219,6 +219,8 @@ enum class HelperEvaluator : std::uint8_t {
     format_bytes,
     time_ago,
     format_duration,
+    /** StrataScript's library: computed by name from its evaluated arguments (library.cpp). */
+    library,
     /** No evaluator: lowering turns the call into its own IR node, or nothing names a helper. */
     unknown,
 };

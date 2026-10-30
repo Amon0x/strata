@@ -32,6 +32,12 @@ enum class SymbolKind : std::uint8_t {
     loop_index,
     lambda_parameter,
     parameter,
+    /** A StrataScript `let` or `var`, or a `catch` binding. */
+    local,
+    /** A `fn` declaration, at the top of a file or in a block. */
+    function,
+    /** A parameter of a `fn` declaration. */
+    function_parameter,
     host,
     component,
     style,
@@ -54,9 +60,13 @@ struct Symbol final {
     const Statement* statement = nullptr;
     /** The lambda declaring a lambda parameter. */
     const Expression* lambda = nullptr;
+    /** The function a function or function parameter belongs to. */
+    const FunctionDeclaration* function = nullptr;
+    /** A `var` local, which assignment may change. */
+    bool mutable_binding = false;
     /** The component a parameter belongs to, or the component a name refers to. */
     const ComponentInfo* component = nullptr;
-    /** A parameter's position in its component's parameter list. */
+    /** A parameter's position in its component's, function's or lambda's parameter list. */
     std::size_t parameter_index = 0U;
     /**
      * The symbol a READY when branch narrows: inside the branch an async value reads as its loaded
@@ -93,6 +103,14 @@ struct ComponentInfo final {
     std::vector<ComponentWidgetDefault> widget_defaults;
 
     [[nodiscard]] const SchemaParameter* find_parameter(std::string_view name) const noexcept;
+};
+
+/** A StrataScript function: its declaration and its parameters as call arguments bind them. */
+struct FunctionInfo final {
+    const FunctionDeclaration* declaration = nullptr;
+    /** The module a top-level function was declared in; empty for one declared in a block. */
+    std::string source_id;
+    std::vector<SchemaParameter> parameters;
 };
 
 /** A module-level style or animation declaration. */
@@ -145,6 +163,8 @@ enum class CallKind : std::uint8_t {
     component_template,
     helper,
     unknown_helper,
+    /** A StrataScript function, or a local holding a function value. */
+    function,
 };
 
 struct ResolvedCall final {
@@ -154,6 +174,9 @@ struct ResolvedCall final {
     const MaterialSchema* material = nullptr;
     const EffectSchema* effect = nullptr;
     const ComponentInfo* component = nullptr;
+    /** For a function call: what the callee name denotes, and the function when it is declared. */
+    SymbolId callee = no_symbol;
+    const FunctionInfo* function = nullptr;
     std::vector<ArgumentBinding> arguments;
 };
 
@@ -197,6 +220,8 @@ struct ExpressionFacts final {
     ExpressionForm form = ExpressionForm::value;
     /** An identifier passed where a Binding<T> parameter expects the state itself. */
     bool state_binding = false;
+    /** A function given where an action is expected: it lowers wrapped, run with the event. */
+    bool handler = false;
 };
 
 struct SemanticModel final {
@@ -213,6 +238,10 @@ struct SemanticModel final {
     std::map<std::string, ComponentInfo, std::less<>> components;
     std::map<std::string, NamedDeclaration, std::less<>> styles;
     std::map<std::string, NamedDeclaration, std::less<>> animations;
+    /** Every function, top-level and block-local, by its declaration. */
+    std::map<const FunctionDeclaration*, FunctionInfo> functions;
+    /** Top-level functions by name. */
+    std::map<std::string, const FunctionInfo*, std::less<>> function_names;
     /** The type a typed state declares, by statement id. */
     std::map<NodeId, SemanticTypePtr> state_declared_types;
     /** The schema each state's slot is declared with, by statement id; empty when it has none. */

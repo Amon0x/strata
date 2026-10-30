@@ -431,10 +431,12 @@ struct AxisSnap final {
  * The `moved` event: `phase` (move, end, cancel, or settling while it coasts or springs after
  * release), the offset, the box where it shows and its container (surface coordinates), and the
  * lines a snap aligned it to, so a host can keep the placement the user chose and present guides
- * of its own. `snapped` is set only when it settles (emit_settled).
+ * of its own. `dx` and `dy` are how far it moved since the last report, for a controlled movable's
+ * action to move its state by. `snapped` is set only when it settles (emit_settled).
  */
 [[nodiscard]] bool emit_moved(BehaviorInputScope& scope, const std::string_view phase,
-                              const Point offset, const MovementGuides& guides) {
+                              const Point offset, const MovementGuides& guides,
+                              const Point delta = {}) {
     const LayoutRecord* own = scope.layout();
     const std::optional<Rect> area = movement_area(scope);
     const Rect bounds = own != nullptr
@@ -447,6 +449,8 @@ struct AxisSnap final {
             {"phase", runtime::Value(std::string(phase))},
             {"x", runtime::Value(offset.x)},
             {"y", runtime::Value(offset.y)},
+            {"dx", runtime::Value(delta.x)},
+            {"dy", runtime::Value(delta.y)},
             {"bounds", rect_value(bounds)},
             {"container", rect_value(area.value_or(Rect{}))},
             {"guideX", guides.x.has_value() ? runtime::Value(*guides.x) : runtime::Value{}},
@@ -613,6 +617,8 @@ enum class SettleMode { rest = 0, coast = 1, spring = 2 };
                           {"phase", runtime::Value("settle")},
                           {"x", runtime::Value(offset.x)},
                           {"y", runtime::Value(offset.y)},
+                          {"dx", runtime::Value(0.0)},
+                          {"dy", runtime::Value(0.0)},
                           {"bounds", rect_value(bounds)},
                           {"container", rect_value(movement_area(scope).value_or(Rect{}))},
                           {"guideX", runtime::Value{}},
@@ -780,6 +786,21 @@ void begin_settle(BehaviorInputScope& scope, const Point velocity) {
     return emit_moved(scope, "settling", position, MovementGuides{});
 }
 
+/**
+ * A controlled movable (option `controlled`) is placed by its action, as the pointer moves: it
+ * shows no offset of its own, and each report's `dx` and `dy` say how far to move the state the
+ * layout reads. A cancelled move reports the way back. It does not coast after release.
+ */
+[[nodiscard]] bool controlled(BehaviorInputScope& scope) {
+    return boolean(scope.option("controlled"), false);
+}
+
+/** Where a controlled move last reported the box, from its session. */
+[[nodiscard]] Point controlled_reported(const runtime::Value* session) {
+    return Point{number(field(session, "reportedX"), 0.0),
+                 number(field(session, "reportedY"), 0.0)};
+}
+
 [[nodiscard]] bool movable_pointer(BehaviorInputScope& scope) {
     const PointerInputEvent* event = scope.pointer();
     if (event == nullptr || !boolean(scope.option("enabled"), true))
@@ -812,6 +833,17 @@ void begin_settle(BehaviorInputScope& scope, const Point velocity) {
     }
     if (event->type == PointerEventType::cancel) {
         static_cast<void>(scope.cancel_gesture());
+        if (controlled(scope)) {
+            const Point reported = controlled_reported(session);
+            const bool dragged = boolean(field(session, "dragged"), false);
+            scope.set_retained(std::string(movement_session), runtime::Value{}, DirtyReason::input);
+            scope.set_retained(std::string(movement_guides), runtime::Value{}, DirtyReason::input);
+            if (dragged) {
+                static_cast<void>(emit_moved(scope, "cancel", Point{}, MovementGuides{},
+                                             Point{-reported.x, -reported.y}));
+            }
+            return true;
+        }
         const Point restored{number(field(session, "offsetX"), 0.0),
                              number(field(session, "offsetY"), 0.0)};
         scope.set_retained(std::string(movement_offset),
@@ -842,8 +874,16 @@ void begin_settle(BehaviorInputScope& scope, const Point velocity) {
         MovementGuides guides;
         const Point snapped = snap_movement(scope, raw, guides);
         Point next = snapped;
-        if (const std::optional<MovementLimits> limits = movement_limits(scope);
-            limits.has_value()) {
+        if (std::optional<MovementLimits> limits = movement_limits(scope); limits.has_value()) {
+            // A controlled box's layout has already moved by what was reported: its limits, as
+            // offsets from where the move began, are that much further.
+            if (controlled(scope)) {
+                const Point moved = controlled_reported(session);
+                limits->min_x += moved.x;
+                limits->max_x += moved.x;
+                limits->min_y += moved.y;
+                limits->max_y += moved.y;
+            }
             const LayoutRecord* own = scope.layout();
             next =
                 limits->rubber_band && own != nullptr
@@ -872,13 +912,20 @@ void begin_settle(BehaviorInputScope& scope, const Point velocity) {
             velocity = Point{instant.x * (1.0 - carried) + velocity.x * carried,
                              instant.y * (1.0 - carried) + velocity.y * carried};
         }
-        scope.set_retained(std::string(movement_offset),
-                           object({{"x", runtime::Value(next.x)}, {"y", runtime::Value(next.y)}}),
-                           DirtyReason::input);
+        const bool placed_by_action = controlled(scope);
+        const Point reported = controlled_reported(session);
+        if (!placed_by_action) {
+            scope.set_retained(
+                std::string(movement_offset),
+                object({{"x", runtime::Value(next.x)}, {"y", runtime::Value(next.y)}}),
+                DirtyReason::input);
+        }
         scope.set_retained(std::string(movement_guides), guides_value(guides), DirtyReason::input);
         scope.set_retained(
             std::string(movement_session),
             object({
+                {"reportedX", runtime::Value(next.x)},
+                {"reportedY", runtime::Value(next.y)},
                 {"pointerId", runtime::Value(static_cast<double>(event->pointer_id))},
                 {"startX", runtime::Value(number(field(session, "startX"), event->position.x))},
                 {"startY", runtime::Value(number(field(session, "startY"), event->position.y))},
@@ -892,7 +939,8 @@ void begin_settle(BehaviorInputScope& scope, const Point velocity) {
                 {"velocityY", runtime::Value(velocity.y)},
             }),
             DirtyReason::input);
-        static_cast<void>(emit_moved(scope, "move", next, guides));
+        static_cast<void>(emit_moved(scope, "move", next, guides,
+                                     Point{next.x - reported.x, next.y - reported.y}));
         return true;
     }
     if (event->type == PointerEventType::release) {
@@ -903,6 +951,7 @@ void begin_settle(BehaviorInputScope& scope, const Point velocity) {
         const Point velocity = recent ? Point{number(field(session, "velocityX"), 0.0),
                                               number(field(session, "velocityY"), 0.0)}
                                       : Point{};
+        const Point reported = controlled_reported(session);
         scope.set_retained(std::string(movement_session), runtime::Value{}, DirtyReason::input);
         if (dragged) {
             const runtime::Value* shown = scope.retained(movement_guides);
@@ -915,9 +964,14 @@ void begin_settle(BehaviorInputScope& scope, const Point velocity) {
                     : std::nullopt,
             };
             scope.set_retained(std::string(movement_guides), runtime::Value{}, DirtyReason::input);
-            static_cast<void>(
-                emit_moved(scope, "end", retained_point(scope.retained(movement_offset)), guides));
-            begin_settle(scope, constrain_axis(scope, velocity, Point{}));
+            if (controlled(scope)) {
+                static_cast<void>(emit_moved(scope, "end", reported, guides));
+            } else {
+                static_cast<void>(emit_moved(scope, "end",
+                                             retained_point(scope.retained(movement_offset)),
+                                             guides));
+                begin_settle(scope, constrain_axis(scope, velocity, Point{}));
+            }
         }
         return dragged;
     }
@@ -944,6 +998,12 @@ void begin_settle(BehaviorInputScope& scope, const Point velocity) {
         next.y += step;
     else
         return false;
+    if (controlled(scope)) {
+        const Point current = retained_point(scope.retained(movement_offset));
+        static_cast<void>(emit_moved(scope, "end", next, MovementGuides{},
+                                     Point{next.x - current.x, next.y - current.y}));
+        return true;
+    }
     next = clamp_movement(scope, next);
     scope.set_retained(std::string(movement_offset),
                        object({{"x", runtime::Value(next.x)}, {"y", runtime::Value(next.y)}}),

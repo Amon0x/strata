@@ -44,6 +44,16 @@ enum class ExpressionKind : std::uint8_t {
     component_template,
     lambda,
     material,
+    /** A call to a script function: `first` the callee, `arguments` what it is called with. */
+    call,
+    /** `...first` inside a list literal. */
+    spread,
+    /** `await first`, which only a script statement performs. */
+    await_value,
+    /** A record built in order from entries (named arguments) and spreads (positional ones). */
+    record,
+    /** A function given where an action is expected: `first`, run with the event. */
+    handler,
     /** Evaluates to null after reporting the portable kind it could not lower. */
     unknown,
 };
@@ -56,6 +66,8 @@ enum class VariableFallback : std::uint8_t {
     host,
     /** A style, animation or component declaration: the name itself. */
     name,
+    /** A function declared at the top of a module: `value` holds its index. */
+    function,
 };
 
 enum class UnaryOperator : std::uint8_t { negate, logical_not };
@@ -123,7 +135,10 @@ struct ProgramHostPath final {
  * - helper: `helper`, `text` (its name), `arguments`.
  * - action: `text` (the action id), `arguments`, `origin`.
  * - component_template: `text` (the component), `arguments`.
- * - lambda: `name` (the parameter), `first` body, `free_variables`.
+ * - lambda: `function` (its parameters and body), `free_variables`.
+ * - call: `first` callee, `arguments` (named by the parameter they bind, or positional).
+ * - spread / await_value / handler: `first` operand.
+ * - record: `arguments`, an entry when named and a spread when positional.
  * - material: `text` (the material id), `arguments` (its parameters, named), `material_call`.
  * - unknown: `text` (the portable kind).
  */
@@ -149,9 +164,37 @@ struct ProgramExpression final {
     std::uint32_t origin = no_program_id;
     std::uint32_t free_variables_begin = 0U;
     std::uint32_t free_variables_count = 0U;
+    /** A lambda's function, or a function variable's. */
+    std::uint32_t function = no_program_id;
     /** The portable expression, for diagnostics and its authored range. */
     data::JsonView source;
 };
+
+struct ProgramFunctionParameter final {
+    Symbol name;
+    ExpressionId default_value = no_program_id;
+};
+
+/**
+ * A StrataScript function: a `fn` declaration, or a lambda. Exactly one of `body` (an expression)
+ * and `block` (statements) is set. `free_variables` are the names it reads from where it is
+ * declared, which tell whether two closures of it differ.
+ */
+struct ProgramFunction final {
+    Symbol name;
+    std::uint32_t parameters_begin = 0U;
+    std::uint32_t parameters_count = 0U;
+    ExpressionId body = no_program_id;
+    BlockId block = no_program_id;
+    bool asynchronous = false;
+    /** Written with `=>` or declared with `fn`, rather than a helper's `->` item function. */
+    bool script = false;
+    std::uint32_t free_variables_begin = 0U;
+    std::uint32_t free_variables_count = 0U;
+    data::JsonView source;
+};
+
+enum class AssignmentOperator : std::uint8_t { assign, add, subtract, multiply, divide, modulo };
 
 /** What an action expression says about where it was authored. */
 struct ProgramActionOrigin final {
@@ -161,7 +204,26 @@ struct ProgramActionOrigin final {
     std::optional<std::string> fallback_component_path;
 };
 
-enum class StatementKind : std::uint8_t { state, derived, node, conditional, when, loop };
+enum class StatementKind : std::uint8_t {
+    state,
+    derived,
+    node,
+    conditional,
+    when,
+    loop,
+    /** A `fn` declared in a block: `function`, `name`. */
+    function,
+    /** StrataScript statements, which only scripts run. */
+    let_binding,
+    assign,
+    effect,
+    while_loop,
+    break_loop,
+    continue_loop,
+    return_value,
+    throw_value,
+    try_catch,
+};
 
 struct ProgramWhenBranch final {
     /** No id for the fallback branch. */
@@ -178,6 +240,14 @@ struct ProgramWhenBranch final {
  * - when: `expression` subject, `branches`.
  * - loop: `expression` collection, `filter`, `name` item, `index_name` (empty when absent),
  *   `block` body, `identity` (a Repeater's root-key extractor, no id otherwise).
+ * - function: `function`, `name`.
+ * - let_binding: `name`, `expression` initializer, `mutable_binding`.
+ * - assign: `target` (a variable, or a property or index path from one), `assignment`,
+ *   `expression` value.
+ * - effect: `expression`.
+ * - while_loop: `expression` condition, `block` body.
+ * - return_value / throw_value: `expression` (no id for a bare return).
+ * - try_catch: `block`, `otherwise` the catch block, `name` the caught value.
  */
 struct ProgramStatement final {
     StatementKind kind = StatementKind::node;
@@ -194,6 +264,10 @@ struct ProgramStatement final {
     std::uint32_t branches_count = 0U;
     /** Index into the unit's state declarations, for a state statement. */
     std::uint32_t state_declaration = no_program_id;
+    std::uint32_t function = no_program_id;
+    ExpressionId target = no_program_id;
+    AssignmentOperator assignment = AssignmentOperator::assign;
+    bool mutable_binding = false;
     data::JsonView source;
 };
 
@@ -418,6 +492,20 @@ class Program final : public std::enable_shared_from_this<Program> {
     [[nodiscard]] std::size_t call_count() const noexcept {
         return calls_.size();
     }
+    [[nodiscard]] const ProgramFunction& function(std::uint32_t id) const {
+        return functions_[id];
+    }
+    [[nodiscard]] std::span<const ProgramFunctionParameter>
+    parameters(const ProgramFunction& function) const {
+        return {function_parameters_.data() + function.parameters_begin,
+                function.parameters_count};
+    }
+    [[nodiscard]] std::span<const Symbol> free_variables(const ProgramFunction& function) const {
+        return {free_variables_.data() + function.free_variables_begin,
+                function.free_variables_count};
+    }
+    /** A function declared at the top of a module, by name. */
+    [[nodiscard]] std::optional<std::uint32_t> function_index(std::string_view name) const;
 
   private:
     friend class ProgramLowering;
@@ -451,6 +539,9 @@ class Program final : public std::enable_shared_from_this<Program> {
     std::vector<ProgramIdentity> identities_;
     std::vector<IdentityId> identity_children_;
     std::vector<ProgramIdentityBranch> identity_branches_;
+    std::vector<ProgramFunction> functions_;
+    std::vector<ProgramFunctionParameter> function_parameters_;
+    std::map<std::string, std::uint32_t, std::less<>> function_indexes_;
     std::map<std::string, std::uint32_t, std::less<>> component_indexes_;
     std::map<std::string, std::uint32_t, std::less<>> screen_indexes_;
     std::map<std::string, std::uint32_t, std::less<>> overlay_indexes_;

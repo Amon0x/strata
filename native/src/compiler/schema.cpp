@@ -289,6 +289,9 @@ std::string SemanticType::diagnostic_name() const {
         return "action";
     case SemanticTypeKind::component:
         return "component";
+    case SemanticTypeKind::function:
+        return "function" +
+               (returns != nullptr ? " returning " + returns->diagnostic_name() : std::string{});
     case SemanticTypeKind::lambda:
         return "pure expression (" +
                (parameter != nullptr ? parameter->diagnostic_name() : std::string("item")) +
@@ -341,8 +344,9 @@ std::string SemanticType::diagnostic_name() const {
 }
 
 bool SemanticType::accepts(const SemanticType& actual) const {
+    // A value typed `any` (a script parameter, an awaited answer) is checked when it arrives.
     if (kind == SemanticTypeKind::any || kind == SemanticTypeKind::unknown ||
-        actual.kind == SemanticTypeKind::unknown) {
+        actual.kind == SemanticTypeKind::unknown || actual.kind == SemanticTypeKind::any) {
         return true;
     }
     if (kind == SemanticTypeKind::union_value) {
@@ -359,6 +363,13 @@ bool SemanticType::accepts(const SemanticType& actual) const {
     }
     if (kind == SemanticTypeKind::string && actual.kind == SemanticTypeKind::string_literal)
         return true;
+    // A function handles an event wherever an action is expected, and is a helper's item
+    // function wherever a pure expression is.
+    if (actual.kind == SemanticTypeKind::function &&
+        (kind == SemanticTypeKind::action || kind == SemanticTypeKind::lambda ||
+         kind == SemanticTypeKind::function)) {
+        return true;
+    }
     if (kind == SemanticTypeKind::path && (actual.kind == SemanticTypeKind::string ||
                                            actual.kind == SemanticTypeKind::string_literal)) {
         return true;

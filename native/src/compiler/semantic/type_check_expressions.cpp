@@ -172,11 +172,35 @@ void TypeChecker::check(const Expression& expression, const std::string& compone
         call_expression(expression, *call, component_path);
     } else if (const auto* lambda = std::get_if<LambdaExpression>(&expression.node)) {
         lambda_body(expression, *lambda, component_path);
+    } else if (const auto* spread = std::get_if<SpreadExpression>(&expression.node)) {
+        check(*spread->operand, component_path);
+    } else if (const auto* awaited = std::get_if<AwaitExpression>(&expression.node)) {
+        if (!permitted_awaits_.contains(expression.id)) {
+            report("STRATA.DSL.SCRIPT_AWAIT_POSITION",
+                   "'await' must be a whole statement's value: let x = await ..., "
+                   "x = await ..., await ...; or return await ....",
+                   expression.span, component_path, "await as a statement's value");
+        }
+        check(*awaited->operand, component_path);
     }
 }
 
 void TypeChecker::lambda_body(const Expression& expression, const LambdaExpression& lambda,
                               const std::string& component_path) {
+    // A script function's body may have effects: it runs when it is called, by a handler.
+    const bool script = lambda.script;
+    if (script) ++effects_allowed_;
+    struct Restore {
+        std::size_t& depth;
+        bool active;
+        ~Restore() {
+            if (active) --depth;
+        }
+    } restore{effects_allowed_, script};
+    if (lambda.block != nullptr) {
+        script_block(*lambda.block, component_path, ScriptContext{false, true, true});
+        return;
+    }
     const SchemaParameter* parameter = oracle_.lambda_parameter_of(expression);
     const SemanticType* returns =
         parameter != nullptr && parameter->type->kind == SemanticTypeKind::lambda
@@ -257,6 +281,9 @@ void TypeChecker::call_expression(const Expression& expression, const CallExpres
                call.target.span, component_path, "registered helper");
         for (const Argument& argument : call.arguments) check(*argument.value, component_path);
         return;
+    case CallKind::function:
+        function_call(expression, call, resolved, component_path);
+        return;
     case CallKind::helper:
         break;
     }
@@ -265,6 +292,70 @@ void TypeChecker::call_expression(const Expression& expression, const CallExpres
         return;
     }
     helper_arguments(expression, call, *resolved.helper, component_path);
+}
+
+void TypeChecker::function_call(const Expression& expression, const CallExpression& call,
+                                const ResolvedCall& resolved, const std::string& component_path) {
+    const std::string name = call.target.qualified_name();
+    if (resolved.function == nullptr) {
+        // A local holding a function value: whatever it is called with is checked at runtime.
+        const SemanticTypePtr callee = oracle_.symbol_type(resolved.callee);
+        // An action called like a function runs the handler it holds, or is performed.
+        if (callee->kind != SemanticTypeKind::function && callee->kind != SemanticTypeKind::any &&
+            callee->kind != SemanticTypeKind::unknown && callee->kind != SemanticTypeKind::action) {
+            report("STRATA.DSL.SCRIPT_NOT_CALLABLE",
+                   "'" + name + "' is " + callee->diagnostic_name() + ", not a function.",
+                   call.target.span, component_path, "function");
+        }
+        for (const Argument& argument : call.arguments) check(*argument.value, component_path);
+        return;
+    }
+    const FunctionInfo& function = *resolved.function;
+    if (effects_allowed_ == 0U && effectful(*function.declaration)) {
+        report("STRATA.DSL.SCRIPT_EFFECT_IN_PURE_CONTEXT",
+               "Function '" + name + "' writes state or performs actions, so it can be called "
+               "only by a handler or another function, not where a value is computed.",
+               call.target.span, component_path, "a function without effects");
+    }
+    if (function.declaration->asynchronous && !awaited_calls_.contains(expression.id)) {
+        report("STRATA.DSL.SCRIPT_ASYNC_NOT_AWAITED",
+               "Async function '" + name + "' must be awaited: await " + name + "(...).",
+               call.target.span, component_path, "await " + name + "(...)");
+    }
+    std::set<std::string, std::less<>> bound;
+    for (std::size_t index = 0U; index < call.arguments.size(); ++index) {
+        const Argument& argument = call.arguments[index];
+        const ArgumentBinding& binding = resolved.arguments[index];
+        const std::string argument_path =
+            component_path + "." + argument.name.value_or(std::to_string(index));
+        if (binding.parameter == nullptr) {
+            report("STRATA.DSL.SCRIPT_UNKNOWN_ARGUMENT",
+                   argument.name.has_value()
+                       ? "Function '" + name + "' has no parameter '" + *argument.name + "'." +
+                             did_you_mean(*argument.name, parameter_names(function.parameters))
+                       : "Function '" + name + "' takes " +
+                             std::to_string(function.parameters.size()) + " arguments.",
+                   argument.span, argument_path, expected_names(parameter_names(function.parameters)));
+            check(*argument.value, argument_path);
+            continue;
+        }
+        if (binding.duplicate) {
+            report("STRATA.DSL.SCRIPT_DUPLICATE_ARGUMENT",
+                   "Parameter '" + binding.parameter->name + "' of '" + name +
+                       "' is given more than once.",
+                   argument.span, argument_path, binding.parameter->name);
+        }
+        bound.insert(binding.parameter->name);
+        validate_expected(*argument.value, *binding.parameter->type,
+                          binding.parameter->nullable, argument_path);
+    }
+    for (const SchemaParameter& parameter : function.parameters) {
+        if (!parameter.required || bound.contains(parameter.name)) continue;
+        report("STRATA.DSL.SCRIPT_MISSING_ARGUMENT",
+               "Function '" + name + "' requires argument '" + parameter.name + "'.",
+               expression.span, component_path,
+               parameter.name + ": " + parameter.type->diagnostic_name());
+    }
 }
 
 } // namespace strata::compiler::semantic

@@ -46,6 +46,10 @@ public:
                 analysis_.model.animations.try_emplace(
                     animation->name, NamedDeclaration{&declaration, declaration.span.source_id}
                 );
+            } else if (const auto* function = std::get_if<FunctionDeclaration>(&declaration.node)) {
+                note("function", function->name);
+                FunctionInfo& info = collect_function(*function, declaration.span.source_id);
+                analysis_.model.function_names.try_emplace(function->name, &info);
             } else if (const auto* screen = std::get_if<ScreenDeclaration>(&declaration.node)) {
                 note("screen", screen->name);
             } else if (const auto* overlay = std::get_if<OverlayDeclaration>(&declaration.node)) {
@@ -67,6 +71,12 @@ private:
                 std::string path, std::string expected) {
         analysis_.diagnostics.report(std::move(code), std::move(message), span, std::move(path),
                                      std::move(expected));
+    }
+
+    FunctionInfo& collect_function(const FunctionDeclaration& function, std::string source_id) {
+        FunctionInfo info = function_info(function, analysis_.registry);
+        info.source_id = std::move(source_id);
+        return analysis_.model.functions.insert_or_assign(&function, std::move(info)).first->second;
     }
 
     void collect_component(const Declaration& declaration, const ComponentDeclaration& component) {
@@ -434,6 +444,35 @@ void collect_declarations(Analysis& analysis) {
 
 void collect_row_template_slots(Analysis& analysis) {
     RowTemplateSlotCollector(analysis).run();
+}
+
+void collect_type_aliases(Analysis& analysis) {
+    const auto declare = [&analysis](const TypeDeclaration& declared, const SourceSpan& span) {
+        if (!analysis.type_aliases.declarations.emplace(declared.name, &declared).second) {
+            analysis.diagnostics.report("STRATA.DSL.SEMANTIC_DUPLICATE_DECLARATION",
+                                        "The type declaration '" + declared.name +
+                                            "' is declared more than once.",
+                                        span, "type " + declared.name, "unique type name");
+        }
+    };
+    const auto body = [&declare](const BlockPtr& block) {
+        if (block == nullptr) return;
+        for (const StatementPtr& statement : block->statements) {
+            if (const auto* local = std::get_if<TypeStatement>(&statement->node))
+                declare(local->declaration, statement->span);
+        }
+    };
+    for (const Declaration& declaration : analysis.file.declarations) {
+        if (const auto* declared = std::get_if<TypeDeclaration>(&declaration.node)) {
+            declare(*declared, declaration.span);
+        } else if (const auto* component = std::get_if<ComponentDeclaration>(&declaration.node)) {
+            body(component->body);
+        } else if (const auto* screen = std::get_if<ScreenDeclaration>(&declaration.node)) {
+            body(screen->body);
+        } else if (const auto* overlay = std::get_if<OverlayDeclaration>(&declaration.node)) {
+            body(overlay->body);
+        }
+    }
 }
 
 } // namespace strata::compiler::semantic

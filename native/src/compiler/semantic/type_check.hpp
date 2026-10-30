@@ -17,6 +17,13 @@ namespace strata::compiler::semantic {
 
 enum class BlockContext { component, ui, lazy_ui };
 
+/** Where a StrataScript statement sits: which jumps and awaits it may make. */
+struct ScriptContext final {
+    bool in_loop = false;
+    bool in_function = false;
+    bool may_await = false;
+};
+
 [[nodiscard]] inline BlockContext nested_context(const BlockContext context) {
     return context == BlockContext::component ? BlockContext::ui : context;
 }
@@ -74,6 +81,39 @@ private:
 
     void for_statement(const ForStatement& loop, const std::string& path,
                        const std::size_t maximum_loop_items, const BlockContext context);
+
+    /** A `type` declaration: every name in it is a type. */
+    void type_declaration(const TypeDeclaration& declared);
+
+    /** A `fn` declaration: its parameters' defaults, then its body. */
+    void function_check(const FunctionDeclaration& function, const std::string& path);
+
+    void script_block(const Block& block, const std::string& path, ScriptContext context);
+
+    void script_statement(const Statement& statement, const std::string& path,
+                          ScriptContext context);
+
+    /**
+     * A statement's value: an `await` may be the whole of it, and only where the context allows;
+     * anywhere else inside it is reported.
+     */
+    void script_value(const Expression& expression, const std::string& path,
+                      const ScriptContext& context);
+
+    /** An assignment's target: a state or a `var`, or a property or index path from one. */
+    void assignment_target(const AssignmentStatement& assignment, const std::string& path);
+
+    /**
+     * Whether a function has effects: it writes state, performs or awaits an action, or calls a
+     * function that does. Lambdas it builds are values, not its own effects.
+     */
+    [[nodiscard]] bool effectful(const FunctionDeclaration& function);
+    [[nodiscard]] bool block_effectful(const Block& block);
+    [[nodiscard]] bool expression_effectful(const Expression& expression);
+
+    /** A call to a script function: its arguments against the parameters they bind. */
+    void function_call(const Expression& expression, const CallExpression& call,
+                       const ResolvedCall& resolved, const std::string& component_path);
 
     void widget_defaults(const Property& property, const std::string& path);
 
@@ -201,6 +241,14 @@ private:
     const SchemaRegistry& registry_;
     SemanticModel& model_;
     std::vector<bool> checked_;
+    /** `await` expressions in a position a statement machine can suspend at. */
+    std::set<NodeId> permitted_awaits_;
+    /** Calls an `await` waits on, which may therefore call an async function. */
+    std::set<NodeId> awaited_calls_;
+    /** How deep checking is inside a function body or a handler, where effects are allowed. */
+    std::size_t effects_allowed_ = 0U;
+    std::map<const FunctionDeclaration*, bool> effectful_;
+    std::set<const FunctionDeclaration*> deciding_effects_;
 };
 
 } // namespace strata::compiler::semantic

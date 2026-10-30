@@ -32,6 +32,9 @@ void InputRouter::report_action_outcome(
         outcome.status != runtime::ActionDispatchStatus::failed) {
         return;
     }
+    // A script reports its own failure, with the error it ended with.
+    if (action.contract == runtime::script_action_contract())
+        return;
 
     std::string layer = "root";
     for (const RetainedNode* current = &node; current != nullptr; current = current->parent()) {

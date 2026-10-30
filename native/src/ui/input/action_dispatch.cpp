@@ -49,9 +49,32 @@ void InputRouter::track_pointer(const PointerInputEvent& event, InputOperationRe
     if (tree_ == nullptr)
         return;
     const bool present = event.type != PointerEventType::cancel;
+    const std::int64_t now = event.timestamp_nanos > 0 ? event.timestamp_nanos : frame_time_nanos_;
+    // A press near the last one, soon after it, with the same button, counts another click.
+    if (event.type == PointerEventType::press) {
+        const bool again = last_pointer_click_.count > 0 &&
+                           last_pointer_click_.button == event.button &&
+                           now - last_pointer_click_.timestamp_nanos < 500'000'000 &&
+                           std::abs(event.position.x - last_pointer_click_.position.x) < 6.0 &&
+                           std::abs(event.position.y - last_pointer_click_.position.y) < 6.0;
+        last_pointer_click_ = PointerClick{event.position, now, event.button,
+                                           again ? last_pointer_click_.count + 1 : 1};
+    }
+    std::set<std::uint64_t>& captured = pointer_captures_[event.pointer_id];
+    if (event.type == PointerEventType::press) {
+        captured.clear();
+        for (const std::uint64_t identity : hovered_) {
+            const RetainedNode* node = tree_->find_identity(identity);
+            if (node != nullptr && observer(*node) != nullptr)
+                captured.insert(identity);
+        }
+    }
+    const auto listening = [&](const std::uint64_t identity) {
+        return hovered_.contains(identity) || captured.contains(identity);
+    };
     // Nodes the pointer has left, or every one when it has left the surface.
     for (auto tracked = pointer_trackers_.begin(); tracked != pointer_trackers_.end();) {
-        if (present && hovered_.contains(*tracked)) {
+        if (present && listening(*tracked)) {
             ++tracked;
             continue;
         }
@@ -65,12 +88,24 @@ void InputRouter::track_pointer(const PointerInputEvent& event, InputOperationRe
         static_cast<void>(
             scope.emit("pointer-left", runtime::Value(Fields{{"inside", runtime::Value(false)}})));
     }
-    if (!present || layout_ == nullptr)
+    if (!present || layout_ == nullptr) {
+        pointer_captures_.erase(event.pointer_id);
         return;
+    }
     prepare_pointer_geometry();
-    // Where the pointer is over each hovered observer, in its own logical coordinates and as a
-    // fraction of its box: the node's hit bounds as it shows, transforms included.
-    const std::vector<std::uint64_t> route(hovered_.begin(), hovered_.end());
+    // Where the pointer is over each hovered observer, and each one a held press began over, in
+    // its own logical coordinates and as a fraction of its box: the node's hit bounds as it
+    // shows, transforms included. A press and its release say so, with the button and keys.
+    std::set<std::uint64_t> route(hovered_.begin(), hovered_.end());
+    route.insert(captured.begin(), captured.end());
+    const std::string_view kind = event.type == PointerEventType::press     ? "pointer-pressed"
+                                  : event.type == PointerEventType::release ? "pointer-released"
+                                                                            : "pointer-moved";
+    const std::string_view phase = event.type == PointerEventType::press     ? "press"
+                                   : event.type == PointerEventType::release ? "release"
+                                                                             : "move";
+    const bool held = event.type == PointerEventType::press ||
+                      (event.type == PointerEventType::move && !captured.empty());
     for (const std::uint64_t identity : route) {
         RetainedNode* const node = tree_->find_identity(identity);
         const DescriptionBehavior* const behavior = node != nullptr ? observer(*node) : nullptr;
@@ -84,17 +119,30 @@ void InputRouter::track_pointer(const PointerInputEvent& event, InputOperationRe
         const double v = (event.position.y - hit.bounds.y) / hit.bounds.height;
         pointer_trackers_.insert(identity);
         BehaviorInputScope scope(*this, *node, *behavior, InputEventPhase::target, result);
-        static_cast<void>(
-            scope.emit("pointer-moved", runtime::Value(Fields{
-                                            {"inside", runtime::Value(true)},
-                                            {"x", runtime::Value(u * hit.local_bounds.width)},
-                                            {"y", runtime::Value(v * hit.local_bounds.height)},
-                                            {"u", runtime::Value(u)},
-                                            {"v", runtime::Value(v)},
-                                            {"width", runtime::Value(hit.local_bounds.width)},
-                                            {"height", runtime::Value(hit.local_bounds.height)},
-                                        })));
+        static_cast<void>(scope.emit(
+            kind, runtime::Value(Fields{
+                      {"inside", runtime::Value(u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0)},
+                      {"x", runtime::Value(u * hit.local_bounds.width)},
+                      {"y", runtime::Value(v * hit.local_bounds.height)},
+                      {"u", runtime::Value(u)},
+                      {"v", runtime::Value(v)},
+                      {"width", runtime::Value(hit.local_bounds.width)},
+                      {"height", runtime::Value(hit.local_bounds.height)},
+                      {"phase", runtime::Value(std::string(phase))},
+                      {"pressed", runtime::Value(held)},
+                      {"button", runtime::Value(static_cast<double>(event.button))},
+                      {"clickCount", runtime::Value(static_cast<double>(
+                                         event.type == PointerEventType::move
+                                             ? 0
+                                             : last_pointer_click_.count))},
+                      {"shift", runtime::Value(event.modifiers.shift)},
+                      {"control", runtime::Value(event.modifiers.control)},
+                      {"alt", runtime::Value(event.modifiers.alt)},
+                      {"meta", runtime::Value(event.modifiers.super_key)},
+                  })));
     }
+    if (event.type == PointerEventType::release)
+        pointer_captures_.erase(event.pointer_id);
 }
 
 void InputRouter::observe_backdrop(const std::uint64_t probe, const double luminance,
@@ -279,12 +327,154 @@ InjectedActionResult InputRouter::dispatch_action(
     return InjectedActionResult{std::move(input), std::move(outcome)};
 }
 
+struct InputRouter::ScriptHost final : runtime::ScriptEffects {
+    ScriptHost(InputRouter& router, runtime::ActionEvent event, const std::uint64_t node,
+               InputOperationResult& result)
+        : router(router), event(std::move(event)), node_identity(node), result(result) {}
+
+    [[nodiscard]] const runtime::Value* state(const runtime::LexicalStateBinding& binding) override {
+        return router.application_.state().find(binding.address);
+    }
+
+    [[nodiscard]] std::optional<std::string> commit(runtime::ScriptTransaction transaction) override {
+        std::vector<runtime::ScriptStateWrite> writes;
+        writes.reserve(transaction.writes.size());
+        for (runtime::ScriptWrite& write : transaction.writes)
+            writes.push_back(runtime::ScriptStateWrite{*write.binding, std::move(write.value)});
+        if (std::optional<std::string> rejected = router.application_.commit_script(
+                writes, router.public_surface_id_, transaction.undo_label,
+                transaction.undo_coalesce, router.frame_time_nanos_)) {
+            return rejected;
+        }
+        // The handler's actions run from its node; one that left the tree takes them with it.
+        for (const std::shared_ptr<const runtime::ActionValue>& action : transaction.actions) {
+            const RetainedNode* source = node();
+            if (source == nullptr || action == nullptr)
+                break;
+            const runtime::ActionDispatchOutcome outcome =
+                router.execute_action(event, *action, *source, result);
+            if (action->action != nullptr)
+                router.report_action_outcome(*action->action, outcome, *source);
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] runtime::ScriptAnswer
+    perform(const std::shared_ptr<const runtime::ActionValue>& action) override {
+        const RetainedNode* source = node();
+        if (source == nullptr || action == nullptr) {
+            return runtime::ScriptAnswer{runtime::ScriptAnswer::Kind::failed, {},
+                                         "The handler's node left the interface."};
+        }
+        router.last_platform_request_.reset();
+        router.last_answer_.reset();
+        const runtime::ActionDispatchOutcome outcome =
+            router.execute_action(event, *action, *source, result);
+        if (outcome.status == runtime::ActionDispatchStatus::failed ||
+            outcome.status == runtime::ActionDispatchStatus::unhandled) {
+            router.last_answer_.reset();
+            router.last_platform_request_.reset();
+            return runtime::ScriptAnswer{
+                runtime::ScriptAnswer::Kind::failed, {},
+                outcome.message.value_or("Action " + outcome.action_id.value_or("?") + " " +
+                                         std::string(status_name(outcome.status)) + ".")};
+        }
+        // An answer known at once (the clock) is the await's value, as a host's answer is.
+        if (router.last_answer_.has_value()) {
+            runtime::Value answer = std::move(*router.last_answer_);
+            router.last_answer_.reset();
+            return runtime::ScriptAnswer{runtime::ScriptAnswer::Kind::value, std::move(answer), {}};
+        }
+        if (router.last_platform_request_.has_value()) {
+            request = *router.last_platform_request_;
+            router.last_platform_request_.reset();
+            return runtime::ScriptAnswer{runtime::ScriptAnswer::Kind::pending, {}, {}};
+        }
+        return runtime::ScriptAnswer{};
+    }
+
+    [[nodiscard]] const RetainedNode* node() const {
+        return router.tree_ != nullptr ? router.tree_->find_identity(node_identity) : nullptr;
+    }
+
+    InputRouter& router;
+    runtime::ActionEvent event;
+    std::uint64_t node_identity;
+    InputOperationResult& result;
+    /** The platform request the run waits on. */
+    std::optional<std::uint64_t> request;
+};
+
+runtime::ActionDispatchOutcome InputRouter::execute_script(const runtime::ActionEvent& event,
+                                                           const runtime::ActionValue& handler,
+                                                           const RetainedNode& node,
+                                                           InputOperationResult& result) {
+    ScriptHost host(*this, event, node.identity(), result);
+    runtime::ExpressionRuntime scripts(application_.host(),
+                                       application_.bundle()->action_registry());
+    runtime::ScriptOutcome outcome = scripts.run_script(handler.script, {event.value}, host);
+    return script_outcome(scripts, std::move(outcome), host);
+}
+
+void InputRouter::resume_script(const std::shared_ptr<runtime::ScriptRun>& run,
+                                const std::uint64_t node_identity,
+                                const runtime::ActionEvent& event, runtime::Value answer,
+                                InputOperationResult& result) {
+    ScriptHost host(*this, event, node_identity, result);
+    runtime::ExpressionRuntime scripts(application_.host(),
+                                       application_.bundle()->action_registry());
+    runtime::ScriptOutcome outcome = scripts.resume_script(run, std::move(answer), false, host);
+    static_cast<void>(script_outcome(scripts, std::move(outcome), host));
+}
+
+runtime::ActionDispatchOutcome InputRouter::script_outcome(runtime::ExpressionRuntime& scripts,
+                                                           runtime::ScriptOutcome outcome,
+                                                           const ScriptHost& host) {
+    for (const runtime::RuntimeDiagnostic& diagnostic : scripts.diagnostics())
+        pending_diagnostics_.push_back(diagnostic);
+    const std::string id = runtime::script_action_contract()->id;
+    switch (outcome.kind) {
+    case runtime::ScriptOutcome::Kind::finished:
+        break;
+    case runtime::ScriptOutcome::Kind::waiting:
+        if (host.request.has_value()) {
+            pending_continuations_.insert_or_assign(
+                *host.request,
+                PendingContinuation{host.node_identity, nullptr, std::move(outcome.run), host.event});
+        }
+        break;
+    case runtime::ScriptOutcome::Kind::failed: {
+        const runtime::Value* code = outcome.error.field("code");
+        const runtime::Value* message = outcome.error.field("message");
+        const std::string text =
+            message != nullptr ? runtime::display_string(*message)
+                               : "Uncaught " + runtime::display_string(outcome.error) + ".";
+        const RetainedNode* source = host.node();
+        pending_diagnostics_.push_back(runtime::RuntimeDiagnostic{
+            code != nullptr && code->string() != nullptr ? *code->string()
+                                                         : std::string("STRATA.SCRIPT.UNCAUGHT"),
+            text,
+            source != nullptr ? std::string(source->structural_path()) : std::string{},
+            std::nullopt,
+            runtime::DiagnosticSeverity::error,
+            std::nullopt,
+        });
+        return runtime::ActionDispatchOutcome{
+            runtime::ActionDispatchStatus::failed, id, {"strata.script"}, text};
+    }
+    }
+    return runtime::ActionDispatchOutcome{
+        runtime::ActionDispatchStatus::handled, id, {"strata.script"}, std::nullopt};
+}
+
 runtime::ActionDispatchOutcome InputRouter::execute_action(
     const runtime::ActionEvent& event,
     const runtime::ActionValue& action,
     const RetainedNode& node,
     InputOperationResult& result
 ) {
+    if (action.script != nullptr)
+        return execute_script(event, action, node, result);
     if (action.action == nullptr) {
         return runtime::ActionDispatchOutcome{
             runtime::ActionDispatchStatus::failed,

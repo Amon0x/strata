@@ -334,10 +334,13 @@ struct Names final {
 [[nodiscard]] bool same_lambda(const LambdaValue& left, const LambdaValue& right) {
     if (&left == &right)
         return true;
-    if (left.program != right.program || left.expression != right.expression)
+    if (left.program != right.program || left.expression != right.expression ||
+        left.function != right.function || (left.group == nullptr) != (right.group == nullptr)) {
         return false;
-    const ExpressionScope& first = left.captured;
-    const ExpressionScope& second = right.captured;
+    }
+    // A block's function closes over its group's scope, which a rebuild replaces.
+    const ExpressionScope& first = left.group != nullptr ? left.group->scope : left.captured;
+    const ExpressionScope& second = right.group != nullptr ? right.group->scope : right.captured;
     if (first.shared_contextual_host_roots() != second.shared_contextual_host_roots() &&
         first.contextual_host_roots() != second.contextual_host_roots()) {
         return false;
@@ -351,8 +354,7 @@ struct Names final {
     if (first.frame() == second.frame())
         return true;
     // Only what the body reads can differ in effect.
-    const ProgramExpression& lambda = left.program->expression(left.expression);
-    for (const Symbol name : left.program->free_variables(lambda)) {
+    for (const Symbol name : left.program->free_variables(left.declaration())) {
         const ExpressionValue* first_value = first.find(name);
         const ExpressionValue* second_value = second.find(name);
         if ((first_value == nullptr) != (second_value == nullptr))
@@ -502,14 +504,48 @@ const Value& ExpressionObjectValue::materialized() const {
 }
 
 const ExpressionValue* ExpressionScope::find(const Symbol name) const noexcept {
+    return lookup(name).value;
+}
+
+ScopeLookup ExpressionScope::lookup(const Symbol name) const noexcept {
     for (const ScopeFrame* frame = frame_.get(); frame != nullptr; frame = frame->parent.get()) {
         for (auto binding = frame->bindings.rbegin(); binding != frame->bindings.rend();
              ++binding) {
-            if (binding->name == name && binding->has_value)
-                return &binding->value;
+            if (binding->name == name && binding->has_value) {
+                return ScopeLookup{binding->cell != nullptr ? binding->cell.get() : &binding->value,
+                                   &*binding};
+            }
+        }
+        if (frame->functions != nullptr) {
+            for (const auto& [function_name, index] : frame->functions->functions) {
+                if (function_name == name)
+                    return ScopeLookup{nullptr, nullptr, frame->functions, index};
+            }
         }
         if (frame->hides_parent_values)
+            return {};
+    }
+    return {};
+}
+
+const std::shared_ptr<const LexicalStateBinding>*
+ExpressionScope::script_state(const Symbol name) const noexcept {
+    for (const ScopeFrame* frame = frame_.get(); frame != nullptr; frame = frame->parent.get()) {
+        for (auto binding = frame->bindings.rbegin(); binding != frame->bindings.rend();
+             ++binding) {
+            if (binding->name != name)
+                continue;
+            // A local of the same name shadows the state.
+            if (binding->state == ScopeStateBinding::bound && binding->binding != nullptr)
+                return &binding->binding;
+            if (binding->state == ScopeStateBinding::cleared || binding->has_value)
+                return nullptr;
+        }
+        if (frame->functions != nullptr &&
+            std::ranges::any_of(frame->functions->functions,
+                                [name](const auto& function) { return function.first == name; })) {
             return nullptr;
+        }
     }
     return nullptr;
 }
@@ -571,6 +607,35 @@ void ExpressionScope::declare(const Symbol name, ExpressionValue value,
     push(std::move(frame));
 }
 
+std::shared_ptr<ExpressionValue> ExpressionScope::declare_variable(const Symbol name,
+                                                                  ExpressionValue value) {
+    auto cell = std::make_shared<ExpressionValue>(std::move(value));
+    ScopeFrame frame;
+    frame.bindings.push_back(
+        ScopeBinding{name, true, ScopeStateBinding::cleared, {}, nullptr, cell});
+    push(std::move(frame));
+    return cell;
+}
+
+void ExpressionScope::bind_functions(const std::shared_ptr<const FunctionGroup>& group) {
+    ScopeFrame frame;
+    frame.functions = group.get();
+    push(std::move(frame));
+    keep(group);
+}
+
+void ExpressionScope::keep(std::shared_ptr<const FunctionGroup> group) {
+    kept_ = std::make_shared<const KeptFunctionGroups>(
+        KeptFunctionGroups{std::move(group), std::move(kept_)});
+}
+
+ExpressionScope ExpressionScope::without_newest(const FunctionGroup* const group) const {
+    ExpressionScope result = *this;
+    if (result.kept_ != nullptr && result.kept_->group.get() == group)
+        result.kept_ = result.kept_->next;
+    return result;
+}
+
 void ExpressionScope::set_component_path(std::string path) {
     component_path_ = std::make_shared<const std::string>(std::move(path));
 }
@@ -608,7 +673,40 @@ bool same_action(const std::shared_ptr<const ActionValue>& left,
         if (!same_action(left->children[index], right->children[index]))
             return false;
     }
-    return true;
+    if ((left->script == nullptr) != (right->script == nullptr))
+        return false;
+    return left->script == nullptr || left->script == right->script ||
+           same_lambda(*left->script, *right->script);
+}
+
+const std::shared_ptr<const ActionContract>& script_action_contract() {
+    static const std::shared_ptr<const ActionContract> contract =
+        std::make_shared<const ActionContract>(ActionContract{
+            "script.run",
+            ValueSchema::any(),
+            ActionDispatchPolicy::framework,
+            "the event",
+            "Runs a script handler with the event.",
+        });
+    return contract;
+}
+
+const Value* ScriptTransaction::written(const StateAddress& address) const noexcept {
+    const auto found = std::ranges::find_if(writes, [&address](const ScriptWrite& write) {
+        return write.binding->address == address;
+    });
+    return found != writes.end() ? &found->value : nullptr;
+}
+
+void ScriptTransaction::write(std::shared_ptr<const LexicalStateBinding> binding, Value value) {
+    const auto found = std::ranges::find_if(writes, [&binding](const ScriptWrite& write) {
+        return write.binding->address == binding->address;
+    });
+    if (found != writes.end()) {
+        found->value = std::move(value);
+        return;
+    }
+    writes.push_back(ScriptWrite{std::move(binding), std::move(value)});
 }
 
 bool same_expression_value(const ExpressionValue& left, const ExpressionValue& right) {
@@ -739,13 +837,24 @@ void DependencyRecorder::record_host(const ExpressionHostDependency& dependency)
 ExpressionValue ExpressionRuntime::evaluate(const Program& program, const ExpressionId expression,
                                             const ExpressionScope& scope,
                                             DependencyRecorder& reads) {
-    return evaluate_node(program, expression, scope, reads);
+    // A function called here that throws, outside any handler, makes the expression null.
+    if (active_run_ != nullptr)
+        return evaluate_node(program, expression, scope, reads);
+    try {
+        return evaluate_node(program, expression, scope, reads);
+    } catch (const ScriptThrow& thrown) {
+        const Value* message = thrown.value.field("message");
+        report(program.expression(expression), scope, "STRATA.SCRIPT.UNCAUGHT",
+               "A function threw: " +
+                   (message != nullptr ? display_string(*message) : display_string(thrown.value)));
+        return ExpressionValue{};
+    }
 }
 
 ExpressionValue ExpressionRuntime::evaluate(const Program& program, const ExpressionId expression,
                                             const ExpressionScope& scope) {
     DependencyRecorder ignored;
-    return evaluate_node(program, expression, scope, ignored);
+    return evaluate(program, expression, scope, ignored);
 }
 
 ExpressionValue ExpressionRuntime::evaluate(const data::JsonView expression,
@@ -761,7 +870,7 @@ ExpressionValue ExpressionRuntime::evaluate(const data::JsonView expression,
         standalone_programs_[data::encode_canonical_json(expression)];
     if (program == nullptr)
         program = Program::lower_expression(expression);
-    return evaluate_node(*program, program->root(), scope, reads);
+    return evaluate(*program, program->root(), scope, reads);
 }
 
 const std::vector<RuntimeDiagnostic>& ExpressionRuntime::diagnostics() const noexcept {
@@ -900,6 +1009,20 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
         std::vector<Value> data;
         data.reserve(elements.size());
         for (std::size_t index = 0U; index < elements.size(); ++index) {
+            // A spread puts its list's elements in place.
+            if (const ProgramExpression& element = program.expression(elements[index].value);
+                element.kind == ExpressionKind::spread) {
+                const ExpressionValue spread = evaluate_node(program, element.first, scope, reads);
+                const Value* items = spread.data_value();
+                if (items != nullptr && items->list() != nullptr) {
+                    for (const Value& item : items->list()->values)
+                        data.push_back(item);
+                } else if (items == nullptr || items->kind() != ValueKind::null_value) {
+                    report(element, scope, "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
+                           "Only a list can be spread into a list.");
+                }
+                continue;
+            }
             ExpressionValue value = evaluate_node(program, elements[index].value, scope, reads);
             if (plain_data(value)) {
                 data.push_back(std::move(value).take_value());
@@ -955,10 +1078,58 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
         return ExpressionValue(std::make_shared<const LambdaValue>(LambdaValue{
             program.shared_from_this(),
             expression,
-            node.first,
-            node.name,
+            node.function,
             scope,
+            nullptr,
         }));
+    case ExpressionKind::call:
+        return evaluate_call(program, node, scope, reads);
+    case ExpressionKind::spread:
+        report(node, scope, "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
+               "A spread belongs in a list or record literal.");
+        return ExpressionValue{};
+    case ExpressionKind::await_value:
+        // Only a script statement waits; anywhere else the operand is its own value.
+        return evaluate_node(program, node.first, scope, reads);
+    case ExpressionKind::record: {
+        // Entries and spreads apply in order, a later field replacing an earlier one.
+        std::vector<std::pair<std::string, Value>> fields;
+        const auto set = [&fields](std::string name, Value value) {
+            const auto found = std::ranges::find(fields, name, &std::pair<std::string, Value>::first);
+            if (found != fields.end())
+                found->second = std::move(value);
+            else
+                fields.emplace_back(std::move(name), std::move(value));
+        };
+        for (const ProgramArgument& part : program.arguments(node)) {
+            const ExpressionValue value = evaluate_node(program, part.value, scope, reads);
+            const Value* data = value.data_value();
+            if (part.named) {
+                set(std::string(part.name.name()), data != nullptr ? *data : Value{});
+                continue;
+            }
+            if (data != nullptr && data->object() != nullptr) {
+                for (const auto& [name, field] : data->object()->fields)
+                    set(name, field);
+            } else if (data == nullptr || data->kind() != ValueKind::null_value) {
+                report(program.expression(part.value), scope, "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
+                       "Only a record can be spread into a record.");
+            }
+        }
+        return ExpressionValue(Value(std::move(fields)));
+    }
+    case ExpressionKind::handler: {
+        ExpressionValue function = evaluate_node(program, node.first, scope, reads);
+        if (function.action() != nullptr)
+            return function;
+        if (function.lambda() == nullptr || *function.lambda() == nullptr)
+            return ExpressionValue{};
+        auto handler = std::make_shared<ActionValue>(
+            std::make_shared<const Action>(script_action_contract(), Value{}), std::nullopt,
+            std::vector<std::shared_ptr<const ActionValue>>{});
+        handler->script = *function.lambda();
+        return ExpressionValue(std::shared_ptr<const ActionValue>(std::move(handler)));
+    }
     case ExpressionKind::action:
         return evaluate_action(program, node, scope, reads);
     case ExpressionKind::helper:
@@ -1027,10 +1198,18 @@ ExpressionValue ExpressionRuntime::evaluate_variable(const Program& program,
             return ExpressionValue{};
         }
     }
-    if (const ExpressionValue* bound = scope.find(node.name)) {
+    const ScopeLookup found = scope.lookup(node.name);
+    if (const ExpressionValue* bound = found.value) {
         if (bound->executable()) {
             reads.lexical(node.name, *bound);
             return *bound;
+        }
+        // In a handler a state reads what the handler wrote, else what the store holds now.
+        if (active_run_ != nullptr) {
+            if (const auto* state = scope.script_state(node.name)) {
+                if (const Value* current = script_state_value(**state))
+                    return ExpressionValue(*current);
+            }
         }
         const std::shared_ptr<const LexicalStateBinding>* binding =
             node.state_binding ? scope.state_binding(node.name) : nullptr;
@@ -1039,11 +1218,28 @@ ExpressionValue ExpressionRuntime::evaluate_variable(const Program& program,
         reads.lexical(node.name, value);
         return value;
     }
+    if (found.group != nullptr) {
+        return ExpressionValue(std::make_shared<const LambdaValue>(LambdaValue{
+            found.group->program,
+            no_program_id,
+            found.function,
+            {},
+            found.group->shared_from_this(),
+        }));
+    }
     switch (node.fallback) {
     case VariableFallback::host:
         throw std::logic_error("host variable bypassed structural host resolution");
     case VariableFallback::name:
         return ExpressionValue(node.value);
+    case VariableFallback::function:
+        if (node.function != no_program_id) {
+            ExpressionScope top;
+            top.set_component_path("function " + std::string(node.name.name()));
+            return ExpressionValue(std::make_shared<const LambdaValue>(LambdaValue{
+                program.shared_from_this(), no_program_id, node.function, std::move(top), nullptr}));
+        }
+        break;
     case VariableFallback::missing:
         break;
     }
@@ -1431,6 +1627,8 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
                              program.expression(entry.value), scope);
     };
     switch (node.helper) {
+    case HelperKind::library:
+        return evaluate_library(program, node, scope, reads);
     case HelperKind::filter:
     case HelperKind::map:
     case HelperKind::sort_by:
@@ -2062,21 +2260,134 @@ Value ExpressionRuntime::require_value(const ExpressionValue& evaluated,
 
 Value ExpressionRuntime::evaluate_lambda(const LambdaValue& lambda, const Value& input,
                                          DependencyRecorder& upstream) {
-    ExpressionScope nested = lambda.captured;
-    ScopeFrame frame;
-    frame.hides_parent_states = true;
-    frame.bindings.push_back(ScopeBinding{lambda.parameter, true, ScopeStateBinding::inherit,
-                                          ExpressionValue(input), nullptr});
-    nested.push(std::move(frame));
-    nested.set_component_path(lambda.captured.component_path() + "/" +
-                              std::string(lambda.parameter.name()));
     // The body's input is the helper's data, not a dependency of whoever evaluates it.
     DependencyRecorder reads(&upstream, DependencyRecorder::Keep::none,
                              DependencyRecorder::Keep::none);
-    reads.hide(lambda.parameter);
+    const ProgramFunction& function = lambda.declaration();
     const Program& program = *lambda.program;
-    return require_value(evaluate_node(program, lambda.body, nested, reads),
-                         program.expression(lambda.body), nested);
+    if (!function.script && function.body != no_program_id && lambda.group == nullptr &&
+        function.parameters_count == 1U) {
+        const Symbol parameter = program.parameters(function).front().name;
+        ExpressionScope nested = lambda.captured;
+        ScopeFrame frame;
+        frame.hides_parent_states = true;
+        frame.bindings.push_back(ScopeBinding{parameter, true, ScopeStateBinding::inherit,
+                                              ExpressionValue(input), nullptr});
+        nested.push(std::move(frame));
+        nested.set_component_path(lambda.captured.component_path() + "/" +
+                                  std::string(parameter.name()));
+        reads.hide(parameter);
+        return require_value(evaluate_node(program, function.body, nested, reads),
+                             program.expression(function.body), nested);
+    }
+    const ExpressionValue result = invoke(lambda, {ExpressionValue(input)}, {}, reads);
+    if (const Value* data = result.data_value())
+        return *data;
+    return Value{};
+}
+
+ExpressionValue ExpressionRuntime::evaluate_call(const Program& program,
+                                                 const ProgramExpression& node,
+                                                 const ExpressionScope& scope,
+                                                 DependencyRecorder& reads) {
+    const ExpressionValue callee = evaluate_node(program, node.first, scope, reads);
+    std::vector<ExpressionValue> positional;
+    std::vector<std::pair<Symbol, ExpressionValue>> named;
+    for (const ProgramArgument& argument : program.arguments(node)) {
+        ExpressionValue value = evaluate_node(program, argument.value, scope, reads);
+        if (argument.named)
+            named.emplace_back(argument.name, std::move(value));
+        else
+            positional.push_back(std::move(value));
+    }
+    if (callee.lambda() != nullptr && *callee.lambda() != nullptr)
+        return invoke(**callee.lambda(), std::move(positional), std::move(named), reads);
+    // An action value called like a function is performed by the handler running it.
+    if (callee.action() != nullptr && *callee.action() != nullptr) {
+        const std::shared_ptr<const ActionValue>& action = *callee.action();
+        if (action->script != nullptr) {
+            for (auto& [name, value] : named)
+                positional.push_back(std::move(value));
+            return invoke(*action->script, std::move(positional), {}, reads);
+        }
+        perform_action(action);
+        return ExpressionValue{};
+    }
+    const std::string name(program.expression(node.first).name.name());
+    if (scripting_ > 0U || active_run_ != nullptr)
+        script_error("STRATA.SCRIPT.NOT_CALLABLE", "'" + name + "' is not a function.");
+    report(node, scope, "STRATA.SCRIPT.NOT_CALLABLE", "'" + name + "' is not a function.");
+    return ExpressionValue{};
+}
+
+ExpressionScope ExpressionRuntime::function_scope(
+    const LambdaValue& function, std::vector<ExpressionValue> positional,
+    std::vector<std::pair<Symbol, ExpressionValue>> named, DependencyRecorder& reads) {
+    const Program& program = *function.program;
+    const ProgramFunction& declaration = function.declaration();
+    ExpressionScope scope;
+    if (function.group != nullptr) {
+        scope = function.group->scope;
+        scope.keep(function.group);
+    } else {
+        scope = function.captured;
+    }
+    const std::span<const ProgramFunctionParameter> parameters = program.parameters(declaration);
+    ScopeFrame frame;
+    // A helper's item function sees no state binding; a script function reads and writes states.
+    frame.hides_parent_states = !declaration.script;
+    std::string path = scope.component_path();
+    if (!declaration.name.name().empty()) path += "/" + std::string(declaration.name.name());
+    for (std::size_t index = 0U; index < parameters.size(); ++index) {
+        const ProgramFunctionParameter& parameter = parameters[index];
+        reads.hide(parameter.name);
+        std::optional<ExpressionValue> value;
+        if (index < positional.size())
+            value = std::move(positional[index]);
+        for (auto& [name, argument] : named) {
+            if (name == parameter.name)
+                value = std::move(argument);
+        }
+        if (!value.has_value() && parameter.default_value != no_program_id) {
+            // A default sees the parameters before it.
+            ExpressionScope defaults = scope;
+            ScopeFrame bound = frame;
+            defaults.push(std::move(bound));
+            value = evaluate_node(program, parameter.default_value, defaults, reads);
+        }
+        frame.bindings.push_back(ScopeBinding{parameter.name, true, ScopeStateBinding::cleared,
+                                              value.value_or(ExpressionValue{}), nullptr});
+    }
+    scope.push(std::move(frame));
+    scope.set_component_path(std::move(path));
+    return scope;
+}
+
+ExpressionValue ExpressionRuntime::call(const LambdaValue& function,
+                                        std::vector<ExpressionValue> arguments) {
+    DependencyRecorder ignored;
+    try {
+        return invoke(function, std::move(arguments), {}, ignored);
+    } catch (const ScriptThrow& thrown) {
+        const Value* message = thrown.value.field("message");
+        report(RuntimeDiagnostic{
+            "STRATA.SCRIPT.UNCAUGHT",
+            "A function threw: " +
+                (message != nullptr ? display_string(*message) : display_string(thrown.value)),
+            function.captured.component_path(),
+            std::nullopt,
+            DiagnosticSeverity::error,
+            std::nullopt,
+        });
+        return ExpressionValue{};
+    }
+}
+
+void ExpressionRuntime::script_error(std::string code, std::string message) {
+    throw ScriptThrow{Value(std::vector<std::pair<std::string, Value>>{
+        {"code", Value(std::move(code))},
+        {"message", Value(std::move(message))},
+    })};
 }
 
 std::shared_ptr<const CollectionViewValue>
@@ -2407,6 +2718,9 @@ ExpressionRuntime::composed_action(const Program& program, const ProgramExpressi
 void ExpressionRuntime::report(const ProgramExpression& node, const ExpressionScope& scope,
                                std::string code, std::string message,
                                std::optional<std::string> expected) {
+    // Inside a script an error unwinds to the nearest catch instead of reading as null.
+    if (scripting_ > 0U)
+        script_error(std::move(code), std::move(message));
     const std::string& component_path = scope.component_path();
     const std::optional<std::string_view> path = node.source.find("path").string();
     report(RuntimeDiagnostic{

@@ -237,10 +237,78 @@ void for_each_child(const Expression& expression,
             } else if constexpr (std::is_same_v<Node, CallExpression>) {
                 for (const Argument& argument : node.arguments) visit(*argument.value);
             } else if constexpr (std::is_same_v<Node, LambdaExpression>) {
-                visit(*node.body);
+                if (node.body != nullptr) visit(*node.body);
+                if (node.block != nullptr) for_each_block_expression(*node.block, visit);
+            } else if constexpr (std::is_same_v<Node, SpreadExpression>) {
+                visit(*node.operand);
+            } else if constexpr (std::is_same_v<Node, AwaitExpression>) {
+                visit(*node.operand);
             }
         },
         expression.node);
+}
+
+FunctionInfo function_info(const FunctionDeclaration& function, const SchemaRegistry& registry) {
+    FunctionInfo info;
+    info.declaration = &function;
+    for (const Parameter& parameter : function.parameters) {
+        SchemaParameter schema;
+        schema.name = parameter.name;
+        schema.type = parameter.type_reference.has_value()
+                          ? resolve_type_reference(*parameter.type_reference, registry)
+                          : simple(SemanticTypeKind::any);
+        schema.required = parameter.default_value == nullptr;
+        schema.nullable = parameter.type_reference.has_value() && parameter.type_reference->nullable;
+        info.parameters.push_back(std::move(schema));
+    }
+    return info;
+}
+
+void for_each_block_expression(const Block& block,
+                               const std::function<void(const Expression&)>& visit) {
+    for (const StatementPtr& statement : block.statements) {
+        std::visit(
+            [&visit](const auto& node) {
+                using Node = std::decay_t<decltype(node)>;
+                if constexpr (std::is_same_v<Node, LetStatement>) {
+                    visit(*node.initializer);
+                } else if constexpr (std::is_same_v<Node, AssignmentStatement>) {
+                    visit(*node.target);
+                    visit(*node.value);
+                } else if constexpr (std::is_same_v<Node, ExpressionStatement>) {
+                    visit(*node.expression);
+                } else if constexpr (std::is_same_v<Node, WhileStatement>) {
+                    visit(*node.condition);
+                    for_each_block_expression(*node.block, visit);
+                } else if constexpr (std::is_same_v<Node, ReturnStatement>) {
+                    if (node.value != nullptr) visit(*node.value);
+                } else if constexpr (std::is_same_v<Node, ThrowStatement>) {
+                    visit(*node.value);
+                } else if constexpr (std::is_same_v<Node, TryStatement>) {
+                    for_each_block_expression(*node.block, visit);
+                    for_each_block_expression(*node.catch_block, visit);
+                } else if constexpr (std::is_same_v<Node, IfStatement>) {
+                    visit(*node.condition);
+                    for_each_block_expression(*node.then_block, visit);
+                    if (node.else_block != nullptr) for_each_block_expression(*node.else_block, visit);
+                } else if constexpr (std::is_same_v<Node, ForStatement>) {
+                    visit(*node.collection);
+                    if (node.filter != nullptr) visit(*node.filter);
+                    for_each_block_expression(*node.block, visit);
+                } else if constexpr (std::is_same_v<Node, WhenStatement>) {
+                    visit(*node.subject);
+                    for (const WhenBranch& branch : node.branches) {
+                        if (branch.match != nullptr) visit(*branch.match);
+                        for_each_block_expression(*branch.block, visit);
+                    }
+                } else if constexpr (std::is_same_v<Node, FunctionStatement>) {
+                    if (node.function.expression_body != nullptr) visit(*node.function.expression_body);
+                    if (node.function.block_body != nullptr)
+                        for_each_block_expression(*node.function.block_body, visit);
+                }
+            },
+            statement->node);
+    }
 }
 
 std::optional<StaticNumber> static_number(const Expression& expression) {

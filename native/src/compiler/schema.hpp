@@ -113,6 +113,8 @@ enum class SemanticTypeKind {
     action,
     component,
     lambda,
+    /** A StrataScript function value: a `fn`, or a lambda written with `=>`. */
+    function,
     component_template,
     enumeration,
     list,

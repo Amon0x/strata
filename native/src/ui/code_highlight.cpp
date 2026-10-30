@@ -788,9 +788,10 @@ constexpr std::string_view sql_builtins[] = {
 };
 
 constexpr std::string_view strata_keywords[] = {
-    "import",    "from",    "as",    "screen",  "overlay", "component", "style",
-    "animation", "extends", "state", "derived", "root",    "if",        "when",
-    "else",      "for",     "in",    "where",   "to",
+    "import", "from",   "as",    "screen",   "overlay", "component", "style",  "animation",
+    "extends", "state", "derived", "root",   "if",      "when",      "else",   "for",
+    "in",     "where",  "to",    "fn",       "async",   "await",     "let",    "var",
+    "while",  "break",  "continue", "return", "throw",  "try",       "catch",
 };
 constexpr std::string_view strata_constants[] = {"true", "false", "null"};
 constexpr std::string_view strata_builtins[] = {"theme", "env", "item"};

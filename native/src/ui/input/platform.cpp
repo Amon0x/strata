@@ -314,6 +314,11 @@ InputOperationResult InputRouter::platform(PlatformInputEvent event) {
         } catch (const std::exception&) {
             answer = runtime::Value{};
         }
+        if (continuation.script != nullptr) {
+            resume_script(continuation.script, continuation.node_identity, continuation.event,
+                          std::move(answer), result);
+            return result;
+        }
         const runtime::ActionEvent answered{"platform-result", node->description().key,
                                             std::move(answer)};
         static_cast<void>(execute_action(answered, *continuation.action, *node, result));

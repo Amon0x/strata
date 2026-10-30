@@ -318,6 +318,9 @@ class SlotDeclarations final {
                 break;
             case runtime::StatementKind::state:
             case runtime::StatementKind::derived:
+            case runtime::StatementKind::function:
+                break;
+            default:
                 break;
             }
         }
@@ -616,6 +619,23 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
     std::vector<std::shared_ptr<const DescriptionNode>> nodes;
     const std::span<const runtime::ProgramStatement> statements =
         program.statements(program.block(block));
+    // The functions the block declares close over its scope, which grows as its states and
+    // derived values are declared: a call reads what is declared by then, a handler all of it.
+    std::shared_ptr<runtime::FunctionGroup> functions;
+    for (const runtime::ProgramStatement& statement : statements) {
+        if (statement.kind != runtime::StatementKind::function)
+            continue;
+        if (functions == nullptr) {
+            functions = std::make_shared<runtime::FunctionGroup>();
+            functions->program = program.shared_from_this();
+        }
+        functions->functions.emplace_back(statement.name, statement.function);
+    }
+    if (functions != nullptr) {
+        Scope& declaring = extend();
+        declaring.expressions.bind_functions(functions);
+        functions->close_over(declaring.expressions);
+    }
     for (std::size_t statement_index = 0U; statement_index < statements.size(); ++statement_index) {
         if (std::ranges::binary_search(skipped_statement_indices, statement_index))
             continue;
@@ -696,6 +716,8 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
                 runtime::ScopeBinding{statement.name, true, runtime::ScopeStateBinding::bound,
                                       ExpressionValue(state), std::move(binding)});
             declaring.expressions.push(std::move(declared));
+            if (functions != nullptr)
+                functions->close_over(declaring.expressions);
             continue;
         }
         case runtime::StatementKind::derived: {
@@ -704,8 +726,13 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
             runtime::ScopeFrame declared;
             declared.bindings.push_back(declared_binding(statement.name, value, nullptr));
             declaring.expressions.push(std::move(declared));
+            if (functions != nullptr)
+                functions->close_over(declaring.expressions);
             continue;
         }
+        case runtime::StatementKind::function:
+            // Bound with the block's other functions before its first statement.
+            continue;
         case runtime::StatementKind::node:
             nodes.push_back(build_call(statement.call, scope));
             continue;
@@ -790,6 +817,8 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
             }
             continue;
         }
+        default:
+            break;
         }
         throw std::logic_error("validated portable IR contains an unknown statement kind");
     }

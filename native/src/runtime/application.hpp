@@ -112,6 +112,12 @@ struct ActivationResult final {
     [[nodiscard]] bool activated() const noexcept;
 };
 
+/** One state a script handler wrote, with the binding that names it. */
+struct ScriptStateWrite final {
+    LexicalStateBinding binding;
+    Value value;
+};
+
 struct StateScopeResolution final {
     StateAddress address;
     std::string declaration_scope;
@@ -158,6 +164,18 @@ public:
         const LexicalStateBinding* lexical_state_binding = nullptr,
         std::string_view undo_scope = "application",
         std::int64_t timestamp_nanos = 0
+    );
+    /**
+     * Commits what a script handler wrote, every state together: each is checked against its
+     * declaration, and on any rejection none is written. One undo step covers them when
+     * `undo_label` names it. A message when the commit was rejected.
+     */
+    [[nodiscard]] std::optional<std::string> commit_script(
+        const std::vector<ScriptStateWrite>& writes,
+        std::string_view undo_scope,
+        const std::optional<std::string>& undo_label,
+        const std::optional<std::string>& undo_coalesce,
+        std::int64_t timestamp_nanos
     );
     [[nodiscard]] const std::shared_ptr<const RuntimeUnit>& active_unit() const noexcept;
     [[nodiscard]] std::optional<std::uint64_t> active_generation() const noexcept;

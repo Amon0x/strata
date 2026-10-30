@@ -27,7 +27,7 @@
       "name": "constant.numeric.strata"
     },
     {
-      "match": "\\b(?:animation|component|derived|else|extends|false|for|from|if|import|in|null|overlay|root|screen|state|style|to|true|when|where)\\b",
+      "match": "\\b(?:animation|async|await|break|catch|component|continue|derived|else|extends|false|fn|for|from|if|import|in|let|null|overlay|return|root|screen|state|style|throw|to|true|try|var|when|where|while)\\b",
       "name": "keyword.control.strata"
     },
     {
@@ -35,7 +35,7 @@
       "name": "entity.name.type.widget.strata"
     },
     {
-      "match": "(?:!=|&&|\\->|<=|==|>=|\\?\\?|\\|\\||!|%|\\*|\\+|\\-|/|<|=|>)",
+      "match": "(?:\\.\\.\\.|!=|%=|&&|\\*=|\\+=|\\-=|\\->|/=|<=|==|=>|>=|\\?\\?|\\|\\||!|%|\\*|\\+|\\-|/|<|=|>)",
       "name": "keyword.operator.strata"
     },
     {

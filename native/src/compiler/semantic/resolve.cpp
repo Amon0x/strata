@@ -63,6 +63,30 @@ private:
         if (style.body != nullptr) block(*style.body);
     }
 
+    void declaration_node(const Declaration&, const FunctionDeclaration& function) {
+        function_body(function);
+    }
+
+    void declaration_node(const Declaration&, const TypeDeclaration&) {}
+
+    /** A function's parameters, then its body, with the scope it was declared in. */
+    void function_body(const FunctionDeclaration& function) {
+        const std::size_t mark = scope_.size();
+        for (std::size_t index = 0U; index < function.parameters.size(); ++index) {
+            const Parameter& parameter = function.parameters[index];
+            if (parameter.default_value != nullptr) expression(*parameter.default_value);
+            Symbol symbol;
+            symbol.kind = SymbolKind::function_parameter;
+            symbol.name = parameter.name;
+            symbol.function = &function;
+            symbol.parameter_index = index;
+            scope_.push_back(Binding{parameter.name, analysis_.add_symbol(std::move(symbol))});
+        }
+        if (function.expression_body != nullptr) expression(*function.expression_body);
+        if (function.block_body != nullptr) block(*function.block_body);
+        scope_.resize(mark);
+    }
+
     void declaration_node(const Declaration&, const AnimationDeclaration& animation) {
         for (const AnimationEntry& entry : animation.entries) {
             if (const auto* timing = std::get_if<AnimationProperty>(&entry)) {
@@ -95,9 +119,30 @@ private:
         return id;
     }
 
-    /** What `name` denotes here: locals, then host roots, then components, styles, animations. */
+    /** A top-level function's symbol, one per function. */
+    [[nodiscard]] SymbolId top_level_function(const std::string_view name) {
+        const auto found = model_.function_names.find(name);
+        if (found == model_.function_names.end()) return no_symbol;
+        const FunctionDeclaration* function = found->second->declaration;
+        if (const auto known = function_symbols_.find(function); known != function_symbols_.end())
+            return known->second;
+        Symbol symbol;
+        symbol.kind = SymbolKind::function;
+        symbol.name = std::string(name);
+        symbol.function = function;
+        symbol.source_id = found->second->source_id;
+        const SymbolId id = analysis_.add_symbol(std::move(symbol));
+        function_symbols_.emplace(function, id);
+        return id;
+    }
+
+    /**
+     * What `name` denotes here: locals, then top-level functions, then host roots, then
+     * components, styles, animations.
+     */
     [[nodiscard]] SymbolId lookup(const std::string& name) {
         if (const SymbolId id = local(name); id != no_symbol) return id;
+        if (const SymbolId id = top_level_function(name); id != no_symbol) return id;
         if (analysis_.registry.host_types().contains(name))
             return global(name, SymbolKind::host, nullptr, {});
         if (const auto component = model_.components.find(name);
@@ -127,6 +172,10 @@ private:
         names.insert(names.end(), analysis_.style_names.begin(), analysis_.style_names.end());
         names.insert(names.end(), analysis_.animation_names.begin(),
                      analysis_.animation_names.end());
+        for (const auto& [name, function] : model_.function_names) {
+            static_cast<void>(function);
+            names.push_back(name);
+        }
         return names;
     }
 
@@ -145,7 +194,28 @@ private:
             if (local_in_block(derived->name, mark) == no_symbol)
                 scope_.push_back(Binding{derived->name, id});
         }
+        // So is a function, and its body sees everything the block declares, wherever it is
+        // written: a component's functions read and write the state declared after them.
+        std::vector<const FunctionDeclaration*> functions;
+        for (const StatementPtr& statement : body.statements) {
+            const auto* declared = std::get_if<FunctionStatement>(&statement->node);
+            if (declared == nullptr) continue;
+            const FunctionDeclaration& function = declared->function;
+            model_.functions.insert_or_assign(&function,
+                                              function_info(function, analysis_.registry));
+            const SymbolId id = analysis_.add_symbol(Symbol{
+                .kind = SymbolKind::function,
+                .name = function.name,
+                .statement = statement.get(),
+                .function = &function,
+            });
+            function_symbols_.emplace(&function, id);
+            functions.push_back(&function);
+            if (local_in_block(function.name, mark) == no_symbol)
+                scope_.push_back(Binding{function.name, id});
+        }
         for (const StatementPtr& statement : body.statements) this->statement(*statement);
+        for (const FunctionDeclaration* function : functions) function_body(*function);
         scope_.resize(mark);
     }
 
@@ -214,6 +284,41 @@ private:
             scope_.resize(mark);
         } else if (const auto* frame = std::get_if<AnimationFrameStatement>(&statement.node)) {
             for (const Property& entry : frame->frame.properties) expression(*entry.value);
+        } else if (const auto* let = std::get_if<LetStatement>(&statement.node)) {
+            // A local is visible after its initializer, which cannot read it.
+            expression(*let->initializer);
+            const SymbolId id = analysis_.add_symbol(Symbol{
+                .kind = SymbolKind::local,
+                .name = let->name,
+                .statement = &statement,
+                .mutable_binding = let->mutable_binding,
+            });
+            scope_.push_back(Binding{let->name, id});
+        } else if (const auto* assignment = std::get_if<AssignmentStatement>(&statement.node)) {
+            expression(*assignment->target);
+            expression(*assignment->value);
+        } else if (const auto* effect = std::get_if<ExpressionStatement>(&statement.node)) {
+            expression(*effect->expression);
+        } else if (const auto* repeat = std::get_if<WhileStatement>(&statement.node)) {
+            expression(*repeat->condition);
+            block(*repeat->block);
+        } else if (const auto* returned = std::get_if<ReturnStatement>(&statement.node)) {
+            if (returned->value != nullptr) expression(*returned->value);
+        } else if (const auto* thrown = std::get_if<ThrowStatement>(&statement.node)) {
+            expression(*thrown->value);
+        } else if (const auto* attempt = std::get_if<TryStatement>(&statement.node)) {
+            block(*attempt->block);
+            const std::size_t mark = scope_.size();
+            scope_.push_back(Binding{
+                attempt->catch_name,
+                analysis_.add_symbol(Symbol{
+                    .kind = SymbolKind::local,
+                    .name = attempt->catch_name,
+                    .statement = &statement,
+                }),
+            });
+            block(*attempt->catch_block);
+            scope_.resize(mark);
         }
     }
 
@@ -407,16 +512,26 @@ private:
 
     void expression_node(const Expression& expression, const LambdaExpression& lambda) {
         const std::size_t mark = scope_.size();
-        scope_.push_back(Binding{
-            lambda.parameter_name,
-            analysis_.add_symbol(Symbol{
-                .kind = SymbolKind::lambda_parameter,
-                .name = lambda.parameter_name,
-                .lambda = &expression,
-            }),
-        });
-        this->expression(*lambda.body);
+        for (std::size_t index = 0U; index < lambda.parameters.size(); ++index) {
+            const LambdaParameter& parameter = lambda.parameters[index];
+            Symbol symbol;
+            symbol.kind = SymbolKind::lambda_parameter;
+            symbol.name = parameter.name;
+            symbol.lambda = &expression;
+            symbol.parameter_index = index;
+            scope_.push_back(Binding{parameter.name, analysis_.add_symbol(std::move(symbol))});
+        }
+        if (lambda.body != nullptr) this->expression(*lambda.body);
+        if (lambda.block != nullptr) block(*lambda.block);
         scope_.resize(mark);
+    }
+
+    void expression_node(const Expression&, const SpreadExpression& spread) {
+        expression(*spread.operand);
+    }
+
+    void expression_node(const Expression&, const AwaitExpression& awaited) {
+        expression(*awaited.operand);
     }
 
     void expression_node(const Expression& expression, const CallExpression& call) {
@@ -447,10 +562,31 @@ private:
         }
     }
 
-    [[nodiscard]] ResolvedCall resolve_call(const CallExpression& call) const {
+    [[nodiscard]] ResolvedCall resolve_call(const CallExpression& call) {
         const SchemaRegistry& registry = analysis_.registry;
         const std::string name = call.target.qualified_name();
         ResolvedCall resolved;
+        // A name bound here, or a top-level function, is called as a function: what a script
+        // declares shadows the helpers.
+        if (name.find('.') == std::string::npos) {
+            SymbolId callee = local(name);
+            if (callee == no_symbol) callee = top_level_function(name);
+            if (callee != no_symbol) {
+                const Symbol& symbol = model_.symbols[callee];
+                resolved.kind = CallKind::function;
+                resolved.callee = callee;
+                if (symbol.kind == SymbolKind::function) {
+                    const auto info = model_.functions.find(symbol.function);
+                    if (info != model_.functions.end()) {
+                        resolved.function = &info->second;
+                        resolved.arguments = bind_arguments(call.arguments, info->second.parameters);
+                    }
+                }
+                if (resolved.arguments.size() != call.arguments.size())
+                    resolved.arguments.resize(call.arguments.size());
+                return resolved;
+            }
+        }
         const std::string* id = !call.arguments.empty()
                                     ? string_literal_value(*call.arguments.front().value)
                                     : nullptr;
@@ -555,6 +691,7 @@ private:
     std::vector<Binding> scope_;
     std::map<std::pair<SymbolKind, std::string>, SymbolId> globals_;
     std::map<const Statement*, SymbolId> derived_symbols_;
+    std::map<const FunctionDeclaration*, SymbolId> function_symbols_;
 };
 
 } // namespace

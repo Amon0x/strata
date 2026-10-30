@@ -29,11 +29,37 @@ using ExpressionPtr = std::shared_ptr<const Expression>;
 using StatementPtr = std::shared_ptr<const Statement>;
 using BlockPtr = std::shared_ptr<const Block>;
 
+enum class TypeReferenceKind : std::uint8_t {
+    /** `name` or `name<arguments>`. */
+    named,
+    /** `"text"`: the one string `name` holds. */
+    string_literal,
+    /** `A | B | ...`: any of `arguments`. */
+    union_type,
+    /** `{ name: T, other?: U }`: a record with `fields`. */
+    record,
+    /** `(T, U) => R`: a function of `arguments` returning `returns`. */
+    function,
+};
+
+struct TypeField;
+
 struct TypeReference final {
     std::string name;
     std::vector<TypeReference> arguments;
     bool nullable;
     SourceSpan span;
+    TypeReferenceKind kind = TypeReferenceKind::named;
+    std::vector<TypeField> fields = {};
+    /** A function type's return type, alone. */
+    std::vector<TypeReference> returns = {};
+};
+
+struct TypeField final {
+    std::string name;
+    TypeReference type;
+    /** Written `name?:`: a record may leave it out. */
+    bool optional = false;
 };
 
 struct Parameter final {
@@ -81,6 +107,11 @@ struct ListExpression final {
     std::vector<ExpressionPtr> elements;
 };
 
+/** `...operand` inside a list literal: the operand's elements, in place. */
+struct SpreadExpression final {
+    ExpressionPtr operand;
+};
+
 struct IdentifierMapKey final {
     std::string name;
     SourceSpan span;
@@ -91,7 +122,12 @@ struct StringMapKey final {
     SourceSpan span;
 };
 
-using MapKey = std::variant<IdentifierMapKey, StringMapKey>;
+/** `...record` inside a record literal: the record's fields, overridden by later entries. */
+struct SpreadMapKey final {
+    SourceSpan span;
+};
+
+using MapKey = std::variant<IdentifierMapKey, StringMapKey, SpreadMapKey>;
 
 struct MapEntry final {
     MapKey key;
@@ -170,9 +206,27 @@ struct CallExpression final {
     std::vector<Argument> arguments;
 };
 
+struct LambdaParameter final {
+    std::string name;
+    std::optional<TypeReference> type_reference;
+    SourceSpan span;
+};
+
+/**
+ * `n -> expr` (a helper's item function), or a StrataScript function value: `x => expr`,
+ * `(a, b) => expr`, `() => { statements }`. Exactly one of `body` and `block` is set.
+ */
 struct LambdaExpression final {
-    std::string parameter_name;
+    std::vector<LambdaParameter> parameters;
     ExpressionPtr body;
+    BlockPtr block;
+    /** Written with `=>` (or a parameter list): a script function rather than a helper's `->`. */
+    bool script = false;
+};
+
+/** `await operand`: performs an action (or calls an async function) and waits for its answer. */
+struct AwaitExpression final {
+    ExpressionPtr operand;
 };
 
 struct ErrorExpression final {};
@@ -190,6 +244,8 @@ using ExpressionNode = std::variant<
     IndexExpression,
     CallExpression,
     LambdaExpression,
+    SpreadExpression,
+    AwaitExpression,
     ErrorExpression>;
 
 struct Expression final {
@@ -278,6 +334,89 @@ struct AnimationFrameStatement final {
     AnimationFrame frame;
 };
 
+/** `type Name = Type`: a name for a type, at the top of a module or in a component. */
+struct TypeDeclaration final {
+    std::string name;
+    TypeReference type;
+    SourceSpan name_span;
+};
+
+/** A type declared in a component body. */
+struct TypeStatement final {
+    TypeDeclaration declaration;
+};
+
+/** A StrataScript function: `fn name(params): Type { ... }` or `fn name(params) = expr`. */
+struct FunctionDeclaration final {
+    std::string name;
+    std::vector<Parameter> parameters;
+    std::optional<TypeReference> return_type;
+    /** Exactly one of `expression_body` and `block_body` is set. */
+    ExpressionPtr expression_body;
+    BlockPtr block_body;
+    bool asynchronous = false;
+    SourceSpan name_span;
+};
+
+/** A function declared in a component body (or a script block). */
+struct FunctionStatement final {
+    FunctionDeclaration function;
+};
+
+/** `let name = value` (immutable) or `var name = value` (mutable). */
+struct LetStatement final {
+    std::string name;
+    bool mutable_binding = false;
+    std::optional<TypeReference> type_reference;
+    ExpressionPtr initializer;
+    SourceSpan name_span;
+};
+
+enum class AssignmentOperator {
+    assign,
+    add,
+    subtract,
+    multiply,
+    divide,
+    modulo,
+};
+
+/** `target op value`; the target is a name, or a property or index path from one. */
+struct AssignmentStatement final {
+    ExpressionPtr target;
+    AssignmentOperator operation = AssignmentOperator::assign;
+    ExpressionPtr value;
+};
+
+/** An expression evaluated for its effect: a call, or an action, which is performed. */
+struct ExpressionStatement final {
+    ExpressionPtr expression;
+};
+
+struct WhileStatement final {
+    ExpressionPtr condition;
+    BlockPtr block;
+};
+
+struct BreakStatement final {};
+struct ContinueStatement final {};
+
+struct ReturnStatement final {
+    /** Null for a bare `return`. */
+    ExpressionPtr value;
+};
+
+struct ThrowStatement final {
+    ExpressionPtr value;
+};
+
+/** `try { ... } catch name { ... }`. */
+struct TryStatement final {
+    BlockPtr block;
+    std::string catch_name;
+    BlockPtr catch_block;
+};
+
 struct ErrorStatement final {};
 
 using StatementNode = std::variant<
@@ -290,6 +429,17 @@ using StatementNode = std::variant<
     WhenStatement,
     ForStatement,
     AnimationFrameStatement,
+    FunctionStatement,
+    LetStatement,
+    AssignmentStatement,
+    ExpressionStatement,
+    WhileStatement,
+    BreakStatement,
+    ContinueStatement,
+    ReturnStatement,
+    ThrowStatement,
+    TryStatement,
+    TypeStatement,
     ErrorStatement>;
 
 struct Statement final {
@@ -350,7 +500,9 @@ using DeclarationNode = std::variant<
     OverlayDeclaration,
     ComponentDeclaration,
     StyleDeclaration,
-    AnimationDeclaration>;
+    AnimationDeclaration,
+    FunctionDeclaration,
+    TypeDeclaration>;
 
 struct Declaration final {
     DeclarationNode node;

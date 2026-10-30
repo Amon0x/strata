@@ -1,0 +1,130 @@
+// StrataScript in one overlay: functions and closures, loops and errors, types, template
+// strings, the library, a controlled drag that undoes as one step, and an awaited answer.
+
+style Root {
+  kind: "STACK";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  background: theme.surface;
+}
+
+style Column {
+  kind: "COLUMN";
+  position: "ABSOLUTE";
+  inset: { left: 16, top: 16 };
+  gap: 6;
+}
+
+type Kind = "exec" | "data"
+type Pin = { id: string, kind: Kind, label: string, note?: string }
+
+fn twice(x: number) = x * 2
+
+fn fib(n: number): number {
+  if n < 2 { return n }
+  return fib(n - 1) + fib(n - 2)
+}
+
+fn makeCounter() {
+  var n = 0
+  return () => { n += 1; return n }
+}
+
+fn greet(name: string, greeting: string = "Hello") = `${greeting}, ${name}!`
+
+fn describe(pin: Pin): string {
+  when pin.kind {
+    "exec" -> { return `exec ${pin.label}` }
+    else -> { return `data ${pin.label} (${pin.note ?? "no note"})` }
+  }
+}
+
+// A handler given as a parameter is called like a function.
+component Choice(label: string, onPick: action) {
+  Button(key: `scripting.choice.${label}`, label: label, onClick: () => { onPick() })
+}
+
+async fn now() {
+  let answer = await action("clock.now")
+  return answer.now
+}
+
+overlay Scripting {
+  state count = 0
+  state items: List<string> = []
+  state node = { name: "a", x: 1 }
+  state log = ""
+  state pins: List<Pin> = [{ id: "a", kind: "exec", label: "Run" },
+                           { id: "b", kind: "data", label: "Value", note: "number" }]
+  state x = 420
+  state y = 200
+  state stamped = false
+
+  fn bump(by: number) {
+    count += by
+    var total = 0
+    var i = 0
+    while i < 10 {
+      i += 1
+      if i == 3 { continue }
+      if i > 8 { break }
+      total += i
+    }
+    items = [...items, `${total}`]
+    node = { ...node, x: node.x + 1 }
+    node.name = "b"
+  }
+
+  fn explore() {
+    try {
+      throw "boom"
+    } catch error {
+      log = `caught ${error}`
+    }
+    var odd = []
+    for n, index in [1, 2, 3, 4] {
+      if n % 2 == 0 { continue }
+      odd = [...odd, n * 10 + index]
+    }
+    fn square(v: number) = v * v
+    let next = makeCounter()
+    next()
+    let third = next() + next()
+    let sorted = sort([5, 3, 9, 1], (a, b) => b - a)
+    log = `${log}; odd ${odd}; square ${square(7)}; fib ${fib(10)}; counter ${third}; ${greet("Ada")} ${greet(greeting: "Hi", name: "Bo")}; ${map(pins, p => describe(p))}; sorted ${sorted}; sum ${reduce(sorted, (a, n) => a + n, 0)}`
+  }
+
+  fn explode() {
+    count = 999
+    let field = "missing"
+    let value = node[field].deeper
+  }
+
+  root Panel(key: "scripting.root", style: Root) {
+    Panel(style: Column) {
+      Text(key: "scripting.count", text: `count=${count} twice=${twice(count)} items=${length(items)} node=${node.name}/${node.x}`)
+      Text(key: "scripting.log", text: log, wrapMode: "WORD")
+      Text(key: "scripting.box", text: `box at ${x},${y} stamped ${stamped}`)
+      Button(key: "scripting.bump", label: "Bump", onClick: () => bump(1))
+      Button(key: "scripting.explore", label: "Explore", onClick: () => explore())
+      Button(key: "scripting.explode", label: "Explode", onClick: () => explode())
+      Button(key: "scripting.stamp", label: "Stamp", onClick: () => {
+        let t = await now()
+        stamped = t > 0
+      })
+      Button(key: "scripting.undo", label: "Undo", onClick: action("application.undo"))
+      Choice(label: "first", onPick: () => { log = "picked first" })
+    }
+    Panel(
+      key: "scripting.handle",
+      layout: { position: "ABSOLUTE", width: 60, height: 40, inset: { left: x, top: y } },
+      style: style(background: #3b82f6, radius: 6),
+      behaviors: [{ id: "strata.movable", options: { controlled: true }, action: e => {
+        // The handle follows the pointer through its state; one drag is one undo step.
+        undoStep("Move handle", "handle")
+        x += e.dx
+        y += e.dy
+      } }]
+    )
+  }
+}

@@ -449,11 +449,23 @@ void TypeChecker::validate_expected(const Expression& expression, const Semantic
         list != nullptr && expected.kind == SemanticTypeKind::list &&
         expected.element != nullptr) {
         checked_[expression.id] = true;
+        bool spread = false;
         for (std::size_t index = 0U; index < list->elements.size(); ++index) {
+            const std::string element_path = component_path + "[" + std::to_string(index) + "]";
+            // A spread contributes a list's elements, so the list it spreads is what is checked.
+            if (const auto* spreading = std::get_if<SpreadExpression>(&list->elements[index]->node)) {
+                spread = true;
+                checked_[list->elements[index]->id] = true;
+                auto unbounded = std::make_shared<SemanticType>(expected);
+                unbounded->minimum_items.reset();
+                unbounded->maximum_items.reset();
+                validate_expected(*spreading->operand, *unbounded, false, element_path);
+                continue;
+            }
             validate_expected(*list->elements[index], *expected.element,
-                              expected.element_nullable,
-                              component_path + "[" + std::to_string(index) + "]");
+                              expected.element_nullable, element_path);
         }
+        if (spread) return;
         if ((expected.minimum_items.has_value() &&
              list->elements.size() < *expected.minimum_items) ||
             (expected.maximum_items.has_value() &&

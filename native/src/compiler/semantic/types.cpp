@@ -29,6 +29,7 @@ OperandClass operand_class(const SemanticType& type) {
     case SemanticTypeKind::async_value:
     case SemanticTypeKind::action:
     case SemanticTypeKind::lambda:
+    case SemanticTypeKind::function:
     case SemanticTypeKind::component_template:
         return OperandClass::other;
     default:
@@ -164,10 +165,16 @@ SemanticTypePtr TypeOracle::compute_symbol(const SymbolId id) {
     case SymbolKind::loop_index:
         return simple(SemanticTypeKind::number);
     case SymbolKind::lambda_parameter: {
-        // The helper signature names the argument whose items the lambda is applied to.
+        const auto& lambda = std::get<LambdaExpression>(symbol.lambda->node);
+        const LambdaParameter& declared = lambda.parameters[symbol.parameter_index];
+        if (declared.type_reference.has_value())
+            return resolve_type_reference(*declared.type_reference, analysis_.registry);
+        // The helper signature names the argument whose items the lambda is applied to; a
+        // script function's parameters take what they are called with.
         const SchemaParameter* parameter = lambda_parameter_of(*symbol.lambda);
-        if (parameter == nullptr || parameter->items_from.empty())
-            return simple(SemanticTypeKind::unknown);
+        if (parameter == nullptr || symbol.parameter_index != 0U)
+            return simple(lambda.script ? SemanticTypeKind::any : SemanticTypeKind::unknown);
+        if (parameter->items_from.empty()) return simple(SemanticTypeKind::unknown);
         const Argument* source =
             argument_for(*analysis_.lambda_arguments.at(symbol.lambda->id).first,
                          parameter->items_from);
@@ -180,6 +187,42 @@ SemanticTypePtr TypeOracle::compute_symbol(const SymbolId id) {
         return symbol.component != nullptr
                    ? symbol.component->parameters[symbol.parameter_index].type
                    : simple(SemanticTypeKind::unknown);
+    case SymbolKind::local: {
+        if (const auto* let = std::get_if<LetStatement>(&symbol.statement->node)) {
+            if (let->type_reference.has_value())
+                return resolve_type_reference(*let->type_reference, analysis_.registry);
+            SemanticTypePtr initial = type_of(*let->initializer);
+            // A `var` holds whatever it is assigned of its kind, not the literal it starts from.
+            if (let->mutable_binding && initial->kind == SemanticTypeKind::string_literal)
+                return simple(SemanticTypeKind::string);
+            if (let->mutable_binding && (initial->kind == SemanticTypeKind::list ||
+                                         initial->kind == SemanticTypeKind::map)) {
+                auto widened = std::make_shared<SemanticType>(*initial);
+                widened->minimum_items.reset();
+                widened->maximum_items.reset();
+                if (widened->kind == SemanticTypeKind::list && widened->element != nullptr &&
+                    widened->element->kind == SemanticTypeKind::any) {
+                    widened->element = simple(SemanticTypeKind::any);
+                }
+                return widened;
+            }
+            return initial;
+        }
+        // A caught value: a thrown value, or a runtime error's { code, message }.
+        return simple(SemanticTypeKind::any);
+    }
+    case SymbolKind::function: {
+        auto type = std::make_shared<SemanticType>();
+        type->kind = SemanticTypeKind::function;
+        type->returns = function_returns(*symbol.function);
+        return type;
+    }
+    case SymbolKind::function_parameter: {
+        const Parameter& parameter = symbol.function->parameters[symbol.parameter_index];
+        return parameter.type_reference.has_value()
+                   ? resolve_type_reference(*parameter.type_reference, analysis_.registry)
+                   : simple(SemanticTypeKind::any);
+    }
     case SymbolKind::host: {
         const auto& hosts = analysis_.registry.host_types();
         const auto found = hosts.find(symbol.name);
@@ -195,6 +238,14 @@ SemanticTypePtr TypeOracle::compute_symbol(const SymbolId id) {
         break;
     }
     return simple(SemanticTypeKind::unknown);
+}
+
+SemanticTypePtr TypeOracle::function_returns(const FunctionDeclaration& function) {
+    if (function.return_type.has_value())
+        return resolve_type_reference(*function.return_type, analysis_.registry);
+    if (function.asynchronous) return simple(SemanticTypeKind::any);
+    if (function.expression_body != nullptr) return type_of(*function.expression_body);
+    return simple(SemanticTypeKind::any);
 }
 
 SemanticTypePtr TypeOracle::component_template_type(
@@ -259,10 +310,25 @@ SemanticTypePtr TypeOracle::compute(const Expression& expression) {
     if (const auto* list = std::get_if<ListExpression>(&expression.node)) {
         auto type = std::make_shared<SemanticType>();
         type->kind = SemanticTypeKind::list;
-        type->maximum_items = list->elements.size();
-        type->minimum_items = list->elements.size();
-        type->element = list->elements.empty() ? simple(SemanticTypeKind::any)
-                                               : type_of(*list->elements.front());
+        // A spread contributes however many elements its list holds.
+        bool spread = false;
+        SemanticTypePtr element;
+        for (const ExpressionPtr& item : list->elements) {
+            SemanticTypePtr item_type = type_of(*item);
+            if (std::holds_alternative<SpreadExpression>(item->node)) {
+                spread = true;
+                item_type = item_type->element != nullptr ? item_type->element
+                                                          : simple(SemanticTypeKind::any);
+            }
+            if (element == nullptr) element = std::move(item_type);
+        }
+        type->element = element != nullptr ? element : simple(SemanticTypeKind::any);
+        if (!spread) {
+            type->maximum_items = list->elements.size();
+            type->minimum_items = list->elements.size();
+        } else {
+            type->maximum_items = maximum_eager_loop_items;
+        }
         return type;
     }
     if (const auto* map = std::get_if<MapExpression>(&expression.node)) {
@@ -270,11 +336,43 @@ SemanticTypePtr TypeOracle::compute(const Expression& expression) {
         type->kind = SemanticTypeKind::map;
         type->label = "object";
         for (const MapEntry& entry : map->entries) {
+            if (std::holds_alternative<SpreadMapKey>(entry.key)) {
+                // A spread record's fields, which later entries override.
+                const SemanticTypePtr spread = type_of(*entry.value);
+                if (spread->kind != SemanticTypeKind::map || spread->allow_unknown_fields ||
+                    spread->fields.empty()) {
+                    type->allow_unknown_fields = true;
+                    type->value = simple(SemanticTypeKind::any);
+                }
+                for (const ObjectField& field : spread->fields) {
+                    std::erase_if(type->fields, [&field](const ObjectField& existing) {
+                        return existing.name == field.name;
+                    });
+                    type->fields.push_back(field);
+                }
+                continue;
+            }
             const std::string* name = static_map_key(entry.key);
             if (name == nullptr || name->empty()) continue;
+            std::erase_if(type->fields,
+                          [name](const ObjectField& existing) { return existing.name == *name; });
             type->fields.push_back(ObjectField{*name, type_of(*entry.value), true, false});
         }
         return type;
+    }
+    if (const auto* spread = std::get_if<SpreadExpression>(&expression.node))
+        return type_of(*spread->operand);
+    if (const auto* awaited = std::get_if<AwaitExpression>(&expression.node)) {
+        // An awaited function call is its return value; an action's answer is whatever it says.
+        const Expression& operand = ungrouped(*awaited->operand);
+        if (const ResolvedCall* resolved = analysis_.model.call(operand);
+            resolved != nullptr && resolved->kind == CallKind::function &&
+            resolved->function != nullptr &&
+            resolved->function->declaration->return_type.has_value()) {
+            return resolve_type_reference(*resolved->function->declaration->return_type,
+                                          analysis_.registry);
+        }
+        return simple(SemanticTypeKind::any);
     }
     if (const auto* unary = std::get_if<UnaryExpression>(&expression.node)) {
         const SemanticTypePtr operand = type_of(*unary->operand);
@@ -345,8 +443,14 @@ SemanticTypePtr TypeOracle::compute(const Expression& expression) {
     }
     if (const auto* call = std::get_if<CallExpression>(&expression.node))
         return compute_call(expression, *call);
-    if (std::holds_alternative<LambdaExpression>(expression.node))
-        return simple(SemanticTypeKind::lambda);
+    if (const auto* lambda = std::get_if<LambdaExpression>(&expression.node)) {
+        if (!lambda->script) return simple(SemanticTypeKind::lambda);
+        auto type = std::make_shared<SemanticType>();
+        type->kind = SemanticTypeKind::function;
+        type->returns = lambda->body != nullptr ? type_of(*lambda->body)
+                                                : simple(SemanticTypeKind::any);
+        return type;
+    }
     return simple(SemanticTypeKind::unknown);
 }
 
@@ -370,6 +474,17 @@ SemanticTypePtr TypeOracle::compute_call(const Expression& expression, const Cal
     }
     case CallKind::unknown_helper:
         return simple(SemanticTypeKind::unknown);
+    case CallKind::function: {
+        if (resolved.function != nullptr) {
+            // An async function's call is what `await` waits on, not a value.
+            if (resolved.function->declaration->asynchronous) return simple(SemanticTypeKind::any);
+            return function_returns(*resolved.function->declaration);
+        }
+        const SemanticTypePtr callee = symbol_type(resolved.callee);
+        return callee->kind == SemanticTypeKind::function && callee->returns != nullptr
+                   ? callee->returns
+                   : simple(SemanticTypeKind::any);
+    }
     case CallKind::helper:
         break;
     }
@@ -423,7 +538,8 @@ SemanticTypePtr TypeOracle::compute_call(const Expression& expression, const Cal
         const auto* lambda = transform != nullptr
                                  ? std::get_if<LambdaExpression>(&ungrouped(*transform->value).node)
                                  : nullptr;
-        if (lambda != nullptr) projected->element = type_of(*lambda->body);
+        if (lambda != nullptr && lambda->body != nullptr)
+            projected->element = type_of(*lambda->body);
     }
     const std::string_view bound_name = implementation == "window" ? std::string_view("limit")
                                         : implementation == "page" ? std::string_view("size")

@@ -1062,10 +1062,17 @@ afterwards. The Windows desktop host provides it through WinHTTP, the shell and 
 ### Following the pointer
 
 The `strata.pointer` behavior tells a node where the pointer is over it. Its action receives an
-object as the pointer moves over the node or any of its descendants: `inside` (true), `x` and `y` in
+object as the pointer moves over the node or any of its descendants: `inside`, `x` and `y` in
 the node's own logical coordinates, `u` and `v` as fractions of its box, and its `width` and
 `height`; once the pointer leaves, `{ inside: false }`. Kept in state, it drives anything an
 expression can: a card that tilts toward the pointer, a button that leans in.
+
+Each report also says what the pointer did: `phase` is `press`, `release` or `move`, `pressed`
+whether a press is held, `button` which (0 primary, 1 middle, 2 secondary), `clickCount` how many
+quick presses in one place this is (2 on a double click), and `shift`, `control`, `alt` and `meta`
+which keys were down. A press begun over the node is reported until it is released wherever the
+pointer goes, with `inside` false and `x`/`y` outside the box while it is out: enough for a marquee
+selection, or for a wire drawn from a node.
 
 ```strata
 component TiltCard() {
@@ -1143,7 +1150,22 @@ or `"y"` keeps it on one axis.
 Its action receives `moved` events: `phase` `move` while dragged, `end` on release, `settling` each
 frame it coasts or springs, and `settle` once it comes to rest, with `snapped` (the index of the
 snap point it took, or of the `snapX`/`snapY` entry, with `snappedX`/`snappedY` per axis), `x` and
-`y` (the offset) and `bounds`. A press catches a settling box where it shows.
+`y` (the offset), `dx` and `dy` (how far it moved since the last report) and `bounds`. A press
+catches a settling box where it shows.
+
+With `controlled: true` the box is placed by its action: it shows no offset of its own, and the
+action moves the state its layout reads by each report's `dx` and `dy`, so whatever else reads
+that state (a wire drawn to the box, a guide) follows it. A cancelled drag reports the way back; a
+controlled box does not coast.
+
+```strata
+Panel(layout: { position: "ABSOLUTE", inset: { left: node.x, top: node.y } },
+      behaviors: [{ id: "strata.movable", options: { controlled: true }, action: e => {
+        undoStep("Move node", node.id)
+        node.x += e.dx
+        node.y += e.dy
+      } }])
+```
 
 ```strata
 // A bottom sheet laid out half open, with open, half and tucked-away snap points.

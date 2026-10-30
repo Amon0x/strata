@@ -203,8 +203,9 @@ void collect_referenced_identifiers(const Expression& expression,
         if (!bound.contains(identifier->name)) output.insert(identifier->name);
         return;
     }
-    if (const auto* lambda = std::get_if<LambdaExpression>(&expression.node))
-        bound.insert(lambda->parameter_name);
+    if (const auto* lambda = std::get_if<LambdaExpression>(&expression.node)) {
+        for (const LambdaParameter& parameter : lambda->parameters) bound.insert(parameter.name);
+    }
     for_each_child(expression, [&](const Expression& child) {
         collect_referenced_identifiers(child, output, bound);
     });

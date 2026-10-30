@@ -51,6 +51,13 @@ inline constexpr std::size_t maximum_lazy_loop_items = 100'000U;
  * Calls `visit` with each expression `expression` directly contains, in source order, a lambda's
  * body included: the one traversal passes share instead of each walking the node kinds.
  */
+/** A function's parameters, typed as declared, for calls to bind their arguments to. */
+[[nodiscard]] FunctionInfo function_info(const FunctionDeclaration& function,
+                                         const SchemaRegistry& registry);
+
+/** Every expression a StrataScript block holds, nested statements included, in order. */
+void for_each_block_expression(const Block& block,
+                               const std::function<void(const Expression&)>& visit);
 void for_each_child(const Expression& expression,
                     const std::function<void(const Expression&)>& visit);
 
@@ -160,6 +167,32 @@ struct PersistenceOwner final {
 class TypeOracle;
 
 /** Everything the passes share: the inputs, the model being built and the diagnostics. */
+/**
+ * The types a module declares with `type`, by name, resolved on first use. Every type reference
+ * resolved while analysis runs can name them (see TypeAliasScope).
+ */
+struct TypeAliases final {
+    std::map<std::string, const TypeDeclaration*, std::less<>> declarations;
+    mutable std::map<std::string, SemanticTypePtr, std::less<>> resolved;
+    mutable std::set<std::string, std::less<>> resolving;
+};
+
+/** Makes `aliases` what type references resolve against for as long as it lives. */
+class TypeAliasScope final {
+public:
+    explicit TypeAliasScope(const TypeAliases& aliases);
+    TypeAliasScope(const TypeAliasScope&) = delete;
+    TypeAliasScope& operator=(const TypeAliasScope&) = delete;
+    ~TypeAliasScope();
+
+private:
+    const TypeAliases* previous_;
+};
+
+/** The declared type alias `name` resolves to; null when no alias has the name. */
+[[nodiscard]] SemanticTypePtr resolve_type_alias(std::string_view name,
+                                                 const SchemaRegistry& registry);
+
 struct Analysis final {
     Analysis(const File& file, const SchemaRegistry& registry, SemanticModel& model);
 
@@ -167,6 +200,7 @@ struct Analysis final {
     const SchemaRegistry& registry;
     SemanticModel& model;
     Diagnostics diagnostics;
+    TypeAliases type_aliases;
 
     /** Declared names, sorted, for suggestions and expected-value lists. */
     std::vector<std::string> style_names;
@@ -210,6 +244,8 @@ public:
     [[nodiscard]] SemanticTypePtr type_of(const Expression& expression);
     [[nodiscard]] SemanticTypePtr symbol_type(SymbolId symbol);
     /** The helper parameter a lambda is passed for, or null when it is not a helper argument. */
+    /** What calling a function gives: its declared type, else its expression body's. */
+    [[nodiscard]] SemanticTypePtr function_returns(const FunctionDeclaration& function);
     [[nodiscard]] const SchemaParameter* lambda_parameter_of(const Expression& lambda) const;
     /** The argument of `call` that fills parameter `name`, by the recorded argument mapping. */
     [[nodiscard]] const Argument* argument_for(const Expression& call, std::string_view name) const;
@@ -262,6 +298,8 @@ void claim_persistence_key(
     const std::string& component_path
 );
 
+/** Pass 0: every `type` a module or component declares, by name; a repeated name is reported. */
+void collect_type_aliases(Analysis& analysis);
 void collect_declarations(Analysis& analysis);
 void resolve_names(Analysis& analysis);
 /** Adds the slots of the row templates a component hands its widgets to the component's own. */

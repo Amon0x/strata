@@ -565,6 +565,72 @@ ActionDispatchOutcome ApplicationContext::dispatch(
     return framework_failure(action, "Framework action '" + id + "' is not implemented by this runtime phase.");
 }
 
+std::optional<std::string> ApplicationContext::commit_script(
+    const std::vector<ScriptStateWrite>& writes,
+    const std::string_view undo_scope,
+    const std::optional<std::string>& undo_label,
+    const std::optional<std::string>& undo_coalesce,
+    const std::int64_t timestamp_nanos
+) {
+    if (writes.empty()) return std::nullopt;
+    if (active_unit_ == nullptr) return "A script's writes require an active runtime unit.";
+    const std::string effective_undo_scope =
+        undo_scope.empty() ? std::string("application") : std::string(undo_scope);
+    const StateSnapshot before = state_.snapshot();
+    const auto rejected = [this, &before](std::string message) -> std::optional<std::string> {
+        static_cast<void>(state_.restore(before));
+        return message;
+    };
+    bool changed = false;
+    std::vector<std::pair<const UnitStateDeclaration*, StateAddress>> persisted;
+    for (const ScriptStateWrite& write : writes) {
+        const LexicalStateBinding& binding = write.binding;
+        const UnitStateDeclaration* declaration =
+            active_unit_->state_declaration(binding.declaration_scope, binding.address.name);
+        if (declaration == nullptr)
+            return rejected("State '" + binding.address.name + "' is not declared.");
+        const StateScopeResolution resolved{binding.address, binding.declaration_scope, declaration};
+        const std::optional<Value> initial = state_initial_value(resolved, binding.address.scope);
+        if (!initial.has_value())
+            return rejected("State '" + binding.address.name + "' has no initial value.");
+        const StateMutationResult result = StateMutation{
+            binding.address,
+            *initial,
+            declaration->type_id == any_state_type_id ? declaration->schema
+                                                      : state_schema(declaration->type_id),
+            StateMutationKind::set,
+            {{"value", write.value}},
+            binding.declaration_scope,
+            declaration->type_id,
+        }.apply(state_);
+        if (result.status == StateMutationStatus::rejected) {
+            return rejected("State '" + binding.address.name + "' cannot hold that value: " +
+                            result.message);
+        }
+        if (result.status == StateMutationStatus::changed) {
+            changed = true;
+            if (declaration->persistence_key.has_value())
+                persisted.emplace_back(declaration, binding.address);
+        }
+    }
+    if (!changed) return std::nullopt;
+    for (const auto& [declaration, address] : persisted) {
+        if (const Value* value = state_.find(address); value != nullptr) {
+            durability_.set_application_value(*declaration->persistence_key, *value);
+        } else {
+            static_cast<void>(durability_.erase_application_value(*declaration->persistence_key));
+        }
+    }
+    undo_.invalidate_other_scopes(effective_undo_scope, "script.run");
+    if (undo_label.has_value()) {
+        undo_.record(effective_undo_scope, before, state_.snapshot(),
+                     UndoRecordOptions{*undo_label, undo_coalesce, timestamp_nanos});
+    } else {
+        undo_.invalidate(effective_undo_scope, "script.run");
+    }
+    return std::nullopt;
+}
+
 std::optional<Value> ApplicationContext::state_initial_value(
     const StateScopeResolution& resolution,
     const std::string_view runtime_scope

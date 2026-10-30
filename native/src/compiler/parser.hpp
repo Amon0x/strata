@@ -81,8 +81,36 @@ private:
     [[nodiscard]] Declaration parse_component_declaration(const Token& keyword);
     [[nodiscard]] Declaration parse_style_declaration(const Token& keyword);
     [[nodiscard]] Declaration parse_animation_declaration(const Token& keyword);
+    /** `fn name(params)[: Type] { ... }` or `= expr`, after `fn` (and `async`). */
+    [[nodiscard]] FunctionDeclaration parse_function(const Token& keyword, bool asynchronous);
+    /** A StrataScript statement, inside a function or lambda block. */
+    [[nodiscard]] StatementPtr parse_script_statement();
+    [[nodiscard]] StatementPtr parse_let_statement(const Token& keyword);
+    /** A script block: `{ statements }`, parsed as StrataScript. */
+    [[nodiscard]] BlockPtr parse_script_block();
+    /** After the parameters and `=>`: the lambda's expression or block body. */
+    [[nodiscard]] ExpressionPtr finish_lambda(std::vector<LambdaParameter> parameters,
+                                              SourceSpan start);
+    /** At `(`: whether `( params ) =>` follows, so the parenthesis opens a lambda. */
+    [[nodiscard]] bool lambda_parameters_ahead() const noexcept;
+    /** At `{` after `=>`: whether it opens a record literal rather than a block. */
+    [[nodiscard]] bool record_literal_ahead() const noexcept;
+    [[nodiscard]] std::vector<LambdaParameter> parse_lambda_parameters();
+    /** The current token is the identifier `word` (a contextual keyword). */
+    [[nodiscard]] bool contextual(std::string_view word) const noexcept;
+    /** `fn name` or `async fn name` starts here. */
+    [[nodiscard]] bool function_start() const noexcept;
+    [[nodiscard]] const Token& peek_at(std::size_t offset) const noexcept;
     [[nodiscard]] std::vector<Parameter> parse_parameters();
     [[nodiscard]] TypeReference parse_type_reference();
+    /** One option of a union: a name, a string, a record or function type, or a grouping. */
+    TypeReference parse_type_option();
+    /** `type Name = Type` after its keyword. */
+    TypeDeclaration parse_type_declaration(const Token& keyword);
+    [[nodiscard]] bool type_declaration_start() const noexcept;
+    /** A template string: its text and expressions joined as text. */
+    ExpressionPtr parse_template(const Token& head);
+    [[nodiscard]] std::string decode_template(const Token& token) const;
     [[nodiscard]] BlockPtr parse_block(BodyKind kind = BodyKind::general);
     [[nodiscard]] StatementPtr parse_statement(BodyKind kind);
     [[nodiscard]] StatementPtr parse_state_declaration(const Token& keyword);
@@ -168,6 +196,8 @@ private:
     std::size_t statement_count_ = 0U;
     std::size_t expression_count_ = 0U;
     NodeId next_node_id_ = 0U;
+    /** Inside a function or lambda block: statements are StrataScript. */
+    bool in_script_ = false;
 };
 
 [[nodiscard]] ParseResult parse_source(

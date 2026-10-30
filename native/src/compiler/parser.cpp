@@ -92,6 +92,33 @@ ParseResult Parser::parse() {
                 if (auto declaration = parse_declaration()) {
                     declarations.push_back(std::move(*declaration));
                 }
+            } else if (type_declaration_start()) {
+                count_declaration();
+                const std::size_t first = current_;
+                try {
+                    const Token& keyword = advance();
+                    TypeDeclaration declared = parse_type_declaration(keyword);
+                    const SourceSpan span = covering(keyword.span, previous_or_peek().span);
+                    declarations.push_back(Declaration{std::move(declared), span});
+                } catch (const ParsePanic&) {
+                    synchronize_top_level();
+                    record_unparsed(first);
+                }
+            } else if (function_start()) {
+                count_declaration();
+                const std::size_t first = current_;
+                try {
+                    const bool asynchronous = contextual("async");
+                    if (asynchronous)
+                        static_cast<void>(advance());
+                    const Token& keyword = advance();
+                    FunctionDeclaration function = parse_function(keyword, asynchronous);
+                    const SourceSpan span = covering(keyword.span, previous_or_peek().span);
+                    declarations.push_back(Declaration{std::move(function), span});
+                } catch (const ParsePanic&) {
+                    synchronize_top_level();
+                    record_unparsed(first);
+                }
             } else if (match(TokenType::error)) {
                 record_unparsed(current_ - 1U);
                 continue;
@@ -99,7 +126,7 @@ ParseResult Parser::parse() {
                 static_cast<void>(error(
                     peek(),
                     "STRATA.DSL.PARSE_EXPECTED_DECLARATION",
-                    "Expected import, screen, overlay, component, style, or animation declaration."
+                    "Expected import, screen, overlay, component, style, animation, or fn declaration."
                 ));
                 const std::size_t first = current_;
                 static_cast<void>(advance());
@@ -300,6 +327,92 @@ std::vector<Parameter> Parser::parse_parameters() {
 
 TypeReference Parser::parse_type_reference() {
     const NestingGuard nesting(*this);
+    TypeReference first = parse_type_option();
+    if (!check(TokenType::pipe))
+        return first;
+    TypeReference result{"union", {}, false, first.span, TypeReferenceKind::union_type};
+    result.arguments.push_back(std::move(first));
+    while (match(TokenType::pipe)) {
+        result.arguments.push_back(parse_type_option());
+        check_collection_size(result.arguments.size());
+    }
+    result.span = covering(result.arguments.front().span, result.arguments.back().span);
+    // `A | B | null` is a nullable union.
+    std::erase_if(result.arguments, [&result](const TypeReference& option) {
+        const bool null = option.kind == TypeReferenceKind::named && option.name == "null";
+        if (null)
+            result.nullable = true;
+        return null;
+    });
+    if (result.arguments.size() == 1U) {
+        TypeReference only = std::move(result.arguments.front());
+        only.nullable = only.nullable || result.nullable;
+        only.span = result.span;
+        return only;
+    }
+    return result;
+}
+
+TypeReference Parser::parse_type_option() {
+    const NestingGuard nesting(*this);
+    if (match(TokenType::string)) {
+        const Token& token = previous_token();
+        TypeReference literal{decode_string(token), {}, false, token.span,
+                              TypeReferenceKind::string_literal};
+        literal.nullable = match(TokenType::question);
+        return literal;
+    }
+    if (match(TokenType::left_brace)) {
+        const Token& open = previous_token();
+        TypeReference record{"record", {}, false, open.span, TypeReferenceKind::record};
+        while (!check(TokenType::right_brace) && !at_end()) {
+            const Token& field = consume_name_token("STRATA.DSL.PARSE_PARAMETER_TYPE",
+                                                   "Expected a field name in a record type.");
+            const bool optional = match(TokenType::question);
+            static_cast<void>(consume(TokenType::colon, "STRATA.DSL.PARSE_PARAMETER_TYPE",
+                                      "Expected ':' after a record type's field name."));
+            record.fields.push_back(TypeField{field.lexeme, parse_type_reference(), optional});
+            check_collection_size(record.fields.size());
+            if (!match(TokenType::comma) && !match(TokenType::semicolon))
+                break;
+        }
+        const Token& close = consume(TokenType::right_brace, "STRATA.DSL.PARSE_PARAMETER_TYPE",
+                                     "Expected '}' after a record type's fields.");
+        record.nullable = match(TokenType::question);
+        record.span = covering(open.span, record.nullable ? previous_token().span : close.span);
+        return record;
+    }
+    if (match(TokenType::left_parenthesis)) {
+        const Token& open = previous_token();
+        std::vector<TypeReference> parameters;
+        if (!check(TokenType::right_parenthesis)) {
+            do {
+                // A parameter may be named for its reader: `(node: Node) => boolean`.
+                if (name_token() && check_next(TokenType::colon)) {
+                    static_cast<void>(advance());
+                    static_cast<void>(advance());
+                }
+                parameters.push_back(parse_type_reference());
+                check_collection_size(parameters.size());
+            } while (match(TokenType::comma));
+        }
+        static_cast<void>(consume(TokenType::right_parenthesis, "STRATA.DSL.PARSE_PARAMETER_TYPE",
+                                  "Expected ')' in a type."));
+        if (match(TokenType::fat_arrow)) {
+            TypeReference function{"function", std::move(parameters), false, open.span,
+                                   TypeReferenceKind::function};
+            function.returns.push_back(parse_type_option());
+            function.span = covering(open.span, function.returns.front().span);
+            return function;
+        }
+        if (parameters.size() != 1U) {
+            throw error(previous_token(), "STRATA.DSL.PARSE_PARAMETER_TYPE",
+                        "Expected '=>' after a function type's parameters.");
+        }
+        TypeReference grouped = std::move(parameters.front());
+        grouped.nullable = grouped.nullable || match(TokenType::question);
+        return grouped;
+    }
     const Token& name = consume_name_token(
         "STRATA.DSL.PARSE_PARAMETER_TYPE",
         "Expected parameter type name after ':'."
@@ -358,9 +471,26 @@ BlockPtr Parser::parse_block(const BodyKind kind) {
 }
 
 StatementPtr Parser::parse_statement(const BodyKind kind) {
+    if (in_script_)
+        return parse_script_statement();
     count_statement();
     const std::size_t first = current_;
     try {
+        if (type_declaration_start()) {
+            const Token& keyword = advance();
+            TypeDeclaration declared = parse_type_declaration(keyword);
+            const SourceSpan span = covering(keyword.span, previous_or_peek().span);
+            return make_statement(next_node_id_, TypeStatement{std::move(declared)}, span);
+        }
+        if (function_start()) {
+            const bool asynchronous = contextual("async");
+            if (asynchronous)
+                static_cast<void>(advance());
+            const Token& keyword = advance();
+            FunctionDeclaration function = parse_function(keyword, asynchronous);
+            const SourceSpan span = covering(keyword.span, previous_or_peek().span);
+            return make_statement(next_node_id_, FunctionStatement{std::move(function)}, span);
+        }
         if (name_token() && check_next(TokenType::colon)) return parse_property_statement();
         if (match(TokenType::state)) return parse_state_declaration(previous_token());
         if (match(TokenType::derived)) return parse_derived_declaration(previous_token());
@@ -745,6 +875,8 @@ ExpressionPtr Parser::parse_expression(const Precedence minimum) {
 }
 
 ExpressionPtr Parser::parse_prefix() {
+    if (match(TokenType::template_full) || match(TokenType::template_head))
+        return parse_template(previous_token());
     if (match(TokenType::string)) {
         const Token& token = previous_token();
         return make_expression(
@@ -777,6 +909,16 @@ ExpressionPtr Parser::parse_prefix() {
         const Token& token = previous_token();
         return make_expression(next_node_id_, LiteralExpression{NullLiteral{}}, token.span);
     }
+    if (contextual("await") && identifier_like() && peek_at(1U).type != TokenType::end_of_file &&
+        (peek_at(1U).type == TokenType::identifier || peek_at(1U).type == TokenType::string ||
+         peek_at(1U).type == TokenType::number || peek_at(1U).type == TokenType::left_parenthesis ||
+         peek_at(1U).type == TokenType::left_bracket || peek_at(1U).type == TokenType::left_brace ||
+         peek_at(1U).type == TokenType::bang || peek_at(1U).type == TokenType::minus)) {
+        const Token& keyword = advance();
+        ExpressionPtr operand = parse_expression(Precedence::unary);
+        const SourceSpan span = covering(keyword.span, operand->span);
+        return make_expression(next_node_id_, AwaitExpression{std::move(operand)}, span);
+    }
     if (identifier_like()) {
         const Token& token = advance();
         if (match(TokenType::arrow)) {
@@ -784,14 +926,26 @@ ExpressionPtr Parser::parse_prefix() {
             const SourceSpan span = covering(token.span, body->span);
             return make_expression(
                 next_node_id_,
-                LambdaExpression{token.lexeme, std::move(body)},
+                LambdaExpression{{LambdaParameter{token.lexeme, std::nullopt, token.span}},
+                                 std::move(body), nullptr, false},
                 span
             );
+        }
+        if (match(TokenType::fat_arrow)) {
+            return finish_lambda({LambdaParameter{token.lexeme, std::nullopt, token.span}},
+                                 token.span);
         }
         return make_expression(next_node_id_, IdentifierExpression{token.lexeme}, token.span);
     }
     if (match(TokenType::minus)) return parse_unary(previous_token(), UnaryOperator::negate);
     if (match(TokenType::bang)) return parse_unary(previous_token(), UnaryOperator::logical_not);
+    if (check(TokenType::left_parenthesis) && lambda_parameters_ahead()) {
+        const Token& left = advance();
+        std::vector<LambdaParameter> parameters = parse_lambda_parameters();
+        static_cast<void>(consume(TokenType::fat_arrow, "STRATA.DSL.PARSE_LAMBDA_ARROW",
+                                  "Expected '=>' after lambda parameters."));
+        return finish_lambda(std::move(parameters), left.span);
+    }
     if (match(TokenType::left_parenthesis)) return parse_grouping(previous_token());
     if (match(TokenType::left_bracket)) return parse_list(previous_token());
     if (match(TokenType::left_brace)) return parse_map(previous_token());
@@ -829,7 +983,15 @@ ExpressionPtr Parser::parse_list(const Token& left) {
     std::vector<ExpressionPtr> elements;
     if (!check(TokenType::right_bracket)) {
         do {
-            elements.push_back(expression());
+            if (match(TokenType::ellipsis)) {
+                const Token& dots = previous_token();
+                ExpressionPtr operand = expression();
+                const SourceSpan span = covering(dots.span, operand->span);
+                elements.push_back(
+                    make_expression(next_node_id_, SpreadExpression{std::move(operand)}, span));
+            } else {
+                elements.push_back(expression());
+            }
             check_collection_size(elements.size());
         } while (match(TokenType::comma) && !check(TokenType::right_bracket));
     }
@@ -883,6 +1045,13 @@ ExpressionPtr Parser::parse_map(const Token& left) {
 std::optional<MapEntry> Parser::parse_map_entry() {
     std::optional<MapKey> key;
     SourceSpan key_span = peek().span;
+    if (match(TokenType::ellipsis)) {
+        // `...record`: its fields, in place, before or under the entries after it.
+        const Token& dots = previous_token();
+        ExpressionPtr value = expression();
+        const SourceSpan span = covering(dots.span, value->span);
+        return MapEntry{SpreadMapKey{dots.span}, std::move(value), span};
+    }
     if (name_token() && check_next(TokenType::colon)) {
         const Token& token = advance();
         key_span = token.span;
@@ -1104,6 +1273,81 @@ NumberLiteral Parser::number_literal(const Token& token) {
         unit = token.lexeme.substr(unit_start);
     }
     return NumberLiteral{token.lexeme.substr(0U, unit_start), std::move(unit)};
+}
+
+bool Parser::type_declaration_start() const noexcept {
+    return contextual("type") && peek_at(1U).type == TokenType::identifier &&
+           peek_at(2U).type == TokenType::equal;
+}
+
+TypeDeclaration Parser::parse_type_declaration(const Token& keyword) {
+    static_cast<void>(keyword);
+    const Token& name = consume_identifier("STRATA.DSL.PARSE_EXPECTED_DECLARATION",
+                                           "Expected the type's name after 'type'.");
+    static_cast<void>(consume(TokenType::equal, "STRATA.DSL.PARSE_EXPECTED_DECLARATION",
+                              "Expected '=' after the type's name."));
+    TypeReference type = parse_type_reference();
+    static_cast<void>(match(TokenType::semicolon));
+    return TypeDeclaration{name.lexeme, std::move(type), name.span};
+}
+
+std::string Parser::decode_template(const Token& token) const {
+    // The text between the opening backtick or `}` and the closing backtick or `${`.
+    const std::string& raw = token.lexeme;
+    const std::size_t begin = 1U;
+    const std::size_t end = token.type == TokenType::template_head ||
+                                    token.type == TokenType::template_middle
+                                ? raw.size() - 2U
+                                : raw.size() - 1U;
+    std::string result;
+    for (std::size_t index = begin; index < end; ++index) {
+        const char value = raw[index];
+        if (value != '\\' || index + 1U >= end) {
+            result.push_back(value);
+            continue;
+        }
+        const char escaped = raw[++index];
+        switch (escaped) {
+        case 'n': result.push_back('\n'); break;
+        case 'r': result.push_back('\r'); break;
+        case 't': result.push_back('\t'); break;
+        default: result.push_back(escaped); break;
+        }
+    }
+    return result;
+}
+
+ExpressionPtr Parser::parse_template(const Token& head) {
+    const NestingGuard nesting(*this);
+    // Text first, so `+` joins everything after it as text.
+    ExpressionPtr result = make_expression(
+        next_node_id_, LiteralExpression{StringLiteral{decode_template(head)}}, head.span);
+    if (head.type == TokenType::template_full)
+        return result;
+    while (true) {
+        ExpressionPtr part = parse_expression(Precedence::lowest);
+        const SourceSpan part_span = part->span;
+        result = make_expression(
+            next_node_id_,
+            BinaryExpression{std::move(result), BinaryOperator::add, std::move(part)},
+            covering(head.span, part_span));
+        if (!check(TokenType::template_middle) && !check(TokenType::template_tail)) {
+            throw error(peek(), "STRATA.DSL.PARSE_EXPECTED_EXPRESSION",
+                        "Expected '}' after a template string's expression.");
+        }
+        const Token& text = advance();
+        const std::string decoded = decode_template(text);
+        if (!decoded.empty()) {
+            ExpressionPtr literal = make_expression(
+                next_node_id_, LiteralExpression{StringLiteral{decoded}}, text.span);
+            result = make_expression(
+                next_node_id_,
+                BinaryExpression{std::move(result), BinaryOperator::add, std::move(literal)},
+                covering(head.span, text.span));
+        }
+        if (text.type == TokenType::template_tail)
+            return result;
+    }
 }
 
 std::string Parser::decode_string(const Token& token) {
@@ -1433,6 +1677,261 @@ ParseResult parse_source(
         limits,
         first_node_id
     ).parse();
+}
+
+
+const Token& Parser::peek_at(const std::size_t offset) const noexcept {
+    const std::size_t index = std::min(current_ + offset, tokens_.size() - 1U);
+    return tokens_[index];
+}
+
+bool Parser::contextual(const std::string_view word) const noexcept {
+    return peek().type == TokenType::identifier && peek().lexeme == word;
+}
+
+bool Parser::function_start() const noexcept {
+    if (contextual("fn"))
+        return peek_at(1U).type == TokenType::identifier && peek_at(2U).type == TokenType::left_parenthesis;
+    if (contextual("async"))
+        return peek_at(1U).type == TokenType::identifier && peek_at(1U).lexeme == "fn" &&
+               peek_at(2U).type == TokenType::identifier &&
+               peek_at(3U).type == TokenType::left_parenthesis;
+    return false;
+}
+
+bool Parser::lambda_parameters_ahead() const noexcept {
+    // ( ) =>  |  ( name [: Type] {, name [: Type]} ) =>
+    std::size_t offset = 1U;
+    if (peek_at(offset).type == TokenType::right_parenthesis)
+        return peek_at(offset + 1U).type == TokenType::fat_arrow;
+    while (true) {
+        if (peek_at(offset).type != TokenType::identifier)
+            return false;
+        ++offset;
+        if (peek_at(offset).type == TokenType::colon) {
+            ++offset;
+            int angles = 0;
+            while (true) {
+                const TokenType type = peek_at(offset).type;
+                if (type == TokenType::end_of_file)
+                    return false;
+                if (type == TokenType::less)
+                    ++angles;
+                else if (type == TokenType::greater)
+                    --angles;
+                else if (angles == 0 &&
+                         (type == TokenType::comma || type == TokenType::right_parenthesis))
+                    break;
+                else if (type != TokenType::identifier && type != TokenType::question &&
+                         type != TokenType::comma)
+                    return false;
+                ++offset;
+            }
+        }
+        if (peek_at(offset).type == TokenType::comma) {
+            ++offset;
+            continue;
+        }
+        if (peek_at(offset).type == TokenType::right_parenthesis)
+            return peek_at(offset + 1U).type == TokenType::fat_arrow;
+        return false;
+    }
+}
+
+std::vector<LambdaParameter> Parser::parse_lambda_parameters() {
+    std::vector<LambdaParameter> parameters;
+    if (!check(TokenType::right_parenthesis)) {
+        do {
+            const Token& name = consume_identifier_like("STRATA.DSL.PARSE_PARAMETER_NAME",
+                                                        "Expected lambda parameter name.");
+            std::optional<TypeReference> type_reference;
+            if (match(TokenType::colon))
+                type_reference = parse_type_reference();
+            parameters.push_back(LambdaParameter{name.lexeme, std::move(type_reference), name.span});
+            check_collection_size(parameters.size());
+        } while (match(TokenType::comma));
+    }
+    static_cast<void>(consume(TokenType::right_parenthesis, "STRATA.DSL.PARSE_PARAMETER_LIST",
+                              "Expected ')' after lambda parameters."));
+    return parameters;
+}
+
+bool Parser::record_literal_ahead() const noexcept {
+    // `{ name: ...`, `{ "name": ...` and `{ ...rest` are records; anything else is a block.
+    const Token& first = peek_at(1U);
+    if (first.type == TokenType::ellipsis)
+        return true;
+    if ((first.type == TokenType::identifier || first.type == TokenType::string) &&
+        peek_at(2U).type == TokenType::colon)
+        return true;
+    return false;
+}
+
+ExpressionPtr Parser::finish_lambda(std::vector<LambdaParameter> parameters, const SourceSpan start) {
+    if (check(TokenType::left_brace) && !record_literal_ahead()) {
+        BlockPtr block = parse_script_block();
+        const SourceSpan span = covering(start, block->span);
+        return make_expression(
+            next_node_id_, LambdaExpression{std::move(parameters), nullptr, std::move(block), true},
+            span);
+    }
+    ExpressionPtr body = expression();
+    const SourceSpan span = covering(start, body->span);
+    return make_expression(next_node_id_,
+                           LambdaExpression{std::move(parameters), std::move(body), nullptr, true},
+                           span);
+}
+
+BlockPtr Parser::parse_script_block() {
+    const bool outer = in_script_;
+    in_script_ = true;
+    try {
+        BlockPtr block = parse_block();
+        in_script_ = outer;
+        return block;
+    } catch (...) {
+        in_script_ = outer;
+        throw;
+    }
+}
+
+FunctionDeclaration Parser::parse_function(const Token& keyword, const bool asynchronous) {
+    static_cast<void>(keyword);
+    const Token& name = consume_identifier_like("STRATA.DSL.PARSE_DECLARATION_NAME",
+                                                "Expected function name after fn.");
+    static_cast<void>(consume(TokenType::left_parenthesis, "STRATA.DSL.PARSE_PARAMETER_LIST",
+                              "Expected '(' after function name."));
+    std::vector<Parameter> parameters = parse_parameters();
+    std::optional<TypeReference> return_type;
+    if (match(TokenType::colon))
+        return_type = parse_type_reference();
+    FunctionDeclaration function{name.lexeme, std::move(parameters), std::move(return_type),
+                                 nullptr, nullptr, asynchronous, name.span};
+    if (match(TokenType::equal)) {
+        function.expression_body = expression();
+        static_cast<void>(match(TokenType::semicolon));
+    } else {
+        function.block_body = parse_script_block();
+    }
+    return function;
+}
+
+StatementPtr Parser::parse_let_statement(const Token& keyword) {
+    const bool mutable_binding = keyword.lexeme == "var";
+    const Token& name = consume_identifier_like("STRATA.DSL.PARSE_LOCAL_NAME",
+                                                "Expected a name after " + keyword.lexeme + ".");
+    std::optional<TypeReference> type_reference;
+    if (match(TokenType::colon))
+        type_reference = parse_type_reference();
+    static_cast<void>(consume(TokenType::equal, "STRATA.DSL.PARSE_LOCAL_INITIALIZER",
+                              "Expected '=' and a value after the name."));
+    ExpressionPtr initializer = expression();
+    static_cast<void>(match(TokenType::semicolon));
+    const SourceSpan span = covering(keyword.span, initializer->span);
+    return make_statement(next_node_id_,
+                          LetStatement{name.lexeme, mutable_binding, std::move(type_reference),
+                                       std::move(initializer), name.span},
+                          span);
+}
+
+StatementPtr Parser::parse_script_statement() {
+    count_statement();
+    const std::size_t first = current_;
+    try {
+        if (match(TokenType::semicolon))
+            return nullptr;
+        if ((contextual("let") || contextual("var")) && peek_at(1U).type == TokenType::identifier)
+            return parse_let_statement(advance());
+        if (function_start()) {
+            const bool asynchronous = contextual("async");
+            if (asynchronous)
+                static_cast<void>(advance());
+            const Token& keyword = advance();
+            FunctionDeclaration function = parse_function(keyword, asynchronous);
+            const SourceSpan span = covering(keyword.span, previous_or_peek().span);
+            return make_statement(next_node_id_, FunctionStatement{std::move(function)}, span);
+        }
+        if (match(TokenType::if_keyword)) return parse_if_statement(previous_token());
+        if (match(TokenType::when_keyword)) return parse_when_statement(previous_token());
+        if (match(TokenType::for_keyword)) return parse_for_statement(previous_token());
+        if (contextual("while") && peek_at(1U).type != TokenType::equal &&
+            peek_at(1U).type != TokenType::dot) {
+            const Token& keyword = advance();
+            ExpressionPtr condition = parse_condition();
+            BlockPtr block = parse_block();
+            const SourceSpan span = covering(keyword.span, block->span);
+            return make_statement(next_node_id_, WhileStatement{std::move(condition), std::move(block)},
+                                  span);
+        }
+        if (contextual("break") || contextual("continue")) {
+            const Token& keyword = advance();
+            static_cast<void>(match(TokenType::semicolon));
+            if (keyword.lexeme == "break")
+                return make_statement(next_node_id_, BreakStatement{}, keyword.span);
+            return make_statement(next_node_id_, ContinueStatement{}, keyword.span);
+        }
+        if (contextual("return")) {
+            const Token& keyword = advance();
+            ExpressionPtr value;
+            if (!check(TokenType::semicolon) && !check(TokenType::right_brace))
+                value = expression();
+            static_cast<void>(match(TokenType::semicolon));
+            const SourceSpan span = value != nullptr ? covering(keyword.span, value->span) : keyword.span;
+            return make_statement(next_node_id_, ReturnStatement{std::move(value)}, span);
+        }
+        if (contextual("throw")) {
+            const Token& keyword = advance();
+            ExpressionPtr value = expression();
+            static_cast<void>(match(TokenType::semicolon));
+            const SourceSpan span = covering(keyword.span, value->span);
+            return make_statement(next_node_id_, ThrowStatement{std::move(value)}, span);
+        }
+        if (contextual("try") && peek_at(1U).type == TokenType::left_brace) {
+            const Token& keyword = advance();
+            BlockPtr block = parse_block();
+            if (!contextual("catch")) {
+                throw error(peek(), "STRATA.DSL.PARSE_TRY_CATCH", "Expected 'catch' after the try block.");
+            }
+            static_cast<void>(advance());
+            std::string catch_name = "error";
+            if (identifier_like() && !check(TokenType::left_brace))
+                catch_name = advance().lexeme;
+            BlockPtr catch_block = parse_block();
+            const SourceSpan span = covering(keyword.span, catch_block->span);
+            return make_statement(next_node_id_,
+                                  TryStatement{std::move(block), std::move(catch_name),
+                                               std::move(catch_block)},
+                                  span);
+        }
+        if (match(TokenType::error)) {
+            record_unparsed(first);
+            return make_statement(next_node_id_, ErrorStatement{}, previous_token().span);
+        }
+        ExpressionPtr target = expression();
+        std::optional<AssignmentOperator> operation;
+        if (match(TokenType::equal)) operation = AssignmentOperator::assign;
+        else if (match(TokenType::plus_equal)) operation = AssignmentOperator::add;
+        else if (match(TokenType::minus_equal)) operation = AssignmentOperator::subtract;
+        else if (match(TokenType::star_equal)) operation = AssignmentOperator::multiply;
+        else if (match(TokenType::slash_equal)) operation = AssignmentOperator::divide;
+        else if (match(TokenType::percent_equal)) operation = AssignmentOperator::modulo;
+        if (operation.has_value()) {
+            ExpressionPtr value = expression();
+            static_cast<void>(match(TokenType::semicolon));
+            const SourceSpan span = covering(target->span, value->span);
+            return make_statement(next_node_id_,
+                                  AssignmentStatement{std::move(target), *operation, std::move(value)},
+                                  span);
+        }
+        static_cast<void>(match(TokenType::semicolon));
+        const SourceSpan span = target->span;
+        return make_statement(next_node_id_, ExpressionStatement{std::move(target)}, span);
+    } catch (const ParsePanic&) {
+        const SourceSpan span = previous_or_peek().span;
+        synchronize_block();
+        record_unparsed(first);
+        return make_statement(next_node_id_, ErrorStatement{}, span);
+    }
 }
 
 } // namespace strata::compiler

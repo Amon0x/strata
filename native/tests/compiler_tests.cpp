@@ -1339,6 +1339,86 @@ void test_theme_reads_palette_and_declared_tokens() {
     }
 }
 
+
+// StrataScript compiles to IR with no diagnostics when it is right, and each kind of mistake is
+// reported by its own code where it is written.
+void test_stratascript_compiles_and_reports_its_mistakes() {
+    const auto valid = compile_source(R"(
+type Kind = "exec" | "data"
+type Pin = { id: string, kind: Kind, note?: string }
+
+fn twice(x: number) = x * 2
+
+async fn later() {
+  let answer = await action("clock.now")
+  return answer
+}
+
+screen Main {
+  state count = 0
+  state pins: List<Pin> = []
+  state text = ""
+
+  fn bump(by: number = 1) {
+    count += by
+    var i = 0
+    while i < 3 { i += 1; if i == 2 { continue } }
+    for pin, index in pins { if pin.kind == "exec" { break } }
+    try { throw { code: "X", message: "y" } } catch error { text = `${error.message}` }
+    pins = [...pins, { id: `p${count}`, kind: "data" }]
+    pins[0].note = "first"
+  }
+
+  derived doubled = twice(count)
+
+  root Button(label: `${doubled}`, onClick: () => {
+    bump()
+    bump(by: 2)
+    let answer = await later()
+    text = toText(answer)
+  })
+}
+)");
+    check(valid.diagnostics.empty(), "a valid script reported diagnostics:" + describe(valid));
+
+    const auto handler = [](const std::string_view body) {
+        return compile_source(
+            "fn pure(x: number) = x\n"
+            "async fn wait() { let a = await action(\"clock.now\"); return a }\n"
+            "fn sync() { let a = await action(\"clock.now\") }\n"
+            "type Kind = \"exec\" | \"data\"\n"
+            "screen Main {\n  state n = 0\n  state kind: Kind = \"exec\"\n"
+            "  fn write() { n = 1 }\n"
+            "  root Button(label: \"x\", onClick: () => {\n    " +
+            std::string(body) + "\n  })\n}\n");
+    };
+    const std::pair<std::string_view, std::string_view> mistakes[] = {
+        {"let a = 1\n    a = 2", "STRATA.DSL.SCRIPT_ASSIGNMENT_TARGET"},
+        {"pure = 3", "STRATA.DSL.SCRIPT_ASSIGNMENT_TARGET"},
+        {"break", "STRATA.DSL.SCRIPT_JUMP_OUTSIDE_LOOP"},
+        {"let a = 1 + await wait()", "STRATA.DSL.SCRIPT_AWAIT_POSITION"},
+        {"wait()", "STRATA.DSL.SCRIPT_ASYNC_NOT_AWAITED"},
+        {"let a = pure()", "STRATA.DSL.SCRIPT_MISSING_ARGUMENT"},
+        {"let a = pure(1, other: 2)", "STRATA.DSL.SCRIPT_UNKNOWN_ARGUMENT"},
+        {"kind = \"flow\"", "STRATA.DSL.SEMANTIC_TYPE_MISMATCH"},
+        {"let a = \"x\"\n    a()", "STRATA.DSL.SCRIPT_NOT_CALLABLE"},
+    };
+    for (const auto& [body, code] : mistakes) {
+        const auto result = handler(body);
+        check(has_diagnostic(result, code),
+              "'" + std::string(body) + "' did not report " + std::string(code) + ":" +
+                  describe(result));
+    }
+    check(has_diagnostic(handler("n = 1"), "STRATA.DSL.SCRIPT_AWAIT_CONTEXT"),
+          "await in a function that is not async was not reported");
+    const auto pure_context = compile_source(
+        "screen Main {\n  state n = 0\n  fn write() { n = 1 }\n"
+        "  derived value = write()\n  root Text(text: \"x\")\n}\n");
+    check(has_diagnostic(pure_context, "STRATA.DSL.SCRIPT_EFFECT_IN_PURE_CONTEXT"),
+          "a state-writing function called where a value is computed was not reported:" +
+              describe(pure_context));
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -1355,6 +1435,7 @@ int strata_test_compiler() {
         test_compiled_artifact_binary_round_trip_and_validation();
         test_portable_ir_rejects_duplicate_fields_in_narrow_and_wide_objects();
         test_duplicate_components_are_reported_without_reading_the_other_schema();
+        test_stratascript_compiles_and_reports_its_mistakes();
         test_long_single_line_compiles_in_linear_time();
         test_statement_keywords_are_member_names();
         test_when_arm_matches_a_bare_name();

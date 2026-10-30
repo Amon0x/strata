@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -86,6 +87,8 @@ struct ExpressionHostDependency final {
 /** `then` runs its first step, and its second with the answer once the first's request has one. */
 enum class ActionCompositionMode { sequence, parallel, delay, then };
 
+struct LambdaValue;
+
 struct ActionValue final {
     ActionValue() = default;
     ActionValue(std::shared_ptr<const Action> action,
@@ -101,12 +104,18 @@ struct ActionValue final {
     std::optional<LexicalStateBinding> lexical_state_binding;
     /** How long a `delay` composition waits before its step runs. */
     std::int64_t delay_nanoseconds = 0;
+    /** A script handler: the function run with the event in place of `action`'s dispatch. */
+    std::shared_ptr<const LambdaValue> script;
 };
+
+/** The contract every script handler's action carries: a framework action run in place. */
+[[nodiscard]] const std::shared_ptr<const ActionContract>& script_action_contract();
 
 struct ExpressionListValue;
 struct ExpressionObjectValue;
 struct ComponentTemplateValue;
 struct LambdaValue;
+struct FunctionGroup;
 
 class ExpressionValue final {
   public:
@@ -209,6 +218,8 @@ struct ScopeBinding final {
     ScopeStateBinding state = ScopeStateBinding::inherit;
     ExpressionValue value;
     std::shared_ptr<const LexicalStateBinding> binding;
+    /** A script `var`: its current value, which assignment replaces, in place of `value`. */
+    std::shared_ptr<ExpressionValue> cell;
 };
 
 /**
@@ -222,6 +233,26 @@ struct ScopeFrame final {
     bool hides_parent_values = false;
     /** A lambda's frame: no retained-state binding reaches its body. */
     bool hides_parent_states = false;
+    /**
+     * The functions a block declares, which this frame binds by name. The group is kept alive by
+     * the scopes holding the frame (see ExpressionScope::bind_functions), never by the frame,
+     * so a group's own scope never holds it.
+     */
+    const FunctionGroup* functions = nullptr;
+};
+
+/** The groups whose functions a scope's frames bind, kept alive with it. */
+struct KeptFunctionGroups final {
+    std::shared_ptr<const FunctionGroup> group;
+    std::shared_ptr<const KeptFunctionGroups> next;
+};
+
+/** What a name denotes in a scope: a value (and the binding holding it), or a function. */
+struct ScopeLookup final {
+    const ExpressionValue* value = nullptr;
+    const ScopeBinding* binding = nullptr;
+    const FunctionGroup* group = nullptr;
+    std::uint32_t function = std::numeric_limits<std::uint32_t>::max();
 };
 
 using HostRoots = std::map<std::string, Value, std::less<>>;
@@ -238,6 +269,14 @@ class ExpressionScope final {
 
     [[nodiscard]] const ExpressionValue* find(Symbol name) const noexcept;
     [[nodiscard]] const ExpressionValue* find(std::string_view name) const;
+    /** What the name denotes, a block's function included. */
+    [[nodiscard]] ScopeLookup lookup(Symbol name) const noexcept;
+    /**
+     * The retained state a script reads or writes through the name: a state binding found
+     * through lambda frames too, which hide states only from Binding<T> arguments.
+     */
+    [[nodiscard]] const std::shared_ptr<const LexicalStateBinding>*
+    script_state(Symbol name) const noexcept;
     /** The retained state a read of the name as a state binding targets. */
     [[nodiscard]] const std::shared_ptr<const LexicalStateBinding>*
     state_binding(Symbol name) const noexcept;
@@ -263,6 +302,14 @@ class ExpressionScope final {
     /** Binds a value as a declaration does: the name's state binding becomes `binding`. */
     void declare(Symbol name, ExpressionValue value,
                  std::shared_ptr<const LexicalStateBinding> binding = nullptr);
+    /** Binds a script `var`, whose value lives in the returned cell. */
+    std::shared_ptr<ExpressionValue> declare_variable(Symbol name, ExpressionValue value);
+    /** Binds a block's functions by name, and keeps their group alive with this scope. */
+    void bind_functions(const std::shared_ptr<const FunctionGroup>& group);
+    /** Keeps a group alive with this scope, as a function of it is called. */
+    void keep(std::shared_ptr<const FunctionGroup> group);
+    /** The groups this scope keeps, past `group` when it is the newest: what the group closes over. */
+    [[nodiscard]] ExpressionScope without_newest(const FunctionGroup* group) const;
     /** Replaces the lexical bindings wholesale. */
     void set_frame(std::shared_ptr<const ScopeFrame> frame) noexcept {
         frame_ = std::move(frame);
@@ -284,17 +331,109 @@ class ExpressionScope final {
     std::shared_ptr<const HostRoots> contextual_host_roots_;
     std::shared_ptr<const std::string> component_path_;
     std::shared_ptr<const FrozenHostReads> host_dependency_overrides_;
+    std::shared_ptr<const KeptFunctionGroups> kept_;
 };
 
-/** A lambda: its body, the program it is part of, and the scope it closed over. */
+/**
+ * The functions one block declares and the scope they close over: the block's, as far as it has
+ * been described or run, so they read the states and locals declared around them.
+ */
+struct FunctionGroup final : std::enable_shared_from_this<FunctionGroup> {
+    std::shared_ptr<const Program> program;
+    /** Each function's name and its index in the program. */
+    std::vector<std::pair<Symbol, std::uint32_t>> functions;
+    /** Kept current while the block extends its scope; never keeps this group itself. */
+    mutable ExpressionScope scope;
+
+    /** Makes `scope` (which binds this group) what the group's functions close over. */
+    void close_over(const ExpressionScope& block_scope) const {
+        scope = block_scope.without_newest(this);
+    }
+};
+
+/**
+ * A function value: a lambda, or a declared function. A lambda or a top-level function closes
+ * over `captured`; a function a block declares closes over its `group`'s scope.
+ */
 struct LambdaValue final {
     std::shared_ptr<const Program> program;
     /** The lambda expression, whose free variables tell which captured names matter. */
     ExpressionId expression = no_program_id;
-    ExpressionId body = no_program_id;
-    Symbol parameter;
+    /** The function's index in the program. */
+    std::uint32_t function = no_program_id;
     ExpressionScope captured;
+    std::shared_ptr<const FunctionGroup> group;
+
+    [[nodiscard]] const ProgramFunction& declaration() const {
+        return program->function(function);
+    }
 };
+
+/** A value a script throws, or a runtime error's `{ code, message }`, unwinding to a catch. */
+struct ScriptThrow final {
+    Value value;
+};
+
+/** One state a script wrote: where, and what it holds now. */
+struct ScriptWrite final {
+    std::shared_ptr<const LexicalStateBinding> binding;
+    Value value;
+};
+
+/**
+ * What a handler does between commits: the states it wrote (each once, its latest value) and
+ * the actions it performs, in order, once those writes are committed.
+ */
+struct ScriptTransaction final {
+    std::vector<ScriptWrite> writes;
+    std::vector<std::shared_ptr<const ActionValue>> actions;
+    /** Set by `undoStep`: the writes are one undo step, merged with the last of the same key. */
+    std::optional<std::string> undo_label;
+    std::optional<std::string> undo_coalesce;
+
+    [[nodiscard]] const Value* written(const StateAddress& address) const noexcept;
+    void write(std::shared_ptr<const LexicalStateBinding> binding, Value value);
+    [[nodiscard]] bool empty() const noexcept {
+        return writes.empty() && actions.empty();
+    }
+};
+
+/** What an awaited action answered: a value at once, a request answered later, or a failure. */
+struct ScriptAnswer final {
+    enum class Kind : std::uint8_t { value, pending, failed };
+    Kind kind = Kind::value;
+    Value value;
+    std::string message;
+};
+
+/** What a script run can do beyond reading: the host it commits its effects to. */
+class ScriptEffects {
+  public:
+    virtual ~ScriptEffects() = default;
+    /** The state's current value, as committed; null when the store holds none. */
+    [[nodiscard]] virtual const Value* state(const LexicalStateBinding& binding) = 0;
+    /** Commits writes, then performs actions; a message when the commit was rejected. */
+    [[nodiscard]] virtual std::optional<std::string> commit(ScriptTransaction transaction) = 0;
+    /** Performs an action whose answer the script waits for. */
+    [[nodiscard]] virtual ScriptAnswer perform(const std::shared_ptr<const ActionValue>& action) = 0;
+};
+
+struct ScriptRun;
+
+/** How a run ended: finished with a value, waiting on an answer, or failed with an error. */
+struct ScriptOutcome final {
+    enum class Kind : std::uint8_t { finished, waiting, failed };
+    Kind kind = Kind::finished;
+    Value value;
+    /** A failed run's uncaught error, `{ code, message }` or the value thrown. */
+    Value error;
+    /** A waiting run, resumed with the answer. */
+    std::shared_ptr<ScriptRun> run;
+};
+
+/** Steps one handler run may take between commits, and how deep its calls may nest. */
+inline constexpr std::uint64_t script_step_budget = 10'000'000U;
+inline constexpr std::size_t script_call_depth = 512U;
 
 /**
  * Whether two evaluated actions dispatch identically: same contract, payload, origin, state
@@ -456,7 +595,21 @@ class ExpressionRuntime final {
     read_host_dependency(const std::shared_ptr<const HostPathKey>& path,
                          const ExpressionScope& scope) const;
 
+    /**
+     * Runs a handler: the function, called with `arguments`, writes and performs through
+     * `effects`. What it writes is committed when it finishes or waits; nothing, when it fails.
+     */
+    [[nodiscard]] ScriptOutcome run_script(const std::shared_ptr<const LambdaValue>& function,
+                                           std::vector<Value> arguments, ScriptEffects& effects);
+    /** Resumes a waiting run with its answer, or with the error its request failed with. */
+    [[nodiscard]] ScriptOutcome resume_script(const std::shared_ptr<ScriptRun>& run, Value answer,
+                                              bool failed, ScriptEffects& effects);
+    /** Calls a function with values, outside any handler: pure, so it may not write state. */
+    [[nodiscard]] ExpressionValue call(const LambdaValue& function,
+                                       std::vector<ExpressionValue> arguments);
+
   private:
+    friend class ScriptMachine;
     enum class CollectionDependencyKind { lexical, host };
 
     struct CollectionDependencyRead final {
@@ -527,6 +680,36 @@ class ExpressionRuntime final {
                                        std::size_t position, DependencyRecorder& reads);
     [[nodiscard]] Value evaluate_lambda(const LambdaValue& lambda, const Value& input,
                                         DependencyRecorder& upstream);
+    /** A helper of StrataScript's library, by name (library.cpp). */
+    [[nodiscard]] ExpressionValue evaluate_library(const Program& program,
+                                                   const ProgramExpression& node,
+                                                   const ExpressionScope& scope,
+                                                   DependencyRecorder& reads);
+    [[nodiscard]] ExpressionValue evaluate_call(const Program& program,
+                                                const ProgramExpression& node,
+                                                const ExpressionScope& scope,
+                                                DependencyRecorder& reads);
+    /**
+     * Calls a function: arguments by position, then by parameter name, the rest defaulted.
+     * A block body runs as a nested script of the run in progress, if any.
+     */
+    [[nodiscard]] ExpressionValue invoke(const LambdaValue& function,
+                                         std::vector<ExpressionValue> positional,
+                                         std::vector<std::pair<Symbol, ExpressionValue>> named,
+                                         DependencyRecorder& reads);
+    /** The scope a function's body runs in, its parameters bound from the arguments. */
+    [[nodiscard]] ExpressionScope function_scope(const LambdaValue& function,
+                                                 std::vector<ExpressionValue> positional,
+                                                 std::vector<std::pair<Symbol, ExpressionValue>> named,
+                                                 DependencyRecorder& reads);
+    /** A script error, unwinding to the nearest catch: `{ code, message }`. */
+    [[noreturn]] void script_error(std::string code, std::string message);
+    /** A state's value as the running handler sees it: its own write, else the store's. */
+    [[nodiscard]] const Value* script_state_value(const LexicalStateBinding& binding);
+    /** Queues an action for the running handler to perform once its writes commit. */
+    void perform_action(const std::shared_ptr<const ActionValue>& action);
+    /** Names the running handler's undo step; false outside a handler. */
+    [[nodiscard]] bool name_undo_step(std::string label, std::optional<std::string> coalesce);
     [[nodiscard]] std::shared_ptr<const CollectionViewValue>
     collection_view(const Program& program, ExpressionId expression, const ExpressionScope& scope,
                     DependencyRecorder& upstream);
@@ -548,6 +731,12 @@ class ExpressionRuntime final {
     std::set<std::string, std::less<>> reported_diagnostics_;
     /** How deep evaluation is inside the left of `??`, where a missing property is just null. */
     std::size_t probing_ = 0U;
+    /** How deep evaluation is inside a script's statements, where an error unwinds to a catch. */
+    std::size_t scripting_ = 0U;
+    /** The handler run whose transaction writes and actions go to; null outside one. */
+    ScriptRun* active_run_ = nullptr;
+    /** How deep function calls nest. */
+    std::size_t call_depth_ = 0U;
     /** Views per collection expression, one per lexical context, newest last. */
     std::unordered_map<ProgramNodeKey, std::vector<CollectionCacheEntry>, ProgramNodeKeyHash>
         collection_cache_;

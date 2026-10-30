@@ -53,6 +53,9 @@ private:
         } else if (const auto* style = std::get_if<StyleDeclaration>(&declaration.node)) {
             add(placement, "style", style->name, declaration.span);
             for (const Property& property : style->properties) expression(*property.value);
+        } else if (const auto* function = std::get_if<FunctionDeclaration>(&declaration.node)) {
+            add(placement, "function", function->name, declaration.span);
+            function_body(*function);
         }
         // Animations compile to a separate table and intentionally have no source-map entries.
     }
@@ -85,8 +88,42 @@ private:
                 expression(*loop->collection);
                 if (loop->filter != nullptr) expression(*loop->filter);
                 block(*loop->block);
+            } else if (const auto* function = std::get_if<FunctionStatement>(&statement.node)) {
+                add(model_.placement(statement.id), "function", function->function.name,
+                    statement.span);
+                function_body(function->function);
+            } else if (const auto* let = std::get_if<LetStatement>(&statement.node)) {
+                expression(*let->initializer);
+                add(model_.placement(statement.id), "local", let->name, statement.span);
+            } else if (const auto* assignment = std::get_if<AssignmentStatement>(&statement.node)) {
+                expression(*assignment->target);
+                expression(*assignment->value);
+                add(model_.placement(statement.id), "statement", std::nullopt, statement.span);
+            } else if (const auto* effect = std::get_if<ExpressionStatement>(&statement.node)) {
+                expression(*effect->expression);
+                add(model_.placement(statement.id), "statement", std::nullopt, statement.span);
+            } else if (const auto* repeat = std::get_if<WhileStatement>(&statement.node)) {
+                expression(*repeat->condition);
+                block(*repeat->block);
+            } else if (const auto* returned = std::get_if<ReturnStatement>(&statement.node)) {
+                if (returned->value != nullptr) expression(*returned->value);
+                add(model_.placement(statement.id), "statement", std::nullopt, statement.span);
+            } else if (const auto* thrown = std::get_if<ThrowStatement>(&statement.node)) {
+                expression(*thrown->value);
+                add(model_.placement(statement.id), "statement", std::nullopt, statement.span);
+            } else if (const auto* attempt = std::get_if<TryStatement>(&statement.node)) {
+                block(*attempt->block);
+                block(*attempt->catch_block);
             }
         }
+    }
+
+    void function_body(const FunctionDeclaration& function) {
+        for (const Parameter& parameter : function.parameters) {
+            if (parameter.default_value != nullptr) expression(*parameter.default_value);
+        }
+        if (function.expression_body != nullptr) expression(*function.expression_body);
+        if (function.block_body != nullptr) block(*function.block_body);
     }
 
     void call(const WidgetCall& call) {
@@ -132,7 +169,12 @@ private:
                 this->expression(*argument.value);
             }
         } else if (const auto* lambda = std::get_if<LambdaExpression>(&expression.node)) {
-            this->expression(*lambda->body);
+            if (lambda->body != nullptr) this->expression(*lambda->body);
+            if (lambda->block != nullptr) block(*lambda->block);
+        } else if (const auto* spread = std::get_if<SpreadExpression>(&expression.node)) {
+            this->expression(*spread->operand);
+        } else if (const auto* awaited = std::get_if<AwaitExpression>(&expression.node)) {
+            this->expression(*awaited->operand);
         }
     }
 

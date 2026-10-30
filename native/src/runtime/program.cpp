@@ -197,7 +197,44 @@ class ProgramLowering final {
                 node.fallback = VariableFallback::name;
                 node.value = Value(std::string(node.name.name()));
                 node.names_component = binding == "component";
+            } else if (binding == "function") {
+                // Resolved once every top-level function is registered.
+                node.fallback = VariableFallback::function;
+                pending_function_variables_.push_back(
+                    static_cast<ExpressionId>(program_.expressions_.size()));
             }
+        } else if (kind == "call") {
+            node.kind = ExpressionKind::call;
+            node.first = expression(required(source, "callee"));
+            std::vector<ProgramArgument> arguments;
+            for (const JsonValue argument : array_field(source, "arguments")) {
+                const std::optional<std::string_view> name = argument.find("name").string();
+                arguments.push_back(ProgramArgument{
+                    name.has_value() ? Symbol::intern(*name) : Symbol{},
+                    name.has_value(),
+                    expression(required(argument, "value")),
+                    argument,
+                });
+            }
+            store_arguments(node, std::move(arguments));
+        } else if (kind == "spread" || kind == "await" || kind == "handler") {
+            node.kind = kind == "spread"  ? ExpressionKind::spread
+                        : kind == "await" ? ExpressionKind::await_value
+                                          : ExpressionKind::handler;
+            node.first = expression(required(source, "operand"));
+        } else if (kind == "record") {
+            node.kind = ExpressionKind::record;
+            std::vector<ProgramArgument> parts;
+            for (const JsonValue part : array_field(source, "parts")) {
+                if (const JsonValue spread = part.find("spread"); spread && !spread.is_null()) {
+                    parts.push_back(ProgramArgument{{}, false, expression(spread), part});
+                } else {
+                    parts.push_back(ProgramArgument{Symbol::intern(string_field(part, "key")),
+                                                    true, expression(required(part, "value")),
+                                                    part});
+                }
+            }
+            store_arguments(node, std::move(parts));
         } else if (kind == "list") {
             node.kind = ExpressionKind::list;
             std::vector<ProgramArgument> elements;
@@ -288,18 +325,14 @@ class ProgramLowering final {
             store_arguments(node, arguments(source));
         } else if (kind == "lambda") {
             node.kind = ExpressionKind::lambda;
-            node.name = Symbol::intern(string_field(source, "parameter"));
-            node.first = expression(required(source, "body"));
-            std::vector<Symbol> free;
-            collect_free_variables(node.first, free);
-            std::ranges::sort(free);
-            const auto duplicates = std::ranges::unique(free);
-            free.erase(duplicates.begin(), duplicates.end());
-            std::erase(free, node.name);
-            node.free_variables_begin = static_cast<std::uint32_t>(program_.free_variables_.size());
-            node.free_variables_count = static_cast<std::uint32_t>(free.size());
-            program_.free_variables_.insert(program_.free_variables_.end(), free.begin(),
-                                            free.end());
+            node.function = function(source, {});
+            const ProgramFunction& lowered = program_.functions_[node.function];
+            // A helper's item function names its one parameter; its body is `first`.
+            if (lowered.parameters_count != 0U)
+                node.name = program_.function_parameters_[lowered.parameters_begin].name;
+            node.first = lowered.body;
+            node.free_variables_begin = lowered.free_variables_begin;
+            node.free_variables_count = lowered.free_variables_count;
         } else if (kind == "materialReference" || kind == "materialCall") {
             node.kind = ExpressionKind::material;
             node.text = std::string(string_field(source, "id"));
@@ -323,6 +356,89 @@ class ProgramLowering final {
         }
         program_.expressions_.push_back(std::move(node));
         return static_cast<ExpressionId>(program_.expressions_.size() - 1U);
+    }
+
+    /**
+     * Lowers a function: a `fn` declaration (with `name`) or a lambda. Its free variables are the
+     * names its body reads, less its parameters.
+     */
+    [[nodiscard]] std::uint32_t function(const JsonValue source, const Symbol name) {
+        ProgramFunction result;
+        result.name = name;
+        result.source = source;
+        result.asynchronous = source.find("async").boolean().value_or(false);
+        // A legacy item function names one `parameter`; a declared function is always a script.
+        result.script = source.find("script").boolean().value_or(!source.find("parameter"));
+        std::vector<ProgramFunctionParameter> parameters;
+        if (const JsonValue listed = source.find("parameters"); listed) {
+            for (const JsonValue parameter : *listed.array()) {
+                if (const std::optional<std::string_view> plain = parameter.string()) {
+                    parameters.push_back(ProgramFunctionParameter{Symbol::intern(*plain)});
+                } else {
+                    parameters.push_back(ProgramFunctionParameter{
+                        Symbol::intern(string_field(parameter, "name")),
+                        optional_expression(required(parameter, "default")),
+                    });
+                }
+            }
+        } else if (const std::optional<std::string_view> single =
+                       source.find("parameter").string()) {
+            parameters.push_back(ProgramFunctionParameter{Symbol::intern(*single)});
+        }
+        result.body = optional_expression(source.find("body"));
+        if (const JsonValue block = source.find("block"); block && !block.is_null())
+            result.block = this->block(block, {});
+        std::vector<Symbol> free;
+        if (result.body != no_program_id) collect_free_variables(result.body, free);
+        if (result.block != no_program_id) collect_block_free_variables(result.block, free);
+        for (const ProgramFunctionParameter& parameter : parameters) {
+            if (parameter.default_value != no_program_id)
+                collect_free_variables(parameter.default_value, free);
+        }
+        std::ranges::sort(free);
+        const auto duplicates = std::ranges::unique(free);
+        free.erase(duplicates.begin(), duplicates.end());
+        for (const ProgramFunctionParameter& parameter : parameters)
+            std::erase(free, parameter.name);
+        result.free_variables_begin = static_cast<std::uint32_t>(program_.free_variables_.size());
+        result.free_variables_count = static_cast<std::uint32_t>(free.size());
+        program_.free_variables_.insert(program_.free_variables_.end(), free.begin(), free.end());
+        result.parameters_begin = static_cast<std::uint32_t>(program_.function_parameters_.size());
+        result.parameters_count = static_cast<std::uint32_t>(parameters.size());
+        program_.function_parameters_.insert(program_.function_parameters_.end(),
+                                             parameters.begin(), parameters.end());
+        program_.functions_.push_back(std::move(result));
+        return static_cast<std::uint32_t>(program_.functions_.size() - 1U);
+    }
+
+    /** A module's top-level functions, by name, then the variables that name them. */
+    void top_level_functions(const JsonValue unit) {
+        const JsonValue functions = unit.find("functions");
+        if (!functions || functions.is_null()) {
+            resolve_function_variables();
+            return;
+        }
+        for (const JsonValue source : *functions.array()) {
+            const std::string_view name = string_field(source, "name");
+            const std::uint32_t index = function(source, Symbol::intern(name));
+            if (!program_.function_indexes_.emplace(std::string(name), index).second)
+                throw std::logic_error("portable IR contains duplicate function '" +
+                                       std::string(name) + "'");
+        }
+        resolve_function_variables();
+    }
+
+    /** Points each variable naming a top-level function at it. */
+    void resolve_function_variables() {
+        for (const ExpressionId id : pending_function_variables_) {
+            ProgramExpression& node = program_.expressions_[id];
+            const auto found = program_.function_indexes_.find(node.name.name());
+            if (found != program_.function_indexes_.end())
+                node.function = found->second;
+            else
+                node.fallback = VariableFallback::missing;
+        }
+        pending_function_variables_.clear();
     }
 
     [[nodiscard]] ExpressionId optional_expression(const JsonValue source) {
@@ -531,6 +647,34 @@ class ProgramLowering final {
         return static_cast<std::uint32_t>(program_.origins_.size() - 1U);
     }
 
+    /**
+     * Every name a script block reads. Its own locals are among them: a superset is harmless,
+     * since a name the closure's scope does not bind compares equal on both sides.
+     */
+    void collect_block_free_variables(const BlockId id, std::vector<Symbol>& names) const {
+        const ProgramBlock& block = program_.blocks_[id];
+        for (std::uint32_t index = 0U; index < block.statements_count; ++index) {
+            const ProgramStatement& statement = program_.statements_[block.statements_begin + index];
+            for (const ExpressionId expression :
+                 {statement.expression, statement.filter, statement.target}) {
+                if (expression != no_program_id) collect_free_variables(expression, names);
+            }
+            for (const BlockId nested : {statement.block, statement.otherwise}) {
+                if (nested != no_program_id) collect_block_free_variables(nested, names);
+            }
+            for (std::uint32_t branch = 0U; branch < statement.branches_count; ++branch) {
+                const ProgramWhenBranch& when = program_.branches_[statement.branches_begin + branch];
+                if (when.match != no_program_id) collect_free_variables(when.match, names);
+                collect_block_free_variables(when.block, names);
+            }
+            if (statement.function != no_program_id) {
+                for (const Symbol name :
+                     program_.free_variables(program_.functions_[statement.function]))
+                    names.push_back(name);
+            }
+        }
+    }
+
     /** Every name a lambda body reads, including those its own lambdas read from it. */
     void collect_free_variables(const ExpressionId id, std::vector<Symbol>& names) const {
         const ProgramExpression& node = program_.expressions_[id];
@@ -610,6 +754,46 @@ class ProgramLowering final {
             if (repeater_body)
                 result.identity = this->identity(required(source, "identity"));
             result.block = block(required(source, "block"), declaration_scope);
+        } else if (kind == "function") {
+            result.kind = StatementKind::function;
+            const JsonValue declared = required(source, "function");
+            result.name = Symbol::intern(string_field(declared, "name"));
+            result.function = function(declared, result.name);
+        } else if (kind == "let") {
+            result.kind = StatementKind::let_binding;
+            result.name = Symbol::intern(string_field(source, "name"));
+            result.mutable_binding = required(source, "mutable").boolean().value_or(false);
+            result.expression = expression(required(source, "initializer"));
+        } else if (kind == "assign") {
+            result.kind = StatementKind::assign;
+            const std::string_view operation = string_field(source, "operator");
+            result.assignment = operation == "add"        ? AssignmentOperator::add
+                                : operation == "subtract" ? AssignmentOperator::subtract
+                                : operation == "multiply" ? AssignmentOperator::multiply
+                                : operation == "divide"   ? AssignmentOperator::divide
+                                : operation == "modulo"   ? AssignmentOperator::modulo
+                                                          : AssignmentOperator::assign;
+            result.target = expression(required(source, "target"));
+            result.expression = expression(required(source, "value"));
+        } else if (kind == "expression") {
+            result.kind = StatementKind::effect;
+            result.expression = expression(required(source, "expression"));
+        } else if (kind == "while") {
+            result.kind = StatementKind::while_loop;
+            result.expression = expression(required(source, "condition"));
+            result.block = block(required(source, "block"), declaration_scope);
+        } else if (kind == "break") {
+            result.kind = StatementKind::break_loop;
+        } else if (kind == "continue") {
+            result.kind = StatementKind::continue_loop;
+        } else if (kind == "return" || kind == "throw") {
+            result.kind = kind == "return" ? StatementKind::return_value : StatementKind::throw_value;
+            result.expression = optional_expression(required(source, "value"));
+        } else if (kind == "try") {
+            result.kind = StatementKind::try_catch;
+            result.name = Symbol::intern(string_field(source, "catchName"));
+            result.block = block(required(source, "block"), declaration_scope);
+            result.otherwise = block(required(source, "catch"), declaration_scope);
         } else {
             throw std::logic_error("validated portable IR contains an unknown statement kind");
         }
@@ -771,6 +955,8 @@ class ProgramLowering final {
 
     Program& program_;
     const Program::StateDeclarationIndex* state_declaration_;
+    /** Variables naming a top-level function, resolved once every one is registered. */
+    std::vector<ExpressionId> pending_function_variables_;
 };
 
 Program::Program() {
@@ -796,6 +982,7 @@ std::shared_ptr<const Program> Program::lower_unit(const data::JsonView unit,
     }
     for (const JsonValue style : array_field(unit, "styles"))
         lowering.style(style);
+    lowering.top_level_functions(unit);
     return program;
 }
 
@@ -805,7 +992,14 @@ std::shared_ptr<const Program> Program::lower_expression(const data::JsonView ex
         std::make_shared<const data::JsonValue>(data::materialize_json(expression));
     ProgramLowering lowering(*program, nullptr);
     program->root_ = lowering.expression(data::JsonView(*program->owned_source_));
+    lowering.resolve_function_variables();
     return program;
+}
+
+std::optional<std::uint32_t> Program::function_index(const std::string_view name) const {
+    const auto found = function_indexes_.find(name);
+    return found != function_indexes_.end() ? std::optional<std::uint32_t>(found->second)
+                                            : std::nullopt;
 }
 
 std::span<const std::uint32_t> Program::parameter_arguments(const ProgramCall& call) const {

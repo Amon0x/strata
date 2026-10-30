@@ -17,9 +17,17 @@ struct Symbol final {
 };
 
 constexpr std::array symbols{
+    Symbol{"...", TokenType::ellipsis},
     Symbol{"->", TokenType::arrow},
+    Symbol{"=>", TokenType::fat_arrow},
+    Symbol{"+=", TokenType::plus_equal},
+    Symbol{"-=", TokenType::minus_equal},
+    Symbol{"*=", TokenType::star_equal},
+    Symbol{"/=", TokenType::slash_equal},
+    Symbol{"%=", TokenType::percent_equal},
     Symbol{"&&", TokenType::amp_amp},
     Symbol{"||", TokenType::pipe_pipe},
+    Symbol{"|", TokenType::pipe},
     Symbol{"==", TokenType::equal_equal},
     Symbol{"!=", TokenType::bang_equal},
     Symbol{"<=", TokenType::less_equal},
@@ -161,6 +169,12 @@ void Lexer::scan_token() {
         scan_slash();
     } else if (code_point == static_cast<std::uint32_t>('"')) {
         scan_string();
+    } else if (code_point == static_cast<std::uint32_t>('`')) {
+        scan_template(true);
+    } else if (code_point == static_cast<std::uint32_t>('}') && !template_depths_.empty() &&
+               template_depths_.back() == brace_depth_) {
+        template_depths_.pop_back();
+        scan_template(false);
     } else if (code_point == static_cast<std::uint32_t>('#')) {
         scan_color();
     } else if (ascii_digit(code_point)) {
@@ -179,11 +193,43 @@ void Lexer::scan_symbol(const std::uint32_t first) {
         if (first == static_cast<std::uint32_t>(symbol.lexeme.front()) &&
             buffer_.starts_with(start_, symbol.lexeme)) {
             current_ = start_ + symbol.lexeme.size();
+            if (symbol.type == TokenType::left_brace)
+                ++brace_depth_;
+            else if (symbol.type == TokenType::right_brace && brace_depth_ > 0U)
+                --brace_depth_;
             add_token(symbol.type);
             return;
         }
     }
     unexpected_character();
+}
+
+void Lexer::scan_template(const bool head) {
+    bool escaped = false;
+    while (!at_end()) {
+        const std::uint32_t code_point = advance();
+        if (escaped) {
+            escaped = false;
+        } else if (code_point == static_cast<std::uint32_t>('\\')) {
+            escaped = true;
+        } else if (code_point == static_cast<std::uint32_t>('`')) {
+            add_token(head ? TokenType::template_full : TokenType::template_tail);
+            return;
+        } else if (code_point == static_cast<std::uint32_t>('$') &&
+                   peek() == static_cast<std::uint32_t>('{')) {
+            static_cast<void>(advance());
+            template_depths_.push_back(brace_depth_);
+            add_token(head ? TokenType::template_head : TokenType::template_middle);
+            return;
+        }
+    }
+    report(
+        "STRATA.DSL.LEX_UNTERMINATED_STRING",
+        "Unterminated template string.",
+        start_,
+        current_
+    );
+    add_token(TokenType::error);
 }
 
 void Lexer::scan_slash() {
@@ -515,6 +561,18 @@ std::string_view token_type_name(const TokenType type) noexcept {
     case TokenType::greater_equal: return "GREATER_EQUAL";
     case TokenType::question_question: return "QUESTION_QUESTION";
     case TokenType::arrow: return "ARROW";
+    case TokenType::fat_arrow: return "FAT_ARROW";
+    case TokenType::plus_equal: return "PLUS_EQUAL";
+    case TokenType::minus_equal: return "MINUS_EQUAL";
+    case TokenType::star_equal: return "STAR_EQUAL";
+    case TokenType::slash_equal: return "SLASH_EQUAL";
+    case TokenType::percent_equal: return "PERCENT_EQUAL";
+    case TokenType::ellipsis: return "ELLIPSIS";
+    case TokenType::pipe: return "PIPE";
+    case TokenType::template_full: return "TEMPLATE";
+    case TokenType::template_head: return "TEMPLATE_HEAD";
+    case TokenType::template_middle: return "TEMPLATE_MIDDLE";
+    case TokenType::template_tail: return "TEMPLATE_TAIL";
     case TokenType::error: return "ERROR";
     case TokenType::end_of_file: return "EOF";
     }

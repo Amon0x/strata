@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "application": {
+    "id": "scripting.headless",
+    "module": "assets/strata/samples/scripting.strata",
+    "root": "Scripting",
+    "actions": []
+  },
+  "surface": {
+    "id": "scripting.headless",
+    "role": "overlay",
+    "backend": "reference",
+    "width": 900,
+    "height": 360,
+    "scale": 1,
+    "reducedMotion": true,
+    "clearColor": "#090b0fff",
+    "fonts": [
+      {"id": "strata:fonts/default-medium", "resource": "assets/strata/fonts/medium.ttf"},
+      {"id": "strata:fonts/default", "resource": "assets/strata/fonts/default.ttf"}
+    ],
+    "images": []
+  },
+  "snapshots": [],
+  "steps": [
+    {"advance": {"milliseconds": 0, "frames": 1}},
+    {"click": {"key": "scripting.bump"}},
+    {"advance": {"milliseconds": 16, "frames": 1}},
+    {"click": {"key": "scripting.bump"}},
+    {"advance": {"milliseconds": 16, "frames": 1}},
+    {"click": {"key": "scripting.explore"}},
+    {"advance": {"milliseconds": 16, "frames": 1}},
+    {"capture": "scripted"},
+    {"click": {"key": "scripting.explode"}},
+    {"advance": {"milliseconds": 16, "frames": 1}},
+    {"click": {"key": "scripting.stamp"}},
+    {"advance": {"milliseconds": 16, "frames": 1}},
+    {"capture": "recovered"},
+    {"pointerDrag": {"from": {"key": "scripting.handle"}, "to": {"x": 600, "y": 300}, "milliseconds": 200, "steps": 10}},
+    {"advance": {"milliseconds": 300, "frames": 6}},
+    {"capture": "moved"},
+    {"click": {"key": "scripting.undo"}},
+    {"advance": {"milliseconds": 16, "frames": 2}},
+    {"capture": "undone"},
+    {"click": {"key": "scripting.choice.first"}},
+    {"advance": {"milliseconds": 16, "frames": 1}},
+    {"capture": "picked"}
+  ]
+}
