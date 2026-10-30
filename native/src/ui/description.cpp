@@ -514,6 +514,7 @@ DescriptionBuilder::DescriptionBuilder(runtime::ApplicationContext& application)
       owned_widgets_(std::make_unique<WidgetRegistry>()), widgets_(*owned_widgets_),
       expressions_(std::make_unique<runtime::ExpressionRuntime>(
           application.host(), application.bundle()->action_registry())) {
+    expressions_->set_animation_host(this);
     observe_state_changes();
 }
 
@@ -523,7 +524,71 @@ DescriptionBuilder::DescriptionBuilder(runtime::ApplicationContext& application,
       owned_widgets_(), widgets_(widgets),
       expressions_(std::make_unique<runtime::ExpressionRuntime>(
           application.host(), application.bundle()->action_registry())) {
+    expressions_->set_animation_host(this);
     observe_state_changes();
+}
+
+bool DescriptionBuilder::reads_frame_time() const {
+    const auto found = host_readers_.find(runtime::frame_time_path()->canonical);
+    return found != host_readers_.end() && !found->second.empty();
+}
+
+std::pair<double, bool> DescriptionBuilder::sampled(const AnimationSlot& slot,
+                                                    const std::int64_t now) {
+    if (slot.from == slot.target)
+        return {slot.target, false};
+    const std::int64_t elapsed = now - slot.start_nanos - slot.delay_nanos;
+    if (elapsed <= 0)
+        return {slot.from, true};
+    if (slot.duration_nanos <= 0 || elapsed >= slot.duration_nanos)
+        return {slot.target, false};
+    const double fraction =
+        static_cast<double>(elapsed) / static_cast<double>(slot.duration_nanos);
+    return {slot.from + (slot.target - slot.from) * motion_easing(slot.easing, fraction), true};
+}
+
+runtime::AnimateSample DescriptionBuilder::animate(const runtime::AnimateCall& call) {
+    Frame* const current = frame();
+    if (current == nullptr || current->instance == nullptr)
+        return runtime::AnimateSample{call.target, false, frame_time_};
+    // The call site: where in the instance, which expression, and its how-many-th evaluation in
+    // this description (a function evaluated twice holds two tweens).
+    std::string key(call.instance_path);
+    key += '\n';
+    key += std::to_string(call.program);
+    key += ':';
+    key += std::to_string(call.expression);
+    const std::size_t occurrence = current->animation_calls[key]++;
+    key += '#';
+    key += std::to_string(occurrence);
+    const auto timing = [&](AnimationSlot& slot) {
+        slot.delay_nanos = call.delay_nanos;
+        slot.duration_nanos = call.duration_nanos;
+        try {
+            slot.easing = MotionEasing(call.easing);
+        } catch (const std::invalid_argument&) {
+            slot.easing = MotionEasing("cubic-in-out");
+        }
+    };
+    auto& slots = current->instance->animations;
+    auto found = slots.find(key);
+    if (found == slots.end()) {
+        AnimationSlot slot;
+        slot.from = call.from.value_or(call.target);
+        slot.target = call.target;
+        slot.start_nanos = frame_time_;
+        timing(slot);
+        found = slots.emplace(std::move(key), std::move(slot)).first;
+    } else if (found->second.target != call.target) {
+        // A new target: it sets out from wherever it is now.
+        AnimationSlot& slot = found->second;
+        slot.from = sampled(slot, frame_time_).first;
+        slot.target = call.target;
+        slot.start_nanos = frame_time_;
+        timing(slot);
+    }
+    const auto [value, running] = sampled(found->second, frame_time_);
+    return runtime::AnimateSample{value, running, frame_time_};
 }
 
 DescriptionBuilder::~DescriptionBuilder() {

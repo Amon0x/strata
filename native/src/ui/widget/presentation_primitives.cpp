@@ -300,35 +300,7 @@ void draw_content(WidgetRenderScope& scope) {
     if (scope.visual().background.has_value()) {
         scope.rounded_rect(scope.layout().bounds, *scope.visual().background);
     }
-    // How much has drawn in: the `reveal` style, or an animation of it. Each shape draws over its
-    // own part of that (revealStart to revealEnd), so one drawing can stage its shapes in turn.
-    double reveal = 1.0;
-    if (const runtime::Value* layout = scope.property("$layout");
-        layout != nullptr && layout->object() != nullptr) {
-        if (const runtime::Value* value = layout->field("reveal");
-            value != nullptr && value->number() != nullptr && std::isfinite(*value->number()))
-            reveal = std::clamp(*value->number(), 0.0, 1.0);
-    }
-    if (const MotionComputedValues* computed = scope.motion_values(); computed != nullptr) {
-        if (const std::optional<double> drawn = computed->number(MotionProperty::reveal);
-            drawn.has_value())
-            reveal = std::clamp(*drawn, 0.0, 1.0);
-    }
     const Size size{scope.layout().bounds.width, scope.layout().bounds.height};
-    const auto window = [reveal](const runtime::Value& shape) {
-        const auto bound = [&shape](const std::string_view name, const double fallback) {
-            const runtime::Value* value = shape.field(name);
-            return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())
-                       ? std::clamp(*value->number(), 0.0, 1.0)
-                       : fallback;
-        };
-        const double start = bound("revealStart", 0.0);
-        const double end = std::max(start, bound("revealEnd", 1.0));
-        if (reveal >= end)
-            return 1.0;
-        return end > start ? std::clamp((reveal - start) / (end - start), 0.0, 1.0)
-                           : (reveal >= start ? 1.0 : 0.0);
-    };
     // Runs of outlines between images draw together, so outlines that meet leave no seam.
     std::vector<PathShape> run;
     for (const runtime::Value& value : shapes->values) {
@@ -348,13 +320,17 @@ void draw_content(WidgetRenderScope& scope) {
         }
         if (!shape.has_value())
             continue;
-        const double amount = window(value);
-        if (amount >= 1.0) {
-            run.push_back(std::move(*shape));
-            continue;
+        // `pathLength`: the stroke's dashes count in parts of that, not in pixels (as SVG's
+        // pathLength), so a dash of the whole length offset by what is left draws it in.
+        if (const runtime::Value* length = value.field("pathLength");
+            length != nullptr && length->number() != nullptr && *length->number() > 0.0 &&
+            shape->stroke_style.has_value()) {
+            const double scale = path_pixel_length(shape->path, size) / *length->number();
+            for (double& dash : shape->stroke_style->dash)
+                dash *= scale;
+            shape->stroke_style->dash_offset *= scale;
         }
-        for (PathShape& part : revealed_shapes(*shape, amount, size))
-            run.push_back(std::move(part));
+        run.push_back(std::move(*shape));
     }
     scope.shapes(scope.layout().bounds, std::move(run));
 }

@@ -4419,10 +4419,10 @@ overlay Ticks {
 
 void test_chart_draws_points_in_along_a_log_axis(const std::filesystem::path& resources) {
     const std::string source = R"(
-animation DrawIn { from { reveal: 0 } to { reveal: 1 } duration: 1000ms; easing: "linear"; fillMode: "FORWARDS"; }
 overlay Cost {
   root Panel(key: "cost.root", layout: { kind: "COLUMN", width: 480, height: 320 }) {
-    Chart(key: "cost.chart", enter: DrawIn, markerRadius: 5, showLegend: false, showAxes: true,
+    Chart(key: "cost.chart", reveal: animate(1, from: 0, duration: 1000ms, easing: "linear"),
+          markerRadius: 5, showLegend: false, showAxes: true,
           axisColor: #0000FF, errorBarColor: #00FF00,
           xAxis: { scale: "LOG", min: 0.5, max: 200, labels: false, marks: "ALL", title: "Cost" },
           yAxis: { title: "Score" },
@@ -4505,85 +4505,109 @@ overlay Cost {
           "first points");
 }
 
-void test_draw_reveals_its_shapes_in_turn(const std::filesystem::path& resources) {
+void test_animate_follows_its_target(const std::filesystem::path& resources) {
     const std::string source = R"(
-animation DrawIn { from { reveal: 0 } to { reveal: 1 } duration: 1000ms; easing: "linear"; fillMode: "FORWARDS"; }
+fn stage(t: number, from: number, length: number) = clamp((t - from) / length, 0, 1)
 overlay Dial {
-  root Panel(key: "dial.root", layout: { kind: "COLUMN", width: 200, height: 200 }) {
-    Draw(key: "dial.draw", enter: DrawIn, layout: { width: 200, height: 200 }, shapes: [
-      { kind: "line", from: { x: 0.5, y: 0.5 }, to: { x: 0.5, y: 0.1 }, stroke: #FF0000,
-        strokeStyle: { width: 2 }, revealEnd: 0.5 },
-      { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.4, start: -90, sweep: 120,
-        fill: #00FF00, revealStart: 0.5 }
+  state open = true
+  root Panel(key: "dial.root", layout: { kind: "COLUMN", width: 200, height: 240 }) {
+    derived t = animate(open ? 1 : 0, from: 0, duration: 1000ms, easing: "linear")
+    Draw(key: "dial.draw", layout: { width: 200, height: 200 }, shapes: [
+      { kind: "line", from: { x: 0.5, y: 0.5 }, to: { x: 0.5, y: 0.5 - 0.4 * stage(t, 0, 0.5) },
+        stroke: #FF0000, strokeStyle: { width: 2 } },
+      { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.4, start: -90,
+        sweep: 120 * stage(t, 0.5, 0.5), fill: #00FF00 },
+      { kind: "line", from: { x: 0.1, y: 0.95 }, to: { x: 0.9, y: 0.95 }, stroke: #0000FF,
+        strokeStyle: { width: 2, dash: [1, 1], dashOffset: 1 - t }, pathLength: 1 }
     ])
+    Panel(key: "dial.toggle", style: { width: 200; height: 40 },
+          behaviors: [{ id: "strata.pointer", action: e => { if e.phase == "press" { open = !open } } }])
   }
 }
 )";
     const auto bundle = runtime::ApplicationBundle::create();
-    runtime::ApplicationContext application("draw-reveal", bundle);
+    runtime::ApplicationContext application("animate", bundle);
     std::unique_ptr<ui::Surface> surface =
-        compiled_surface(application, resources, source, "Dial", 200.0, 200.0, false);
+        compiled_surface(application, resources, source, "Dial", 200.0, 240.0, false);
     std::int64_t now = 1'000'000;
-    // The line's reach upward and the sector's sweep, as this frame draws them.
+    // The red line's reach upward, the green sector's sweep, and the blue line's dash in pixels.
     struct Drawn final {
         std::optional<double> line_top;
         std::optional<double> sweep;
+        std::optional<double> dash;
     };
     const auto drawn = [&] {
         Drawn result;
+        const auto read = [&](const ui::PathShape& shape) {
+            const runtime::ColorValue* stroke =
+                shape.stroke.has_value() ? shape.stroke->color() : nullptr;
+            const runtime::ColorValue* fill = shape.fill.has_value() ? shape.fill->color() : nullptr;
+            if (stroke != nullptr && stroke->red == 255U && shape.primitive.has_value())
+                result.line_top = shape.primitive->to.y;
+            if (fill != nullptr && fill->green == 255U && shape.primitive.has_value())
+                result.sweep = shape.primitive->sweep_degrees;
+            if (stroke != nullptr && stroke->blue == 255U && shape.stroke_style.has_value() &&
+                !shape.stroke_style->dash.empty())
+                result.dash = shape.stroke_style->dash.front();
+        };
         for (const ui::RenderCommand& command : surface->render_commands().commands()) {
             const auto* path = std::get_if<ui::PathRenderCommand>(&command);
             if (path == nullptr)
                 continue;
-            for (const ui::PathShape* shape : {&path->shape}) {
-                const runtime::ColorValue* stroke =
-                    shape->stroke.has_value() ? shape->stroke->color() : nullptr;
-                const runtime::ColorValue* fill =
-                    shape->fill.has_value() ? shape->fill->color() : nullptr;
-                if (stroke != nullptr && stroke->red == 255U && shape->primitive.has_value())
-                    result.line_top = shape->primitive->to.y;
-                if (fill != nullptr && fill->green == 255U && shape->primitive.has_value())
-                    result.sweep = shape->primitive->sweep_degrees;
-            }
-            for (const ui::PathShape& shape : path->joined) {
-                const runtime::ColorValue* fill =
-                    shape.fill.has_value() ? shape.fill->color() : nullptr;
-                if (fill != nullptr && fill->green == 255U && shape.primitive.has_value())
-                    result.sweep = shape.primitive->sweep_degrees;
-            }
+            read(path->shape);
+            for (const ui::PathShape& shape : path->joined)
+                read(shape);
         }
         return result;
     };
+    const auto frames = [&](const int count) {
+        for (int frame = 0; frame < count; ++frame)
+            static_cast<void>(surface->frame(now += 20'000'000));
+    };
     static_cast<void>(surface->frame(now));
     const Drawn start = drawn();
-    check(!start.line_top.has_value() && !start.sweep.has_value(),
-          "a Draw drawing in showed its shapes before the reveal began");
-    for (int frame = 0; frame < 13; ++frame)
-        static_cast<void>(surface->frame(now += 20'000'000));
+    check(start.line_top.has_value() && std::abs(*start.line_top - 0.5) < 1.0e-9,
+          "an animate() from 0 did not start at 0");
+    frames(13);
     const Drawn early = drawn();
     check(early.line_top.has_value() && *early.line_top > 0.1 && *early.line_top < 0.5 &&
-              !early.sweep.has_value(),
-          "a quarter through, a Draw's first shape had not grown part way alone");
-    for (int frame = 0; frame < 25; ++frame)
-        static_cast<void>(surface->frame(now += 20'000'000));
+              (!early.sweep.has_value() || *early.sweep == 0.0),
+          "a quarter through, the first stage cut from an animate() had not run part way alone");
+    // pathLength 1: a dash of 1 is the line's whole 160 pixels.
+    check(early.dash.has_value() && std::abs(*early.dash - 160.0) < 0.5,
+          "a dash counted in pathLength parts was not scaled to the stroke's length");
+    frames(25);
     const Drawn later = drawn();
     check(later.line_top.has_value() && std::abs(*later.line_top - 0.1) < 1.0e-9 &&
               later.sweep.has_value() && *later.sweep > 0.0 && *later.sweep < 120.0,
-          "three quarters through, a Draw's sector had not swept part way after its line");
-    for (int frame = 0; frame < 20; ++frame)
-        static_cast<void>(surface->frame(now += 20'000'000));
-    const Drawn end = drawn();
-    check(end.sweep.has_value() && std::abs(*end.sweep - 120.0) < 1.0e-9,
-          "a Draw that had drawn in did not sweep its sector all the way");
+          "three quarters through, the second stage had not swept part way after the first");
+    // A new target: it turns back from where it is, not from either end.
+    std::vector<ui::SurfaceInputEvent> events;
+    events.emplace_back(ui::PointerInputEvent{ui::Point{100.0, 220.0}, ui::PointerEventType::press, 4, 0});
+    events.emplace_back(ui::PointerInputEvent{ui::Point{100.0, 220.0}, ui::PointerEventType::release, 4, 0});
+    static_cast<void>(surface->input().enqueue(std::move(events)));
+    frames(5);
+    const Drawn turning = drawn();
+    check(turning.sweep.has_value() && *turning.sweep > 0.0 && *later.sweep > *turning.sweep,
+          "an animate() whose target changed did not turn back from where it was");
+    frames(60);
+    const Drawn closed = drawn();
+    check(closed.line_top.has_value() && std::abs(*closed.line_top - 0.5) < 1.0e-9,
+          "an animate() turned back did not reach its new target");
+    // Settled, it reads no time: frames describe nothing.
+    const ui::SurfaceFrame& still = surface->frame(now += 20'000'000);
+    check(still.operations.described_nodes == 0U && surface->idle(),
+          "a settled animate() kept its readers being described");
 }
 
 void test_radial_layout_hit_shapes_and_hover(const std::filesystem::path& resources) {
     const std::string source = R"(
-animation Deal { from { radialSweep: 0 } to { radialSweep: 360 } duration: 1000ms; easing: "linear"; fillMode: "FORWARDS"; }
+style Ring { kind: "RADIAL"; width: 200; height: 200; padding: 0; radialRadius: 50; }
 overlay Wheel {
   state hovered = -1
   root Panel(key: "wheel.root", style: { kind: "OVERLAY"; width: 200; height: 200; padding: 0 }) {
-    Panel(key: "wheel.ring", enter: Deal, style: { kind: "RADIAL"; width: 200; height: 200; padding: 0; radialRadius: 50 }) {
+    derived deal = animate(1, from: 0, duration: 1000ms, easing: "linear")
+    Panel(key: "wheel.ring", style: style(Ring, radialSweep: 360 * deal)) {
       for n, index in [0, 1, 2, 3] {
         Panel(key: `wheel.item.${index}`, style: { width: 20; height: 20 })
       }
@@ -5185,7 +5209,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_calendar_picks_days_by_pointer_and_keyboard(resources);
         test_chart_inspects_selects_and_hides_series(resources);
         test_chart_draws_points_in_along_a_log_axis(resources);
-        test_draw_reveals_its_shapes_in_turn(resources);
+        test_animate_follows_its_target(resources);
         test_radial_layout_hit_shapes_and_hover(resources);
         test_timers_fire_on_their_interval(resources);
         test_markdown_expands_blocks_and_follows_links(resources);

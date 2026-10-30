@@ -1520,7 +1520,8 @@ FrameDirtyModel Surface::observe_dirty(const std::int64_t frame_time_nanos, cons
     return FrameDirtyModel{
         .requested = requested,
         .description = description_invalidated_ ||
-                       application_.dirty_generation() != observed_application_generation_,
+                       application_.dirty_generation() != observed_application_generation_ ||
+                       descriptions_.reads_frame_time(),
         .retained = tree_.dirty_count() != 0U,
         // Work raised after the frame's last layout (a post-layout reveal scrolling) only bumps
         // the layout generation: its dirty marks were cleared with the frame that raised it.
@@ -1712,6 +1713,20 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     input_.publish_frame_time(frame_time_nanos);
     input_.publish_reduced_motion(environment_.reduced_motion);
     application_.async().advance(frame_time_nanos);
+    // Expressions on their way (`animate`) read the frame's time: they are described again
+    // with it, and only they.
+    descriptions_.set_frame_time(frame_time_nanos);
+    if (descriptions_.reads_frame_time() && published_frame_time_ != frame_time_nanos) {
+        published_frame_time_ = frame_time_nanos;
+        const runtime::Value time = runtime::frame_time_value(frame_time_nanos);
+        data::JsonValue::Object clock;
+        clock.emplace_back("time", data::JsonValue(*time.number()));
+        data::JsonValue::Object roots;
+        roots.emplace_back("strataFrame", data::JsonValue(std::move(clock)));
+        static_cast<void>(application_.host().adopt(runtime::HostSnapshot::from_json(
+            "strata.frame", static_cast<std::uint64_t>(std::max<std::int64_t>(1, frame_time_nanos)),
+            data::JsonValue(std::move(roots)))));
+    }
     const bool pending_lifecycle = !pending_lifecycle_input_.events.empty() ||
                                    !pending_lifecycle_input_.action_outcomes.empty() ||
                                    pending_lifecycle_input_.injected_events != 0U ||

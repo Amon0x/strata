@@ -1312,7 +1312,7 @@ private:
             "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight",
             "marginLeft", "marginTop", "marginRight", "marginBottom",
             "paddingLeft", "paddingTop", "paddingRight", "paddingBottom",
-            "placementX", "placementY", "radialRadius", "radialStart", "radialSweep",
+            "placementX", "placementY",
         };
         const bool affects_layout = std::ranges::any_of(names, [&layout_properties](const std::string& name) {
             return layout_properties.contains(name);

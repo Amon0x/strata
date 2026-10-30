@@ -36,9 +36,6 @@ constexpr std::array property_names{
     PropertyName{MotionProperty::padding_bottom, "paddingBottom"},
     PropertyName{MotionProperty::placement_x, "placementX"},
     PropertyName{MotionProperty::placement_y, "placementY"},
-    PropertyName{MotionProperty::radial_radius, "radialRadius"},
-    PropertyName{MotionProperty::radial_start, "radialStart"},
-    PropertyName{MotionProperty::radial_sweep, "radialSweep"},
     PropertyName{MotionProperty::background, "background"},
     PropertyName{MotionProperty::foreground, "foreground"},
     PropertyName{MotionProperty::color, "color"},
@@ -66,7 +63,6 @@ constexpr std::array property_names{
     PropertyName{MotionProperty::perspective, "perspective"},
     PropertyName{MotionProperty::shapes, "shapes"},
     PropertyName{MotionProperty::data, "data"},
-    PropertyName{MotionProperty::reveal, "reveal"},
     PropertyName{MotionProperty::paint_rotate, "paintRotate"},
 };
 
@@ -192,8 +188,7 @@ std::string_view motion_property_name(const MotionProperty property) noexcept {
 }
 
 bool motion_property_affects_layout(const MotionProperty property) noexcept {
-    return (property >= MotionProperty::width && property <= MotionProperty::placement_y) ||
-           (property >= MotionProperty::radial_radius && property <= MotionProperty::radial_sweep);
+    return property >= MotionProperty::width && property <= MotionProperty::placement_y;
 }
 
 bool motion_property_interpolable(const MotionProperty property) noexcept {

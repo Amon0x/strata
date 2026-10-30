@@ -16,6 +16,7 @@
 #include "runtime/application.hpp"
 #include "runtime/expression.hpp"
 #include "runtime/program.hpp"
+#include "ui/motion/model.hpp"
 #include "ui/tree.hpp"
 #include "ui/widget/registry.hpp"
 
@@ -66,8 +67,15 @@ struct DescriptionTelemetry final {
  * what its body read, its output, and the state scopes it binds and owns. Instances form a tree;
  * a provider's rows are child instances of it, described by this builder when they are realized.
  */
-class DescriptionBuilder final {
+class DescriptionBuilder final : public runtime::AnimationHost {
   public:
+    /** The time `animate` calls are sampled at, from the frame being described. */
+    void set_frame_time(std::int64_t nanos) noexcept {
+        frame_time_ = nanos;
+    }
+    /** Something described reads the frame time: an `animate` is on its way. */
+    [[nodiscard]] bool reads_frame_time() const;
+    [[nodiscard]] runtime::AnimateSample animate(const runtime::AnimateCall& call) override;
     explicit DescriptionBuilder(runtime::ApplicationContext& application);
     DescriptionBuilder(runtime::ApplicationContext& application, const WidgetRegistry& widgets);
     ~DescriptionBuilder();
@@ -212,6 +220,19 @@ class DescriptionBuilder final {
         std::vector<ChildRef> children;
     };
 
+    /** One `animate` call site's tween: where it set out from, for where, when and how. */
+    struct AnimationSlot final {
+        double from = 0.0;
+        double target = 0.0;
+        std::int64_t start_nanos = 0;
+        std::int64_t delay_nanos = 0;
+        std::int64_t duration_nanos = 0;
+        MotionEasing easing;
+    };
+    /** Where a tween is at `now`, and whether it is still on its way. */
+    [[nodiscard]] static std::pair<double, bool> sampled(const AnimationSlot& slot,
+                                                         std::int64_t now);
+
     struct ComponentInstance final {
         InstanceId id = 0U;
         InstanceKind kind = InstanceKind::component;
@@ -236,6 +257,8 @@ class DescriptionBuilder final {
         std::string name;
 
         InstanceReads reads;
+        /** Its body's `animate` tweens, by call site; they live as long as the instance. */
+        std::unordered_map<std::string, AnimationSlot> animations;
         /**
          * What the call's arguments and behaviors read when they were last evaluated, and the
          * widget defaults it was called under: while all of them are as they were, the inputs are
@@ -337,6 +360,8 @@ class DescriptionBuilder final {
          * that did any of it is described again each time.
          */
         std::size_t effects = 0U;
+        /** How often each `animate` call site has been evaluated in this description of it. */
+        std::unordered_map<std::string, std::size_t> animation_calls;
     };
 
     /** A state a body declared, to be stored when the build that described it commits. */
@@ -607,6 +632,7 @@ class DescriptionBuilder final {
     using Readers = std::unordered_set<InstanceId>;
     std::map<runtime::StateAddress, Readers, std::less<>> state_readers_;
     std::map<std::string, Readers, std::less<>> host_readers_;
+    std::int64_t frame_time_ = 0;
     /** Readers of retained values, by the value's name. */
     std::unordered_map<std::string, Readers, KeyHash, std::equal_to<>> retained_readers_;
     /** Bodies that raised errors: described again by every build, which reports them. */

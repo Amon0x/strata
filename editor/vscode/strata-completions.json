@@ -2569,27 +2569,7 @@
       "type": "number"
     },
     {
-      "name": "radialRadius",
-      "nullable": false,
-      "type": "number"
-    },
-    {
-      "name": "radialStart",
-      "nullable": false,
-      "type": "number"
-    },
-    {
-      "name": "radialSweep",
-      "nullable": false,
-      "type": "number"
-    },
-    {
       "name": "radius",
-      "nullable": false,
-      "type": "number"
-    },
-    {
-      "name": "reveal",
       "nullable": false,
       "type": "number"
     },
@@ -2951,6 +2931,55 @@
         }
       ],
       "returnType": "action"
+    },
+    {
+      "capabilities": [
+        "NUMERIC"
+      ],
+      "name": "animate",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "target",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "duration",
+          "nullable": false,
+          "required": false,
+          "type": "duration"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "easing",
+          "nullable": false,
+          "required": false,
+          "type": "easing: a named curve, spring, bouncy, snappy, cubic-bezier(x1, y1, x2, y2) or spring(stiffness, damping)"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "delay",
+          "nullable": false,
+          "required": false,
+          "type": "duration"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "from",
+          "nullable": true,
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "returnType": "number"
     },
     {
       "capabilities": [
@@ -5758,11 +5787,6 @@
       "type": "number | { all?: number, bottom?: number, bottomLeft?: number, bottomRight?: number, left?: number, right?: number, top?: number, topLeft?: number, topRight?: number }"
     },
     {
-      "name": "reveal",
-      "nullable": false,
-      "type": "number"
-    },
-    {
       "name": "rowSpan",
       "nullable": false,
       "type": "number"
@@ -7345,6 +7369,14 @@
           "nullable": true,
           "required": false,
           "type": "color"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "reveal",
+          "nullable": false,
+          "required": false,
+          "type": "number"
         },
         {
           "aliases": [],
@@ -10394,7 +10426,7 @@
           "name": "shapes",
           "nullable": false,
           "required": true,
-          "type": "list of ({ center?: { x: number, y: number }, commands?: path, fill?: paint, fillRule?: \"evenodd\" | \"nonzero\", from?: { x: number, y: number }, height?: number, image?: image, includeCenter?: boolean, innerRadius?: number, kind: \"arc\" | \"circle\" | \"ellipse\" | \"image\" | \"line\" | \"path\" | \"polygon\" | \"polyline\" | \"rect\" | \"ring\" | \"sector\", points?: list of { x: number, y: number }, radius?: number, radiusX?: number, radiusY?: number, revealEnd?: number, revealStart?: number, source?: { height?: number, u?: number, v?: number, width?: number }, start?: number, stroke?: paint, strokeStyle?: { cap?: \"butt\" | \"round\" | \"square\", dash?: list of number, dashOffset?: number, join?: \"bevel\" | \"miter\" | \"round\", miterLimit?: number, width?: number }, sweep?: number, tint?: color, to?: { x: number, y: number }, width?: number, x?: number, y?: number })"
+          "type": "list of ({ center?: { x: number, y: number }, commands?: path, fill?: paint, fillRule?: \"evenodd\" | \"nonzero\", from?: { x: number, y: number }, height?: number, image?: image, includeCenter?: boolean, innerRadius?: number, kind: \"arc\" | \"circle\" | \"ellipse\" | \"image\" | \"line\" | \"path\" | \"polygon\" | \"polyline\" | \"rect\" | \"ring\" | \"sector\", pathLength?: number, points?: list of { x: number, y: number }, radius?: number, radiusX?: number, radiusY?: number, source?: { height?: number, u?: number, v?: number, width?: number }, start?: number, stroke?: paint, strokeStyle?: { cap?: \"butt\" | \"round\" | \"square\", dash?: list of number, dashOffset?: number, join?: \"bevel\" | \"miter\" | \"round\", miterLimit?: number, width?: number }, sweep?: number, tint?: color, to?: { x: number, y: number }, width?: number, x?: number, y?: number })"
         },
         {
           "aliases": [],

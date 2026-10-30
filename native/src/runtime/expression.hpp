@@ -586,9 +586,55 @@ class DependencyRecorder final {
 /** Decodes the canonical authored range retained on a portable expression, when present. */
 [[nodiscard]] std::optional<DiagnosticRange> portable_expression_range(data::JsonView expression);
 
+/**
+ * One evaluation of `animate(target, duration, easing, delay, from)`: where the call is (an
+ * instance path and an expression of a program) and what it heads for.
+ */
+struct AnimateCall final {
+    std::string_view instance_path;
+    std::uint64_t program = 0U;
+    ExpressionId expression = 0U;
+    double target = 0.0;
+    std::optional<double> from;
+    std::int64_t duration_nanos = 300'000'000;
+    std::int64_t delay_nanos = 0;
+    std::string_view easing = "cubic-in-out";
+};
+
+/** Where an `animate` call is now, and whether it is still on its way. */
+struct AnimateSample final {
+    double value = 0.0;
+    bool running = false;
+    /** The time it was sampled at, which a running call's reads depend on. */
+    std::int64_t time_nanos = 0;
+};
+
+/**
+ * Hosts `animate`: keeps each call site's tween and knows the time. Each call site follows its
+ * target from wherever it is when the target changes (from `from` the first time, else from the
+ * target itself). Without a host, `animate` is its target.
+ */
+class AnimationHost {
+  public:
+    virtual ~AnimationHost() = default;
+    [[nodiscard]] virtual AnimateSample animate(const AnimateCall& call) = 0;
+};
+
+/**
+ * The host path a running `animate` reads: the frame's time, published (by the surface that
+ * describes with it) while anything reads it, so exactly its readers are described again.
+ */
+[[nodiscard]] const std::shared_ptr<const HostPathKey>& frame_time_path();
+/** The frame time as that path holds it. */
+[[nodiscard]] Value frame_time_value(std::int64_t nanos);
+
 /** Evaluates lowered program expressions against explicit runtime state. */
 class ExpressionRuntime final {
   public:
+    /** Who keeps `animate`'s tweens; none evaluates every `animate` as its target. */
+    void set_animation_host(AnimationHost* host) noexcept {
+        animation_host_ = host;
+    }
     ExpressionRuntime(const HostStore& host, const RuntimeActionRegistry& actions);
 
     /** Evaluates an expression, telling `reads` what it reads. */
@@ -624,6 +670,7 @@ class ExpressionRuntime final {
                                        std::vector<ExpressionValue> arguments);
 
   private:
+    AnimationHost* animation_host_ = nullptr;
     friend class ScriptMachine;
     enum class CollectionDependencyKind { lexical, host };
 

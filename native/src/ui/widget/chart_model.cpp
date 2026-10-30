@@ -105,17 +105,6 @@ constexpr double outline_step = 6.0;
     return spec;
 }
 
-/** A style field (from `style`, merged into `$layout`) or the node's own property. */
-[[nodiscard]] const runtime::Value* styled(const RetainedNode& node,
-                                           const std::string_view name) noexcept {
-    if (const runtime::Value* layout = property(node, "$layout");
-        layout != nullptr && layout->object() != nullptr) {
-        if (const runtime::Value* value = layout->field(name); value != nullptr)
-            return value;
-    }
-    return property(node, name);
-}
-
 [[nodiscard]] std::vector<std::optional<double>> values_of(const runtime::Value* value) {
     std::vector<std::optional<double>> result;
     if (value == nullptr || value->list() == nullptr)
@@ -467,7 +456,7 @@ ChartState chart_state(const RetainedNode& node) {
     state.title_style = part_style("titleStyle");
     state.label_style = part_style("labelStyle");
     state.legend_style = part_style("legendStyle");
-    if (const std::optional<double> reveal = finite(styled(node, "reveal")); reveal.has_value())
+    if (const std::optional<double> reveal = finite(property(node, "reveal")); reveal.has_value())
         state.reveal = std::clamp(*reveal, 0.0, 1.0);
 
     std::vector<bool> hidden;
@@ -1486,9 +1475,6 @@ void chart_content(WidgetRenderScope& scope) {
     ChartState state = chart_state(scope.node());
     // Animated data: values morph, and series and slices fade or sweep as the legend toggles them.
     if (const MotionComputedValues* computed = scope.motion_values(); computed != nullptr) {
-        if (const std::optional<double> reveal = computed->number(MotionProperty::reveal);
-            reveal.has_value())
-            state.reveal = std::clamp(*reveal, 0.0, 1.0);
         if (const MotionNumbers* animated = computed->numbers(MotionProperty::data);
             animated != nullptr && animated->values != nullptr) {
             const RetainedNode& node = scope.node();

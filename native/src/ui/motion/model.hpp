@@ -64,23 +64,10 @@ enum class MotionProperty {
     /** The numbers a widget publishes as `$motionData` for its own data to animate (a Chart's). */
     data,
     /**
-     * How much of a node's drawing has appeared, 0 to 1: a Chart draws each line along itself up
-     * to it, a point and its label appearing as the line reaches them. An `enter` animation from
-     * 0 to 1 draws it in.
-     */
-    reveal,
-    /**
      * Degrees clockwise the node's gradient paints (background, border, fill, track, scrim) turn
      * about its centre: a conic start or linear angle advances, so a border can spin.
      */
     paint_rotate,
-    /**
-     * A RADIAL layout's ring: its radius, start angle and sweep. Layout properties like width to
-     * placement_y; they come last so the theme ABI's numbers for the rest stay as they were.
-     */
-    radial_radius,
-    radial_start,
-    radial_sweep,
 };
 
 enum class MotionTrigger {

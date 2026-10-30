@@ -319,6 +319,11 @@ struct Names final {
     Symbol range_end = Symbol::intern("rangeEnd");
     Symbol cache_hits = Symbol::intern("cacheHits");
     Symbol rebuilds = Symbol::intern("rebuilds");
+    Symbol target = Symbol::intern("target");
+    Symbol duration = Symbol::intern("duration");
+    Symbol easing = Symbol::intern("easing");
+    Symbol delay = Symbol::intern("delay");
+    Symbol from = Symbol::intern("from");
 };
 
 [[nodiscard]] const Names& names() {
@@ -804,6 +809,16 @@ ExpressionDependencyValue capture_expression_dependency(const ExpressionValue& v
 
 ExpressionValue restore_expression_dependency(const ExpressionDependencyValue& value) {
     return value.value;
+}
+
+const std::shared_ptr<const HostPathKey>& frame_time_path() {
+    static const std::shared_ptr<const HostPathKey> path = HostPathKey::make(
+        {HostPathSegment::named("strataFrame"), HostPathSegment::named("time")});
+    return path;
+}
+
+Value frame_time_value(const std::int64_t nanos) {
+    return Value(static_cast<double>(nanos) / 1.0e6);
 }
 
 std::string canonical_host_dependency_path(const std::span<const HostPathSegment> path) {
@@ -1790,6 +1805,37 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
             first = false;
         }
         return ExpressionValue(Value(result));
+    }
+    case HelperKind::animate: {
+        const Value target = argument_value(program, node, scope, known.target, 0U, reads);
+        const double heading = target.number() != nullptr ? *target.number() : 0.0;
+        if (animation_host_ == nullptr)
+            return ExpressionValue(Value(heading));
+        const Value duration = argument_value(program, node, scope, known.duration, 1U, reads);
+        const Value easing = argument_value(program, node, scope, known.easing, 2U, reads);
+        const Value delay = argument_value(program, node, scope, known.delay, 3U, reads);
+        const Value from = argument_value(program, node, scope, known.from, 4U, reads);
+        AnimateCall call;
+        call.instance_path = scope.component_path();
+        call.program = program.serial();
+        call.expression = expression;
+        call.target = heading;
+        if (from.number() != nullptr)
+            call.from = *from.number();
+        if (duration.duration() != nullptr)
+            call.duration_nanos = std::max<std::int64_t>(0, duration.duration()->nanoseconds);
+        if (delay.duration() != nullptr)
+            call.delay_nanos = std::max<std::int64_t>(0, delay.duration()->nanoseconds);
+        if (easing.string() != nullptr)
+            call.easing = *easing.string();
+        const AnimateSample sample = animation_host_->animate(call);
+        // While it moves it reads the frame's time, so whatever holds it is described again.
+        if (sample.running) {
+            reads.host(ExpressionHostDependency{frame_time_path(), false,
+                                                frame_time_value(sample.time_nanos), std::nullopt,
+                                                0U});
+        }
+        return ExpressionValue(Value(sample.value));
     }
     case HelperKind::clamp: {
         const Value value_argument = argument_value(program, node, scope, known.value, 0U, reads);

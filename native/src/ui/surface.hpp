@@ -439,6 +439,8 @@ class Surface final {
     BehaviorRegistry behaviors_;
     WidgetRegistry widgets_;
     DescriptionBuilder descriptions_;
+    /** The frame time last published for `animate`'s readers. */
+    std::int64_t published_frame_time_ = -1;
     /** The last `env` binding: the same value while the environment is unchanged, so every cached
      * component's comparison with it is a pointer comparison instead of a field-by-field one. */
     std::optional<runtime::Value> environment_binding_;

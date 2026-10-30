@@ -105,14 +105,8 @@ struct PathShape final {
 [[nodiscard]] std::optional<PathShape> path_shape_from_value(const runtime::Value* value,
                                                              bool painted = true);
 
-/**
- * `shape` as far as `amount` (0 to 1) has drawn it, at `size` logical pixels: a sector or arc
- * swept open from its start angle, a line grown from its start, any other stroke drawn along its
- * outline from where it starts (a circle or ellipse from its top, clockwise), and a fill faded in.
- * Nothing at 0; the shape itself at 1. A shape both filled and stroked comes back as two.
- */
-[[nodiscard]] std::vector<PathShape> revealed_shapes(const PathShape& shape, double amount,
-                                                     Size size);
+/** How long `path`'s outline is, drawn at `size` logical pixels: every contour, closed ones round. */
+[[nodiscard]] double path_pixel_length(const Path& path, Size size);
 
 /**
  * Whether two of `shapes`, drawn in one frame of `size` logical pixels, share part of an edge: a

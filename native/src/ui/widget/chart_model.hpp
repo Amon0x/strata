@@ -115,8 +115,8 @@ struct ChartState final {
     const runtime::Value* label_style = nullptr;
     const runtime::Value* legend_style = nullptr;
     /**
-     * How much has appeared, 0 to 1 (the `reveal` style, animated by an enter): each line drawn
-     * along itself that far, its points and their labels appearing as it reaches them.
+     * How much has appeared, 0 to 1 (the `reveal` argument; animate() draws a chart in): each
+     * line drawn along itself that far, its points and their labels appearing as it reaches them.
      */
     double reveal = 1.0;
 

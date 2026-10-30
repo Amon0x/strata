@@ -212,6 +212,7 @@ Children: `false` · Capabilities: —
 | `gridColor` | color | false | true | — |
 | `axisColor` | color | false | true | — |
 | `errorBarColor` | color | false | true | — |
+| `reveal` | number | false | false | — |
 | `legendGap` | number | false | false | — |
 | `tickStyle` | style | false | false | — |
 | `titleStyle` | style | false | false | — |
@@ -675,7 +676,7 @@ Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
-| `shapes` | list of ({ center?: { x: number, y: number }, commands?: path, fill?: paint, fillRule?: "evenodd" \| "nonzero", from?: { x: number, y: number }, height?: number, image?: image, includeCenter?: boolean, innerRadius?: number, kind: "arc" \| "circle" \| "ellipse" \| "image" \| "line" \| "path" \| "polygon" \| "polyline" \| "rect" \| "ring" \| "sector", points?: list of { x: number, y: number }, radius?: number, radiusX?: number, radiusY?: number, revealEnd?: number, revealStart?: number, source?: { height?: number, u?: number, v?: number, width?: number }, start?: number, stroke?: paint, strokeStyle?: { cap?: "butt" \| "round" \| "square", dash?: list of number, dashOffset?: number, join?: "bevel" \| "miter" \| "round", miterLimit?: number, width?: number }, sweep?: number, tint?: color, to?: { x: number, y: number }, width?: number, x?: number, y?: number }) | true | false | — |
+| `shapes` | list of ({ center?: { x: number, y: number }, commands?: path, fill?: paint, fillRule?: "evenodd" \| "nonzero", from?: { x: number, y: number }, height?: number, image?: image, includeCenter?: boolean, innerRadius?: number, kind: "arc" \| "circle" \| "ellipse" \| "image" \| "line" \| "path" \| "polygon" \| "polyline" \| "rect" \| "ring" \| "sector", pathLength?: number, points?: list of { x: number, y: number }, radius?: number, radiusX?: number, radiusY?: number, source?: { height?: number, u?: number, v?: number, width?: number }, start?: number, stroke?: paint, strokeStyle?: { cap?: "butt" \| "round" \| "square", dash?: list of number, dashOffset?: number, join?: "bevel" \| "miter" \| "round", miterLimit?: number, width?: number }, sweep?: number, tint?: color, to?: { x: number, y: number }, width?: number, x?: number, y?: number }) | true | false | — |
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
@@ -3573,7 +3574,6 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `radialStart` | number |
 | `radialSweep` | number |
 | `radius` | number \| { all?: number, bottom?: number, bottomLeft?: number, bottomRight?: number, left?: number, right?: number, top?: number, topLeft?: number, topRight?: number } |
-| `reveal` | number |
 | `rowSpan` | number |
 | `stackBelow` | number |
 | `syntax` | { attribute?: color, builtin?: color, comment?: color, constant?: color, emphasis?: color, function?: color, gutter?: color, heading?: color, keyword?: color, lineHighlight?: color, lineNumber?: color, link?: color, meta?: color, number?: color, operator?: color, plain?: color, property?: color, punctuation?: color, string?: color, tag?: color, type?: color, variable?: color } |
@@ -3709,11 +3709,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `paintRotate` | number |
 | `placementX` | number |
 | `placementY` | number |
-| `radialRadius` | number |
-| `radialStart` | number |
-| `radialSweep` | number |
 | `radius` | number |
-| `reveal` | number |
 | `scale` | number |
 | `scaleX` | number |
 | `scaleY` | number |
@@ -3744,6 +3740,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `any` | boolean | COLLECTION |
 | `ceil` | number | NUMERIC |
 | `chooseAction` | action | ACTION |
+| `animate` | number | NUMERIC |
 | `clamp` | number | NUMERIC |
 | `contains` | boolean | COLLECTION |
 | `count` | number | COLLECTION |
