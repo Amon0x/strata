@@ -1,0 +1,145 @@
+// A radial tool selector, all of its motion plain arithmetic on animate(): a hand rises from the
+// centre and sweeps the ring in, the dividers grow, the tools fade up; hovering a slice tints it
+// and fans its options out; CLOSE spins it all down into the hub like a vortex.
+style Page { kind: "OVERLAY"; width: { weight: 1 }; height: { weight: 1 }; padding: 0; background: #1A1D22; border: null; }
+style Layer { kind: "OVERLAY"; width: 600; height: 600; padding: 0; background: null; border: null; }
+style Ring { kind: "RADIAL"; width: 600; height: 600; padding: 0; background: null; border: null; }
+style Tool { kind: "COLUMN"; width: 80; height: 50; padding: 0; gap: 7; alignItems: "CENTER"; justifyContent: "CENTER"; background: null; border: null; }
+style ToolName { font: "strata:fonts/mono"; pixelSize: 10.5; letterSpacing: 1; }
+style Option { kind: "COLUMN"; width: 70; height: 30; padding: 0; alignItems: "CENTER"; justifyContent: "CENTER"; background: null; border: null; }
+style OptionName { font: "strata:fonts/default-medium"; pixelSize: 12.5; color: #ECEEF2; }
+style CloseName { font: "strata:fonts/mono"; pixelSize: 9; letterSpacing: 1.2; color: #ECEEF2; }
+style Picked { font: "strata:fonts/mono"; pixelSize: 11; letterSpacing: 1; color: #7D8597; }
+
+// The ring, in the 600 px layer's own units: its centre button, its rim, and the fan beyond it.
+fn hub() = 0.057
+fn rim() = 0.25
+fn fanIn() = 0.272
+fn fanOut() = 0.4
+// Easing for the stages cut out of one timeline.
+fn ease(x: number) = x * x * (3 - 2 * x)
+fn stage(t: number, from: number, length: number) = ease(clamp((t - from) / length, 0, 1))
+fn point(angle: number, radius: number) = { x: 0.5 + radius * cos(angle * 3.14159265 / 180), y: 0.5 + radius * sin(angle * 3.14159265 / 180) }
+// Ink between the resting grey-white and the accent orange.
+fn ink(k: number) = rgb(220 + 20 * k, 225 - 87 * k, 232 - 157 * k)
+
+fn icon(name: string, color: color) =
+  name == "draw" ? [
+    { kind: "polygon", points: [{ x: 0.22, y: 0.78 }, { x: 0.3, y: 0.56 }, { x: 0.68, y: 0.18 }, { x: 0.82, y: 0.32 }, { x: 0.44, y: 0.7 }], stroke: color, strokeStyle: { width: 1.6, join: "round" } } ]
+  : name == "shape" ? [
+    { kind: "rect", x: 0.14, y: 0.14, width: 0.46, height: 0.46, stroke: color, strokeStyle: { width: 1.6 } },
+    { kind: "circle", center: { x: 0.66, y: 0.66 }, radius: 0.2, stroke: color, strokeStyle: { width: 1.6 } } ]
+  : name == "text" ? [
+    { kind: "path", commands: "M 0.18 0.24 L 0.18 0.14 L 0.82 0.14 L 0.82 0.24 M 0.5 0.14 L 0.5 0.86 M 0.38 0.86 L 0.62 0.86", stroke: color, strokeStyle: { width: 1.6, cap: "round", join: "round" } } ]
+  : name == "color" ? [
+    { kind: "path", commands: "M 0.5 0.12 C 0.5 0.12 0.24 0.46 0.24 0.62 C 0.24 0.78 0.36 0.88 0.5 0.88 C 0.64 0.88 0.76 0.78 0.76 0.62 C 0.76 0.46 0.5 0.12 0.5 0.12 Z", stroke: color, strokeStyle: { width: 1.6, join: "round" } } ]
+  : name == "layers" ? [
+    { kind: "polygon", points: [{ x: 0.5, y: 0.18 }, { x: 0.86, y: 0.38 }, { x: 0.5, y: 0.58 }, { x: 0.14, y: 0.38 }], stroke: color, strokeStyle: { width: 1.6, join: "round" } },
+    { kind: "polyline", points: [{ x: 0.14, y: 0.58 }, { x: 0.5, y: 0.78 }, { x: 0.86, y: 0.58 }], stroke: color, strokeStyle: { width: 1.6, join: "round" } } ]
+  : [
+    { kind: "rect", x: 0.12, y: 0.2, width: 0.76, height: 0.6, radius: 0.04, stroke: color, strokeStyle: { width: 1.6 } },
+    { kind: "polyline", points: [{ x: 0.2, y: 0.72 }, { x: 0.42, y: 0.48 }, { x: 0.56, y: 0.62 }, { x: 0.66, y: 0.52 }, { x: 0.82, y: 0.72 }], stroke: color, strokeStyle: { width: 1.6, join: "round" } },
+    { kind: "circle", center: { x: 0.66, y: 0.36 }, radius: 0.07, stroke: color, strokeStyle: { width: 1.4 } } ]
+
+overlay RadialSelector {
+  state open = true
+  state hovered = -1
+  state picked = ""
+  state tools = [
+    { id: "draw", name: "DRAW", options: ["Pen", "Brush", "Marker"] },
+    { id: "shape", name: "SHAPE", options: ["Square", "Circle", "Star"] },
+    { id: "text", name: "TEXT", options: ["Title", "Body", "Caption"] },
+    { id: "color", name: "COLOR", options: ["Fill", "Stroke", "Picker"] },
+    { id: "layers", name: "LAYERS", options: ["Group", "Lock", "Hide"] },
+    { id: "image", name: "IMAGE", options: ["Place", "Crop", "Mask"] }
+  ]
+
+  root Panel(key: "radial.root", style: Page) {
+    // Opening is one timeline, cut into stages: the hand rises, sweeps the ring in, the dividers
+    // grow, the tools fade up. It snaps back to the start on closing, ready for the next open.
+    derived t = animate(open ? 1 : 0, from: 0, duration: open ? 1500ms : 0ms, easing: "linear")
+    // Closing is another: everything spins faster and faster as it is pulled into the hub.
+    derived c = animate(open ? 0 : 1, duration: open ? 0ms : 800ms, easing: "cubic-in")
+    derived spin = 540 * c * c
+    derived pull = 1 - c
+    derived ring = hub() + (rim() - hub()) * pull
+    derived o = open ? t : 1
+    derived rise = stage(o, 0, 0.14)
+    derived sweep = stage(o, 0.12, 0.46)
+    derived lines = stage(o, 0.56, 0.24)
+    derived shown = stage(o, 0.68, 0.32)
+
+    Panel(key: "radial.menu", style: Layer, layout: { position: "ABSOLUTE", inset: { left: 20, top: -20 } }) {
+      Draw(key: "radial.frame", style: { opacity: 1 - c }, layout: { width: 600, height: 600 }, shapes: [
+        // The ring fills behind the hand as it sweeps round from the top.
+        { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: ring, innerRadius: hub(), start: -90 + spin, sweep: 360 * sweep, fill: #20242B },
+        { kind: "arc", center: { x: 0.5, y: 0.5 }, radius: ring, start: -90 + spin, sweep: 360 * sweep, stroke: #E6E8EC, strokeStyle: { width: 3 } },
+        // The hand: up from the hub, then round with the sweep, gone once the dividers are in.
+        { kind: "line", from: point(-90 + 360 * sweep, hub()), to: point(-90 + 360 * sweep, hub() + (rim() - hub()) * rise),
+          stroke: rgba(236, 238, 242, 1 - lines), strokeStyle: { width: 3, cap: "round" } },
+        ...map(range(0, 6), i => { id: i, kind: "line", from: point(-120 + 60 * i + spin, hub()),
+          to: point(-120 + 60 * i + spin, hub() + (ring - hub()) * lines), stroke: #E6E8EC, strokeStyle: { width: 3 } })
+      ])
+
+      // The tools, each centred in its slice.
+      Panel(key: "radial.tools", style: style(Ring, radialRadius: 96 * pull, radialStart: -120 + spin, radialSweep: 360)) {
+        for tool, index in tools {
+          derived lit = animate(hovered == index ? 1 : 0, duration: 160ms, easing: "cubic-out")
+          Panel(key: `radial.tool.${index}`, style: style(Tool, opacity: shown * pull, rotate: spin * 0.5)) {
+            Draw(key: `radial.icon.${index}`, layout: { width: 22, height: 22 }, shapes: icon(tool.id, ink(lit)))
+            Text(key: `radial.name.${index}`, text: tool.name, style: style(ToolName, color: rgb(140 + 96 * lit, 149 + 89 * lit, 166 + 76 * lit)))
+          }
+        }
+      }
+
+      // One wedge per tool, hit only inside it, once the ring is open: hovering tints it and fans
+      // its options out beyond the rim.
+      if open && t > 0.99 {
+        for tool, index in tools {
+          derived lit = animate(hovered == index ? 1 : 0, duration: 160ms, easing: "cubic-out")
+          derived fan = animate(hovered == index ? 1 : 0, duration: 300ms, easing: "cubic-out")
+          derived from = -90 + 60 * index - 51.75
+          Panel(key: `radial.slice.${index}`, style: Layer,
+                hitShape: { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: rim(), innerRadius: hub(), start: -120 + 60 * index, sweep: 60 },
+                onHover: inside => { if inside { hovered = index } else if hovered == index { hovered = -1 } }) {
+            if lit > 0.001 {
+              Draw(key: `radial.tint.${index}`, layout: { width: 600, height: 600 }, shapes: [
+                { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: rim() + 0.014 * lit, innerRadius: hub() + 0.004, start: -120 + 60 * index + 0.4, sweep: 59.2,
+                  fill: rgba(232, 118, 58, 0.2 * lit) }
+              ])
+            }
+            if fan > 0.001 {
+              Panel(key: `radial.fan.${index}`, style: Layer,
+                    hitShape: { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: fanOut(), innerRadius: rim(), start: from, sweep: 103.5 }) {
+                // Three segments open one after another, each sweeping round from its own start.
+                Draw(key: `radial.fan.band.${index}`, layout: { width: 600, height: 600 }, shapes: [
+                  ...map(range(0, 3), j => { id: j, kind: "sector", center: { x: 0.5, y: 0.5 }, radius: fanIn() + (fanOut() - fanIn()) * fan, innerRadius: fanIn(),
+                    start: from + 34.5 * j + 1.25, sweep: 32 * clamp(fan * 1.8 - j * 0.4, 0, 1),
+                    fill: #2A2F38, stroke: #15181D, strokeStyle: { width: 3 } }) ])
+                Panel(key: `radial.fan.names.${index}`, style: style(Ring, radialRadius: 202, radialStart: from, radialSweep: 103.5)) {
+                  for option, slot in tool.options {
+                    Panel(key: `radial.option.${index}.${slot}`, style: style(Option, opacity: clamp(fan * 2.2 - slot * 0.45 - 0.4, 0, 1)),
+                          behaviors: [{ id: "strata.pointer", action: e => { if e.phase == "press" { picked = `${tool.name} / ${option}` } } }]) {
+                      Text(text: option, style: OptionName)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // The hub: closes the ring, or opens it again.
+      Panel(key: "radial.hub", style: { kind: "COLUMN"; width: 70; height: 70; padding: 0; alignItems: "CENTER"; justifyContent: "CENTER";
+                                        background: #1A1D22; border: { width: 3, color: #E6E8EC }; radius: 35; opacity: open ? rise : 1 },
+            layout: { position: "ABSOLUTE", inset: { left: 265, top: 265 } },
+            hitShape: { kind: "circle", center: { x: 0.5, y: 0.5 }, radius: 0.5 },
+            behaviors: [{ id: "strata.pointer", action: e => { if e.phase == "press" { open = !open; hovered = -1 } } }]) {
+        Text(text: open ? "CLOSE" : "OPEN", style: CloseName)
+      }
+    }
+    Text(key: "radial.picked", text: picked == "" ? "HOVER A SLICE, PICK AN OPTION" : `PICKED ${picked}`, style: Picked,
+         layout: { position: "ABSOLUTE", inset: { left: 0, bottom: 26 }, width: { weight: 1 } }, alignment: "CENTER", wrapMode: "WORD")
+  }
+}

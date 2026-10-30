@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "launch": {
+    "kind": "generic",
+    "resourceRoot": "../../..",
+    "title": "Radial selector"
+  },
+  "application": {
+    "id": "strata.radial",
+    "module": "assets/strata/samples/radial.strata",
+    "root": "RadialSelector"
+  },
+  "surface": {
+    "id": "strata.radial",
+    "width": 640,
+    "height": 560,
+    "scale": 1,
+    "fonts": [
+      {
+        "id": "strata:fonts/default",
+        "resource": "assets/strata/fonts/default.ttf"
+      },
+      {
+        "id": "strata:fonts/default-medium",
+        "resource": "assets/strata/fonts/medium.ttf"
+      },
+      {
+        "id": "strata:fonts/mono",
+        "resource": "assets/strata/fonts/mono.ttf"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "capture": "radial"
+    }
+  ]
+}
