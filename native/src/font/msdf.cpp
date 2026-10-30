@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace strata::font {
@@ -264,6 +265,87 @@ void add_edge(std::vector<Edge>& output, const Point from, const Point to, const
     return static_cast<std::uint8_t>(std::clamp(std::lround(normalized * 255.0), 0L, 255L));
 }
 
+/** The nonzero winding number of the contours about `point`. */
+[[nodiscard]] int winding_at(const std::vector<Contour>& contours, const Point point) noexcept {
+    int winding = 0;
+    for (const Contour& contour : contours) {
+        for (const Edge& edge : contour.edges) {
+            if ((edge.from.y > point.y) == (edge.to.y > point.y))
+                continue;
+            const double x = (edge.to.x - edge.from.x) * (point.y - edge.from.y) /
+                                 (edge.to.y - edge.from.y) +
+                             edge.from.x;
+            if (x > point.x)
+                winding += edge.to.y > edge.from.y ? 1 : -1;
+        }
+    }
+    return winding;
+}
+
+/**
+ * The parts of the contours' edges that outline what they fill together. Fonts may draw a glyph
+ * as overlapping contours (a variable font's stem and crossbar stay apart so they can move): an
+ * edge of one inside another bounds nothing, and a distance to it would draw it as a faint line
+ * through the letter. Each edge is cut where others cross it, and a piece is kept when the shape
+ * is filled on one side of it and not the other.
+ */
+[[nodiscard]] std::vector<Edge> union_outline(const std::vector<Contour>& contours) {
+    std::vector<const Edge*> edges;
+    for (const Contour& contour : contours) {
+        for (const Edge& edge : contour.edges)
+            edges.push_back(&edge);
+    }
+    std::vector<Edge> result;
+    result.reserve(edges.size());
+    std::vector<double> cuts;
+    for (const Edge* edge : edges) {
+        const Point a = edge->from;
+        const Point d{edge->to.x - a.x, edge->to.y - a.y};
+        cuts.assign({0.0, 1.0});
+        for (const Edge* other : edges) {
+            if (other == edge ||
+                std::max(other->from.x, other->to.x) < std::min(a.x, edge->to.x) ||
+                std::min(other->from.x, other->to.x) > std::max(a.x, edge->to.x) ||
+                std::max(other->from.y, other->to.y) < std::min(a.y, edge->to.y) ||
+                std::min(other->from.y, other->to.y) > std::max(a.y, edge->to.y))
+                continue;
+            const Point e{other->to.x - other->from.x, other->to.y - other->from.y};
+            const double denominator = d.x * e.y - d.y * e.x;
+            if (std::abs(denominator) <= 1.0e-12)
+                continue;
+            const Point offset{other->from.x - a.x, other->from.y - a.y};
+            const double t = (offset.x * e.y - offset.y * e.x) / denominator;
+            const double u = (offset.x * d.y - offset.y * d.x) / denominator;
+            if (t > 1.0e-9 && t < 1.0 - 1.0e-9 && u >= 0.0 && u <= 1.0)
+                cuts.push_back(t);
+        }
+        std::ranges::sort(cuts);
+        const double length = std::hypot(d.x, d.y);
+        if (length <= 1.0e-9)
+            continue;
+        const Point normal{-d.y / length, d.x / length};
+        for (std::size_t index = 0U; index + 1U < cuts.size(); ++index) {
+            const double first = cuts[index];
+            const double last = cuts[index + 1U];
+            const double piece = (last - first) * length;
+            if (piece <= 1.0e-9)
+                continue;
+            const double middle = (first + last) * 0.5;
+            const Point at{a.x + d.x * middle, a.y + d.y * middle};
+            const double side = std::min(piece * 0.01, 0.01);
+            const bool left =
+                winding_at(contours, Point{at.x + normal.x * side, at.y + normal.y * side}) != 0;
+            const bool right =
+                winding_at(contours, Point{at.x - normal.x * side, at.y - normal.y * side}) != 0;
+            if (left != right) {
+                result.push_back(Edge{Point{a.x + d.x * first, a.y + d.y * first},
+                                      Point{a.x + d.x * last, a.y + d.y * last}, edge->channels});
+            }
+        }
+    }
+    return result;
+}
+
 void validate(const MsdfRasterConfig& config) {
     if (config.maximum_dimension == 0U || config.oversampling == 0U ||
         !std::isfinite(config.pixel_range) || config.pixel_range <= 0.0 ||
@@ -397,21 +479,24 @@ std::optional<GlyphRasterBitmap> rasterize_msdf(
     bool has_red = false;
     bool has_green = false;
     bool has_blue = false;
-    for (const Contour& contour : contours) {
-        for (const Edge edge : contour.edges) {
-            nearby.push_back(Nearby{edge, std::min(edge.from.x, edge.to.x) - cutoff,
-                                    std::max(edge.from.x, edge.to.x) + cutoff,
-                                    std::min(edge.from.y, edge.to.y) - cutoff,
-                                    std::max(edge.from.y, edge.to.y) + cutoff});
-            has_red = has_red || (edge.channels & red) != 0U;
-            has_green = has_green || (edge.channels & green) != 0U;
-            has_blue = has_blue || (edge.channels & blue) != 0U;
-        }
+    // Distances are to the outline of the filled shape only; inside or outside still comes from
+    // every contour's winding.
+    for (const Edge edge : union_outline(contours)) {
+        nearby.push_back(Nearby{edge, std::min(edge.from.x, edge.to.x) - cutoff,
+                                std::max(edge.from.x, edge.to.x) + cutoff,
+                                std::min(edge.from.y, edge.to.y) - cutoff,
+                                std::max(edge.from.y, edge.to.y) + cutoff});
+        has_red = has_red || (edge.channels & red) != 0U;
+        has_green = has_green || (edge.channels & green) != 0U;
+        has_blue = has_blue || (edge.channels & blue) != 0U;
     }
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(byte_count));
     std::vector<const Nearby*> row_edges;
-    std::vector<std::vector<double>> crossings(contours.size());
-    std::vector<std::size_t> passed(contours.size());
+    // Where the edges cross the row, with which way each goes, and the winding they add up to
+    // past each: a sample is inside where the edges to its right wind a nonzero number of times,
+    // so a contour that overlaps itself (one stroke over another) stays filled where it does.
+    std::vector<std::pair<double, int>> crossings;
+    std::vector<int> winding_past;
     for (std::uint32_t y = 0U; y < height; ++y) {
         const double sample_y =
             font_bounds.bottom + (static_cast<double>(height - y) - 0.5) / atlas_scale;
@@ -420,33 +505,28 @@ std::optional<GlyphRasterBitmap> rasterize_msdf(
             if (sample_y >= candidate.bottom && sample_y <= candidate.top)
                 row_edges.push_back(&candidate);
         }
-        // Where each contour's edges cross this row: a ray to a sample's right crosses those past
-        // it.
-        for (std::size_t index = 0U; index < contours.size(); ++index) {
-            std::vector<double>& row = crossings[index];
-            row.clear();
-            for (const Edge edge : contours[index].edges) {
+        crossings.clear();
+        for (const Contour& contour : contours) {
+            for (const Edge edge : contour.edges) {
                 if ((edge.from.y > sample_y) == (edge.to.y > sample_y))
                     continue;
-                row.push_back((edge.to.x - edge.from.x) * (sample_y - edge.from.y) /
-                                  (edge.to.y - edge.from.y) +
-                              edge.from.x);
+                crossings.emplace_back((edge.to.x - edge.from.x) * (sample_y - edge.from.y) /
+                                               (edge.to.y - edge.from.y) +
+                                           edge.from.x,
+                                       edge.to.y > edge.from.y ? 1 : -1);
             }
-            std::ranges::sort(row);
-            passed[index] = 0U;
         }
+        std::ranges::sort(crossings);
+        winding_past.assign(crossings.size() + 1U, 0);
+        for (std::size_t index = crossings.size(); index > 0U; --index)
+            winding_past[index - 1U] = winding_past[index] + crossings[index - 1U].second;
+        std::size_t passed = 0U;
         for (std::uint32_t x = 0U; x < width; ++x) {
             const Point sample{font_bounds.left + (static_cast<double>(x) + 0.5) / atlas_scale,
                                sample_y};
-            int winding = 0;
-            for (std::size_t index = 0U; index < contours.size(); ++index) {
-                const std::vector<double>& row = crossings[index];
-                std::size_t& count = passed[index];
-                while (count < row.size() && row[count] <= sample.x)
-                    ++count;
-                if (((row.size() - count) & 1U) != 0U)
-                    winding += contours[index].signed_area >= 0.0 ? 1 : -1;
-            }
+            while (passed < crossings.size() && crossings[passed].first <= sample.x)
+                ++passed;
+            const int winding = winding_past[passed];
             double red_squared = cutoff_squared;
             double green_squared = cutoff_squared;
             double blue_squared = cutoff_squared;

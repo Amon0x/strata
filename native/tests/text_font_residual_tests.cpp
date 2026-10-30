@@ -1886,6 +1886,81 @@ void test_layout_cache_drops_unused_text(const std::filesystem::path& resources)
 }
 
 /** A variable font's instance moves its outlines and advances (when the system has Bahnschrift). */
+// A font may draw a letter as overlapping contours (the default font's h is a stem and a shoulder
+// drawn apart), or as one contour that crosses itself (its e's bar runs on through the bowl): the
+// edges inside bound nothing, and where strokes overlap is still inside, so the distance field
+// reads solidly inside there rather than drawing faint lines through the letter.
+void test_msdf_overlapping_contours(const std::filesystem::path& resources) {
+    using namespace strata;
+    const font::OpenTypeFont regular = font::OpenTypeFont::parse(resource::load_binary_resource(
+        resources, resource::ResourceId::parse("assets/strata/fonts/default.ttf")));
+    font::CoverageRasterConfig plain;
+    plain.hinting = font::GlyphHinting::none;
+    for (const char letter : std::string_view("fhade")) {
+        const std::uint16_t glyph = regular.glyph_id(static_cast<std::uint32_t>(letter));
+        check(regular.glyph_outline(glyph) != nullptr &&
+                  regular.glyph_outline(glyph)->contours.size() >= (letter == 'e' ? 1U : 2U),
+              std::string("the default font's ") + letter +
+                  " no longer has overlapping contours, so this tests nothing");
+        const std::optional<font::GlyphRasterBitmap> field =
+            font::rasterize_msdf(regular, glyph, 96.0);
+        const std::optional<font::GlyphRasterBitmap> coverage =
+            font::rasterize_coverage(regular, glyph, 96.0, 1.0, {}, plain);
+        check(field.has_value() && coverage.has_value(),
+              std::string("the default font's ") + letter + " did not rasterize");
+        const font::RasterPlaneBounds& planes = field->plane_bounds_layout_pixels;
+        const font::RasterPlaneBounds& covered = coverage->plane_bounds_layout_pixels;
+        // Whether every coverage pixel within three of the layout point is fully inside.
+        const auto deep = [&](const double x, const double up) {
+            const double column = (x - covered.left) / (covered.right - covered.left) *
+                                  static_cast<double>(coverage->width);
+            const double row = (covered.top - up) / (covered.top - covered.bottom) *
+                               static_cast<double>(coverage->height);
+            for (int dy = -3; dy <= 3; ++dy) {
+                for (int dx = -3; dx <= 3; ++dx) {
+                    const auto cx = static_cast<long>(std::floor(column)) + dx;
+                    const auto cy = static_cast<long>(std::floor(row)) + dy;
+                    if (cx < 0 || cy < 0 || cx >= static_cast<long>(coverage->width) ||
+                        cy >= static_cast<long>(coverage->height) ||
+                        coverage->bytes[static_cast<std::size_t>(cy) * coverage->width +
+                                        static_cast<std::size_t>(cx)] != 255U)
+                        return false;
+                }
+            }
+            return true;
+        };
+        std::size_t inside = 0U;
+        std::size_t edges = 0U;
+        for (std::uint32_t y = 0U; y < field->height; ++y) {
+            for (std::uint32_t x = 0U; x < field->width; ++x) {
+                const double layout_x =
+                    planes.left + (static_cast<double>(x) + 0.5) /
+                                      static_cast<double>(field->width) *
+                                      (planes.right - planes.left);
+                const double layout_up =
+                    planes.bottom + (static_cast<double>(field->height - y) - 0.5) /
+                                        static_cast<double>(field->height) *
+                                        (planes.top - planes.bottom);
+                if (!deep(layout_x, layout_up))
+                    continue;
+                ++inside;
+                const std::size_t index = (static_cast<std::size_t>(y) * field->width + x) * 4U;
+                const std::uint8_t r = field->bytes[index];
+                const std::uint8_t g = field->bytes[index + 1U];
+                const std::uint8_t b = field->bytes[index + 2U];
+                const std::uint8_t median = std::max(std::min(r, g), std::min(std::max(r, g), b));
+                if (median < 191U || field->bytes[index + 3U] < 191U)
+                    ++edges;
+            }
+        }
+        check(inside > 100U, std::string("the ") + letter + " had no deep inside to measure");
+        check(edges == 0U, std::string("the distance field of the default font's ") + letter +
+                               " drew " + std::to_string(edges) + " of " +
+                               std::to_string(inside) +
+                               " samples deep inside it as an edge of an overlapping contour");
+    }
+}
+
 void test_variable_font_instance(const std::filesystem::path& resources) {
     using namespace strata;
     const std::filesystem::path path("C:/Windows/Fonts/bahnschrift.ttf");
@@ -1949,6 +2024,7 @@ int strata_test_text_font_residual(const int argument_count, const char* const* 
         test_layout_runs_fallback_and_soft_wrap(resources);
         test_layout_cache_drops_unused_text(resources);
         test_variable_font_instance(resources);
+        test_msdf_overlapping_contours(resources);
         std::cout << "text/font residual tests passed\n";
         return 0;
     } catch (const std::exception& error) {
