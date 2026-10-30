@@ -250,6 +250,22 @@ LayoutStyle layout_style(const DescriptionNode& description) {
                        static_cast<double>(std::numeric_limits<int>::max()));
         style.z_index = static_cast<int>(bounded);
     }
+    if (style.kind == LayoutKind::radial) {
+        // Each only when authored: an absent one keeps its default (a full turn from the top).
+        const auto authored = [layout](const std::string_view name) -> std::optional<double> {
+            const runtime::Value* value = field(layout, name);
+            if (value == nullptr || value->number() == nullptr || !std::isfinite(*value->number()))
+                return std::nullopt;
+            return *value->number();
+        };
+        if (const std::optional<double> radius = authored("radialRadius");
+            radius.has_value() && *radius >= 0.0)
+            style.radial_radius = *radius;
+        if (const std::optional<double> start = authored("radialStart"); start.has_value())
+            style.radial_start = *start;
+        if (const std::optional<double> sweep = authored("radialSweep"); sweep.has_value())
+            style.radial_sweep = *sweep;
+    }
     if (style.kind == LayoutKind::scroll) {
         style.scroll_horizontal = boolean(field(layout, "scrollHorizontal"), false);
         style.scroll_vertical = boolean(field(layout, "scrollVertical"), !style.scroll_horizontal);

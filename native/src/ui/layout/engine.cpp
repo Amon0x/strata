@@ -697,6 +697,12 @@ LayoutStyle LayoutEngine::resolved_style(const RetainedNode& node) const {
     edge(MotionProperty::padding_top, style.padding.top);
     edge(MotionProperty::padding_right, style.padding.right);
     edge(MotionProperty::padding_bottom, style.padding.bottom);
+    if (const auto radius = values->number(MotionProperty::radial_radius); radius.has_value())
+        style.radial_radius = std::max(0.0, *radius);
+    if (const auto start = values->number(MotionProperty::radial_start); start.has_value())
+        style.radial_start = *start;
+    if (const auto sweep = values->number(MotionProperty::radial_sweep); sweep.has_value())
+        style.radial_sweep = *sweep;
     const auto placement = [values](const MotionProperty property,
                                     std::optional<LayoutSize>& destination) {
         if (const MotionLayoutValue* value = values->layout(property); value != nullptr) {

@@ -781,6 +781,7 @@ InputOperationResult InputRouter::after_layout() {
     route_active_lifecycle_hooks(true, result);
     observe_layout(result);
     refresh_hover();
+    dispatch_hover(result);
     update_editor_scroll();
     std::optional<runtime::HostServiceRect> ime_cursor;
     if (focused_.has_value() && ime_cursor_rect_resolver_) {
@@ -1041,11 +1042,17 @@ void InputRouter::hover_route(const RetainedNode* target) {
     for (const RetainedNode* current = target; current != nullptr; current = current->parent()) {
         next.insert(current->identity());
     }
+    const auto watches_hover = [this](const std::uint64_t identity) {
+        const RetainedNode* const node = tree_->find_identity(identity);
+        return node != nullptr && node->description().properties.contains("onHover");
+    };
     for (const std::uint64_t identity : hovered_) {
         if (!next.contains(identity)) {
             static_cast<void>(tree_->mark(identity, DirtyReason::input));
             hover_started_nanos_.erase(identity);
             matured_command_tooltips_.erase(identity);
+            if (watches_hover(identity))
+                pending_hover_.emplace_back(identity, false);
         }
     }
     for (const std::uint64_t identity : next) {
@@ -1053,10 +1060,38 @@ void InputRouter::hover_route(const RetainedNode* target) {
             static_cast<void>(tree_->mark(identity, DirtyReason::input));
             hover_started_nanos_.insert_or_assign(identity, frame_time_nanos_);
             matured_command_tooltips_.erase(identity);
+            if (watches_hover(identity))
+                pending_hover_.emplace_back(identity, true);
         }
     }
     hovered_ = std::move(next);
     update_tooltip_disclosures();
+}
+
+void InputRouter::dispatch_hover(InputOperationResult& result) {
+    if (pending_hover_.empty())
+        return;
+    const std::vector<std::pair<std::uint64_t, bool>> pending = std::move(pending_hover_);
+    pending_hover_.clear();
+    for (const auto& [identity, hovered] : pending) {
+        RetainedNode* const node = tree_->find_identity(identity);
+        if (node == nullptr)
+            continue;
+        // The node's own onHover only: hovering must never run a widget's default action.
+        const auto found = node->description().properties.find("onHover");
+        if (found == node->description().properties.end() || found->second.action() == nullptr)
+            continue;
+        const std::shared_ptr<const runtime::ActionValue>& binding = *found->second.action();
+        if (binding == nullptr || binding->action == nullptr)
+            continue;
+        JsonValue event = object({
+            {"action", canonical_action(*binding, *node)},
+            {"source", source(*node)},
+            {"type", JsonValue("hover-changed")},
+            {"value", JsonValue(hovered)},
+        });
+        emit(std::move(event), binding, *node, runtime::Value(hovered), result);
+    }
 }
 
 std::shared_ptr<const runtime::ActionValue>

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "ui/command.hpp"
 #include "ui/input/detail.hpp"
 #include "ui/motion.hpp"
+#include "ui/path.hpp"
 #include "ui/presentation_geometry.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
@@ -22,6 +24,58 @@
 namespace strata::ui {
 using namespace input_detail;
 namespace {
+
+/** Whether `point` is inside `outlines`, even-odd: a ring's hole is outside it. */
+[[nodiscard]] bool inside_outlines(const std::vector<std::vector<Point>>& outlines,
+                                   const Point point) noexcept {
+    bool inside = false;
+    for (const std::vector<Point>& outline : outlines) {
+        if (outline.size() < 3U)
+            continue;
+        Point previous = outline.back();
+        for (const Point current : outline) {
+            if ((current.y > point.y) != (previous.y > point.y) &&
+                point.x < (previous.x - current.x) * (point.y - current.y) /
+                                  (previous.y - current.y) +
+                              current.x)
+                inside = !inside;
+            previous = current;
+        }
+    }
+    return inside;
+}
+
+/**
+ * A node's `hitShape` (a Draw shape, normalized to its bounds) as outlines over `bounds`; none
+ * when it has no shape or a malformed one, which leaves the whole box hittable.
+ */
+[[nodiscard]] std::vector<std::vector<Point>> hit_outlines(const RetainedNode& node,
+                                                          const Rect bounds) {
+    const auto found = node.description().properties.find("hitShape");
+    if (found == node.description().properties.end() || found->second.value() == nullptr ||
+        found->second.value()->object() == nullptr || bounds.width <= 0.0 || bounds.height <= 0.0)
+        return {};
+    std::optional<PathShape> shape;
+    try {
+        shape = path_shape_from_value(found->second.value(), false);
+    } catch (const std::invalid_argument&) {
+        return {};
+    }
+    if (!shape.has_value())
+        return {};
+    std::vector<std::vector<Point>> outlines;
+    for (const PathContour& contour :
+         flatten_path(shape->path, Size{bounds.width, bounds.height}, 0.25)) {
+        std::vector<Point> outline;
+        outline.reserve(contour.points.size());
+        for (const Point point : contour.points)
+            outline.push_back(Point{bounds.x + point.x * bounds.width,
+                                    bounds.y + point.y * bounds.height});
+        outlines.push_back(std::move(outline));
+    }
+    return outlines;
+}
+
 [[nodiscard]] bool
 pointer_geometry_generations_match(const DirtyGenerationSnapshot& left,
                                    const DirtyGenerationSnapshot& right) noexcept {
@@ -928,6 +982,7 @@ void InputRouter::prepare_pointer_geometry() const {
             anchor,
             here.relative,
             anchor ? std::nullopt : here.relative_clip,
+            hit_outlines(node, bounds),
         });
     };
     // Detached portal roots occupy the final render plane. Visit them first in reverse paint
@@ -1153,7 +1208,10 @@ RetainedNode* InputRouter::hit_test(const Point position) const noexcept {
             // A rotated node is hit inside its turned shape, not the box around it.
             (entry.transform.axis_aligned() ||
              contains(entry.local_bounds,
-                      inverse_presentation_point(position, entry.transform)))) {
+                      inverse_presentation_point(position, entry.transform))) &&
+            // And a node with a hit shape only inside that.
+            (entry.shape.empty() ||
+             inside_outlines(entry.shape, inverse_presentation_point(position, entry.transform)))) {
             return entry.node;
         }
     }
@@ -1638,6 +1696,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
 
     if (event.type == PointerEventType::press) {
         hover_route(hover_target);
+        dispatch_hover(result);
         track_pointer(event, result);
         dismiss_transient_popups(target, result);
         // Window gestures begin with the press, whatever takes it after: a title bar is often
@@ -1699,6 +1758,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
                                         ? tree_->find_identity(pressed->second.identity)
                                         : target;
     hover_route(hover_target);
+    dispatch_hover(result);
     track_pointer(event, result);
     InputDispatchState dispatch = route_pointer_event(dispatch_target, hover_target, event, result);
     pressed = pressed_pointer_targets_.find(event.pointer_id);
@@ -1786,6 +1846,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
             (routed_subtarget_.has_value() ? routed_subtarget_->id : std::string{});
     finish_capture();
     hover_route(hover_target);
+    dispatch_hover(result);
     if (!click_suppressed && subtarget_matches && target != nullptr &&
         pressed_identity == target->identity()) {
         const std::uint64_t click_identity =

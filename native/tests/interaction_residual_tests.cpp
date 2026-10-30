@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <numbers>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -4504,6 +4505,156 @@ overlay Cost {
           "first points");
 }
 
+void test_draw_reveals_its_shapes_in_turn(const std::filesystem::path& resources) {
+    const std::string source = R"(
+animation DrawIn { from { reveal: 0 } to { reveal: 1 } duration: 1000ms; easing: "linear"; fillMode: "FORWARDS"; }
+overlay Dial {
+  root Panel(key: "dial.root", layout: { kind: "COLUMN", width: 200, height: 200 }) {
+    Draw(key: "dial.draw", enter: DrawIn, layout: { width: 200, height: 200 }, shapes: [
+      { kind: "line", from: { x: 0.5, y: 0.5 }, to: { x: 0.5, y: 0.1 }, stroke: #FF0000,
+        strokeStyle: { width: 2 }, revealEnd: 0.5 },
+      { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.4, start: -90, sweep: 120,
+        fill: #00FF00, revealStart: 0.5 }
+    ])
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("draw-reveal", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Dial", 200.0, 200.0, false);
+    std::int64_t now = 1'000'000;
+    // The line's reach upward and the sector's sweep, as this frame draws them.
+    struct Drawn final {
+        std::optional<double> line_top;
+        std::optional<double> sweep;
+    };
+    const auto drawn = [&] {
+        Drawn result;
+        for (const ui::RenderCommand& command : surface->render_commands().commands()) {
+            const auto* path = std::get_if<ui::PathRenderCommand>(&command);
+            if (path == nullptr)
+                continue;
+            for (const ui::PathShape* shape : {&path->shape}) {
+                const runtime::ColorValue* stroke =
+                    shape->stroke.has_value() ? shape->stroke->color() : nullptr;
+                const runtime::ColorValue* fill =
+                    shape->fill.has_value() ? shape->fill->color() : nullptr;
+                if (stroke != nullptr && stroke->red == 255U && shape->primitive.has_value())
+                    result.line_top = shape->primitive->to.y;
+                if (fill != nullptr && fill->green == 255U && shape->primitive.has_value())
+                    result.sweep = shape->primitive->sweep_degrees;
+            }
+            for (const ui::PathShape& shape : path->joined) {
+                const runtime::ColorValue* fill =
+                    shape.fill.has_value() ? shape.fill->color() : nullptr;
+                if (fill != nullptr && fill->green == 255U && shape.primitive.has_value())
+                    result.sweep = shape.primitive->sweep_degrees;
+            }
+        }
+        return result;
+    };
+    static_cast<void>(surface->frame(now));
+    const Drawn start = drawn();
+    check(!start.line_top.has_value() && !start.sweep.has_value(),
+          "a Draw drawing in showed its shapes before the reveal began");
+    for (int frame = 0; frame < 13; ++frame)
+        static_cast<void>(surface->frame(now += 20'000'000));
+    const Drawn early = drawn();
+    check(early.line_top.has_value() && *early.line_top > 0.1 && *early.line_top < 0.5 &&
+              !early.sweep.has_value(),
+          "a quarter through, a Draw's first shape had not grown part way alone");
+    for (int frame = 0; frame < 25; ++frame)
+        static_cast<void>(surface->frame(now += 20'000'000));
+    const Drawn later = drawn();
+    check(later.line_top.has_value() && std::abs(*later.line_top - 0.1) < 1.0e-9 &&
+              later.sweep.has_value() && *later.sweep > 0.0 && *later.sweep < 120.0,
+          "three quarters through, a Draw's sector had not swept part way after its line");
+    for (int frame = 0; frame < 20; ++frame)
+        static_cast<void>(surface->frame(now += 20'000'000));
+    const Drawn end = drawn();
+    check(end.sweep.has_value() && std::abs(*end.sweep - 120.0) < 1.0e-9,
+          "a Draw that had drawn in did not sweep its sector all the way");
+}
+
+void test_radial_layout_hit_shapes_and_hover(const std::filesystem::path& resources) {
+    const std::string source = R"(
+animation Deal { from { radialSweep: 0 } to { radialSweep: 360 } duration: 1000ms; easing: "linear"; fillMode: "FORWARDS"; }
+overlay Wheel {
+  state hovered = -1
+  root Panel(key: "wheel.root", style: { kind: "OVERLAY"; width: 200; height: 200; padding: 0 }) {
+    Panel(key: "wheel.ring", enter: Deal, style: { kind: "RADIAL"; width: 200; height: 200; padding: 0; radialRadius: 50 }) {
+      for n, index in [0, 1, 2, 3] {
+        Panel(key: `wheel.item.${index}`, style: { width: 20; height: 20 })
+      }
+    }
+    for n, index in [0, 1] {
+      Panel(key: `wheel.half.${index}`, style: { width: 200; height: 200; padding: 0; background: null },
+            hitShape: { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.5, innerRadius: 0.1, start: -90 + 180 * index, sweep: 180 },
+            onHover: inside => { if inside { hovered = index } else if hovered == index { hovered = -1 } })
+    }
+    Text(key: "wheel.hovered", text: `${hovered}`, layout: { position: "ABSOLUTE", inset: { left: 0, top: 0 } })
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("radial", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Wheel", 200.0, 200.0, false);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const auto centre = [&](const int index) {
+        const ui::RetainedNode* node =
+            surface->tree().find_key("wheel.item." + std::to_string(index));
+        const ui::LayoutRecord* record =
+            node != nullptr ? surface->layout().find(node->identity()) : nullptr;
+        return record != nullptr ? center(record->bounds) : ui::Point{-1.0, -1.0};
+    };
+    // Dealing: half way round, the four share 180 degrees from the top, a quarter turn apart.
+    for (int frame = 0; frame < 25; ++frame)
+        static_cast<void>(surface->frame(now += 20'000'000));
+    const ui::Point dealing = centre(1);
+    const double half_way = (-90.0 + 180.0 * 1.5 / 4.0) * std::numbers::pi / 180.0;
+    check(std::abs(dealing.x - (100.0 + 50.0 * std::cos(half_way))) < 1.0 &&
+              std::abs(dealing.y - (100.0 + 50.0 * std::sin(half_way))) < 1.0,
+          "half way through dealing, a RADIAL child was not in the middle of its share of the "
+          "sweep: " + std::to_string(dealing.x) + "," + std::to_string(dealing.y));
+    for (int frame = 0; frame < 40; ++frame)
+        static_cast<void>(surface->frame(now += 20'000'000));
+    // Dealt: each in the middle of its quarter of the circle, the first up and to the right.
+    for (int index = 0; index < 4; ++index) {
+        const double angle = (-90.0 + 90.0 * (index + 0.5)) * std::numbers::pi / 180.0;
+        const ui::Point at = centre(index);
+        check(std::abs(at.x - (100.0 + 50.0 * std::cos(angle))) < 0.5 &&
+                  std::abs(at.y - (100.0 + 50.0 * std::sin(angle))) < 0.5,
+              "a dealt RADIAL child was not centred in its share of the circle");
+    }
+
+    const auto shown = [&] {
+        const ui::RetainedNode* node = surface->tree().find_key("wheel.hovered");
+        const auto found = node->description().properties.find("text");
+        return found->second.value() != nullptr && found->second.value()->string() != nullptr
+                   ? *found->second.value()->string()
+                   : std::string{};
+    };
+    const auto move = [&](const ui::Point at) {
+        std::vector<ui::SurfaceInputEvent> events;
+        events.emplace_back(ui::PointerInputEvent{at, ui::PointerEventType::move, 4, 0});
+        static_cast<void>(surface->input().enqueue(std::move(events)));
+        static_cast<void>(surface->frame(now += 16'000'000));
+        static_cast<void>(surface->frame(now += 16'000'000));
+    };
+    // The right half's ring, then the left's; the hole in the middle and the corners are neither.
+    move(ui::Point{170.0, 100.0});
+    check(shown() == "0", "hovering inside a hit shape did not run its onHover: " + shown());
+    move(ui::Point{30.0, 100.0});
+    check(shown() == "1", "moving into another hit shape did not hover it alone: " + shown());
+    move(ui::Point{100.0, 100.0});
+    check(shown() == "-1", "the hole inside a ring hit shape still hovered it: " + shown());
+    move(ui::Point{5.0, 5.0});
+    check(shown() == "-1", "a corner outside every hit shape hovered one: " + shown());
+}
+
 void test_chart_inspects_selects_and_hides_series(const std::filesystem::path& resources) {
     const std::string source = R"(
 overlay Sales {
@@ -5034,6 +5185,8 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_calendar_picks_days_by_pointer_and_keyboard(resources);
         test_chart_inspects_selects_and_hides_series(resources);
         test_chart_draws_points_in_along_a_log_axis(resources);
+        test_draw_reveals_its_shapes_in_turn(resources);
+        test_radial_layout_hit_shapes_and_hover(resources);
         test_timers_fire_on_their_interval(resources);
         test_markdown_expands_blocks_and_follows_links(resources);
         test_modal_sides_open_drawers_and_sheets(resources);

@@ -174,7 +174,115 @@ PathShape segment_shape(const Point from, const Point to, Paint stroke, StrokeSt
     return shape;
 }
 
-std::optional<PathShape> path_shape_from_value(const runtime::Value* const value) {
+namespace {
+
+/** `path`'s first `amount` of length at `size` pixels, its contours in order, closed ones opened. */
+[[nodiscard]] Path trimmed_path(const Path& path, const double amount, const Size size) {
+    const std::vector<PathContour> contours =
+        flatten_path(path, size, 0.25 / std::max(1.0, std::max(size.width, size.height)));
+    const auto length = [&](const Point from, const Point to) {
+        return std::hypot((to.x - from.x) * size.width, (to.y - from.y) * size.height);
+    };
+    std::vector<std::vector<Point>> runs;
+    double total = 0.0;
+    for (const PathContour& contour : contours) {
+        std::vector<Point> run = contour.points;
+        if (contour.closed && run.size() > 1U)
+            run.push_back(run.front());
+        for (std::size_t index = 1U; index < run.size(); ++index)
+            total += length(run[index - 1U], run[index]);
+        runs.push_back(std::move(run));
+    }
+    double left = total * amount;
+    Path trimmed;
+    for (const std::vector<Point>& run : runs) {
+        if (left <= 0.0 || run.empty())
+            break;
+        trimmed.move_to(run.front());
+        for (std::size_t index = 1U; index < run.size(); ++index) {
+            const Point from = run[index - 1U];
+            const Point to = run[index];
+            const double piece = length(from, to);
+            if (piece >= left) {
+                const double t = piece > 0.0 ? left / piece : 0.0;
+                trimmed.line_to(Point{from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t});
+                left = 0.0;
+                break;
+            }
+            trimmed.line_to(to);
+            left -= piece;
+        }
+    }
+    return trimmed;
+}
+
+} // namespace
+
+std::vector<PathShape> revealed_shapes(const PathShape& shape, const double amount,
+                                       const Size size) {
+    if (!(amount > 0.0))
+        return {};
+    if (amount >= 1.0)
+        return {shape};
+    if (shape.primitive.has_value()) {
+        const ShapePrimitive& primitive = *shape.primitive;
+        if (primitive.kind == ShapePrimitiveKind::sector ||
+            primitive.kind == ShapePrimitiveKind::arc) {
+            // Swept open from its start angle, in its own colours.
+            PathShape opened = shape;
+            ShapePrimitive swept = primitive;
+            swept.sweep_degrees = primitive.sweep_degrees * amount;
+            opened.path = primitive.kind == ShapePrimitiveKind::sector
+                              ? Path::sector(primitive.center, primitive.radius_x,
+                                             primitive.radius_y, primitive.inner_fraction,
+                                             primitive.start_degrees, swept.sweep_degrees)
+                              : Path::arc(primitive.center, primitive.radius_x,
+                                          primitive.radius_y, primitive.start_degrees,
+                                          swept.sweep_degrees);
+            opened.primitive = swept;
+            return {std::move(opened)};
+        }
+        if (primitive.kind == ShapePrimitiveKind::segment) {
+            PathShape grown = shape;
+            ShapePrimitive drawn = primitive;
+            drawn.to = Point{primitive.from.x + (primitive.to.x - primitive.from.x) * amount,
+                             primitive.from.y + (primitive.to.y - primitive.from.y) * amount};
+            grown.path = Path::line(drawn.from, drawn.to);
+            grown.primitive = drawn;
+            return {std::move(grown)};
+        }
+    }
+    std::vector<PathShape> parts;
+    if (shape.fill.has_value()) {
+        PathShape fill = shape;
+        fill.stroke.reset();
+        fill.stroke_style.reset();
+        fill.fill->multiply_alpha(amount);
+        parts.push_back(std::move(fill));
+    }
+    if (shape.stroke.has_value()) {
+        PathShape stroke = shape;
+        stroke.fill.reset();
+        if (shape.primitive.has_value() && shape.primitive->kind == ShapePrimitiveKind::ellipse) {
+            // Drawn round from the top, clockwise: still an exact arc.
+            const ShapePrimitive& primitive = *shape.primitive;
+            stroke.path = Path::arc(primitive.center, primitive.radius_x, primitive.radius_y,
+                                    -90.0, 360.0 * amount);
+            stroke.primitive = ShapePrimitive{ShapePrimitiveKind::arc, primitive.center,
+                                              primitive.radius_x, primitive.radius_y, 0.0, -90.0,
+                                              360.0 * amount};
+        } else {
+            stroke.path = trimmed_path(shape.path, amount, size);
+            stroke.primitive.reset();
+        }
+        if (!stroke.path.empty())
+            parts.push_back(std::move(stroke));
+    }
+    return parts;
+}
+
+std::optional<PathShape> path_shape_from_value(const runtime::Value* const value,
+                                               const bool painted) {
     if (value == nullptr || value->object() == nullptr) return std::nullopt;
     const runtime::Value* kind_value = field(*value, "kind");
     if (kind_value == nullptr || kind_value->string() == nullptr) return std::nullopt;
@@ -300,7 +408,7 @@ std::optional<PathShape> path_shape_from_value(const runtime::Value* const value
     if (shape.stroke.has_value() && !shape.stroke_style.has_value()) {
         shape.stroke_style = StrokeStyle{};
     }
-    if (!shape.fill.has_value() && !shape.stroke.has_value()) {
+    if (painted && !shape.fill.has_value() && !shape.stroke.has_value()) {
         throw std::invalid_argument("a shape requires a fill, a stroke, or both");
     }
     return shape;

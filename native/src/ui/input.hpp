@@ -572,6 +572,8 @@ class InputRouter final {
     /** Routes the blur of the node losing focus, commits its editor and records the change. */
     void blur(RetainedNode& previous, std::string_view reason, InputOperationResult& result);
     void hover_route(const RetainedNode* target);
+    /** Runs the `onHover` actions of the nodes hover entered (true) or left (false) since. */
+    void dispatch_hover(InputOperationResult& result);
     /**
      * The hovered node for a hit at `hit`: the owner of the subtarget hit there, which `subtarget`
      * receives, unless that is a scrim behind the hit.
@@ -681,6 +683,11 @@ class InputRouter final {
         /** Its transform, and its ancestors' clips, within the anchor. */
         MotionTransform relative;
         std::optional<Rect> relative_clip;
+        /**
+         * Its `hitShape` as outlines in the same space as `local_bounds`: a point hits the node
+         * only inside them (even-odd), so a slice of a ring is not hit in the box around it.
+         */
+        std::vector<std::vector<Point>> shape;
     };
     /**
      * A presentation group's root as hit testing sees it. Entries within it are kept relative to
@@ -1000,6 +1007,8 @@ class InputRouter final {
     std::optional<std::string> focus_containment_key_;
     std::optional<std::uint64_t> focus_before_containment_;
     std::set<std::uint64_t> hovered_;
+    /** Nodes with an `onHover` that hover entered or left, waiting for dispatch_hover. */
+    std::vector<std::pair<std::uint64_t, bool>> pending_hover_;
     /** Nodes `strata.pointer` last told the pointer was over them. */
     std::set<std::uint64_t> pointer_trackers_;
     /**

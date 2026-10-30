@@ -74,6 +74,13 @@ enum class MotionProperty {
      * about its centre: a conic start or linear angle advances, so a border can spin.
      */
     paint_rotate,
+    /**
+     * A RADIAL layout's ring: its radius, start angle and sweep. Layout properties like width to
+     * placement_y; they come last so the theme ABI's numbers for the rest stay as they were.
+     */
+    radial_radius,
+    radial_start,
+    radial_sweep,
 };
 
 enum class MotionTrigger {
