@@ -1247,6 +1247,8 @@ void numeric_content(WidgetRenderScope& scope, ChartState& state, ChartProjectio
         return appear * appear * (3.0 - 2.0 * appear);
     };
     // Error bars under everything, each growing out of its point as the point appears.
+    StrokeStyle hairline;
+    hairline.width = 1.0;
     for (std::size_t index = 0U; index < state.series.size(); ++index) {
         const ChartSeries& series = state.series[index];
         if (series.hidden)
@@ -1261,11 +1263,13 @@ void numeric_content(WidgetRenderScope& scope, ChartState& state, ChartProjectio
             const double eased = appeared(drawn[index], point);
             if (eased <= 0.0)
                 continue;
+            // A hairline on its pixel column whose ends grow smoothly, not a pixel at a time.
             const Point at = drawn[index].points[point];
+            const double x = std::floor(at.x) + 0.5;
             const double top = at.y + (y_of(value.high.value_or(value.y)) - at.y) * eased;
             const double bottom = at.y + (y_of(value.low.value_or(value.y)) - at.y) * eased;
-            scope.solid_rect(Rect{std::floor(at.x), top, 1.0, std::max(0.0, bottom - top)},
-                             Paint(bar));
+            if (bottom - top > 0.0)
+                scope.line(Point{x, top}, Point{x, bottom}, Paint(bar), hairline);
         }
     }
     // The first series is the one to read: it draws last, over the others.

@@ -4455,15 +4455,19 @@ overlay Cost {
             if (const auto* rect = std::get_if<ui::SolidRectRenderCommand>(&command);
                 rect != nullptr && rect->fill.color() != nullptr) {
                 const runtime::ColorValue& color = *rect->fill.color();
-                if (color.green == 255U && color.red == 0U && rect->bounds.height > 0.0)
-                    result.bars.push_back(rect->bounds);
-                else if (color.blue == 255U && color.red == 0U && rect->bounds.width == 1.0 &&
-                         rect->bounds.height == 5.0)
+                if (color.blue == 255U && color.red == 0U && rect->bounds.width == 1.0 &&
+                    rect->bounds.height == 5.0)
                     ++result.marks;
             }
             const auto* path = std::get_if<ui::PathRenderCommand>(&command);
             if (path == nullptr)
                 continue;
+            if (const runtime::ColorValue* color =
+                    path->shape.stroke.has_value() ? path->shape.stroke->color() : nullptr;
+                color != nullptr && color->green == 255U && color->red == 0U) {
+                result.bars.push_back(path->bounds);
+                continue;
+            }
             if (red(path->shape.stroke))
                 result.line_end = path->bounds.right();
             else if (red(path->shape.fill) && path->bounds.width > 0.0)
@@ -4488,7 +4492,7 @@ overlay Cost {
     check(end.points.size() == 3U && end.line_end.has_value(),
           "a Chart that had drawn in did not show its line and all three points");
     check(end.bars.size() == 1U &&
-              std::abs(end.bars.front().x + 0.5 - end.points[1]) < 1.0 &&
+              std::abs(end.bars.front().x + end.bars.front().width * 0.5 - end.points[1]) < 1.0 &&
               end.bars.front().height > 10.0,
           "a point's low and high did not draw one error bar through it");
     // On a log axis 1, 10 and 100 are evenly spaced.

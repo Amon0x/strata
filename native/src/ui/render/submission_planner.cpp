@@ -985,9 +985,16 @@ struct MaskGrid final {
     /** Device pixels per local pixel along the shape's own axes. */
     double device_x = 1.0;
     double device_y = 1.0;
-    /** The shape's origin: its whole device pixel and the sub-pixel phase in sixteenths. */
+    /**
+     * The shape's origin: its whole device pixel, the sub-pixel phase in sixteenths (which names
+     * its mask, so a moving shape reuses a handful), and the exact sub-pixel position, where a mask
+     * made for this draw puts the outline. A shape whose outline changes as it is drawn (a line
+     * growing, a path edited at one end) moves its origin with it; rounded, the whole outline would
+     * shift back and forth by up to a 32nd of a pixel each frame.
+     */
     Point whole;
     Point phase;
+    Point exact;
 };
 
 /**
@@ -1025,6 +1032,7 @@ struct MaskGrid final {
     grid.whole = Point{std::floor(origin.x), std::floor(origin.y)};
     grid.phase = Point{std::round((origin.x - grid.whole.x) * 16.0) / 16.0,
                        std::round((origin.y - grid.whole.y) * 16.0) / 16.0};
+    grid.exact = Point{origin.x - grid.whole.x, origin.y - grid.whole.y};
     return grid;
 }
 
@@ -1244,8 +1252,8 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
         placed.closed = run.closed;
         placed.points.reserve(run.points.size());
         for (const Point point : run.points)
-            placed.points.push_back(host::RasterPoint{grid.phase.x + point.x * grid.device_x,
-                                                      grid.phase.y + point.y * grid.device_y});
+            placed.points.push_back(host::RasterPoint{grid.exact.x + point.x * grid.device_x,
+                                                      grid.exact.y + point.y * grid.device_y});
         runs.push_back(std::move(placed));
     }
     return runs;
@@ -1273,8 +1281,8 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
     // The shape's normalized position at content pixel x: x * scale + offset, per axis.
     const double scale_x = 1.0 / (grid.device_x * bounds.width);
     const double scale_y = 1.0 / (grid.device_y * bounds.height);
-    const double offset_x = (origin.x - grid.phase.x) * scale_x;
-    const double offset_y = (origin.y - grid.phase.y) * scale_y;
+    const double offset_x = (origin.x - grid.exact.x) * scale_x;
+    const double offset_y = (origin.y - grid.exact.y) * scale_y;
     switch (gradient->kind) {
     case GradientKind::linear:
         layer.paint = host::RasterPaint::linear;
@@ -1474,8 +1482,8 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
                 std::vector<host::RasterPoint> polygon;
                 polygon.reserve(contour.points.size());
                 for (const Point point : contour.points)
-                    polygon.push_back(host::RasterPoint{grid->phase.x + point.x * grid->device_x,
-                                                        grid->phase.y + point.y * grid->device_y});
+                    polygon.push_back(host::RasterPoint{grid->exact.x + point.x * grid->device_x,
+                                                        grid->exact.y + point.y * grid->device_y});
                 polygons.push_back(std::move(polygon));
             }
             return polygons;
@@ -1928,6 +1936,7 @@ append_art_masks(std::vector<PlannedItem>& output, const PathRenderCommand& comm
     const double device_x = grid->device_x;
     const double device_y = grid->device_y;
     const Point phase = grid->phase;
+    const Point exact = grid->exact;
     const StrokeStyle style = shape.stroke_style.value_or(StrokeStyle{});
     const double tolerance =
         mask_flatness / std::max(std::min(std::abs(device_x), std::abs(device_y)), 1.0e-3);
@@ -2040,8 +2049,8 @@ append_art_masks(std::vector<PlannedItem>& output, const PathRenderCommand& comm
                     std::vector<host::RasterPoint> polygon;
                     polygon.reserve(contour.points.size());
                     for (const Point point : contour.points)
-                        polygon.push_back(host::RasterPoint{phase.x + point.x * device_x,
-                                                            phase.y + point.y * device_y});
+                        polygon.push_back(host::RasterPoint{exact.x + point.x * device_x,
+                                                            exact.y + point.y * device_y});
                     polygons.push_back(std::move(polygon));
                 }
                 device_outline = std::move(polygons);
