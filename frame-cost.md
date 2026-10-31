@@ -140,3 +140,41 @@ for every batch (`Map` with `WRITE_DISCARD`), then `TextureStore::bind`.
 - [ ] Uploading clip stacks once per frame instead of per draw is no longer worth doing for these
   pages; revisit if a page with many distinct clips shows the uploads.
 - [ ] Measure: the hover page's first frame describes in under 15 ms.
+
+## Phase 5: the first time a page opens
+
+Opening the showcase (F7) and opening each of its tabs the first time hitched: measured with
+`strata_core_benchmark <resources> <showcase.json> first` (each tab's first frame, with a profile
+breakdown) and on the real GPU with the desktop harness (`--performance`, a scenario pressing F7
+and then clicking every tab).
+
+- [x] Opening the showcase: 220 ms to about 55 ms of setup, and its first frame 46 ms to 27 ms.
+  Animated images play from their bytes (160 ms to 10 ms); resources are read whole and unbuffered
+  (`base::read_file`: MSVC's `ifstream` copied the 5 MB artifact, fonts and images through its own
+  buffer, 3.7 ms to 1.3 ms for the artifact alone); host snapshots are written compact straight
+  from the `Value`, and generated contracts move a snapshot into place instead of copying it out
+  of an initializer list (binding the showcase's data 26 ms to 16 ms); portable IR validation
+  builds its error context only when it fails.
+- [x] Large text is drawn from outlines (vector glyphs), each built at five detail levels and
+  fitted to the pixel grid at its size, one glyph after another as planning asked for it: 14 ms
+  for the TYPE page's 108 glyphs and 6 ms for their 165 fitted sizes, 20 ms of the showcase's first
+  frame too. `VectorGlyphPool::prepare` builds a frame's new glyphs and sizes at once over the
+  raster pool's lanes (`font::parallel_for`, the atlas's threads made a shared primitive), before
+  planning finds them.
+- [x] MSDF glyphs for text effects (a glow's reach widens their range to 18 to 46 pixels) measured
+  every edge of a row at every sample. Each edge now measures only the samples within the cutoff
+  of its line, with its direction and reciprocal length worked out once: the same bytes, the
+  atlas's share of the TYPE page 10 ms to 6 ms.
+- [x] Shaping: variable font instances vary advances per glyph when asked; GPOS pair tables are
+  read where they are rather than expanded into maps; positioning works out each glyph's lookup
+  class once per run and skips mark attachment for a run with no marks. OpenType time for the
+  LAYOUT page's 104 new labels 6.7 ms to 2.2 ms.
+- First opens now (core benchmark): TYPE 48 ms to 30 ms, LAYOUT 28 to 23, CONTENT 42 to 20,
+  BLUEPRINT 16, LOTTIE 13, DATA 8; on the GPU the worst first frames are TYPE 37 ms, LOTTIE 23
+  (8 ms of it uploading textures), LAYOUT 25, CONTENT 21, DATA 21, BLUEPRINT 20.
+- [ ] Activation is 18 ms of the showcase's setup in three near-equal parts: decoding the 5 MB
+  artifact, validating its IR and lowering it. Each walks the whole tree; validation and lowering
+  could be one walk.
+- [ ] The rest of the showcase's setup could leave the frame: a session activated on a worker and
+  given its surface on the frame thread, so pressing F7 never stalls the frame it is pressed on.
+- [ ] BLUEPRINT's first frame is 4.4 ms of describing the graph in StrataScript: the interpreter.
