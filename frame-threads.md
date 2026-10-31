@@ -44,6 +44,22 @@ content never blocks it.
 - A runtime is free-threaded but never re-entered: calls may come from any thread, never two at
   once (`EntryGuard`). Separate runtimes may already run on separate threads.
 
+## Before this plan: finish frame-cost.md
+
+**Do not start this plan until `frame-cost.md` is done.** Its open phases come first, in its
+order:
+
+1. Phase 1 (scrolling moves a layer, not the page) is a hard prerequisite. A scroll offset has to
+   be a transform on a presentation group, not a position baked into every record, before a render
+   thread can scroll content without the UI thread (Phase 6 here). Every reader of record
+   positions it lists must be moved to the new model first.
+2. Phase 2 (recompose a parent from the children that changed) and the open items of Phases 3 to 5
+   land next, so the UI thread's own frame cost is as low as it goes before work is split across
+   threads. Threading a frame that does needless work only hides the work.
+
+Check every box in `frame-cost.md` (or record why an item was dropped) before ticking anything
+here.
+
 ## The target
 
 Three kinds of threads, each with one job:
@@ -134,6 +150,8 @@ a boundary may hold the previous content for a bounded time so a page appears wh
   display's rate (frame times from the render thread, not the UI thread).
 
 ## Phase 6: the compositor moves what it can
+
+Requires Phase 1 of `frame-cost.md` to have landed (see "Before this plan").
 
 - [ ] Scrolling: a scroll view's content is a presentation group (Phase 1 of `frame-cost.md`);
   the packet marks it scrollable with its extent and physics. Wheel, touch and drag on it are
