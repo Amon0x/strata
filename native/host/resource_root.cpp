@@ -1,13 +1,12 @@
 #include "host/resource_root.hpp"
 
 #include <algorithm>
-#include <fstream>
-#include <limits>
 #include <new>
 #include <optional>
 #include <system_error>
 #include <utility>
 
+#include "base/file.hpp"
 #include "host/system_fonts.hpp"
 
 namespace strata::host {
@@ -74,26 +73,10 @@ std::vector<std::uint8_t> ResourceRoot::read(const std::filesystem::path& relati
     std::error_code status_error;
     if (!std::filesystem::is_regular_file(path, status_error))
         throw ResourceNotFound("resource not found: " + display(relative));
-    std::ifstream input(path, std::ios::binary | std::ios::ate);
-    if (!input)
-        throw std::runtime_error("could not open resource: " + display(relative));
-    const std::streampos end = input.tellg();
-    if (end < 0)
-        throw std::runtime_error("could not size resource: " + display(relative));
-    const auto size = static_cast<std::uint64_t>(end);
-    if (size > static_cast<std::uint64_t>(std::numeric_limits<std::streamsize>::max()) ||
-        size > std::vector<std::uint8_t>{}.max_size()) {
-        throw std::length_error("resource is too large: " + display(relative));
-    }
-    std::vector<std::uint8_t> result(static_cast<std::size_t>(size));
-    input.seekg(0, std::ios::beg);
-    if (!result.empty()) {
-        input.read(reinterpret_cast<char*>(result.data()),
-                   static_cast<std::streamsize>(result.size()));
-    }
-    if (!input)
+    std::optional<std::vector<std::uint8_t>> bytes = base::read_file(path);
+    if (!bytes.has_value())
         throw std::runtime_error("could not read resource: " + display(relative));
-    return result;
+    return std::move(*bytes);
 }
 
 std::string ResourceRoot::read_text(const std::filesystem::path& relative) const {

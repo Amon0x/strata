@@ -4,7 +4,6 @@
 #include <cctype>
 #include <condition_variable>
 #include <cstdlib>
-#include <fstream>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -13,6 +12,8 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+
+#include "base/file.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -376,13 +377,7 @@ class Catalog final {
         const std::uintmax_t size = std::filesystem::file_size(path, error);
         if (error || size == 0U || size > 64U * 1024U * 1024U)
             return std::nullopt;
-        std::ifstream input(path, std::ios::binary);
-        if (!input)
-            return std::nullopt;
-        resource::ResourceBytes bytes(static_cast<std::size_t>(size));
-        if (!input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size)))
-            return std::nullopt;
-        return bytes;
+        return base::read_file(path);
     }
 
     /** Loads and keeps a font; a file that is no font of ours is skipped from then on. */

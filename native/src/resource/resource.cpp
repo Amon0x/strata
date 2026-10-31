@@ -2,12 +2,13 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <fstream>
+#include <optional>
 #include <iterator>
 #include <string>
 #include <system_error>
 #include <vector>
 
+#include "base/file.hpp"
 #include "base/utf8.hpp"
 
 namespace strata::resource {
@@ -109,19 +110,11 @@ ResourceBytes load_binary_resource(
 ) {
     std::uintmax_t file_size = 0U;
     const std::filesystem::path candidate = resolve_resource(root, resource, limits, file_size);
-    std::ifstream stream(candidate, std::ios::binary);
-    if (!stream) {
-        throw ResourceError("resource cannot be opened");
-    }
-    ResourceBytes bytes(static_cast<std::size_t>(file_size));
-    stream.read(
-        reinterpret_cast<char*>(bytes.data()),
-        static_cast<std::streamsize>(bytes.size())
-    );
-    if (stream.gcount() != static_cast<std::streamsize>(bytes.size())) {
+    std::optional<ResourceBytes> bytes = base::read_file(candidate);
+    // The file changed size since it was resolved: it is not the resource that was checked.
+    if (!bytes.has_value() || bytes->size() != file_size)
         throw ResourceError("resource could not be read completely");
-    }
-    return bytes;
+    return std::move(*bytes);
 }
 
 std::string load_utf8_resource(
