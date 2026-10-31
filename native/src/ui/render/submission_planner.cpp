@@ -12,6 +12,7 @@
 #include <limits>
 #include <numbers>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
@@ -230,6 +231,19 @@ struct CommandTexture final {
                : 1.0;
 }
 
+/** Whether a run's glyphs may draw from their outlines: coverage text that reads no distance. */
+[[nodiscard]] bool vector_run(const TextRunRenderCommand& command) noexcept {
+    return raster_mode(command.font_rasterization) == font::GlyphRasterMode::coverage &&
+           !command.effects.distance();
+}
+
+/** Whether a glyph's face draws it from its outline: not emboldened synthetically. */
+[[nodiscard]] bool vector_face(const LogicalGlyph& logical, const font::OpenTypeFont& font) {
+    return !font::resolve_font_style_geometry(logical.font_style_flags,
+                                              font.metadata().style_flags)
+                .bold();
+}
+
 /**
  * The vector glyph that draws a run's glyph, when one can: text antialiased by coverage (MSDF
  * text, and text whose effects read a distance, keep their fields), a glyph with a TrueType
@@ -239,17 +253,49 @@ struct CommandTexture final {
                                                        const TextRunRenderCommand& command,
                                                        const LogicalGlyph& logical,
                                                        const font::OpenTypeFont& font) {
-    if (vectors == nullptr ||
-        raster_mode(command.font_rasterization) != font::GlyphRasterMode::coverage ||
-        command.effects.distance()) {
+    if (vectors == nullptr || !vector_run(command) || !vector_face(logical, font))
         return std::nullopt;
-    }
-    if (font::resolve_font_style_geometry(logical.font_style_flags, font.metadata().style_flags)
-            .bold()) {
-        return std::nullopt;
-    }
     return vectors->glyph(logical.font_id.view(), font,
                           static_cast<std::uint16_t>(logical.glyph_id));
+}
+
+/** Device pixels a font unit of `font` spans in a run at `vector_scale` (0: not fitted). */
+[[nodiscard]] double vector_fit_scale(const TextRunRenderCommand& command,
+                                      const font::OpenTypeFont& font, const double vector_scale) {
+    const double scale = command.pixel_size / static_cast<double>(std::max<std::uint16_t>(
+                                                  font.units_per_em(), std::uint16_t{1U}));
+    return vector_scale > 0.0 ? scale * vector_scale : 0.0;
+}
+
+/**
+ * Makes the vector glyphs, and their fitted variants, that the text runs at `runs` draw and the
+ * pool lacks, all at once over the raster pool's lanes (VectorGlyphPool::prepare): preparing the
+ * runs then finds them.
+ */
+void prepare_vector_glyphs(const RenderCommandView& stream, const std::span<const std::size_t> runs,
+                           const TextEngine& text_engine,
+                           const std::span<const double> vector_scales,
+                           VectorGlyphPool* const vectors) {
+    if (vectors == nullptr)
+        return;
+    std::vector<VectorGlyphWant> wants;
+    for (const std::size_t index : runs) {
+        const auto& text = std::get<TextRunRenderCommand>(stream[index]);
+        if (!vector_run(text))
+            continue;
+        for (const LogicalGlyph& logical : text.glyphs) {
+            // Preparing the run reports a glyph id out of range.
+            if (logical.glyph_id > std::numeric_limits<std::uint16_t>::max())
+                continue;
+            const font::OpenTypeFont& face = text_engine.font(logical.font_id);
+            if (!vector_face(logical, face))
+                continue;
+            wants.push_back(VectorGlyphWant{logical.font_id.view(), &face,
+                                            static_cast<std::uint16_t>(logical.glyph_id),
+                                            vector_fit_scale(text, face, vector_scales[index])});
+        }
+    }
+    vectors->prepare(wants);
 }
 
 [[nodiscard]] std::vector<PreparedText>
@@ -281,10 +327,10 @@ prepare_text(const TextRunRenderCommand& command, font::GlyphAtlas& atlas,
                 command.pixel_size / static_cast<double>(std::max<std::uint16_t>(
                                          face.units_per_em(), std::uint16_t{1U}));
             // Fitted for the device pixels a font unit spans where it is laid out.
+            const double fit_scale = vector_fit_scale(command, face, vector_scale);
             const std::optional<std::uint32_t> fitted =
-                vector_scale > 0.0
-                    ? std::optional<std::uint32_t>(vectors->fitted(*vector, scale * vector_scale))
-                    : std::nullopt;
+                fit_scale > 0.0 ? std::optional<std::uint32_t>(vectors->fitted(*vector, fit_scale))
+                                : std::nullopt;
             // Its quad covers the outline and the fitted variant, whichever a frame draws.
             VectorGlyphRecord record = vectors->record(*vector);
             if (fitted.has_value()) {
@@ -2824,6 +2870,7 @@ std::vector<PlannedItem> plan(
     const auto collect_warmup_requests =
         [&](const std::uint64_t atlas_generation, const bool all) {
         std::vector<font::GlyphAtlasWarmupRequest> requests;
+        std::vector<std::size_t> fresh;
         rescaled.clear();
         for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
             if (!visible_text[index]) continue;
@@ -2844,7 +2891,13 @@ std::vector<PlannedItem> plan(
                 rescaled.push_back(index);
                 continue;
             }
-            append_warmup_requests(*text, *text_engine, context, text_scales[index],
+            fresh.push_back(index);
+        }
+        prepare_vector_glyphs(commands.commands(), fresh, *text_engine, vector_scales,
+                              cache.vector_glyphs);
+        for (const std::size_t index : fresh) {
+            append_warmup_requests(std::get<TextRunRenderCommand>(commands.commands()[index]),
+                                   *text_engine, context, text_scales[index],
                                    subpixel_runs.atlas[index], zoomed_runs[index],
                                    cache.vector_glyphs, requests);
         }
@@ -3021,7 +3074,24 @@ std::optional<std::vector<std::size_t>> replan_ranges(
     const std::vector<bool>& zoomed_runs = cache.text_contexts.zoomed;
     // Text in the ranges is prepared as the full plan would: a run keeps its prepared glyphs
     // while its content does, and a hidden run drops them. Entries are exact for their content,
-    // so they stand even when this update gives way to a full plan.
+    // so they stand even when this update gives way to a full plan. The vector glyphs the runs
+    // to prepare draw are made first, all at once.
+    if (text_engine != nullptr) {
+        std::vector<std::size_t> fresh;
+        for (const CommandRange& range : ranges) {
+            for (std::size_t index = range.first; index <= range.last; ++index) {
+                const auto* text = std::get_if<TextRunRenderCommand>(&stream[index]);
+                if (text == nullptr || !visible_text[index] ||
+                    retained_text(cache.text[index], *text, text_engine,
+                                  glyph_atlas.generation(), context.scale,
+                                  subpixel_runs.vector[index], vector_scales[index])) {
+                    continue;
+                }
+                fresh.push_back(index);
+            }
+        }
+        prepare_vector_glyphs(stream, fresh, *text_engine, vector_scales, cache.vector_glyphs);
+    }
     for (const CommandRange& range : ranges) {
         for (std::size_t index = range.first; index <= range.last; ++index) {
             const auto* text = std::get_if<TextRunRenderCommand>(&stream[index]);

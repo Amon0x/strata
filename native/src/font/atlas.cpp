@@ -7,7 +7,6 @@
 #include <chrono>
 #include <cmath>
 #include <compare>
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -25,75 +24,10 @@
 #include <type_traits>
 #include <utility>
 
+#include "font/raster_pool.hpp"
+
 namespace strata::font {
 namespace {
-
-/**
- * The threads glyph misses are rasterized on, kept for the life of the process. A lane keeps the
- * FreeType faces it leased in thread-local caches, so a persistent lane rasterizes the next batch
- * without building them again, and no batch pays for starting threads. One batch runs at a time;
- * the caller works as a lane too.
- */
-class RasterPool final {
-  public:
-    static constexpr std::size_t helpers = 3U;
-
-    /** The pool, made on first use and never destroyed: its threads end with the process. */
-    [[nodiscard]] static RasterPool& shared() {
-        static RasterPool* const pool = new RasterPool();
-        return *pool;
-    }
-
-    /** Runs `lane` on the caller and on `count` helpers (at most `helpers`), and waits for all. */
-    void run(const std::size_t count, const std::function<void()>& lane) {
-        const std::scoped_lock batch(batch_mutex_);
-        const std::size_t used = std::min(count, helpers);
-        {
-            const std::scoped_lock lock(mutex_);
-            lane_ = &lane;
-            waiting_ = used;
-            running_ = used;
-        }
-        work_.notify_all();
-        lane();
-        std::unique_lock lock(mutex_);
-        done_.wait(lock, [this] { return running_ == 0U; });
-        lane_ = nullptr;
-    }
-
-  private:
-    RasterPool() {
-        for (std::size_t index = 0U; index < helpers; ++index)
-            threads_.emplace_back([this] { serve(); });
-    }
-
-    void serve() {
-        for (;;) {
-            const std::function<void()>* lane = nullptr;
-            {
-                std::unique_lock lock(mutex_);
-                work_.wait(lock, [this] { return waiting_ != 0U; });
-                --waiting_;
-                lane = lane_;
-            }
-            (*lane)();
-            {
-                const std::scoped_lock lock(mutex_);
-                --running_;
-            }
-            done_.notify_one();
-        }
-    }
-
-    std::mutex batch_mutex_;
-    std::mutex mutex_;
-    std::condition_variable work_;
-    std::condition_variable done_;
-    const std::function<void()>* lane_ = nullptr;
-    std::size_t waiting_ = 0U;
-    std::size_t running_ = 0U;
-    std::vector<std::thread> threads_;
-};
 
 [[nodiscard]] std::string owner_token(const std::string_view owner_id) {
     // Length-prefixing is injective for arbitrary owner bytes; a fixed-width hash would make

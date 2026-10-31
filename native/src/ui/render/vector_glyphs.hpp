@@ -1,9 +1,11 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -59,6 +61,15 @@ struct VectorGlyphAppend final {
     }
 };
 
+/** A glyph a frame draws from its outline, and the scale it is fitted at there (0: none). */
+struct VectorGlyphWant final {
+    std::string_view font_id;
+    const font::OpenTypeFont* font = nullptr;
+    std::uint16_t glyph = 0U;
+    /** Device pixels a font unit spans, as VectorGlyphPool::fitted takes it. */
+    double fit_scale = 0.0;
+};
+
 /**
  * A Surface's vector glyphs: each glyph's outline made into a font::VectorGlyph once, the first
  * time it is drawn, and its record, segments and bands appended to buffers the host keeps on the
@@ -88,6 +99,13 @@ class VectorGlyphPool final {
      * outline drawn at any size has many: each pixel reads fewer.
      */
     [[nodiscard]] std::uint32_t fitted(std::uint32_t index, double scale);
+    /**
+     * Makes the wanted glyphs and fitted variants the pool lacks, spread over the raster pool's
+     * lanes (font::parallel_for), so glyph and fitted then find them: a page of new text builds
+     * its outlines at once rather than one after another as planning asks. Records are added in
+     * the order wanted, so the buffers are the same however the work was spread.
+     */
+    void prepare(std::span<const VectorGlyphWant> wants);
     [[nodiscard]] const VectorGlyphRecord& record(std::uint32_t index) const {
         return records_.at(index);
     }
@@ -108,6 +126,25 @@ class VectorGlyphPool final {
     }
 
   private:
+    /** A glyph's records, its own and its coarser levels; its own empty when it has none. */
+    using Levels = std::array<font::VectorGlyph, vector_glyph_detail_levels>;
+    struct Source;
+
+    [[nodiscard]] static std::shared_ptr<const font::GlyphOutline>
+    drawn_outline(const font::OpenTypeFont& font, std::uint16_t glyph);
+    [[nodiscard]] static Levels build_levels(const font::GlyphOutline& outline,
+                                             std::uint16_t units_per_em,
+                                             const font::FontHintZones& zones);
+    /** The variant of `source` fitted at `scale`; nothing when its outline flattens to none. */
+    [[nodiscard]] static std::optional<font::VectorGlyph> build_fitted(const Source& source,
+                                                                       double scale);
+    [[nodiscard]] const font::FontHintZones& zones(std::string_view font_id,
+                                                   const font::OpenTypeFont& font);
+    /** Adds a glyph's levels and indexes it; nothing when it has no records. */
+    std::optional<std::uint32_t> adopt(std::string_view font_id, std::uint16_t glyph,
+                                       std::shared_ptr<const font::GlyphOutline> outline,
+                                       std::uint16_t units_per_em,
+                                       const font::FontHintZones* zones, const Levels& levels);
     [[nodiscard]] std::uint32_t add(const font::VectorGlyph& glyph);
 
     std::string id_;
