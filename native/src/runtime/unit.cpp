@@ -428,7 +428,7 @@ void RuntimeUnit::build_indexes() {
     }
     referenced_actions_.assign(actions.begin(), actions.end());
     std::ranges::sort(state_declarations_, {}, [](const UnitStateDeclaration& value) {
-        return std::pair{value.scope, value.name};
+        return std::pair<std::string_view, std::string_view>{value.scope, value.name};
     });
     const auto duplicate = std::ranges::adjacent_find(
         state_declarations_,

@@ -206,8 +206,10 @@ class ProgramLowering final {
         } else if (kind == "call") {
             node.kind = ExpressionKind::call;
             node.first = expression(required(source, "callee"));
+            const JsonArray encoded_arguments = array_field(source, "arguments");
             std::vector<ProgramArgument> arguments;
-            for (const JsonValue argument : array_field(source, "arguments")) {
+            arguments.reserve(encoded_arguments.size());
+            for (const JsonValue argument : encoded_arguments) {
                 const std::optional<std::string_view> name = argument.find("name").string();
                 arguments.push_back(ProgramArgument{
                     name.has_value() ? Symbol::intern(*name) : Symbol{},
@@ -224,8 +226,10 @@ class ProgramLowering final {
             node.first = expression(required(source, "operand"));
         } else if (kind == "record") {
             node.kind = ExpressionKind::record;
+            const JsonArray encoded_parts = array_field(source, "parts");
             std::vector<ProgramArgument> parts;
-            for (const JsonValue part : array_field(source, "parts")) {
+            parts.reserve(encoded_parts.size());
+            for (const JsonValue part : encoded_parts) {
                 if (const JsonValue spread = part.find("spread"); spread && !spread.is_null()) {
                     parts.push_back(ProgramArgument{{}, false, expression(spread), part});
                 } else {
@@ -237,15 +241,19 @@ class ProgramLowering final {
             store_arguments(node, std::move(parts));
         } else if (kind == "list") {
             node.kind = ExpressionKind::list;
+            const JsonArray encoded_elements = array_field(source, "elements");
             std::vector<ProgramArgument> elements;
-            for (const JsonValue element : array_field(source, "elements")) {
+            elements.reserve(encoded_elements.size());
+            for (const JsonValue element : encoded_elements) {
                 elements.push_back(ProgramArgument{{}, false, expression(element), element});
             }
             store_arguments(node, std::move(elements));
         } else if (kind == "map") {
             node.kind = ExpressionKind::map;
+            const JsonObject encoded_entries = object_field(source, "entries");
             std::vector<ProgramArgument> entries;
-            for (const auto& [name, value] : object_field(source, "entries")) {
+            entries.reserve(encoded_entries.size());
+            for (const auto& [name, value] : encoded_entries) {
                 entries.push_back(
                     ProgramArgument{Symbol::intern(name), true, expression(value), value});
             }
@@ -492,8 +500,10 @@ class ProgramLowering final {
     /** A Repeater's body is the one block whose loop carries a row-key extractor. */
     [[nodiscard]] BlockId block(const JsonValue source, const std::string_view declaration_scope,
                                 const bool repeater_body = false) {
+        const JsonArray encoded_statements = array_field(source, "statements");
         std::vector<ProgramStatement> statements;
-        for (const JsonValue encoded : array_field(source, "statements")) {
+        statements.reserve(encoded_statements.size());
+        for (const JsonValue encoded : encoded_statements) {
             statements.push_back(statement(encoded, declaration_scope, repeater_body));
         }
         ProgramBlock result{static_cast<std::uint32_t>(program_.statements_.size()),
@@ -644,8 +654,10 @@ class ProgramLowering final {
     }
 
     [[nodiscard]] std::vector<ProgramArgument> arguments(const JsonValue source) {
+        const JsonArray encoded_arguments = array_field(source, "arguments");
         std::vector<ProgramArgument> result;
-        for (const JsonValue argument : array_field(source, "arguments")) {
+        result.reserve(encoded_arguments.size());
+        for (const JsonValue argument : encoded_arguments) {
             const JsonValue name = argument.find("name");
             const std::optional<std::string_view> text = name.string();
             if (text.has_value())
@@ -943,13 +955,17 @@ class ProgramLowering final {
             result.slot = widget->slot;
             result.lazy_rows = widget->lazy_rows;
         }
+        const JsonObject encoded_arguments = object_field(source, "arguments");
         std::vector<ProgramCallArgument> arguments;
+        arguments.reserve(encoded_arguments.size());
         std::vector<ProgramBehavior> behaviors;
-        for (const auto& [name, value] : object_field(source, "arguments")) {
+        for (const auto& [name, value] : encoded_arguments) {
             if (name == "behaviors") {
                 result.has_behaviors = true;
                 if (string_field(value, "kind") == "list") {
-                    for (const JsonValue element : array_field(value, "elements")) {
+                    const JsonArray encoded_behaviors = array_field(value, "elements");
+                    behaviors.reserve(encoded_behaviors.size());
+                    for (const JsonValue element : encoded_behaviors) {
                         if (string_field(element, "kind") != "map")
                             continue;
                         const JsonValue entries = required(element, "entries");
