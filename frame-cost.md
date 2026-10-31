@@ -106,8 +106,18 @@ projecting themes, 3 ms reconciling, about 10 µs per node in all. Timing parts 
 by hand found no single cost: token resolution in authored styles and per-node property setup each
 take about 2 µs a node, and removing two whole-map copies a node was within noise.
 
-- [ ] Profile a cold start with a sampling profiler instead of hand-placed timers, and fix what it
-  ranks first. The Windows Performance Toolkit is installed (`xperf`, `wpaexporter`), but kernel
-  sampling needs an elevated shell: `wpr -start CPU`, run the page, `wpr -stop cold.etl`, from an
-  administrator prompt.
+- [x] Profile a cold start with a sampling profiler. Recorded with `wpr -start CPU` (an elevated
+  prompt) over nine launches of the hover page, and read with `xperf -i trace.etl -symbols -a
+  profile -detail` against the build's PDBs. The engine's own code was 2.3 s of the 24.8 s the
+  process spent; compiling HLSL was 6.2 s, about 0.7 s every launch.
+- [x] Compiled shaders persist between runs (`d3d11::set_shader_cache_directory`, under
+  `%LOCALAPPDATA%\\Strata\\shaders` on the desktop host): creating the D3D11 renderer went from
+  723 ms to 4 ms on every start after the first.
+- [ ] The Vulkan backend compiles its HLSL through shaderc on every run too: the same cache, for
+  SPIR-V.
+- [ ] Description at about 10 µs a node: from the same trace, sorted by inclusive time with stacks
+  (`-a stack`), since self time spreads it over allocation, `Value::field` and map lookups.
+- Skipping draw state that did not change between batches (shader, scissor, blend, clips,
+  textures) did not move the uncapped frame rate past run-to-run noise: those frames are bound by
+  the GPU and driver, not by the calls. Not kept.
 - [ ] Measure: the hover page's first frame describes in under 15 ms.

@@ -3,6 +3,7 @@
 #endif
 
 #include "effect_pass.hpp"
+#include "shader_cache.hpp"
 #include "gpu/effect_policy.hpp"
 #include "gpu/effect_shaders.hpp"
 #include "gpu/isolation.hpp"
@@ -43,19 +44,8 @@ void require_hresult(const HRESULT result, const char* const operation) {
 
 [[nodiscard]] ComPtr<ID3DBlob> compile_shader(const std::string_view source,
                                               const char* const entry, const char* const target) {
-    ComPtr<ID3DBlob> bytecode;
-    ComPtr<ID3DBlob> errors;
-    const HRESULT result =
-        D3DCompile(source.data(), source.size(), "strata.d3d11.generated-effect.hlsl", nullptr,
-                   nullptr, entry, target, D3DCOMPILE_ENABLE_STRICTNESS, 0U, &bytecode, &errors);
-    if (FAILED(result)) {
-        const std::string detail =
-            errors != nullptr ? std::string(static_cast<const char*>(errors->GetBufferPointer()),
-                                            errors->GetBufferSize())
-                              : std::string("unknown compiler error");
-        throw std::runtime_error("D3D11 effect shader compilation failed: " + detail);
-    }
-    return bytecode;
+    return compile_hlsl(source, "strata.d3d11.generated-effect.hlsl", entry, target,
+                        D3DCOMPILE_ENABLE_STRICTNESS, "D3D11 effect shader compilation failed");
 }
 
 using gpu::effect_prelude;

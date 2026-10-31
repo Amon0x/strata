@@ -640,6 +640,7 @@ if(WIN32)
             d3d11/presenter.cpp
             d3d11/presenter_abi.cpp
             d3d11/raster_pass.cpp
+            d3d11/shader_cache.cpp
             d3d11/render_context.cpp
             d3d11/renderer.cpp
             d3d11/texture_store.cpp

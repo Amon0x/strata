@@ -1,4 +1,5 @@
 #include "blur_pass.hpp"
+#include "shader_cache.hpp"
 
 #include <algorithm>
 #include <array>
@@ -44,20 +45,9 @@ void require_hresult(const HRESULT result, const std::string_view operation) {
 
 [[nodiscard]] ComPtr<ID3DBlob> compile_shader(const std::string_view source,
                                               const char* const target) {
-    ComPtr<ID3DBlob> result;
-    ComPtr<ID3DBlob> diagnostics;
-    const HRESULT status = D3DCompile(
-        source.data(), source.size(), "strata.d3d11.blur.hlsl", nullptr, nullptr, "main", target,
-        D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3, 0U, &result, &diagnostics);
-    if (FAILED(status)) {
-        const std::string detail =
-            diagnostics == nullptr
-                ? std::string{}
-                : std::string(static_cast<const char*>(diagnostics->GetBufferPointer()),
-                              diagnostics->GetBufferSize());
-        throw std::runtime_error("D3D11 blur shader compilation failed: " + detail);
-    }
-    return result;
+    return compile_hlsl(source, "strata.d3d11.blur.hlsl", "main", target,
+                        D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3,
+                        "D3D11 blur shader compilation failed");
 }
 
 struct Target final {

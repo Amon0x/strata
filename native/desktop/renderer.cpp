@@ -83,8 +83,9 @@ struct Renderer::Impl final {
             fail_hresult("COM initialization", com_status);
         create_device();
         capture_adapter_info();
-        // Compiled art keeps between runs, so a page drawing art shows it from its first frame.
-        d3d11::set_art_cache_directory(local_application_data() / "Strata" / "art");
+        // Compiled shaders keep between runs: the next start skips compiling them, and a page
+        // drawing art or a material shows it from its first frame.
+        d3d11::set_shader_cache_directory(local_application_data() / "Strata" / "shaders");
         renderer = std::make_unique<d3d11::RenderContext>(device.Get(), context.Get(),
                                                           asynchronous_shader_compilation);
         RECT client{};

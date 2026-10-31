@@ -236,11 +236,12 @@ class Presenter final {
 };
 
 /**
- * Where compiled art programs (Present::art) persist between runs, so a page drawing art shows it
- * at once rather than after its program compiles. Process-wide; empty, the default, keeps them in
- * memory only. Entries are named by a hash of their whole source, so a changed program or engine
+ * Where compiled shaders persist between runs: the backend's own (which take most of a second to
+ * compile) and authored ones (materials, effects, art programs), so a later run starts and draws
+ * them at once. Process-wide; empty, the default, compiles them every run. Entries are named by a
+ * hash of their whole source, entry, target, flags and compiler, so a changed shader or engine
  * never reads a stale one.
  */
-void set_art_cache_directory(std::filesystem::path directory);
+void set_shader_cache_directory(std::filesystem::path directory);
 
 } // namespace strata::d3d11

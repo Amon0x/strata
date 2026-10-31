@@ -1,4 +1,5 @@
 #include "raster_pass.hpp"
+#include "shader_cache.hpp"
 
 #include <algorithm>
 #include <array>
@@ -51,68 +52,7 @@ void require_hresult(const HRESULT result, const std::string_view operation) {
  * driver optimizes the bytecode itself, so the program runs as fast and appears several times
  * sooner. The raster kernels keep it: they compile at build time (raster_bake.cpp).
  */
-constexpr UINT art_optimization = D3DCOMPILE_SKIP_OPTIMIZATION;
-
-/** set_art_cache_directory's directory, read by the threads that write compiled art. */
-std::mutex art_cache_mutex;
-std::filesystem::path art_cache_directory;
-
-[[nodiscard]] std::filesystem::path art_cache_file(const std::string_view text,
-                                                   const std::string_view entry) {
-    const std::lock_guard lock(art_cache_mutex);
-    if (art_cache_directory.empty())
-        return {};
-    std::uint64_t hash = 1469598103934665603ULL;
-    for (const std::string_view part :
-         {text, std::string_view("|"), entry, std::string_view("|d3d11-fxc-skip-optimization-2")}) {
-        for (const char byte : part) {
-            hash ^= static_cast<unsigned char>(byte);
-            hash *= 1099511628211ULL;
-        }
-    }
-    char name[40];
-    std::snprintf(name, sizeof(name), "art-%016llx.dxbc", static_cast<unsigned long long>(hash));
-    return art_cache_directory / name;
-}
-
-/** A compiled art kernel from the cache, if one is there. */
-[[nodiscard]] ComPtr<ID3DBlob> cached_art(const std::filesystem::path& file) {
-    if (file.empty())
-        return nullptr;
-    std::ifstream input(file, std::ios::binary | std::ios::ate);
-    if (!input)
-        return nullptr;
-    const std::streamsize size = input.tellg();
-    if (size <= 0)
-        return nullptr;
-    ComPtr<ID3DBlob> blob;
-    if (FAILED(D3DCreateBlob(static_cast<SIZE_T>(size), &blob)))
-        return nullptr;
-    input.seekg(0);
-    if (!input.read(static_cast<char*>(blob->GetBufferPointer()), size))
-        return nullptr;
-    return blob;
-}
-
-/** Keeps a compiled art kernel for later runs; a cache that cannot be written is skipped. */
-void cache_art(const std::filesystem::path& file, ID3DBlob* const code) noexcept {
-    if (file.empty() || code == nullptr)
-        return;
-    try {
-        std::error_code error;
-        std::filesystem::create_directories(file.parent_path(), error);
-        const std::filesystem::path partial = file.string() + ".partial";
-        {
-            std::ofstream output(partial, std::ios::binary | std::ios::trunc);
-            output.write(static_cast<const char*>(code->GetBufferPointer()),
-                         static_cast<std::streamsize>(code->GetBufferSize()));
-            if (!output)
-                return;
-        }
-        std::filesystem::rename(partial, file, error);
-    } catch (...) {
-    }
-}
+constexpr UINT art_flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_SKIP_OPTIMIZATION;
 
 [[nodiscard]] ComPtr<ID3DBlob> compile(const char* const entry, const std::string_view text,
                                        const UINT optimization) {
@@ -279,9 +219,9 @@ struct RasterPass::Impl final {
         if (!kernel.code.valid()) {
             const char* const entry = shaders::art_entry;
             std::string text = shaders::art_source(source);
-            const std::filesystem::path file = art_cache_file(text, entry);
             // Compiled on an earlier run: made now, so the page shows its art from its first frame.
-            if (ComPtr<ID3DBlob> cached = cached_art(file); cached != nullptr) {
+            if (ComPtr<ID3DBlob> cached = cached_hlsl(text, entry, "cs_5_0", art_flags);
+                cached != nullptr) {
                 ComPtr<ID3D11ComputeShader> shader;
                 if (SUCCEEDED(device->CreateComputeShader(
                         cached->GetBufferPointer(), cached->GetBufferSize(), nullptr, &shader))) {
@@ -289,10 +229,10 @@ struct RasterPass::Impl final {
                     return kernel.shader.Get();
                 }
             }
-            kernel.code = std::async(std::launch::async, [text = std::move(text), entry, file] {
-                              ComPtr<ID3DBlob> code = compile(entry, text, art_optimization);
-                              cache_art(file, code.Get());
-                              return code;
+            kernel.code = std::async(std::launch::async, [text = std::move(text), entry] {
+                              return compile_hlsl(text, "strata.d3d11.raster.hlsl", entry,
+                                                  "cs_5_0", art_flags,
+                                                  "D3D11 raster shader compilation failed");
                           }).share();
         }
         if (kernel.code.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
@@ -629,11 +569,6 @@ struct RasterPass::Impl final {
     WorkBuffer positions;
     std::vector<std::uint32_t> lut_data;
 };
-
-void set_art_cache_directory(std::filesystem::path directory) {
-    const std::lock_guard lock(art_cache_mutex);
-    art_cache_directory = std::move(directory);
-}
 
 RasterPass::RasterPass(ID3D11Device* const device, ID3D11DeviceContext* const context)
     : impl_(std::make_unique<Impl>(device, context)) {}

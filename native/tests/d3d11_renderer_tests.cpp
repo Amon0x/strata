@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <span>
@@ -623,6 +624,43 @@ void test_art_matches_the_same_points(const D3D_DRIVER_TYPE driver, const std::s
     }
 }
 
+// Compiled shaders persist: a renderer made with a shader cache keeps its bytecode there, and one
+// made after it reads that back, compiling nothing, and draws the same.
+void test_shaders_are_kept_between_renderers() {
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() /
+        ("strata-shader-cache-test-" + std::to_string(GetCurrentProcessId()));
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    d3d11::set_shader_cache_directory(directory);
+    const auto entries = [&directory] {
+        std::size_t count = 0U;
+        std::error_code listing;
+        for (const auto& entry : std::filesystem::directory_iterator(directory, listing))
+            count += entry.path().extension() == ".dxbc" ? 1U : 0U;
+        return count;
+    };
+    const auto draw = [] {
+        Fixture fixture;
+        d3d11::Renderer renderer(fixture.device.Get(), fixture.context.Get());
+        d3d11::FrameOptions options;
+        options.load_action = d3d11::TargetLoadAction::clear;
+        host::RenderPacket blue = quad(1U, 0U, 0U, 255U);
+        blue.full_geometry_payload = true;
+        blue.geometry_dirty_all = true;
+        static_cast<void>(renderer.render("layer", blue, fixture.target(), options));
+        return fixture.center();
+    };
+    check(draw() == std::array<int, 4>{0, 0, 255, 255}, "a renderer with a shader cache drew wrong");
+    const std::size_t kept = entries();
+    check(kept >= 2U, "a renderer with a shader cache kept no compiled shaders");
+    check(draw() == std::array<int, 4>{0, 0, 255, 255},
+          "a renderer made from cached shaders drew wrong");
+    check(entries() == kept, "a second renderer compiled shaders the cache already held");
+    d3d11::set_shader_cache_directory({});
+    std::filesystem::remove_all(directory, error);
+}
+
 } // namespace
 
 int main() {
@@ -636,6 +674,7 @@ int main() {
         test_unused_effect_samples_are_evicted();
         test_deep_isolation_is_bounded();
         test_image_texels_are_sampled_as_uploaded();
+        test_shaders_are_kept_between_renderers();
         std::cout << "strata_d3d11_renderer_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {
