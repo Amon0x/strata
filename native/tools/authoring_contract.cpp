@@ -995,8 +995,11 @@ template <typename... T>
             const std::string type = root.wrapper ? root.wrapper_name : root.type.cpp;
             output << "[[nodiscard]] inline ::strata::host::Value encode_" << root.function_name
                    << "(const " << type << "& value) {\n"
-                   << "    return ::strata::host::Value::object({{"
-                   << cpp_quote(root.path) << ", to_value(value)}});\n}\n\n";
+                   // Moved into place: an initializer list's values are const, so building the
+                   // object from one would copy the whole snapshot.
+                   << "    ::strata::host::Value::Object fields;\n"
+                   << "    fields.emplace(" << cpp_quote(root.path) << ", to_value(value));\n"
+                   << "    return ::strata::host::Value(::std::move(fields));\n}\n\n";
             if ((root.semantic->kind != SemanticTypeKind::map ||
                  root.semantic->fields.empty()) &&
                 root.semantic->kind != SemanticTypeKind::host_object) {
@@ -1013,9 +1016,13 @@ template <typename... T>
             for (const FieldDefinition& field : definition->fields) {
                 output << "[[nodiscard]] inline ::strata::host::Value encode_" << root.function_name
                        << '_' << field.member_name << "(const " << field.type.cpp << "& value) {\n"
-                       << "    return ::strata::host::Value::object({{"
-                       << cpp_quote(root.path) << ", ::strata::host::Value::object({{"
-                       << cpp_quote(field.wire_name) << ", to_value(value)}})}});\n}\n\n";
+                       << "    ::strata::host::Value::Object field;\n"
+                       << "    field.emplace(" << cpp_quote(field.wire_name)
+                       << ", to_value(value));\n"
+                       << "    ::strata::host::Value::Object fields;\n"
+                       << "    fields.emplace(" << cpp_quote(root.path)
+                       << ", ::strata::host::Value(::std::move(field)));\n"
+                       << "    return ::strata::host::Value(::std::move(fields));\n}\n\n";
             }
             output << "class " << root.model_name << " final {\n"
                    << "public:\n"

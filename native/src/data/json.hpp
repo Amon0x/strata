@@ -91,4 +91,9 @@ void append_json_entries(JsonValue::Object& object, std::initializer_list<JsonEn
 /** Canonically ordered JSON without insignificant whitespace, terminated by one newline. */
 [[nodiscard]] std::string encode_json_line(const JsonValue& value);
 
+/** Appends a finite number as canonical JSON writes it. Throws for a non-finite one. */
+void append_json_number(std::string& output, double value);
+/** Appends a string quoted and escaped as canonical JSON writes it. */
+void append_json_string(std::string& output, std::string_view value);
+
 } // namespace strata::data

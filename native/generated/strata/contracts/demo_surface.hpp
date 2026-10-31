@@ -530,27 +530,45 @@ struct AsyncTreeChildren final {
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_async_results(const AsyncResults& value) {
-    return ::strata::host::Value::object({{"asyncResults", to_value(value)}});
+    ::strata::host::Value::Object fields;
+    fields.emplace("asyncResults", to_value(value));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_async_tree_children(const AsyncTreeChildren& value) {
-    return ::strata::host::Value::object({{"asyncTreeChildren", to_value(value)}});
+    ::strata::host::Value::Object fields;
+    fields.emplace("asyncTreeChildren", to_value(value));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_data(const Data& value) {
-    return ::strata::host::Value::object({{"data", to_value(value)}});
+    ::strata::host::Value::Object fields;
+    fields.emplace("data", to_value(value));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_data_tree_items(const ::std::vector<DataTreeItemsItem>& value) {
-    return ::strata::host::Value::object({{"data", ::strata::host::Value::object({{"treeItems", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("treeItems", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("data", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_data_table_rows(const ::std::vector<DataTableRowsItem>& value) {
-    return ::strata::host::Value::object({{"data", ::strata::host::Value::object({{"tableRows", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("tableRows", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("data", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_data_grid_entries(const ::std::vector<DataGridEntriesItem>& value) {
-    return ::strata::host::Value::object({{"data", ::strata::host::Value::object({{"gridEntries", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("gridEntries", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("data", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 class DataModel final {
@@ -625,119 +643,233 @@ private:
 };
 
 [[nodiscard]] inline ::strata::host::Value encode_demo(const Demo& value) {
-    return ::strata::host::Value::object({{"demo", to_value(value)}});
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", to_value(value));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_event_total(const double& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"eventTotal", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("eventTotal", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_retained_event_count(const double& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"retainedEventCount", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("retainedEventCount", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_events(const ::std::vector<DemoEventsItem>& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"events", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("events", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_coalescing_result(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"coalescingResult", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("coalescingResult", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_deterministic_result(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"deterministicResult", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("deterministicResult", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_focus_contained(const bool& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"focusContained", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("focusContained", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_inspector_pick_armed(const bool& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorPickArmed", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("inspectorPickArmed", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_reorder_items(const ::std::vector<DemoReorderItemsItem>& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"reorderItems", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("reorderItems", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_controlled_split_ratio(const double& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"controlledSplitRatio", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("controlledSplitRatio", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_host_value(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"hostValue", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("hostValue", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_host_message(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"hostMessage", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("hostMessage", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_data_activity(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"dataActivity", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("dataActivity", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_form_valid(const bool& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"formValid", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("formValid", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_form_dirty(const bool& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"formDirty", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("formDirty", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_form_touched(const bool& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"formTouched", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("formTouched", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_combo_query(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"comboQuery", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("comboQuery", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_combo_selection(const ::std::optional<::std::string>& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"comboSelection", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("comboSelection", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_inspector_node_count(const double& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorNodeCount", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("inspectorNodeCount", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_inspector_selected_key(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorSelectedKey", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("inspectorSelectedKey", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_inspector_selected_type(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorSelectedType", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("inspectorSelectedType", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_inspector_bounds(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorBounds", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("inspectorBounds", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_inspector_actions(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorActions", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("inspectorActions", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_inspector_handler_owners(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorHandlerOwners", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("inspectorHandlerOwners", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_inspector_motion(const ::std::string& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorMotion", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("inspectorMotion", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_measured_nodes(const double& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"measuredNodes", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("measuredNodes", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_reused_nodes(const double& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"reusedNodes", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("reusedNodes", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_arranged_nodes(const double& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"arrangedNodes", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("arrangedNodes", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_demo_surface_visible(const bool& value) {
-    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"surfaceVisible", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("surfaceVisible", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("demo", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 class DemoModel final {

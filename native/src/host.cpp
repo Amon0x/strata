@@ -1,7 +1,9 @@
 #include <strata/host.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
+#include <iterator>
 #include <exception>
 #include <mutex>
 #include <stdexcept>
@@ -12,35 +14,46 @@
 namespace strata::host {
 namespace {
 
-[[nodiscard]] data::JsonValue to_json_value(const Value& value) {
-    if (value.is_null())
-        return data::JsonValue{};
-    if (const bool* boolean = value.boolean(); boolean != nullptr) {
-        return data::JsonValue(*boolean);
+/**
+ * Writes `value` as JSON straight from its fields: canonical order (an Object's keys are sorted
+ * already) and numbers, without whitespace or a copy into data::JsonValue first. A snapshot of
+ * thousands of rows is this text, which the runtime parses, so its size and cost are the
+ * snapshot's.
+ */
+void append_compact(std::string& output, const Value& value) {
+    if (value.is_null()) {
+        output.append("null");
+    } else if (const bool* boolean = value.boolean(); boolean != nullptr) {
+        output.append(*boolean ? "true" : "false");
+    } else if (const std::int64_t* integer = value.integer(); integer != nullptr) {
+        char buffer[32]{};
+        const auto converted = std::to_chars(std::begin(buffer), std::end(buffer), *integer);
+        output.append(buffer, converted.ptr);
+    } else if (const double* number = value.number(); number != nullptr) {
+        data::append_json_number(output, *number);
+    } else if (const std::string* string = value.string(); string != nullptr) {
+        data::append_json_string(output, *string);
+    } else if (const Value::Array* values = value.array(); values != nullptr) {
+        output.push_back('[');
+        for (std::size_t index = 0U; index < values->size(); ++index) {
+            if (index != 0U)
+                output.push_back(',');
+            append_compact(output, (*values)[index]);
+        }
+        output.push_back(']');
+    } else {
+        output.push_back('{');
+        bool first = true;
+        for (const auto& [name, child] : *value.object()) {
+            if (!first)
+                output.push_back(',');
+            first = false;
+            data::append_json_string(output, name);
+            output.push_back(':');
+            append_compact(output, child);
+        }
+        output.push_back('}');
     }
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) {
-        return data::JsonValue(*integer);
-    }
-    if (const double* number = value.number(); number != nullptr) {
-        return data::JsonValue(*number);
-    }
-    if (const std::string* string = value.string(); string != nullptr) {
-        return data::JsonValue(*string);
-    }
-    if (const Value::Array* values = value.array(); values != nullptr) {
-        data::JsonValue::Array result;
-        result.reserve(values->size());
-        for (const Value& child : *values)
-            result.push_back(to_json_value(child));
-        return data::JsonValue(std::move(result));
-    }
-    data::JsonValue::Object result;
-    const Value::Object& fields = *value.object();
-    result.reserve(fields.size());
-    for (const auto& [name, child] : fields) {
-        result.emplace_back(name, to_json_value(child));
-    }
-    return data::JsonValue(std::move(result));
 }
 
 [[nodiscard]] Value from_json_value(const data::JsonValue& value) {
@@ -229,7 +242,9 @@ std::optional<double> Value::optional_number(const std::string_view field) const
 }
 
 std::string Value::json() const {
-    return data::encode_canonical_json(to_json_value(*this));
+    std::string output;
+    append_compact(output, *this);
+    return output;
 }
 
 bool operator==(const Value& left, const Value& right) noexcept {

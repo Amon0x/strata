@@ -707,4 +707,14 @@ std::string encode_json_line(const JsonValue& value) {
     return output;
 }
 
+void append_json_number(std::string& output, const double value) {
+    if (!std::isfinite(value))
+        throw std::invalid_argument("JSON rejects non-finite numbers");
+    output.append(plain_decimal(value));
+}
+
+void append_json_string(std::string& output, const std::string_view value) {
+    append_quoted(output, value);
+}
+
 } // namespace strata::data

@@ -86,6 +86,7 @@ class Value final {
     [[nodiscard]] std::optional<std::int64_t>
     optional_integer(std::string_view field) const noexcept;
     [[nodiscard]] std::optional<double> optional_number(std::string_view field) const noexcept;
+    /** The value as compact JSON: keys in order, no whitespace, as snapshots carry it. */
     [[nodiscard]] std::string json() const;
 
     /** JSON numbers compare by numeric value even when one side parsed as an integer. */

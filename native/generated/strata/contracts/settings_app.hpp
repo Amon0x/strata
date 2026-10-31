@@ -224,15 +224,25 @@ struct Settings final {
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_settings(const Settings& value) {
-    return ::strata::host::Value::object({{"settings", to_value(value)}});
+    ::strata::host::Value::Object fields;
+    fields.emplace("settings", to_value(value));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_settings_saved_message(const ::std::string& value) {
-    return ::strata::host::Value::object({{"settings", ::strata::host::Value::object({{"savedMessage", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("savedMessage", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("settings", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_settings_profile_tree(const ::std::vector<SettingsProfileTreeItem>& value) {
-    return ::strata::host::Value::object({{"settings", ::strata::host::Value::object({{"profileTree", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("profileTree", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("settings", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 class SettingsModel final {

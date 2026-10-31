@@ -284,35 +284,65 @@ struct Hub final {
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_hub(const Hub& value) {
-    return ::strata::host::Value::object({{"hub", to_value(value)}});
+    ::strata::host::Value::Object fields;
+    fields.emplace("hub", to_value(value));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_hub_frame_summary(const ::std::string& value) {
-    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"frameSummary", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("frameSummary", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("hub", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_hub_frame_millis(const double& value) {
-    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"frameMillis", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("frameMillis", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("hub", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_hub_frame_history(const ::std::vector<HubFrameHistoryItem>& value) {
-    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"frameHistory", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("frameHistory", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("hub", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_hub_frame_area(const ::std::vector<HubFrameAreaItem>& value) {
-    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"frameArea", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("frameArea", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("hub", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_hub_frame_scale(const ::std::string& value) {
-    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"frameScale", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("frameScale", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("hub", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_hub_status(const ::std::string& value) {
-    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"status", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("status", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("hub", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_hub_surfaces(const ::std::vector<HubSurfacesItem>& value) {
-    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"surfaces", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("surfaces", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("hub", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 class HubModel final {

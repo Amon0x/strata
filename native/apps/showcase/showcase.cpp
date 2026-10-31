@@ -117,12 +117,15 @@ Value ShowcaseModel::table_snapshot() const {
     std::vector<contract::DataTableRowsItem> rows;
     rows.reserve(5'000U);
     for (std::size_t index = 0U; index < 5'000U; ++index) {
-        std::ostringstream name;
-        name << "Entity " << std::setw(4) << std::setfill('0') << index;
+        // Five thousand rows: their names are put together directly, not through a stream.
+        const std::string number = std::to_string(index);
+        std::string name = "Entity ";
+        name.append(number.size() < 4U ? 4U - number.size() : 0U, '0');
+        name.append(number);
         rows.push_back(contract::DataTableRowsItem{
-            .key = "data.table.row." + std::to_string(index),
+            .key = "data.table.row." + number,
             .cells = contract::DataTableRowsItemCells{
-                .name = name.str(),
+                .name = std::move(name),
                 .status = index % 3U == 0U ? "Active" : "Idle",
                 .progress = static_cast<double>(index % 101U),
             },

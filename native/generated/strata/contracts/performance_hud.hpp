@@ -233,23 +233,41 @@ struct Performance final {
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_performance(const Performance& value) {
-    return ::strata::host::Value::object({{"performance", to_value(value)}});
+    ::strata::host::Value::Object fields;
+    fields.emplace("performance", to_value(value));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_performance_fps(const ::std::string& value) {
-    return ::strata::host::Value::object({{"performance", ::strata::host::Value::object({{"fps", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("fps", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("performance", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_performance_total_millis(const ::std::string& value) {
-    return ::strata::host::Value::object({{"performance", ::strata::host::Value::object({{"totalMillis", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("totalMillis", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("performance", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_performance_native_millis(const ::std::string& value) {
-    return ::strata::host::Value::object({{"performance", ::strata::host::Value::object({{"nativeMillis", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("nativeMillis", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("performance", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_performance_samples(const ::std::vector<PerformanceSamplesItem>& value) {
-    return ::strata::host::Value::object({{"performance", ::strata::host::Value::object({{"samples", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("samples", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("performance", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 class PerformanceModel final {

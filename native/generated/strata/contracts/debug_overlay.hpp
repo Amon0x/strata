@@ -575,91 +575,177 @@ enum class StrataDebugSelectModeActionMode {
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug(const Debug& value) {
-    return ::strata::host::Value::object({{"debug", to_value(value)}});
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", to_value(value));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_mode(const ::std::string& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"mode", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("mode", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_frame(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"frame", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("frame", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_errors(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"errors", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("errors", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_warnings(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"warnings", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("warnings", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_infos(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"infos", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("infos", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_diagnostic_count(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"diagnosticCount", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("diagnosticCount", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_dropped_diagnostics(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"droppedDiagnostics", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("droppedDiagnostics", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_hot_path_count(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"hotPathCount", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("hotPathCount", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_spike_count(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"spikeCount", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("spikeCount", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_motion_count(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"motionCount", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("motionCount", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_running_motion_count(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"runningMotionCount", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("runningMotionCount", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_semantic_count(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"semanticCount", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("semanticCount", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_collection_count(const double& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"collectionCount", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("collectionCount", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_summary_metrics(const ::std::vector<DebugSummaryMetricsItem>& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"summaryMetrics", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("summaryMetrics", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_counters(const ::std::vector<DebugCountersItem>& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"counters", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("counters", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_hot_paths(const ::std::vector<DebugHotPathsItem>& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"hotPaths", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("hotPaths", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_spikes(const ::std::vector<DebugSpikesItem>& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"spikes", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("spikes", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_diagnostics(const ::std::vector<DebugDiagnosticsItem>& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"diagnostics", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("diagnostics", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_motions(const ::std::vector<DebugMotionsItem>& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"motions", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("motions", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_semantics(const ::std::vector<DebugSemanticsItem>& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"semantics", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("semantics", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 [[nodiscard]] inline ::strata::host::Value encode_debug_collections(const ::std::vector<DebugCollectionsItem>& value) {
-    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"collections", to_value(value)}})}});
+    ::strata::host::Value::Object field;
+    field.emplace("collections", to_value(value));
+    ::strata::host::Value::Object fields;
+    fields.emplace("debug", ::strata::host::Value(::std::move(field)));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 class DebugModel final {
