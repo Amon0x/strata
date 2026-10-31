@@ -51,5 +51,7 @@ class CaptureRenderer {
 };
 
 [[nodiscard]] std::unique_ptr<CaptureRenderer> create_capture_renderer(std::string_view backend);
+/** Enables the CLI hosts' private user-cache location before any renderer is created. */
+void use_default_shader_cache();
 
 } // namespace strata::headless

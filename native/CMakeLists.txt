@@ -600,6 +600,7 @@ if(STRATA_BUILD_VULKAN)
         vulkan/effects.cpp
         vulkan/raster.cpp
         vulkan/shader.cpp
+        vulkan/shader_cache.cpp
         vulkan/presenter.cpp
         vulkan/presenter_abi.cpp)
     add_library(Strata::vulkan ALIAS strata_vulkan)
@@ -607,7 +608,7 @@ if(STRATA_BUILD_VULKAN)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(strata_vulkan PUBLIC Vulkan::Vulkan Strata::render_host Strata::host
-        PRIVATE StrataShaderc::shaderc)
+        PRIVATE StrataShaderc::shaderc StrataShaderc::spirv_tools ${CMAKE_DL_LIBS})
     set_target_properties(strata_vulkan PROPERTIES EXPORT_NAME vulkan POSITION_INDEPENDENT_CODE ON)
     target_compile_features(strata_vulkan PUBLIC cxx_std_23)
     strata_target_defaults(strata_vulkan)

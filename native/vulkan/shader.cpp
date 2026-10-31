@@ -1,12 +1,23 @@
 #include "shader.hpp"
-#include <shaderc/shaderc.hpp>
+
 #include <algorithm>
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <utility>
+
+#include <shaderc/shaderc.hpp>
+
+#include "shader_cache.hpp"
+
 namespace strata::vulkan::detail {
 std::vector<std::uint32_t> compile_hlsl(std::string_view source, bool vertex,
                                         std::string_view name) {
+    const auto stage = vertex ? shaderc_vertex_shader : shaderc_fragment_shader;
+    const ShaderCacheEntry cache(source, "main", name,
+                                vertex ? ShaderStage::vertex : ShaderStage::fragment, true);
+    if (auto cached = cache.load(); cached.has_value())
+        return std::move(*cached);
     shaderc::Compiler compiler;
     shaderc::CompileOptions options;
     options.SetSourceLanguage(shaderc_source_language_hlsl);
@@ -23,11 +34,13 @@ std::vector<std::uint32_t> compile_hlsl(std::string_view source, bool vertex,
     options.SetInvertY(vertex);
     options.SetOptimizationLevel(shaderc_optimization_level_performance);
     const auto result = compiler.CompileGlslToSpv(
-        source.data(), source.size(), vertex ? shaderc_vertex_shader : shaderc_fragment_shader,
+        source.data(), source.size(), stage,
         std::string(name).c_str(), "main", options);
     if (result.GetCompilationStatus() != shaderc_compilation_status_success)
         throw std::runtime_error("Vulkan HLSL compilation failed: " + result.GetErrorMessage());
-    return {result.cbegin(), result.cend()};
+    std::vector<std::uint32_t> words(result.cbegin(), result.cend());
+    cache.store(words);
+    return words;
 }
 void route_second_output_to_dual_source(std::vector<std::uint32_t>& spirv) {
     constexpr std::uint32_t op_decorate = 71U;
@@ -67,6 +80,9 @@ void route_second_output_to_dual_source(std::vector<std::uint32_t>& spirv) {
 
 std::vector<std::uint32_t> compile_hlsl_compute(std::string_view source, std::string_view entry,
                                                 std::string_view name, bool optimize) {
+    const ShaderCacheEntry cache(source, entry, name, ShaderStage::compute, optimize);
+    if (auto cached = cache.load(); cached.has_value())
+        return std::move(*cached);
     shaderc::Compiler compiler;
     shaderc::CompileOptions options;
     options.SetSourceLanguage(shaderc_source_language_hlsl);
@@ -81,6 +97,8 @@ std::vector<std::uint32_t> compile_hlsl_compute(std::string_view source, std::st
                                                   std::string(entry).c_str(), options);
     if (result.GetCompilationStatus() != shaderc_compilation_status_success)
         throw std::runtime_error("Vulkan HLSL compilation failed: " + result.GetErrorMessage());
-    return {result.cbegin(), result.cend()};
+    std::vector<std::uint32_t> words(result.cbegin(), result.cend());
+    cache.store(words);
+    return words;
 }
 } // namespace strata::vulkan::detail

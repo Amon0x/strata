@@ -1,4 +1,6 @@
 #include "vulkan/offscreen.hpp"
+#include "vulkan/shader.hpp"
+#include "vulkan/shader_cache.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -250,9 +252,83 @@ void test_raster_jobs_match_the_reference(vulkan::detail::Offscreen& context) {
     require(largest == 0, "Vulkan compute composite differs from the reference");
 }
 
+void test_shader_cache(vulkan::detail::Offscreen& context) {
+    const auto directory = std::filesystem::temp_directory_path() /
+        ("strata-vulkan-shaders-" +
+         std::to_string(reinterpret_cast<std::uintptr_t>(&context)) + "-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    require(std::filesystem::create_directory(directory), "create isolated shader cache");
+    struct Cleanup {
+        std::filesystem::path directory;
+        ~Cleanup() {
+            vulkan::set_shader_cache_directory({});
+            std::error_code error;
+            std::filesystem::remove_all(directory, error);
+        }
+    } cleanup{directory};
+    vulkan::set_shader_cache_directory(directory);
+    const std::string vertex_source =
+        "float4 main(float4 position : POSITION) : SV_Position { return position; }";
+    const auto vertex = vulkan::detail::compile_hlsl(vertex_source, true, "cache.vertex");
+    const vulkan::detail::ShaderCacheEntry entry(
+        vertex_source, "main", "cache.vertex", vulkan::detail::ShaderStage::vertex, true);
+    // A valid envelope and checksum do not make a malformed module safe to send to a driver.
+    entry.store(std::array<std::uint32_t, 6>{0x07230203U, 0x00010300U, 0U, 1U, 0U, 0U});
+    require(vulkan::detail::compile_hlsl(vertex_source, true, "cache.vertex") == vertex,
+            "malformed cached SPIR-V was not replaced by compilation");
+    const auto fragment = vulkan::detail::compile_hlsl(
+        "float4 main() : SV_Target0 { return float4(0.25,0.5,0.75,1); }",
+        false, "cache.fragment");
+    entry.store(fragment);
+    require(vulkan::detail::compile_hlsl(vertex_source, true, "cache.vertex") == vertex,
+            "cached SPIR-V with the wrong execution stage reached its caller");
+    const std::string compute_source =
+        "[numthreads(1,1,1)] void first(uint3 id : SV_DispatchThreadID) {} "
+        "[numthreads(1,1,1)] void second(uint3 id : SV_DispatchThreadID) {}";
+    const auto first = vulkan::detail::compile_hlsl_compute(compute_source, "first", "cache.compute");
+    const auto second = vulkan::detail::compile_hlsl_compute(compute_source, "second", "cache.compute");
+    vulkan::detail::ShaderCacheEntry(
+        compute_source, "first", "cache.compute", vulkan::detail::ShaderStage::compute, true).store(second);
+    require(vulkan::detail::compile_hlsl_compute(compute_source, "first", "cache.compute") == first,
+            "cached SPIR-V with the wrong entry point reached its caller");
+    bool rejected = false;
+    try {
+        static_cast<void>(vulkan::detail::compile_hlsl(
+            vertex_source + " invalid shader source", true, "cache.vertex"));
+    } catch (const std::runtime_error&) {
+        rejected = true;
+    }
+    require(rejected, "a cached shader hid a changed source's compilation error");
+
+    context.resize(32, 32);
+    const auto draw = [&](const std::string_view source, const std::array<int, 4> expected) {
+        vulkan::Renderer renderer(context.device);
+        renderer.declare_material("cache.color", source);
+        auto packet = quad();
+        packet.materials = {"cache.color"};
+        (void)renderer.render("shader-cache", packet, context.target(32, 32),
+                              {vulkan::TargetLoadAction::clear, {}, 0});
+        near(pixel(context.pixels(), 32, 16, 16), expected, "shader cache changed rendered pixels");
+    };
+    constexpr std::string_view blue =
+        "float4 material(PixelInput input) { return float4(0.2,0.4,0.6,1); }";
+    draw(blue, {51, 102, 153, 255});
+    draw(blue, {51, 102, 153, 255});
+    draw("float4 material(PixelInput input) { return float4(0.6,0.4,0.2,1); }",
+         {153, 102, 51, 255});
+    for (const auto& file : std::filesystem::directory_iterator(directory)) {
+        if (file.path().extension() == ".spv") {
+            std::ofstream damaged(file.path(), std::ios::binary | std::ios::trunc);
+            damaged << "truncated";
+        }
+    }
+    draw(blue, {51, 102, 153, 255});
+}
+
 void run() {
     vulkan::detail::Offscreen context(true);
     std::cout << "Vulkan device: " << context.device_name << "\n";
+    test_shader_cache(context);
     test_raster_jobs_match_the_reference(context);
     context.resize(32, 32);
     {

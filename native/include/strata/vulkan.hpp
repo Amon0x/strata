@@ -20,6 +20,13 @@ struct RenderPacket;
 
 namespace strata::vulkan {
 
+/**
+ * Sets the process-wide shaderc/SPIR-V cache directory; empty disables it. Configuration is
+ * synchronized, and each compilation keeps the directory it started with. The default is
+ * disabled: hosts choose a private cache directory, as for the D3D11 shader cache.
+ */
+void set_shader_cache_directory(std::filesystem::path directory);
+
 /** Borrowed Vulkan 1.1+ handles. All calls and queue access must be externally serialized. */
 struct Device final {
     VkPhysicalDevice physical_device = VK_NULL_HANDLE;

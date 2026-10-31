@@ -8,11 +8,11 @@ Minecraft dependency is introduced.
 ## Building on Linux
 
 The `linux-x64` preset enables the backend and GPU acceptance tests. Install a C++23 compiler,
-CMake, Ninja, Vulkan headers/loader, shaderc development files, a Vulkan
+CMake, Ninja, Vulkan headers/loader, shaderc and SPIRV-Tools development files, a Vulkan
 ICD for the GPU, and Khronos validation layers. On Arch Linux:
 
 ```sh
-sudo pacman -S --needed gcc cmake ninja vulkan-headers vulkan-icd-loader shaderc vulkan-validation-layers sdl2-compat
+sudo pacman -S --needed gcc cmake ninja vulkan-headers vulkan-icd-loader shaderc spirv-tools vulkan-validation-layers sdl2-compat
 cmake --preset linux-x64
 cmake --build --preset linux-x64 --parallel 8
 ctest --preset linux-x64 --output-on-failure
@@ -21,8 +21,9 @@ ctest --preset linux-x64 --output-on-failure
 `-DSTRATA_TEST_VULKAN=OFF` disables driver-dependent tests while still building the renderer.
 `-DSTRATA_BUILD_VULKAN=OFF` builds the portable CPU lane without Vulkan or shaderc. PNG images
 are decoded by the core in both lanes, so no image library is needed. Windows keeps D3D11 as its
-default; Vulkan can be enabled with `STRATA_BUILD_VULKAN=ON` and the Vulkan SDK's shaderc available
-to CMake.
+default; Vulkan can be enabled with `STRATA_BUILD_VULKAN=ON` and the Vulkan SDK's shaderc and
+SPIRV-Tools available to CMake. Shared libraries are preferred; deploy their matching runtime
+libraries with an embedding, or make the SDK's runtime directory available to the loader.
 
 The preset also builds the [SDL interactive preview](linux-preview.md). Set
 `-DSTRATA_BUILD_PREVIEW=OFF` to build without SDL.
@@ -150,6 +151,27 @@ is deliberately a subsequent change.
 
 ## Loading-time preparation and persistent cache
 
+Shader compilation and driver pipeline creation have separate caches. Before creating a renderer
+or presenter, a C++ host can enable the process-wide compiler cache:
+
+```cpp
+strata::vulkan::set_shader_cache_directory(shader_cache_directory);
+```
+
+An empty path disables it. Configuration is synchronized, and an in-flight compilation retains
+the directory it started with. Headless and SDL preview executables enable the user cache:
+`%LOCALAPPDATA%/Strata/shaders` on Windows, or `$XDG_CACHE_HOME/strata/shaders` (otherwise
+`$HOME/.cache/strata/shaders`) on Linux. Other embedders choose their own private location.
+
+Compiler entries are keyed by the loaded compiler module, validator version, complete source,
+stage, entry point, name and compilation options. Source and names are also compared exactly,
+so a filename hash collision cannot substitute another shader. Entries have a 16 MiB limit and
+checksum; SPIRV-Tools checks the module for Vulkan 1.1, and the requested execution stage and
+entry point must exist before the code is used. Missing, damaged or incompatible entries compile
+again. Writes use process-unique adjacent files and atomic replacement; an unwritable cache does
+not prevent compilation. Files include cache metadata and source, not just standalone SPIR-V,
+and are disposable local data.
+
 After declaring shaders (or calling `Presenter::synchronize_programs`), use:
 
 ```cpp
@@ -181,12 +203,14 @@ first-frame cost or change the renderer's queue/fence contract.
 
 ### Reproducible preparation benchmark
 
-With Vulkan tests enabled, `strata_vulkan_preparation_benchmark MODE CACHE_PATH` renders a
+With Vulkan tests enabled, `strata_vulkan_preparation_benchmark MODE CACHE_PATH [SHADER_CACHE]` renders a
 1280×800 target with an authored material, blur, and authored effect. Modes are `lazy`, `prepare`,
 and `cache` (load then prepare). Each invocation measures its first render, then 120 warmup and
 600 retained frames, waiting for the queue after each. Wall times include CPU recording,
 submission, and GPU completion, but no
-pixel readback/PNG or Vulkan validation. It reports newly created first-render pipelines.
+pixel readback/PNG or Vulkan validation. It reports newly created first-render pipelines and
+renderer/shader setup separately from pipeline preparation. The optional directory enables the
+compiler cache; repeat the same command to measure a later process loading it.
 
 Five sequential invocations per mode on RTX 4070 SUPER / NVIDIA 610.57.04, Linux, 2026-09-05:
 

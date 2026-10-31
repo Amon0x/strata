@@ -13,6 +13,7 @@
 
 #include "desktop/launch.hpp"
 #include "headless/application_host.hpp"
+#include "headless/capture_renderer.hpp"
 #include "headless/png.hpp"
 #include "input.hpp"
 #include "services.hpp"
@@ -117,6 +118,7 @@ int main(const int argc, char** argv) {
         }
         if (backend != "vulkan" && backend != "reference")
             throw std::invalid_argument("preview backend must be vulkan or reference");
+        headless::use_default_shader_cache();
         manifest.application.render_backend = backend;
         const auto& scenario = manifest.application;
         const Uint32 flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |

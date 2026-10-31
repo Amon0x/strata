@@ -40,6 +40,10 @@ selects the CPU renderer. The desktop backend overrides the manifest's capture b
 manifest authored with `d3d11` can be previewed on Linux. Vulkan/shader startup failures report an
 error; there is no silent rendering fallback.
 
+Compiled Vulkan shaders persist in `$XDG_CACHE_HOME/strata/shaders`, or
+`$HOME/.cache/strata/shaders` when no XDG cache root is set. The cache is disposable; source or
+compiler changes select new entries, and damaged entries compile again.
+
 Tab/Shift+Tab navigate focus. Sliders accept arrows, Home/End, and Page Up/Down; dropdowns accept
 arrows, typeahead, Enter, and Escape. Editors use the native clipboard and SDL's separate committed
 text/composition events. Dragging keeps pointer capture outside the window; losing window focus

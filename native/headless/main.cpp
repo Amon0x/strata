@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 
+#include "capture_renderer.hpp"
 #include "interactive.hpp"
 #include "runner.hpp"
 #include "scenario.hpp"
@@ -51,6 +52,7 @@ int main(const int argument_count, const char* const* const arguments) {
             return 2;
         }
         const strata::headless::Scenario scenario = strata::headless::load_scenario(scenario_path);
+        strata::headless::use_default_shader_cache();
         if (interactive) {
             strata::headless::run_interactive(scenario, resources, output, std::cin, std::cout);
         } else {

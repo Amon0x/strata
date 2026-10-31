@@ -46,14 +46,17 @@ host::RenderPacket quad(std::array<std::uint8_t, 4> color = {255, 0, 0, 255}) {
 } // namespace
 int main(int argc, char** argv) {
     try {
-        if (argc != 3)
+        if (argc != 3 && argc != 4)
             throw std::invalid_argument(
-                "usage: strata_vulkan_preparation_benchmark lazy|prepare|cache CACHE_PATH");
+                "usage: strata_vulkan_preparation_benchmark lazy|prepare|cache CACHE_PATH [SHADER_CACHE]");
         const std::string mode = argv[1];
         if (mode != "lazy" && mode != "prepare" && mode != "cache")
             throw std::invalid_argument("unknown mode");
+        if (argc == 4)
+            vulkan::set_shader_cache_directory(argv[3]);
         vulkan::detail::Offscreen context(false);
         context.resize(1280, 800);
+        const auto renderer_start = Clock::now();
         vulkan::Renderer renderer(context.device);
         renderer.declare_material(
             "bench", "float4 material(PixelInput input) { return float4(input.uv, 0.5, 1); }");
@@ -61,6 +64,7 @@ int main(int argc, char** argv) {
                                      UINT32_MAX,
                                      "float4 effect(EffectInput input) { return "
                                      "sampleEffectSource(input.uv) * float4(0.8,1,1,1); }");
+        const double renderer_setup_ms = milliseconds(renderer_start);
         auto packet = quad();
         packet.materials = {"bench"};
         std::get<host::DrawBatch>(packet.batches[0]).scissor = {0, 0, 1280, 800};
@@ -103,6 +107,7 @@ int main(int argc, char** argv) {
         const bool saved = renderer.save_pipeline_cache(argv[2]);
         std::cout << "{\"device\":\"" << context.device_name << "\",\"mode\":\"" << mode
                   << "\",\"cache_loaded\":" << loaded << ",\"cache_saved\":" << saved
+                  << ",\"renderer_setup_ms\":" << renderer_setup_ms
                   << ",\"prepare_ms\":" << prepare_ms << ",\"first_render_ms\":" << first
                   << ",\"first_render_new_pipelines\":" << created << ",\"steady_mean_ms\":"
                   << std::accumulate(frames.begin(), frames.end(), 0.0) /

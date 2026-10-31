@@ -21,6 +21,10 @@ Each capture contains both views needed by automated testing:
 This makes the system useful for visual regression, interaction tests, conformance investigation,
 and automated tooling without putting an automation-only interface into the core.
 
+The CLI enables persistent D3D11/SPIR-V shader caches in the user's Strata cache directory.
+Sources and compiler settings identify entries; shader edits still compile immediately.
+The backend libraries themselves remain opt-in, so isolated renderer tests need not use disk caches.
+
 ## Running a scenario
 
 After building the Windows preset, the production-renderer showcase scenario is:
