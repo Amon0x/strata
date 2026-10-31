@@ -31,6 +31,41 @@ using JsonObject = data::JsonObjectView;
     return result;
 }
 
+/**
+ * Where in the unit a value is, for an error message: a chain of parts put together only when
+ * something fails, so validating a large unit builds no strings for the nodes it passes.
+ */
+class Context final {
+public:
+    Context(const char* const part) noexcept : first_(part) {}
+    Context(const std::string_view part) noexcept : first_(part) {}
+    Context(const Context& parent, const std::string_view part,
+            const std::string_view detail = {}) noexcept
+        : parent_(&parent), first_(part), second_(detail) {}
+
+    [[nodiscard]] static Context named(const std::string_view first, const std::string_view second,
+                                       const std::string_view third = {}) noexcept {
+        Context result(first);
+        result.second_ = second;
+        result.third_ = third;
+        return result;
+    }
+
+    [[nodiscard]] std::string text() const {
+        std::string result = parent_ != nullptr ? parent_->text() : std::string();
+        result.append(first_);
+        result.append(second_);
+        result.append(third_);
+        return result;
+    }
+
+private:
+    const Context* parent_ = nullptr;
+    std::string_view first_;
+    std::string_view second_;
+    std::string_view third_;
+};
+
 [[nodiscard]] JsonValue required(const JsonValue value, const std::string_view field) {
     const JsonValue child_value = value.find(field);
     if (!child_value) throw std::runtime_error("portable IR is missing field '" + std::string(field) + "'");
@@ -60,8 +95,8 @@ private:
     static constexpr std::size_t maximum_values = 1'000'000U;
     static constexpr std::size_t maximum_array_items = 100'000U;
 
-    [[noreturn]] static void fail(const std::string_view context, const std::string& message) {
-        throw std::runtime_error("portable IR " + std::string(context) + " " + message);
+    [[noreturn]] static void fail(const Context& context, const std::string& message) {
+        throw std::runtime_error("portable IR " + context.text() + " " + message);
     }
 
     void walk(const JsonValue value, const std::size_t depth) {
@@ -97,14 +132,14 @@ private:
         }
     }
 
-    static void require_object(const JsonValue value, const std::string_view context) {
+    static void require_object(const JsonValue value, const Context& context) {
         if (!value.object().has_value()) fail(context, "must be an object");
     }
 
     static JsonArray require_array(
         const JsonValue value,
         const std::string_view field,
-        const std::string_view context
+        const Context& context
     ) {
         const JsonValue child_value = required(value, field);
         const std::optional<JsonArray> result = child_value.array();
@@ -115,7 +150,7 @@ private:
     static std::string_view require_string(
         const JsonValue value,
         const std::string_view field,
-        const std::string_view context,
+        const Context& context,
         const bool allow_empty = false
     ) {
         const std::optional<std::string_view> child_value = required(value, field).string();
@@ -128,14 +163,14 @@ private:
     static void require_boolean(
         const JsonValue value,
         const std::string_view field,
-        const std::string_view context
+        const Context& context
     ) {
         if (!required(value, field).boolean().has_value()) {
             fail(context, "field '" + std::string(field) + "' must be boolean");
         }
     }
 
-    static void validate_position(const JsonValue value, const std::string_view context) {
+    static void validate_position(const JsonValue value, const Context& context) {
         require_object(value, context);
         for (const std::string_view field : {"column", "line", "offset"}) {
             const std::optional<std::int64_t> number = required(value, field).integer();
@@ -145,7 +180,7 @@ private:
         }
     }
 
-    static void validate_span(const JsonValue owner, const std::string_view context) {
+    static void validate_span(const JsonValue owner, const Context& context) {
         const JsonValue value = required(owner, "span");
         require_object(value, context);
         require_string(value, "sourceId", context);
@@ -155,7 +190,7 @@ private:
         validate_position(required(value, "end"), context);
     }
 
-    static std::string_view validate_path(const JsonValue value, const std::string_view context) {
+    static std::string_view validate_path(const JsonValue value, const Context& context) {
         const std::string_view path = require_string(value, "path", context);
         if (!path.starts_with('/')) fail(context, "path must begin with '/'");
         return path;
@@ -175,7 +210,7 @@ private:
             validate_span(declaration, role);
             if (has_body) validate_block(
                 required(declaration, "body"),
-                std::string(role) + " " + std::string(name)
+                Context::named(role, " ", name)
             );
             if (role == "component") {
                 for (const JsonValue parameter : require_array(declaration, "parameters", role)) {
@@ -198,32 +233,32 @@ private:
             const std::string_view name = require_string(function, "name", "function");
             if (name.empty() || !names.insert(name).second)
                 fail("function", "has an empty or duplicate name");
-            validate_function(function, "function " + std::string(name));
+            validate_function(function, Context::named("function ", name));
         }
     }
 
-    void validate_function(const JsonValue function, const std::string& context) {
+    void validate_function(const JsonValue function, const Context& context) {
         require_object(function, context);
         require_string(function, "name", context);
         require_boolean(function, "async", context);
         validate_path(function, context);
         validate_span(function, context);
         for (const JsonValue parameter : require_array(function, "parameters", context)) {
-            require_object(parameter, context + "/parameter");
-            require_string(parameter, "name", context + "/parameter");
+            require_object(parameter, Context(context, "/parameter"));
+            require_string(parameter, "name", Context(context, "/parameter"));
             const JsonValue default_value = required(parameter, "default");
             if (!default_value.is_null())
-                validate_expression(default_value, context + "/parameter default");
+                validate_expression(default_value, Context(context, "/parameter default"));
         }
         const JsonValue body = required(function, "body");
         const JsonValue block = required(function, "block");
         if (body.is_null() == block.is_null())
             fail(context, "function must have exactly one of body and block");
-        if (!body.is_null()) validate_expression(body, context + "/body");
-        if (!block.is_null()) validate_script_block(block, context + "/block");
+        if (!body.is_null()) validate_expression(body, Context(context, "/body"));
+        if (!block.is_null()) validate_script_block(block, Context(context, "/block"));
     }
 
-    void validate_script_block(const JsonValue block, const std::string& context) {
+    void validate_script_block(const JsonValue block, const Context& context) {
         require_object(block, context);
         validate_path(block, context);
         validate_span(block, context);
@@ -231,7 +266,7 @@ private:
             validate_script_statement(statement, context);
     }
 
-    void validate_script_statement(const JsonValue statement, const std::string& context) {
+    void validate_script_statement(const JsonValue statement, const Context& context) {
         require_object(statement, context);
         const std::string_view kind = require_string(statement, "kind", context);
         validate_path(statement, context);
@@ -239,55 +274,55 @@ private:
         if (kind == "let") {
             require_string(statement, "name", context);
             require_boolean(statement, "mutable", context);
-            validate_expression(required(statement, "initializer"), context + "/let");
+            validate_expression(required(statement, "initializer"), Context(context, "/let"));
         } else if (kind == "assign") {
             const std::string_view operation = require_string(statement, "operator", context);
             if (operation != "assign" && operation != "add" && operation != "subtract" &&
                 operation != "multiply" && operation != "divide" && operation != "modulo") {
                 fail(context, "assign has unknown operator '" + std::string(operation) + "'");
             }
-            validate_expression(required(statement, "target"), context + "/assign target");
-            validate_expression(required(statement, "value"), context + "/assign value");
+            validate_expression(required(statement, "target"), Context(context, "/assign target"));
+            validate_expression(required(statement, "value"), Context(context, "/assign value"));
         } else if (kind == "expression") {
-            validate_expression(required(statement, "expression"), context + "/expression");
+            validate_expression(required(statement, "expression"), Context(context, "/expression"));
         } else if (kind == "while") {
-            validate_expression(required(statement, "condition"), context + "/while condition");
-            validate_script_block(required(statement, "block"), context + "/while body");
+            validate_expression(required(statement, "condition"), Context(context, "/while condition"));
+            validate_script_block(required(statement, "block"), Context(context, "/while body"));
         } else if (kind == "break" || kind == "continue") {
         } else if (kind == "return") {
             const JsonValue value = required(statement, "value");
-            if (!value.is_null()) validate_expression(value, context + "/return");
+            if (!value.is_null()) validate_expression(value, Context(context, "/return"));
         } else if (kind == "throw") {
-            validate_expression(required(statement, "value"), context + "/throw");
+            validate_expression(required(statement, "value"), Context(context, "/throw"));
         } else if (kind == "try") {
             require_string(statement, "catchName", context);
-            validate_script_block(required(statement, "block"), context + "/try");
-            validate_script_block(required(statement, "catch"), context + "/catch");
+            validate_script_block(required(statement, "block"), Context(context, "/try"));
+            validate_script_block(required(statement, "catch"), Context(context, "/catch"));
         } else if (kind == "if") {
-            validate_expression(required(statement, "condition"), context + "/if condition");
-            validate_script_block(required(statement, "then"), context + "/if then");
+            validate_expression(required(statement, "condition"), Context(context, "/if condition"));
+            validate_script_block(required(statement, "then"), Context(context, "/if then"));
             const JsonValue otherwise = required(statement, "else");
-            if (!otherwise.is_null()) validate_script_block(otherwise, context + "/if else");
+            if (!otherwise.is_null()) validate_script_block(otherwise, Context(context, "/if else"));
         } else if (kind == "when") {
-            validate_expression(required(statement, "subject"), context + "/when subject");
+            validate_expression(required(statement, "subject"), Context(context, "/when subject"));
             for (const JsonValue branch : require_array(statement, "branches", context)) {
                 require_object(branch, "when branch");
                 validate_span(branch, "when branch");
                 const JsonValue match = required(branch, "match");
                 if (!match.is_null()) validate_expression(match, "when branch match");
-                validate_script_block(required(branch, "block"), context + "/when branch");
+                validate_script_block(required(branch, "block"), Context(context, "/when branch"));
             }
         } else if (kind == "for") {
             require_string(statement, "itemName", context);
             const JsonValue index_name = required(statement, "indexName");
             if (!index_name.is_null() && !index_name.string().has_value())
                 fail(context, "for indexName must be string or null");
-            validate_expression(required(statement, "collection"), context + "/for collection");
+            validate_expression(required(statement, "collection"), Context(context, "/for collection"));
             const JsonValue filter = required(statement, "filter");
-            if (!filter.is_null()) validate_expression(filter, context + "/for filter");
-            validate_script_block(required(statement, "block"), context + "/for body");
+            if (!filter.is_null()) validate_expression(filter, Context(context, "/for filter"));
+            validate_script_block(required(statement, "block"), Context(context, "/for body"));
         } else if (kind == "function") {
-            validate_function(required(statement, "function"), context + "/function");
+            validate_function(required(statement, "function"), Context(context, "/function"));
         } else {
             fail(context, "contains unknown script statement kind '" + kind + "'");
         }
@@ -295,7 +330,7 @@ private:
 
     void validate_block(
         const JsonValue block,
-        const std::string& context,
+        const Context& context,
         const bool repeater_body = false
     ) {
         require_object(block, context);
@@ -308,7 +343,7 @@ private:
 
     void validate_statement(
         const JsonValue statement,
-        const std::string& context,
+        const Context& context,
         const bool repeater_body
     ) {
         require_object(statement, context);
@@ -323,50 +358,50 @@ private:
                 fail(context, "state declaredType must be a non-empty string or null");
             }
             const JsonValue initializer = required(statement, "initializer");
-            if (!initializer.is_null()) validate_expression(initializer, context + "/state initializer");
+            if (!initializer.is_null()) validate_expression(initializer, Context(context, "/state initializer"));
         } else if (kind == "derived") {
             require_string(statement, "name", context);
-            validate_expression(required(statement, "expression"), context + "/derived expression");
+            validate_expression(required(statement, "expression"), Context(context, "/derived expression"));
         } else if (kind == "node") {
             require_boolean(statement, "root", context);
-            validate_call(required(statement, "call"), context + "/node");
+            validate_call(required(statement, "call"), Context(context, "/node"));
         } else if (kind == "if") {
-            validate_expression(required(statement, "condition"), context + "/if condition");
-            validate_block(required(statement, "then"), context + "/if then");
+            validate_expression(required(statement, "condition"), Context(context, "/if condition"));
+            validate_block(required(statement, "then"), Context(context, "/if then"));
             const JsonValue otherwise = required(statement, "else");
-            if (!otherwise.is_null()) validate_block(otherwise, context + "/if else");
+            if (!otherwise.is_null()) validate_block(otherwise, Context(context, "/if else"));
         } else if (kind == "when") {
-            validate_expression(required(statement, "subject"), context + "/when subject");
+            validate_expression(required(statement, "subject"), Context(context, "/when subject"));
             for (const JsonValue branch : require_array(statement, "branches", context)) {
                 require_object(branch, "when branch");
                 validate_span(branch, "when branch");
                 const JsonValue match = required(branch, "match");
                 if (!match.is_null()) validate_expression(match, "when branch match");
-                validate_block(required(branch, "block"), context + "/when branch");
+                validate_block(required(branch, "block"), Context(context, "/when branch"));
             }
         } else if (kind == "for") {
             require_string(statement, "itemName", context);
             const JsonValue index_name = required(statement, "indexName");
             if (!index_name.is_null() && !index_name.string().has_value()) fail(context, "for indexName must be string or null");
-            validate_expression(required(statement, "collection"), context + "/for collection");
+            validate_expression(required(statement, "collection"), Context(context, "/for collection"));
             const JsonValue filter = required(statement, "filter");
-            if (!filter.is_null()) validate_expression(filter, context + "/for filter");
+            if (!filter.is_null()) validate_expression(filter, Context(context, "/for filter"));
             if (repeater_body) {
                 const JsonValue identity = required(statement, "identity");
                 if (identity.is_null()) {
                     fail(context, "Repeater for identity extractor must not be null");
                 }
-                validate_repeater_identity(identity, context + "/for identity");
+                validate_repeater_identity(identity, Context(context, "/for identity"));
             }
-            validate_block(required(statement, "block"), context + "/for body");
+            validate_block(required(statement, "block"), Context(context, "/for body"));
         } else if (kind == "function") {
-            validate_function(required(statement, "function"), context + "/function");
+            validate_function(required(statement, "function"), Context(context, "/function"));
         } else {
             fail(context, "contains unknown statement kind '" + kind + "'");
         }
     }
 
-    void validate_repeater_identity(const JsonValue identity, const std::string& context) {
+    void validate_repeater_identity(const JsonValue identity, const Context& context) {
         require_object(identity, context);
         const std::string_view kind = require_string(identity, "kind", context);
         if (kind == "block") {
@@ -374,28 +409,28 @@ private:
             if (statements.size() != 1U) {
                 fail(context, "must select exactly one keyed root");
             }
-            validate_repeater_identity(statements.front(), context + "/statement");
+            validate_repeater_identity(statements.front(), Context(context, "/statement"));
         } else if (kind == "key") {
-            validate_expression(required(identity, "expression"), context + "/key");
+            validate_expression(required(identity, "expression"), Context(context, "/key"));
         } else if (kind == "if") {
-            validate_expression(required(identity, "condition"), context + "/condition");
-            validate_repeater_identity(required(identity, "then"), context + "/then");
-            validate_repeater_identity(required(identity, "else"), context + "/else");
+            validate_expression(required(identity, "condition"), Context(context, "/condition"));
+            validate_repeater_identity(required(identity, "then"), Context(context, "/then"));
+            validate_repeater_identity(required(identity, "else"), Context(context, "/else"));
         } else if (kind == "when") {
-            validate_expression(required(identity, "subject"), context + "/subject");
+            validate_expression(required(identity, "subject"), Context(context, "/subject"));
             const JsonArray branches = require_array(identity, "branches", context);
             if (branches.empty()) fail(context, "when identity must contain branches");
             for (std::size_t index = 0U; index < branches.size(); ++index) {
                 const JsonValue branch = branches[index];
-                require_object(branch, context + "/branch");
+                require_object(branch, Context(context, "/branch"));
                 const JsonValue match = required(branch, "match");
                 if (match.is_null() != (index + 1U == branches.size())) {
                     fail(context, "when identity must end with exactly one fallback branch");
                 }
-                if (!match.is_null()) validate_expression(match, context + "/branch match");
+                if (!match.is_null()) validate_expression(match, Context(context, "/branch match"));
                 validate_repeater_identity(
                     required(branch, "identity"),
-                    context + "/branch identity"
+                    Context(context, "/branch identity")
                 );
             }
         } else {
@@ -403,7 +438,7 @@ private:
         }
     }
 
-    void validate_call(const JsonValue call, const std::string& context) {
+    void validate_call(const JsonValue call, const Context& context) {
         require_object(call, context);
         const std::string_view kind = require_string(call, "kind", context);
         if (kind != "widget" && kind != "component") fail(context, "call kind must be widget or component");
@@ -411,11 +446,11 @@ private:
         validate_path(call, context);
         validate_span(call, context);
         const JsonValue arguments = required(call, "arguments");
-        require_object(arguments, context + "/arguments");
+        require_object(arguments, Context(context, "/arguments"));
         const JsonObject object = *arguments.object();
         for (const auto& [name, expression] : object) {
             if (name.empty()) fail(context, "call argument names must not be empty");
-            validate_expression(expression, context + "/argument " + name);
+            validate_expression(expression, Context(context, "/argument ", name));
         }
         const JsonValue children = required(call, "children");
         const DeclaredWidget* const widget =
@@ -425,47 +460,47 @@ private:
             if (repeater) fail(context, "Repeater children must contain one keyed for statement");
             return;
         }
-        validate_block(children, context + "/children", repeater);
+        validate_block(children, Context(context, "/children"), repeater);
         if (repeater) {
             const JsonArray statements = require_array(
                 children,
                 "statements",
-                context + "/children"
+                Context(context, "/children")
             );
             if (statements.size() != 1U ||
-                require_string(statements.front(), "kind", context + "/children") != "for") {
+                require_string(statements.front(), "kind", Context(context, "/children")) != "for") {
                 fail(context, "Repeater children must contain exactly one keyed for statement");
             }
         }
     }
 
-    void validate_expression(const JsonValue expression, const std::string& context) {
+    void validate_expression(const JsonValue expression, const Context& context) {
         require_object(expression, context);
         const std::string_view kind = require_string(expression, "kind", context);
         validate_path(expression, context);
         validate_span(expression, context);
         if (kind == "literal") {
-            validate_literal(required(expression, "value"), context + "/literal");
+            validate_literal(required(expression, "value"), Context(context, "/literal"));
         } else if (kind == "variable") {
             require_string(expression, "binding", context);
             require_string(expression, "name", context);
             require_string(expression, "type", context);
         } else if (kind == "list") {
             for (const JsonValue item : require_array(expression, "elements", context)) {
-                validate_expression(item, context + "/list item");
+                validate_expression(item, Context(context, "/list item"));
             }
         } else if (kind == "map") {
             const JsonValue entries = required(expression, "entries");
-            require_object(entries, context + "/map entries");
+            require_object(entries, Context(context, "/map entries"));
             const JsonObject object = *entries.object();
             for (const auto& [name, value] : object) {
                 if (name.empty()) fail(context, "map entry names must not be empty");
-                validate_expression(value, context + "/map entry " + name);
+                validate_expression(value, Context(context, "/map entry ", name));
             }
         } else if (kind == "unary") {
             const std::string_view operation = require_string(expression, "operator", context);
             if (operation != "negate" && operation != "not") fail(context, "has unknown unary operator '" + operation + "'");
-            validate_expression(required(expression, "operand"), context + "/operand");
+            validate_expression(required(expression, "operand"), Context(context, "/operand"));
         } else if (kind == "binary") {
             static const std::set<std::string_view> operations = {
                 "add", "subtract", "multiply", "divide", "modulo", "equal", "not_equal",
@@ -473,18 +508,18 @@ private:
             };
             const std::string_view operation = require_string(expression, "operator", context);
             if (!operations.contains(operation)) fail(context, "has unknown binary operator '" + operation + "'");
-            validate_expression(required(expression, "left"), context + "/left");
-            validate_expression(required(expression, "right"), context + "/right");
+            validate_expression(required(expression, "left"), Context(context, "/left"));
+            validate_expression(required(expression, "right"), Context(context, "/right"));
         } else if (kind == "conditional") {
-            validate_expression(required(expression, "condition"), context + "/condition");
-            validate_expression(required(expression, "then"), context + "/then");
-            validate_expression(required(expression, "else"), context + "/else");
+            validate_expression(required(expression, "condition"), Context(context, "/condition"));
+            validate_expression(required(expression, "then"), Context(context, "/then"));
+            validate_expression(required(expression, "else"), Context(context, "/else"));
         } else if (kind == "property") {
             require_string(expression, "name", context);
-            validate_expression(required(expression, "receiver"), context + "/receiver");
+            validate_expression(required(expression, "receiver"), Context(context, "/receiver"));
         } else if (kind == "index") {
-            validate_expression(required(expression, "receiver"), context + "/receiver");
-            validate_expression(required(expression, "index"), context + "/index");
+            validate_expression(required(expression, "receiver"), Context(context, "/receiver"));
+            validate_expression(required(expression, "index"), Context(context, "/index"));
         } else if (kind == "helper") {
             require_string(expression, "name", context);
             validate_expression_arguments(expression, context);
@@ -497,7 +532,7 @@ private:
         } else if (kind == "lambda" && !expression.find("parameters")) {
             // A helper's item function as compiled before scripts: one parameter, a body.
             require_string(expression, "parameter", context);
-            validate_expression(required(expression, "body"), context + "/lambda body");
+            validate_expression(required(expression, "body"), Context(context, "/lambda body"));
         } else if (kind == "lambda") {
             require_boolean(expression, "script", context);
             for (const JsonValue parameter : require_array(expression, "parameters", context)) {
@@ -508,41 +543,41 @@ private:
             const JsonValue block = required(expression, "block");
             if (body.is_null() == block.is_null())
                 fail(context, "lambda must have exactly one of body and block");
-            if (!body.is_null()) validate_expression(body, context + "/lambda body");
-            if (!block.is_null()) validate_script_block(block, context + "/lambda block");
+            if (!body.is_null()) validate_expression(body, Context(context, "/lambda body"));
+            if (!block.is_null()) validate_script_block(block, Context(context, "/lambda block"));
         } else if (kind == "call") {
-            validate_expression(required(expression, "callee"), context + "/callee");
+            validate_expression(required(expression, "callee"), Context(context, "/callee"));
             validate_expression_arguments(expression, context);
         } else if (kind == "spread" || kind == "await" || kind == "handler") {
-            validate_expression(required(expression, "operand"), context + "/" + std::string(kind));
+            validate_expression(required(expression, "operand"), Context(context, "/", kind));
         } else if (kind == "record") {
             for (const JsonValue part : require_array(expression, "parts", context)) {
-                require_object(part, context + "/record part");
+                require_object(part, Context(context, "/record part"));
                 const JsonValue spread = part.find("spread");
                 if (spread && !spread.is_null()) {
-                    validate_expression(spread, context + "/record spread");
+                    validate_expression(spread, Context(context, "/record spread"));
                 } else {
-                    require_string(part, "key", context + "/record part");
-                    validate_expression(required(part, "value"), context + "/record value");
+                    require_string(part, "key", Context(context, "/record part"));
+                    validate_expression(required(part, "value"), Context(context, "/record value"));
                 }
             }
         } else if (kind == "materialCall") {
             require_string(expression, "id", context);
             std::set<std::string_view> names;
             for (const JsonValue parameter : require_array(expression, "parameters", context)) {
-                require_object(parameter, context + "/material parameter");
+                require_object(parameter, Context(context, "/material parameter"));
                 const std::string_view name = require_string(
                     parameter,
                     "name",
-                    context + "/material parameter"
+                    Context(context, "/material parameter")
                 );
                 if (name.empty() || !names.insert(name).second) {
                     fail(context, "contains an empty or duplicate material parameter");
                 }
-                validate_span(parameter, context + "/material parameter");
+                validate_span(parameter, Context(context, "/material parameter"));
                 validate_expression(
                     required(parameter, "value"),
-                    context + "/material parameter value"
+                    Context(context, "/material parameter value")
                 );
             }
         } else if (kind == "materialReference") {
@@ -552,17 +587,17 @@ private:
         }
     }
 
-    void validate_expression_arguments(const JsonValue expression, const std::string& context) {
+    void validate_expression_arguments(const JsonValue expression, const Context& context) {
         for (const JsonValue argument : require_array(expression, "arguments", context)) {
-            require_object(argument, context + "/argument");
+            require_object(argument, Context(context, "/argument"));
             const JsonValue name = required(argument, "name");
             if (!name.is_null() && !name.string().has_value()) fail(context, "argument name must be string or null");
-            validate_span(argument, context + "/argument");
-            validate_expression(required(argument, "value"), context + "/argument value");
+            validate_span(argument, Context(context, "/argument"));
+            validate_expression(required(argument, "value"), Context(context, "/argument value"));
         }
     }
 
-    static void validate_literal(const JsonValue literal, const std::string& context) {
+    static void validate_literal(const JsonValue literal, const Context& context) {
         require_object(literal, context);
         const std::string_view kind = require_string(literal, "kind", context);
         if (kind == "null") return;
@@ -607,7 +642,7 @@ private:
             require_object(properties, "style properties");
             const JsonObject object = *properties.object();
             for (const auto& [property, expression] : object) {
-                validate_expression(expression, "style " + name + "." + property);
+                validate_expression(expression, Context(Context::named("style ", name, "."), property));
             }
         }
     }
