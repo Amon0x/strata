@@ -247,22 +247,12 @@ void add_edge(std::vector<Edge>& output, const Point from, const Point to, const
     return result;
 }
 
-[[nodiscard]] double edge_distance_squared(const Point point, const Edge edge) noexcept {
-    const double x = edge.to.x - edge.from.x;
-    const double y = edge.to.y - edge.from.y;
-    const double length_squared = x * x + y * y;
-    if (length_squared <= 1.0e-10) return distance_squared(point, edge.from);
-    const double projection = std::clamp(
-        ((point.x - edge.from.x) * x + (point.y - edge.from.y) * y) / length_squared,
-        0.0,
-        1.0
-    );
-    return distance_squared(point, Point{edge.from.x + x * projection, edge.from.y + y * projection});
-}
-
-[[nodiscard]] std::uint8_t encode_distance(const double pixels, const double range) noexcept {
-    const double normalized = std::clamp(pixels / range + 0.5, 0.0, 1.0);
-    return static_cast<std::uint8_t>(std::clamp(std::lround(normalized * 255.0), 0L, 255L));
+/** A distance in pixels as a byte: half the range either way spans it, the edge at the middle. */
+[[nodiscard]] std::uint8_t encode_distance(const double pixels,
+                                           const double inverse_range) noexcept {
+    const double normalized = std::clamp(pixels * inverse_range + 0.5, 0.0, 1.0);
+    // Rounded half up: normalized is never negative.
+    return static_cast<std::uint8_t>(normalized * 255.0 + 0.5);
 }
 
 /** The nonzero winding number of the contours about `point`. */
@@ -474,6 +464,11 @@ std::optional<GlyphRasterBitmap> rasterize_msdf(
         double right = 0.0;
         double bottom = 0.0;
         double top = 0.0;
+        /** The edge's unit normal: a sample farther than the cutoff from its line is too. */
+        Point normal;
+        /** The edge from its start, and one over its length squared (0 for a point). */
+        Point direction;
+        double inverse_length_squared = 0.0;
     };
     std::vector<Nearby> nearby;
     bool has_red = false;
@@ -482,15 +477,24 @@ std::optional<GlyphRasterBitmap> rasterize_msdf(
     // Distances are to the outline of the filled shape only; inside or outside still comes from
     // every contour's winding.
     for (const Edge edge : union_outline(contours)) {
+        const double dx = edge.to.x - edge.from.x;
+        const double dy = edge.to.y - edge.from.y;
+        const double length = std::hypot(dx, dy);
         nearby.push_back(Nearby{edge, std::min(edge.from.x, edge.to.x) - cutoff,
                                 std::max(edge.from.x, edge.to.x) + cutoff,
                                 std::min(edge.from.y, edge.to.y) - cutoff,
-                                std::max(edge.from.y, edge.to.y) + cutoff});
+                                std::max(edge.from.y, edge.to.y) + cutoff,
+                                length > 1.0e-9 ? Point{-dy / length, dx / length} : Point{},
+                                Point{dx, dy},
+                                dx * dx + dy * dy > 1.0e-10 ? 1.0 / (dx * dx + dy * dy) : 0.0});
         has_red = has_red || (edge.channels & red) != 0U;
         has_green = has_green || (edge.channels & green) != 0U;
         has_blue = has_blue || (edge.channels & blue) != 0U;
     }
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(byte_count));
+    const double inverse_range = 1.0 / config.pixel_range;
+    // A row's nearest squared distances, red, green, blue and any, each sample's four together.
+    std::vector<double> row_squared(static_cast<std::size_t>(width) * 4U);
     std::vector<const Nearby*> row_edges;
     // Where the edges cross the row, with which way each goes, and the winding they add up to
     // past each: a sample is inside where the edges to its right wind a nonzero number of times,
@@ -520,46 +524,79 @@ std::optional<GlyphRasterBitmap> rasterize_msdf(
         winding_past.assign(crossings.size() + 1U, 0);
         for (std::size_t index = crossings.size(); index > 0U; --index)
             winding_past[index - 1U] = winding_past[index] + crossings[index - 1U].second;
+        // Each edge measured only at the samples of the row that are within the cutoff of its
+        // line, give or take a column: no sample outside could be nearer than the cutoff to it,
+        // so the nearest distances are the ones measuring every edge at every sample finds.
+        for (std::size_t index = 0U; index < row_squared.size(); ++index)
+            row_squared[index] = cutoff_squared;
+        const double last_column = static_cast<double>(width) - 1.0;
+        for (const Nearby* candidate : row_edges) {
+            double reach_left = candidate->left;
+            double reach_right = candidate->right;
+            if (std::abs(candidate->normal.x) > 1.0e-9) {
+                // n.x (x - from.x) + n.y (y - from.y) within the cutoff either way.
+                const double centre =
+                    candidate->edge.from.x -
+                    candidate->normal.y * (sample_y - candidate->edge.from.y) / candidate->normal.x;
+                const double half = cutoff / std::abs(candidate->normal.x);
+                reach_left = std::max(reach_left, centre - half);
+                reach_right = std::min(reach_right, centre + half);
+            }
+            const double first_column =
+                std::floor((reach_left - font_bounds.left) * atlas_scale - 0.5) - 1.0;
+            const double end_column =
+                std::ceil((reach_right - font_bounds.left) * atlas_scale - 0.5) + 1.0;
+            if (end_column < 0.0 || first_column > last_column)
+                continue;
+            const auto first = static_cast<std::uint32_t>(std::max(first_column, 0.0));
+            const auto last = static_cast<std::uint32_t>(std::min(end_column, last_column));
+            const std::uint8_t channels = candidate->edge.channels;
+            const Point from = candidate->edge.from;
+            const Point direction = candidate->direction;
+            const double inverse = candidate->inverse_length_squared;
+            // The row's part of the projection onto the edge, the same at every sample.
+            const double row_offset = sample_y - from.y;
+            const double row_projection = row_offset * direction.y;
+            for (std::uint32_t x = first; x <= last; ++x) {
+                const double sample_x =
+                    font_bounds.left + (static_cast<double>(x) + 0.5) / atlas_scale;
+                if (sample_x < candidate->left || sample_x > candidate->right)
+                    continue;
+                const double offset = sample_x - from.x;
+                const double along =
+                    std::clamp((offset * direction.x + row_projection) * inverse, 0.0, 1.0);
+                const double away_x = offset - direction.x * along;
+                const double away_y = row_offset - direction.y * along;
+                const double distance = away_x * away_x + away_y * away_y;
+                double* const nearest = &row_squared[static_cast<std::size_t>(x) * 4U];
+                nearest[3] = std::min(nearest[3], distance);
+                if ((channels & red) != 0U)
+                    nearest[0] = std::min(nearest[0], distance);
+                if ((channels & green) != 0U)
+                    nearest[1] = std::min(nearest[1], distance);
+                if ((channels & blue) != 0U)
+                    nearest[2] = std::min(nearest[2], distance);
+            }
+        }
         std::size_t passed = 0U;
         for (std::uint32_t x = 0U; x < width; ++x) {
-            const Point sample{font_bounds.left + (static_cast<double>(x) + 0.5) / atlas_scale,
-                               sample_y};
-            while (passed < crossings.size() && crossings[passed].first <= sample.x)
+            const double sample_x =
+                font_bounds.left + (static_cast<double>(x) + 0.5) / atlas_scale;
+            while (passed < crossings.size() && crossings[passed].first <= sample_x)
                 ++passed;
             const int winding = winding_past[passed];
-            double red_squared = cutoff_squared;
-            double green_squared = cutoff_squared;
-            double blue_squared = cutoff_squared;
-            double mono_squared = cutoff_squared;
-            for (const Nearby* candidate : row_edges) {
-                if (sample.x < candidate->left || sample.x > candidate->right)
-                    continue;
-                const double distance = edge_distance_squared(sample, candidate->edge);
-                mono_squared = std::min(mono_squared, distance);
-                const std::uint8_t channels = candidate->edge.channels;
-                if ((channels & red) != 0U)
-                    red_squared = std::min(red_squared, distance);
-                if ((channels & green) != 0U)
-                    green_squared = std::min(green_squared, distance);
-                if ((channels & blue) != 0U)
-                    blue_squared = std::min(blue_squared, distance);
-            }
-            if (!has_red)
-                red_squared = mono_squared;
-            if (!has_green)
-                green_squared = mono_squared;
-            if (!has_blue)
-                blue_squared = mono_squared;
+            const double* const nearest = &row_squared[static_cast<std::size_t>(x) * 4U];
+            const double mono_squared = nearest[3];
+            const double red_squared = has_red ? nearest[0] : mono_squared;
+            const double green_squared = has_green ? nearest[1] : mono_squared;
+            const double blue_squared = has_blue ? nearest[2] : mono_squared;
             const double sign = winding != 0 ? 1.0 : -1.0;
             const std::size_t index = (static_cast<std::size_t>(y) * width + x) * 4U;
             const double scale = sign * atlas_scale;
-            bytes[index] = encode_distance(std::sqrt(red_squared) * scale, config.pixel_range);
-            bytes[index + 1U] =
-                encode_distance(std::sqrt(green_squared) * scale, config.pixel_range);
-            bytes[index + 2U] =
-                encode_distance(std::sqrt(blue_squared) * scale, config.pixel_range);
-            bytes[index + 3U] =
-                encode_distance(std::sqrt(mono_squared) * scale, config.pixel_range);
+            bytes[index] = encode_distance(std::sqrt(red_squared) * scale, inverse_range);
+            bytes[index + 1U] = encode_distance(std::sqrt(green_squared) * scale, inverse_range);
+            bytes[index + 2U] = encode_distance(std::sqrt(blue_squared) * scale, inverse_range);
+            bytes[index + 3U] = encode_distance(std::sqrt(mono_squared) * scale, inverse_range);
         }
     }
     return GlyphRasterBitmap{
