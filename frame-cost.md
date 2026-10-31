@@ -118,6 +118,20 @@ take about 2 µs a node, and removing two whole-map copies a node was within noi
 - [ ] Description at about 10 µs a node: from the same trace, sorted by inclusive time with stacks
   (`-a stack`), since self time spreads it over allocation, `Value::field` and map lookups.
 - Skipping draw state that did not change between batches (shader, scissor, blend, clips,
-  textures) did not move the uncapped frame rate past run-to-run noise: those frames are bound by
-  the GPU and driver, not by the calls. Not kept.
+  textures) did not move the uncapped frame rate past run-to-run noise, and moved CPU time in
+  `Renderer::render` by 3 to 5% within overlapping ranges (it includes waiting on Present). Not
+  kept.
+
+## Phase 4: submitting a frame to D3D11
+
+The same trace, by inclusive time: on the hover page the desktop host's D3D11 submission
+(`RenderContext::render_layer`) costs about five times the whole core frame (`Surface::frame`).
+Most of `draw` is `RoundedClipBuffer::bind`, which maps, fills and unmaps the clip constant buffer
+for every batch (`Map` with `WRITE_DISCARD`), then `TextureStore::bind`.
+
+- [ ] Count batches and clip uploads per frame on the hover and showcase pages, to know whether
+  the cost is many batches or expensive uploads.
+- [ ] Upload every batch's clip stack once per frame into one buffer and give each draw its offset
+  (as the vertex stream already is), instead of a constant-buffer update per draw.
+- [ ] Measure CPU time spent submitting, with presentation excluded, before and after.
 - [ ] Measure: the hover page's first frame describes in under 15 ms.
