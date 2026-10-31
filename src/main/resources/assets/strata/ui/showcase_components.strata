@@ -3834,8 +3834,9 @@ component CodeCard() {
   derived sqlSample = "-- Monthly revenue per customer, newest first\nSELECT c.id,\n       c.name AS \"Customer\",\n       DATE_TRUNC('month', o.created_at) AS month,\n       SUM(o.total) AS revenue,\n       COUNT(*) FILTER (WHERE o.total > 100) AS large_orders\nFROM customers c\nINNER JOIN orders o ON o.customer_id = c.id\nWHERE o.status IN ('paid', 'shipped')\n  AND o.created_at >= NOW() - INTERVAL '1 year'\nGROUP BY c.id, c.name, month\nHAVING SUM(o.total) > 1000.50\nORDER BY month DESC\nLIMIT 50;"
   derived strataSample = "import \"theme.strata\";\n\nstyle GlowCard {\n  radius: 16;\n  background: #141A2BFF;\n  border: { width: 2, paint: { kind: \"conic\", stops: [ { color: #7CFFDA00 }, { color: #7CFFDAFF } ] } };\n}\n\nanimation BorderSpin { duration: 3s; easing: \"linear\"; repeat: \"forever\"; from { paintRotate: 0 } to { paintRotate: 360 } }\n\ncomponent Counter(label: string) {\n  state count = 0;\n  Panel(style: GlowCard, enter: BorderSpin) {\n    Text(text: format(\"{0}: {1}\", label, count), style: style(pixelSize: 14, color: theme.foreground))\n    Button(label: \"Add\", onClick: action(\"state.adjust\", name: \"count\", amount: 1))\n  }\n}"
   // A few thousand generated lines, to show a long file stays fast: tokenized once, laid out in
-  // chunks, and only the visible chunks drawn.
-  derived largeSample = join(map(range(1, 4001), n -> "export const row" + formatNumber(n, 0) + " = { id: " + formatNumber(n, 0) + ", label: \"Row " + formatNumber(n, 0) + "\", weight: " + formatNumber(n * 0.37, 2) + ", even: " + (n % 2 == 0 ? "true" : "false") + " }; // generated"), "\n")
+  // chunks, and only the visible chunks drawn. A function, so the lines are only made when the
+  // long file is picked: a derived value is worked out whenever the card is.
+  fn largeSample() = join(map(range(1, 4001), n -> "export const row" + formatNumber(n, 0) + " = { id: " + formatNumber(n, 0) + ", label: \"Row " + formatNumber(n, 0) + "\", weight: " + formatNumber(n * 0.37, 2) + ", even: " + (n % 2 == 0 ? "true" : "false") + " }; // generated"), "\n")
   derived sample = language == "rust" ? rustSample
     : language == "python" ? pythonSample
     : language == "typescript" ? typescriptSample
@@ -3852,7 +3853,7 @@ component CodeCard() {
     : language == "shell" ? shellSample
     : language == "sql" ? sqlSample
     : language == "strata" ? strataSample
-    : largeSample
+    : largeSample()
   Card(title: "CODE: HIGHLIGHTED IN SIXTEEN LANGUAGES, NUMBERED, SELECTABLE") {
     Panel(style: style(ActionRow, alignItems: "CENTER")) {
       Select(
