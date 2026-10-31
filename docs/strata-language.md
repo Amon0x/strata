@@ -744,10 +744,9 @@ Text(text: "Headline", style: style(Title, font: "system:bahnschrift.ttf", fontW
 
 An `Image` showing an animated GIF, APNG or WebP plays it: each frame shows for as long as the file
 says (a GIF frame under 20 ms for 100 ms, as browsers do), and it loops as many times as the file
-asks. An animation whose frames fit in 64 MB is decoded once, when the Surface is created, a
-texture per frame; a longer one plays from its bytes, decoded a few frames ahead into one texture,
-so its length costs no memory. JPEG, PNG, GIF and WebP images all bind the same
-way, told apart by their bytes.
+asks. It plays from its bytes, as browsers play one: a worker decodes a few frames ahead into one
+texture while it shows, so neither creating the Surface nor the animation's length costs time or
+memory up front. JPEG, PNG, GIF and WebP images all bind the same way, told apart by their bytes.
 
 Video plays into a runtime image at its own size, so any `Image` (clipped, rounded, turned) can
 show it.

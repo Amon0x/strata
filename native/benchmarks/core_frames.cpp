@@ -3,10 +3,13 @@
 // It measures Strata's own work — compile, describe, layout, render planning, packet encoding and
 // decoding — without a GPU or rasterizer in the loop, so runs are comparable on any machine.
 //
-// usage: strata_core_benchmark <resource-root> <scenario.json> [iterations-scale | cold]
-// `cold` measures only the cold start, for profiling startup over many runs.
+// usage: strata_core_benchmark <resource-root> <scenario.json> [iterations-scale | cold | first]
+// `cold` measures only the cold start, for profiling startup over many runs. `first` opens every
+// showcase tab once, in order, and reports each first opening: the hitch a user sees the first
+// time a page appears, with the sections it spent its time in.
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <exception>
@@ -159,16 +162,17 @@ class Driver final {
 int main(int argc, char** argv) {
     try {
         if (argc < 3) {
-            std::fprintf(stderr, "usage: strata_core_benchmark <resource-root> <scenario.json> [scale|cold|switch]\n");
+            std::fprintf(stderr, "usage: strata_core_benchmark <resource-root> <scenario.json> [scale|cold|switch|first]\n");
             return 2;
         }
         const std::filesystem::path resources = argv[1];
         const bool cold_only = argc > 3 && std::string_view(argv[3]) == "cold";
         // "switch" measures only tab switching, at length: what profiling the cold path wants.
         const bool switch_only = argc > 3 && std::string_view(argv[3]) == "switch";
+        const bool first_opens = argc > 3 && std::string_view(argv[3]) == "first";
         const int scale = switch_only ? 10
-                          : argc > 3 && !cold_only ? std::max(1, std::atoi(argv[3]))
-                                                   : 1;
+                          : argc > 3 && !cold_only && !first_opens ? std::max(1, std::atoi(argv[3]))
+                                                                   : 1;
         strata::headless::Scenario scenario = strata::headless::load_scenario(argv[2]);
         scenario.render_backend = "none";
         scenario.steps.clear();
@@ -204,6 +208,29 @@ int main(int argc, char** argv) {
             return driver.locate(Selector{std::nullopt, std::nullopt, std::string(name),
                                           std::string("tab")});
         };
+        if (first_opens) {
+            // Each tab's first opening, in the order the tab bar lists them; the page shown at
+            // start (EXTEND) has opened already.
+            constexpr std::array<const char*, 20U> tabs{
+                "MENU", "BLUEPRINT", "INTERACT", "TYPE", "LAYOUT", "DRAW", "STATE", "CONTROL",
+                "FORMS", "MANIPULATE", "ADAPT", "INSPECT", "DATA", "SHELL", "SYSTEM", "MEDIA",
+                "DESKTOP", "NET", "LOTTIE", "CONTENT"};
+            std::vector<std::pair<const char*, std::pair<double, double>>> targets;
+            for (const char* const name : tabs)
+                targets.emplace_back(name, tab(name));
+            host.set_capture_frames(false);
+            for (const auto& [name, at] : targets) {
+                Phase opened{std::string("first ") + name, {}};
+                Phase after{std::string("after ") + name, {}};
+                driver.click(at, opened, after, 30);
+                std::printf("%-12s open %8.3f ms   next 30 frames max %8.3f ms, total %8.3f ms\n",
+                            name, opened.frames.front(), *std::ranges::max_element(after.frames),
+                            std::accumulate(after.frames.begin(), after.frames.end(), 0.0));
+                breakdown(opened);
+            }
+            host.close();
+            return 0;
+        }
         const auto forms = tab("FORMS");
         const auto shell = tab("SHELL");
         const auto extend = tab("EXTEND");

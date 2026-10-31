@@ -343,12 +343,6 @@ image_bindings(const strata_surface_config& config) {
     return result;
 }
 
-/** Past this much decoded memory an animation streams from its bytes instead of being held. */
-constexpr std::size_t maximum_animation_bytes = 64U * 1024U * 1024U;
-/** Browsers show a GIF frame that asks for under 20 ms for 100 ms instead; so do we. */
-constexpr std::uint32_t minimum_frame_delay_ms = 20U;
-constexpr std::uint32_t short_frame_delay_ms = 100U;
-
 struct MaterializedImages final {
     std::vector<strata::resource::EncodedTextureResource> textures;
     std::shared_ptr<const strata::resource::SvgImageRegistry> svg_images;
@@ -379,35 +373,26 @@ image_resources(const ResourceLoader& resources,
             const strata::resource::ImageInfo info = strata::resource::inspect_image(bytes);
             const std::string host_id =
                 std::string(host_resource_namespace) + "/static/" + std::to_string(index);
-            // An animation that fits the budget becomes one texture per frame (`<id>#k`), each
-            // shown in its turn; a longer one plays from its bytes, one texture showing each frame.
-            std::optional<strata::resource::DecodedImage> animated;
-            std::shared_ptr<strata::resource::ImageStream> stream;
+            // A still image keeps its bytes until a frame draws it. An animation plays from its
+            // bytes as browsers play one, a worker decoding a few frames ahead while it shows:
+            // creating the Surface decodes no more than the two frames that tell the two apart,
+            // however long the animation runs.
             if (*format != strata::resource::ImageFormat::jpeg) {
-                strata::resource::DecodedImage collected;
-                collected.width = info.dimensions.width;
-                collected.height = info.dimensions.height;
-                std::size_t held = 0U;
-                bool over = false;
+                std::vector<strata::resource::ImageFrame> frames;
                 try {
-                    collected.loop_count = strata::resource::stream_image(
-                        bytes, [&](std::vector<std::uint8_t>& rgba, const std::uint32_t delay_ms) {
-                            if (held + rgba.size() > maximum_animation_bytes &&
-                                !collected.frames.empty()) {
-                                over = true;
-                                return false;
-                            }
-                            held += rgba.size();
-                            collected.frames.push_back(
+                    static_cast<void>(strata::resource::stream_image(
+                        bytes, [&frames](std::vector<std::uint8_t>& rgba,
+                                         const std::uint32_t delay_ms) {
+                            frames.push_back(
                                 strata::resource::ImageFrame{std::move(rgba), delay_ms});
-                            return true;
-                        });
+                            return frames.size() < 2U;
+                        }));
                 } catch (const std::exception&) {
-                    collected.frames.clear();
+                    frames.clear();
                 }
-                if (over) {
-                    strata::resource::ImageFrame first = std::move(collected.frames.front());
-                    stream = std::make_shared<strata::resource::ImageStream>(
+                if (frames.size() > 1U) {
+                    strata::resource::ImageFrame& first = frames.front();
+                    auto stream = std::make_shared<strata::resource::ImageStream>(
                         std::vector<std::uint8_t>(bytes.begin(), bytes.end()), info.dimensions,
                         first.rgba, first.delay_ms);
                     result.textures.push_back(strata::resource::EncodedTextureResource{
@@ -424,40 +409,15 @@ image_resources(const ResourceLoader& resources,
                     result.animations.insert_or_assign(binding.id, std::move(animation));
                     continue;
                 }
-                if (collected.frames.size() > 1U)
-                    animated = std::move(collected);
             }
-            if (!animated.has_value()) {
-                result.textures.push_back(strata::resource::EncodedTextureResource{
-                    binding.id,
-                    host_id,
-                    image_sampling(binding.sampling),
-                    strata::resource::image_encoding(*format),
-                    info.dimensions,
-                    std::move(bytes),
-                });
-                continue;
-            }
-            strata::resource::ImageAnimation animation;
-            animation.loop_count = animated->loop_count;
-            std::int64_t end = 0;
-            for (std::size_t frame = 0U; frame < animated->frames.size(); ++frame) {
-                strata::resource::ImageFrame& pixels = animated->frames[frame];
-                const std::uint32_t delay = pixels.delay_ms < minimum_frame_delay_ms
-                                                ? short_frame_delay_ms
-                                                : pixels.delay_ms;
-                end += static_cast<std::int64_t>(delay) * 1'000'000;
-                animation.frame_ends_nanos.push_back(end);
-                result.textures.push_back(strata::resource::EncodedTextureResource{
-                    frame == 0U ? binding.id : binding.id + "#" + std::to_string(frame),
-                    frame == 0U ? host_id : host_id + "/" + std::to_string(frame),
-                    image_sampling(binding.sampling),
-                    strata::resource::ImageEncoding::rgba8,
-                    strata::resource::ImageDimensions{animated->width, animated->height},
-                    std::move(pixels.rgba),
-                });
-            }
-            result.animations.insert_or_assign(binding.id, std::move(animation));
+            result.textures.push_back(strata::resource::EncodedTextureResource{
+                binding.id,
+                host_id,
+                image_sampling(binding.sampling),
+                strata::resource::image_encoding(*format),
+                info.dimensions,
+                std::move(bytes),
+            });
             continue;
         }
         const std::string source(bytes.begin(), bytes.end());
