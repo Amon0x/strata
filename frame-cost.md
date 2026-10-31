@@ -111,7 +111,7 @@ take about 2 µs a node, and removing two whole-map copies a node was within noi
   profile -detail` against the build's PDBs. The engine's own code was 2.3 s of the 24.8 s the
   process spent; compiling HLSL was 6.2 s, about 0.7 s every launch.
 - [x] Compiled shaders persist between runs (`d3d11::set_shader_cache_directory`, under
-  `%LOCALAPPDATA%\\Strata\\shaders` on the desktop host): creating the D3D11 renderer went from
+  `%LOCALAPPDATA%\Strata\shaders` on the desktop host): creating the D3D11 renderer went from
   723 ms to 4 ms on every start after the first.
 - [ ] The Vulkan backend compiles its HLSL through shaderc on every run too: the same cache, for
   SPIR-V.
