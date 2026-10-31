@@ -177,4 +177,5 @@ and then clicking every tab).
   could be one walk.
 - [ ] The rest of the showcase's setup could leave the frame: a session activated on a worker and
   given its surface on the frame thread, so pressing F7 never stalls the frame it is pressed on.
+  Planned with the rest of moving work off the frame in `frame-threads.md`.
 - [ ] BLUEPRINT's first frame is 4.4 ms of describing the graph in StrataScript: the interpreter.
