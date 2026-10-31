@@ -95,6 +95,30 @@ Value::Value(std::vector<std::pair<std::string, Value>> fields) {
     storage_ = std::make_shared<const ValueObject>(ValueObject{std::move(fields)});
 }
 
+Value Value::concatenate(const Value& left, const Value& right) {
+    std::string left_display;
+    std::string right_display;
+    const std::string* left_text = left.string();
+    const std::string* right_text = right.string();
+    if (left_text == nullptr) {
+        left_display = display_string(left);
+        left_text = &left_display;
+    }
+    if (right_text == nullptr) {
+        right_display = display_string(right);
+        right_text = &right_display;
+    }
+    std::string joined;
+    if (right_text->size() > joined.max_size() - left_text->size())
+        throw std::length_error("runtime string concatenation exceeds the supported size");
+    joined.reserve(left_text->size() + right_text->size());
+    joined.append(*left_text);
+    joined.append(*right_text);
+    Value result;
+    result.storage_ = std::make_shared<const std::string>(std::move(joined));
+    return result;
+}
+
 ValueKind Value::kind() const noexcept {
     return static_cast<ValueKind>(storage_.index());
 }

@@ -63,6 +63,19 @@ void test_immutable_values_and_runtime_schemas() {
     check(record.field("missing") == nullptr, "missing object field unexpectedly resolved");
     const Value copy = strata::runtime::value_from_json(strata::runtime::value_to_json(record));
     check(copy == record, "runtime value JSON round trip changed the value");
+    const Value prefix("\xce\xa9=");
+    const Value prefix_copy = prefix;
+    const Value numbered = Value::concatenate(prefix, Value(42.0));
+    const Value combined = Value::concatenate(numbered, Value("\xe6\xbc\xa2\xf0\x9f\x99\x82"));
+    check(*combined.string() == "\xce\xa9=42\xe6\xbc\xa2\xf0\x9f\x99\x82" &&
+              *numbered.string() == "\xce\xa9=42" && *prefix_copy.string() == "\xce\xa9=",
+          "string composition changed Unicode, mixed-value formatting or an earlier value");
+    const Value embedded_zero(std::string("a\0b", 3U));
+    check(*Value::concatenate(embedded_zero, Value("c")).string() == std::string("a\0bc", 4U),
+          "string composition treated an embedded zero as a terminator");
+    check_throws<std::invalid_argument>(
+        [] { static_cast<void>(Value(std::string("\xc0\xaf", 2U))); },
+        "an invalid UTF-8 string entered the immutable value boundary");
     check_throws<std::invalid_argument>(
         [] { static_cast<void>(Value(std::numeric_limits<double>::infinity())); },
         "non-finite runtime value was accepted");

@@ -1526,7 +1526,7 @@ ExpressionValue ExpressionRuntime::evaluate_binary(const Program& program,
             return ExpressionValue(Value(!(left == right)));
         case BinaryOperator::add:
             if (left.string() != nullptr || right.string() != nullptr)
-                return ExpressionValue(Value(display_string(left) + display_string(right)));
+                return ExpressionValue(Value::concatenate(left, right));
             break;
         default:
             break;

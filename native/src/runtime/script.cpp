@@ -79,7 +79,7 @@ class Nesting final {
                                            const Value& right) {
     if (operation == AssignmentOperator::add &&
         (left.string() != nullptr || right.string() != nullptr)) {
-        return Value(display_string(left) + display_string(right));
+        return Value::concatenate(left, right);
     }
     // A list grows by what is added: one item, or each item of a list.
     if (operation == AssignmentOperator::add && left.list() != nullptr) {

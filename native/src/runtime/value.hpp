@@ -125,6 +125,12 @@ public:
     explicit Value(std::vector<Value> values);
     explicit Value(std::vector<std::pair<std::string, Value>> fields);
 
+    /**
+     * Joins the display text of two values without revalidating their already-valid UTF-8.
+     * Inputs remain immutable; raw strings still enter through the validating constructors.
+     */
+    [[nodiscard]] static Value concatenate(const Value& left, const Value& right);
+
     [[nodiscard]] ValueKind kind() const noexcept;
     [[nodiscard]] const Storage& storage() const noexcept;
     [[nodiscard]] const bool* boolean() const noexcept;
