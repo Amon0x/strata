@@ -1238,9 +1238,9 @@ void test_optional_tables_and_generic_positioning(const std::filesystem::path& r
 
 /**
  * Layout tables whose offsets alias one shared record describe far more entries than they hold
- * bytes. Parsing must stay proportional to the table: aliased PairSets and LigatureSets stop at
- * the table's work budget (keeping the lookups parsed before it), and a class-pair matrix without
- * value records is never iterated.
+ * bytes. Parsing must stay proportional to the table: PairSets are read where they are, so
+ * aliased ones are never expanded; aliased LigatureSets stop at the table's work budget (keeping
+ * the lookups parsed before it); and a class-pair matrix without value records is never iterated.
  */
 void test_layout_tables_bound_expansion(const std::filesystem::path& resources) {
     const auto load = [&] {
@@ -1270,7 +1270,8 @@ void test_layout_tables_bound_expansion(const std::filesystem::path& resources) 
         return font;
     };
 
-    // 30000 coverage glyphs share one 60000-pair PairSet: 1.8e9 pairs from ~180 KB.
+    // 30000 coverage glyphs share one 60000-pair PairSet: 1.8e9 pairs from ~180 KB, none of them
+    // expanded. A pair is two binary searches into the table.
     Bytes pair_bomb = load();
     replace_table(
         pair_bomb,
@@ -1282,11 +1283,11 @@ void test_layout_tables_bound_expansion(const std::filesystem::path& resources) 
         })
     );
     const strata::font::OpenTypeFont pair_font = timed_parse(std::move(pair_bomb));
-    check(budget_diagnostic(pair_font, "GPOS"),
-          "aliased PairSets did not stop at the GPOS work budget");
+    check(!budget_diagnostic(pair_font, "GPOS"),
+          "aliased PairSets were expanded against the GPOS work budget");
     const std::array<std::uint16_t, 2U> pair_glyphs{pair_left, pair_right};
     check(pair_font.position_glyphs(pair_glyphs)[0].x_advance == -20,
-          "the lookup parsed before the exhausted budget was not kept");
+          "an aliased PairSet disturbed the lookup before it");
 
     // A 65535 x 65535 class matrix with no value records holds no bytes and no adjustments.
     Bytes zero_classes(16U, 0U);

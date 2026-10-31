@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstddef>
@@ -30,6 +31,8 @@ public:
     explicit Reader(const std::span<const std::uint8_t> bytes) : bytes_(bytes) {}
 
     [[nodiscard]] std::size_t size() const noexcept { return bytes_.size(); }
+    /** The bytes it reads: a view into the font's own, for as long as the font is. */
+    [[nodiscard]] std::span<const std::uint8_t> bytes() const noexcept { return bytes_; }
 
     void require(const std::size_t offset, const std::size_t count) const {
         if (offset > bytes_.size() || count > bytes_.size() - offset) {
@@ -184,28 +187,51 @@ struct ClassDefinition final {
     }
 };
 
+/** A value record pair's two formats and where a subtable's records are, read on demand. */
+struct PairRecords final {
+    /** The GPOS table, which the font keeps alive for as long as it is. */
+    std::span<const std::uint8_t> table;
+    std::uint16_t first_format = 0U;
+    std::uint16_t second_format = 0U;
+
+    [[nodiscard]] std::size_t size() const noexcept;
+    /** The pair of value records at `offset` in the table. Throws when the font is short. */
+    [[nodiscard]] PairAdjustment read(std::size_t offset) const;
+};
+
+/**
+ * A class-based PairPos subtable (format 2), read where it is: a pair's adjustment is the record
+ * its two classes index, decoded when it is asked for, as HarfBuzz reads one.
+ */
 struct ClassPairRule final {
     std::vector<GlyphRange> coverage;
     ClassDefinition first_classes;
     ClassDefinition second_classes;
     std::uint16_t first_class_count = 0U;
     std::uint16_t second_class_count = 0U;
-    std::map<std::uint32_t, PairAdjustment> adjustments;
+    PairRecords records;
+    /** Where the class matrix's records start in the table. */
+    std::size_t matrix = 0U;
 
-    [[nodiscard]] const PairAdjustment* find(
+    [[nodiscard]] std::optional<PairAdjustment> find(
         const std::uint16_t left,
         const std::uint16_t right
     ) const noexcept {
-        if (containing_range(coverage, left) == nullptr) return nullptr;
+        if (containing_range(coverage, left) == nullptr) return std::nullopt;
         const std::uint16_t first_class = first_classes.value(left);
         const std::uint16_t second_class = second_classes.value(right);
         if (first_class >= first_class_count || second_class >= second_class_count) {
-            return nullptr;
+            return std::nullopt;
         }
-        const auto found = adjustments.find(pair_key(first_class, second_class));
-        if (found != adjustments.end()) return &found->second;
-        static constexpr PairAdjustment zero{};
-        return &zero;
+        if (records.size() == 0U)
+            return PairAdjustment{};
+        try {
+            return records.read(matrix + (static_cast<std::size_t>(first_class) *
+                                              second_class_count + second_class) *
+                                             records.size());
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
     }
 };
 
@@ -238,17 +264,53 @@ struct MarkAttachmentRule final {
     > ligature_anchors;
 };
 
+/**
+ * A PairPos subtable, read where it is. Format 1 lists, for each covered first glyph, a PairSet of
+ * second glyphs in ascending order: a pair is two binary searches, its records decoded when found,
+ * so loading a font no longer expands thousands of kerning pairs it may never shape.
+ */
 struct ParsedPairSubtable final {
-    std::map<std::uint32_t, PairAdjustment> pairs;
+    /** Format 1: the covered first glyphs, each range's `value` the coverage index it starts at. */
+    std::vector<GlyphRange> coverage;
+    /** Format 1: where the subtable is, and how many PairSets it has. */
+    std::size_t offset = 0U;
+    std::uint16_t pair_set_count = 0U;
+    PairRecords records;
     std::optional<ClassPairRule> class_rule;
 
-    [[nodiscard]] const PairAdjustment* find(
+    [[nodiscard]] std::optional<PairAdjustment> find(
         const std::uint16_t left,
         const std::uint16_t right
     ) const noexcept {
-        const auto explicit_pair = pairs.find(pair_key(left, right));
-        if (explicit_pair != pairs.end()) return &explicit_pair->second;
-        return class_rule.has_value() ? class_rule->find(left, right) : nullptr;
+        if (class_rule.has_value())
+            return class_rule->find(left, right);
+        const GlyphRange* const range = containing_range(coverage, left);
+        if (range == nullptr)
+            return std::nullopt;
+        const std::size_t index = static_cast<std::size_t>(range->value) + (left - range->first);
+        if (index >= pair_set_count)
+            return std::nullopt;
+        try {
+            const Reader reader(records.table);
+            const std::size_t pair_set = offset + reader.u16(offset + 10U + index * 2U);
+            const std::uint16_t count = reader.u16(pair_set);
+            const std::size_t stride = 2U + records.size();
+            std::size_t low = 0U;
+            std::size_t high = count;
+            while (low < high) {
+                const std::size_t middle = low + (high - low) / 2U;
+                const std::size_t record = pair_set + 2U + middle * stride;
+                const std::uint16_t second = reader.u16(record);
+                if (second == right)
+                    return records.read(record + 2U);
+                if (second < right)
+                    low = middle + 1U;
+                else
+                    high = middle;
+            }
+        } catch (const std::exception&) {
+        }
+        return std::nullopt;
     }
 };
 
@@ -464,6 +526,17 @@ private:
     return result;
 }
 
+std::size_t PairRecords::size() const noexcept {
+    return value_record_size(first_format) + value_record_size(second_format);
+}
+
+PairAdjustment PairRecords::read(const std::size_t offset) const {
+    const Reader reader(table);
+    return PairAdjustment{parse_value_record(reader, offset, first_format),
+                          parse_value_record(reader, offset + value_record_size(first_format),
+                                             second_format)};
+}
+
 [[nodiscard]] std::uint32_t next_utf8(
     const std::string_view text,
     std::size_t& offset
@@ -592,20 +665,13 @@ struct OpenTypeFont::Impl final {
                 coordinates.empty()
                     ? std::make_unique<TrueTypeOutlineSource>(font_bytes, glyphs)
                     : std::make_unique<TrueTypeOutlineSource>(font_bytes, glyphs, coordinates);
-            // An instance's advances move with its phantom points.
-            if (!coordinates.empty()) {
-                try {
-                    for (std::size_t glyph = 0U; glyph < advances.size(); ++glyph) {
-                        const double moved =
-                            static_cast<double>(advances[glyph]) +
-                            outlines->advance_delta(static_cast<std::uint16_t>(glyph));
-                        advances[glyph] =
-                            static_cast<std::uint16_t>(std::clamp(std::round(moved), 0.0, 65535.0));
-                    }
-                } catch (const std::exception& error) {
-                    optional_diagnostics.push_back("gvar advances ignored: " +
-                                                   std::string(error.what()));
-                }
+            // An instance's advances move with its phantom points: worked out for each glyph
+            // the first time it is asked for, since text asks for a few of a font's thousands.
+            if (!coordinates.empty() && !advances.empty()) {
+                varied_advances =
+                    std::make_unique<std::atomic<std::uint32_t>[]>(advances.size());
+                for (std::size_t glyph = 0U; glyph < advances.size(); ++glyph)
+                    varied_advances[glyph].store(unvaried, std::memory_order_relaxed);
             }
         }
     }
@@ -735,9 +801,35 @@ struct OpenTypeFont::Impl final {
     std::int16_t gap = 0;
     std::uint16_t glyphs = 0U;
     std::vector<std::uint16_t> advances;
+    /** An instance's advances, each `unvaried` until it is first asked for (see advance). */
+    static constexpr std::uint32_t unvaried = 0xFFFFFFFFU;
+    std::unique_ptr<std::atomic<std::uint32_t>[]> varied_advances;
+
+    /** A glyph's advance, at the instance's coordinates for an instance. */
+    [[nodiscard]] std::uint16_t advance(const std::uint16_t glyph) const noexcept {
+        if (glyph >= advances.size())
+            return 0U;
+        if (varied_advances == nullptr)
+            return advances[glyph];
+        const std::uint32_t known = varied_advances[glyph].load(std::memory_order_relaxed);
+        if (known != unvaried)
+            return static_cast<std::uint16_t>(known);
+        std::uint16_t moved = advances[glyph];
+        try {
+            moved = static_cast<std::uint16_t>(std::clamp(
+                std::round(static_cast<double>(advances[glyph]) + outlines->advance_delta(glyph)),
+                0.0, 65535.0));
+        } catch (const std::exception&) {
+            // A glyph whose variation data cannot be read keeps its default advance.
+        }
+        varied_advances[glyph].store(moved, std::memory_order_relaxed);
+        return moved;
+    }
     std::vector<Cmap12Group> cmap12;
     std::optional<Cmap4> cmap4;
     std::vector<PositioningLookup> positioning_lookups;
+    /** Every glyph a mark attachment subtable names, sorted: what glyph_is_mark searches. */
+    std::vector<std::uint16_t> mark_glyphs;
     std::vector<LigatureSubstitutionLookup> substitution_lookups;
     ClassDefinition glyph_classes;
     ClassDefinition mark_attachment_classes;
@@ -1077,33 +1169,22 @@ struct OpenTypeFont::Impl final {
         reader.require(offset, 10U);
         ParsedPairSubtable result;
         const std::uint16_t format = reader.u16(offset);
-        const std::uint16_t first_format = reader.u16(offset + 4U);
-        const std::uint16_t second_format = reader.u16(offset + 6U);
+        const PairRecords records{reader.bytes(), reader.u16(offset + 4U),
+                                  reader.u16(offset + 6U)};
         if (format == 1U) {
             const std::uint16_t count = reader.u16(offset + 8U);
             reader.require(offset + 10U, static_cast<std::size_t>(count) * 2U);
-            const std::vector<GlyphRange> ranges =
-                parse_coverage(reader, offset + reader.u16(offset + 2U));
-            layout_budget.charge(ranges.size() + count);
-            const auto coverage = expand_coverage(ranges, count);
-            for (std::size_t index = 0U; index < count; ++index) {
-                if (index >= coverage.size()) break;
-                const std::size_t pair_set = offset + reader.u16(offset + 10U + index * 2U);
-                const std::uint16_t pair_count = reader.u16(pair_set);
-                // Every coverage glyph may name the same PairSet; each use is charged.
-                layout_budget.charge(pair_count);
-                std::size_t cursor = pair_set + 2U;
-                for (std::size_t pair_index = 0U; pair_index < pair_count; ++pair_index) {
-                    const std::uint16_t right = reader.u16(cursor);
-                    cursor += 2U;
-                    const ValueAdjustment first = parse_value_record(reader, cursor, first_format);
-                    cursor += value_record_size(first_format);
-                    const ValueAdjustment second = parse_value_record(reader, cursor, second_format);
-                    cursor += value_record_size(second_format);
-                    const PairAdjustment adjustment{first, second};
-                    result.pairs.insert_or_assign(pair_key(coverage[index], right), adjustment);
-                }
+            result.coverage = parse_coverage(reader, offset + reader.u16(offset + 2U));
+            layout_budget.charge(result.coverage.size() + count);
+            // Each range's coverage index, so a glyph's PairSet is found without expanding them.
+            std::size_t start = 0U;
+            for (GlyphRange& range : result.coverage) {
+                range.value = static_cast<std::uint16_t>(std::min<std::size_t>(start, 0xFFFFU));
+                start += static_cast<std::size_t>(range.last) - range.first + 1U;
             }
+            result.offset = offset;
+            result.pair_set_count = count;
+            result.records = records;
             return result;
         }
         if (format == 2U) {
@@ -1116,43 +1197,13 @@ struct OpenTypeFont::Impl final {
                 rule.coverage.size() + rule.first_classes.ranges.size() +
                 rule.second_classes.ranges.size()
             );
-            const std::uint16_t first_count = reader.u16(offset + 12U);
-            const std::uint16_t second_count = reader.u16(offset + 14U);
-            rule.first_class_count = first_count;
-            rule.second_class_count = second_count;
-            // Without value records every class pair is a zero adjustment and occupies no bytes,
-            // so nothing bounds the class counts; there is nothing to read either.
-            const std::size_t record_size =
-                value_record_size(first_format) + value_record_size(second_format);
-            const std::size_t class_pairs = static_cast<std::size_t>(first_count) * second_count;
-            if (record_size == 0U) {
-                result.class_rule = std::move(rule);
-                return result;
-            }
-            reader.require(offset + 16U, class_pairs * record_size);
-            layout_budget.charge(class_pairs);
-            std::size_t cursor = offset + 16U;
-            for (std::size_t first_class = 0U; first_class < first_count; ++first_class) {
-                for (std::size_t second_class = 0U; second_class < second_count; ++second_class) {
-                    const ValueAdjustment first = parse_value_record(reader, cursor, first_format);
-                    cursor += value_record_size(first_format);
-                    const ValueAdjustment second = parse_value_record(reader, cursor, second_format);
-                    cursor += value_record_size(second_format);
-                    const PairAdjustment adjustment{first, second};
-                    if (!adjustment.zero()) {
-                        if (first_class > 0xFFFFU || second_class > 0xFFFFU) {
-                            throw FontError("OpenType class id exceeds uint16");
-                        }
-                        rule.adjustments.emplace(
-                            pair_key(
-                                static_cast<std::uint16_t>(first_class),
-                                static_cast<std::uint16_t>(second_class)
-                            ),
-                            adjustment
-                        );
-                    }
-                }
-            }
+            rule.first_class_count = reader.u16(offset + 12U);
+            rule.second_class_count = reader.u16(offset + 14U);
+            rule.records = records;
+            rule.matrix = offset + 16U;
+            // The matrix is read where it is; that it is all there is checked once, here.
+            reader.require(rule.matrix, static_cast<std::size_t>(rule.first_class_count) *
+                                            rule.second_class_count * records.size());
             result.class_rule = std::move(rule);
             return result;
         }
@@ -1376,6 +1427,16 @@ struct OpenTypeFont::Impl final {
                 );
             }
         }
+        // Shaping asks whether a glyph is a mark for every glyph in every lookup, so the marks
+        // are gathered once here rather than searched for across every subtable each time.
+        for (const PositioningLookup& lookup : positioning_lookups) {
+            for (const PositioningSubtable& subtable : lookup.subtables) {
+                if (!subtable.mark.has_value()) continue;
+                for (const auto& [glyph, record] : subtable.mark->marks) mark_glyphs.push_back(glyph);
+            }
+        }
+        std::ranges::sort(mark_glyphs);
+        mark_glyphs.erase(std::ranges::unique(mark_glyphs).begin(), mark_glyphs.end());
     }
 
     [[nodiscard]] std::map<std::uint16_t, std::vector<LigatureSubstitutionRule>>
@@ -1921,15 +1982,7 @@ struct OpenTypeFont::Impl final {
     }
 
     [[nodiscard]] bool glyph_is_mark(const std::uint16_t glyph) const noexcept {
-        if (glyph_classes.value(glyph) == 3U) return true;
-        for (const PositioningLookup& lookup : positioning_lookups) {
-            for (const PositioningSubtable& subtable : lookup.subtables) {
-                if (subtable.mark.has_value() && subtable.mark->marks.contains(glyph)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return glyph_classes.value(glyph) == 3U || std::ranges::binary_search(mark_glyphs, glyph);
     }
 
     template <typename Glyph>
@@ -1984,19 +2037,19 @@ struct OpenTypeFont::Impl final {
         return std::nullopt;
     }
 
-    [[nodiscard]] static const PairAdjustment* pair_in_lookup(
+    [[nodiscard]] static std::optional<PairAdjustment> pair_in_lookup(
         const PositioningLookup& lookup,
         const std::uint16_t left,
         const std::uint16_t right
     ) noexcept {
         for (const PositioningSubtable& subtable : lookup.subtables) {
             if (!subtable.pair.has_value()) continue;
-            if (const PairAdjustment* adjustment = subtable.pair->find(left, right);
-                adjustment != nullptr) {
+            if (std::optional<PairAdjustment> adjustment = subtable.pair->find(left, right);
+                adjustment.has_value()) {
                 return adjustment;
             }
         }
-        return nullptr;
+        return std::nullopt;
     }
 
     [[nodiscard]] std::optional<PairAdjustment> gpos_adjustment(
@@ -2012,8 +2065,8 @@ struct OpenTypeFont::Impl final {
                 ignored_by_lookup(lookup.filter, right_input)) {
                 continue;
             }
-            const PairAdjustment* pair = pair_in_lookup(lookup, left, right);
-            if (pair == nullptr) continue;
+            const std::optional<PairAdjustment> pair = pair_in_lookup(lookup, left, right);
+            if (!pair.has_value()) continue;
             matched = true;
             const auto accumulate = [](ValueAdjustment& target, const ValueAdjustment& value) {
                 target.x_placement = static_cast<std::int16_t>(std::clamp<std::int32_t>(
@@ -2126,7 +2179,7 @@ struct OpenTypeFont::Impl final {
         const FontStyleGeometry style
     ) const {
         if (!style.bold() ||
-            glyph >= advances.size() || advances[glyph] == 0U || outlines == nullptr) {
+            glyph >= advances.size() || advance(glyph) == 0U || outlines == nullptr) {
             return 0.0;
         }
         const std::shared_ptr<const GlyphOutline> outline = outlines->outline(glyph);
@@ -2211,10 +2264,52 @@ struct OpenTypeFont::Impl final {
             target.y_advance = saturated_design_add(target.y_advance, value.y_advance);
         };
 
+        // Each glyph's class for lookup flags, worked out once for the run rather than again for
+        // every glyph of every lookup; and whether any glyph is a mark a lookup could attach.
+        std::vector<std::uint16_t> classes(glyph_run.size());
+        bool attachable_marks = false;
+        for (std::size_t index = 0U; index < glyph_run.size(); ++index) {
+            const GlyphPositioningInput& input = glyph_run[index];
+            const bool listed = std::ranges::binary_search(mark_glyphs, input.glyph_id);
+            attachable_marks = attachable_marks || listed;
+            std::uint16_t glyph_class = glyph_classes.value(input.glyph_id);
+            if (glyph_class == 0U)
+                glyph_class = listed ? 3U : input.ligature_component_count > 1U ? 2U : 1U;
+            classes[index] = glyph_class;
+        }
+        // ignored_by_lookup, from the run's classes.
+        const auto ignored = [&](const LookupFilter& filter, const std::size_t index) {
+            const std::uint16_t glyph_class = classes[index];
+            if (glyph_class == 1U && (filter.flags & 0x0002U) != 0U) return true;
+            if (glyph_class == 2U && (filter.flags & 0x0004U) != 0U) return true;
+            if (glyph_class != 3U) return false;
+            if ((filter.flags & 0x0008U) != 0U) return true;
+            const std::uint16_t glyph = glyph_run[index].glyph_id;
+            const auto attachment_type = static_cast<std::uint16_t>(filter.flags >> 8U);
+            if (attachment_type != 0U && mark_attachment_classes.value(glyph) != attachment_type)
+                return true;
+            return filter.mark_filtering_set.has_value() &&
+                   !covered(mark_filtering_sets[*filter.mark_filtering_set], glyph);
+        };
+        const auto next_unignored = [&](const LookupFilter& filter,
+                                        const std::size_t current) -> std::optional<std::size_t> {
+            for (std::size_t index = current + 1U; index < glyph_run.size(); ++index) {
+                if (!ignored(filter, index)) return index;
+            }
+            return std::nullopt;
+        };
+        const auto previous_unignored = [&](const LookupFilter& filter, const std::size_t current)
+            -> std::optional<std::size_t> {
+            for (std::size_t index = current; index-- > 0U;) {
+                if (!ignored(filter, index)) return index;
+            }
+            return std::nullopt;
+        };
+
         struct PlannedPairAdjustment final {
             std::size_t left = 0U;
             std::size_t right = 0U;
-            const PairAdjustment* adjustment = nullptr;
+            PairAdjustment adjustment;
         };
         std::vector<std::vector<PlannedPairAdjustment>> pair_plans(
             positioning_lookups.size()
@@ -2237,16 +2332,14 @@ struct OpenTypeFont::Impl final {
             std::vector<PlannedPairAdjustment>& plan = pair_plans[lookup_index];
             plan.reserve(glyph_run.size());
             for (std::size_t left = 0U; left < glyph_run.size(); ++left) {
-                if (ignored_by_lookup(lookup.filter, glyph_run[left])) continue;
-                const std::optional<std::size_t> right = next_eligible(
-                    lookup.filter, glyph_run, left
-                );
+                if (ignored(lookup.filter, left)) continue;
+                const std::optional<std::size_t> right = next_unignored(lookup.filter, left);
                 if (!right.has_value()) continue;
-                const PairAdjustment* pair = pair_in_lookup(
+                const std::optional<PairAdjustment> pair = pair_in_lookup(
                     lookup, glyph_run[left].glyph_id, glyph_run[*right].glyph_id
                 );
-                if (pair == nullptr) continue;
-                plan.push_back(PlannedPairAdjustment{left, *right, pair});
+                if (!pair.has_value()) continue;
+                plan.push_back(PlannedPairAdjustment{left, *right, *pair});
                 if (*right == left + 1U) adjacent_pair_positioned[left] = true;
             }
         }
@@ -2271,27 +2364,31 @@ struct OpenTypeFont::Impl final {
             const PositioningLookup& lookup = positioning_lookups[lookup_index];
             if (pair_lookups[lookup_index]) {
                 for (const PlannedPairAdjustment& pair : pair_plans[lookup_index]) {
-                    add(result[pair.left], pair.adjustment->first);
-                    add(result[pair.right], pair.adjustment->second);
+                    add(result[pair.left], pair.adjustment.first);
+                    add(result[pair.right], pair.adjustment.second);
                 }
                 continue;
             }
+            // Every other lookup attaches marks: a run without any (most text) has none to place.
+            if (!attachable_marks) continue;
 
             std::vector<double> pen_x(glyph_run.size());
             std::vector<double> pen_y(glyph_run.size());
             for (std::size_t index = 1U; index < glyph_run.size(); ++index) {
                 const std::uint16_t previous = glyph_run[index - 1U].glyph_id;
-                const std::uint16_t nominal = previous < advances.size()
-                    ? advances[previous] : 0U;
+                const std::uint16_t nominal = advance(previous);
                 pen_x[index] = pen_x[index - 1U] +
                     static_cast<double>(nominal) + result[index - 1U].x_advance;
                 pen_y[index] = pen_y[index - 1U] + result[index - 1U].y_advance;
             }
             for (std::size_t mark_index = 1U; mark_index < glyph_run.size(); ++mark_index) {
-                if (ignored_by_lookup(lookup.filter, glyph_run[mark_index])) continue;
-                const std::optional<std::size_t> candidate = previous_eligible(
-                    lookup.filter, glyph_run, mark_index
-                );
+                // A glyph no subtable lists as a mark attaches to nothing.
+                if (!std::ranges::binary_search(mark_glyphs, glyph_run[mark_index].glyph_id) ||
+                    ignored(lookup.filter, mark_index)) {
+                    continue;
+                }
+                const std::optional<std::size_t> candidate =
+                    previous_unignored(lookup.filter, mark_index);
                 if (!candidate.has_value()) continue;
                 for (const PositioningSubtable& subtable : lookup.subtables) {
                     if (!subtable.mark.has_value()) continue;
@@ -2580,7 +2677,7 @@ OpenTypeFont::instance(const std::span<const std::pair<std::string, double>> set
 }
 
 std::uint16_t OpenTypeFont::horizontal_advance(const std::uint16_t glyph) const noexcept {
-    return glyph < implementation_->advances.size() ? implementation_->advances[glyph] : 0U;
+    return implementation_->advance(glyph);
 }
 
 std::shared_ptr<const GlyphOutline> OpenTypeFont::glyph_outline(const std::uint16_t glyph) const {
