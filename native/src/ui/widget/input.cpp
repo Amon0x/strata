@@ -50,6 +50,15 @@ const KeyModifiers& WidgetInputScope::modifiers() const noexcept {
 const PointerInputEvent* WidgetInputScope::pointer() const noexcept {
     return pointer_;
 }
+Point WidgetInputScope::local_position(const Point surface_position) const {
+    return router_.logical_pointer_position(node_, surface_position);
+}
+Point WidgetInputScope::local_position(const RetainedNode& node, const Point surface_position) const {
+    return router_.logical_pointer_position(node, surface_position);
+}
+const InputRouter& WidgetInputScope::input() const noexcept {
+    return router_;
+}
 const ScrollInputEvent* WidgetInputScope::scroll() const noexcept {
     return dispatch_ != nullptr ? dispatch_->scroll() : nullptr;
 }

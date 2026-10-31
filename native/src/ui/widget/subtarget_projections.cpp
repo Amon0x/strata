@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "ui/command.hpp"
+#include "ui/input.hpp"
 #include "ui/notification.hpp"
 #include "ui/text_geometry.hpp"
 #include "ui/tree.hpp"
@@ -89,11 +90,13 @@ using Targets = std::vector<WidgetSubtarget>;
 [[nodiscard]] std::optional<Rect> descendant_bounds(
     const RetainedNode& node,
     const std::string_view key,
-    const LayoutResult& layout
+    const LayoutResult& layout,
+    const InputRouter& input
 ) noexcept {
     const RetainedNode* child = descendant_key(node, key);
     const LayoutRecord* record = child != nullptr ? layout.find(child->identity()) : nullptr;
-    return record != nullptr ? std::optional<Rect>(record->bounds) : std::nullopt;
+    return record != nullptr
+        ? std::optional<Rect>(input.relative_bounds(*child, node, record->bounds)) : std::nullopt;
 }
 
 [[nodiscard]] Rect popup_bounds(
@@ -268,6 +271,8 @@ Targets radio_group(const WidgetSubtargetContext& context) {
             runtime::Value(*id), label != nullptr ? *label : *id, {},
             boolean(entry.field("enabled"), true), false, context.record.z_index,
         });
+        if (child != nullptr)
+            result.back().presentation_identity = node.children()[index]->identity();
     }
     return result;
 }
@@ -279,7 +284,7 @@ Targets select(const WidgetSubtargetContext& context) {
     const Rect bounds = context.record.bounds;
     const std::string select_key = node.description().key.value_or("$select");
     const Rect control_bounds = property(node, "triggerTemplate") != nullptr
-        ? descendant_bounds(node, select_key + ".trigger", layout).value_or(bounds)
+        ? descendant_bounds(node, select_key + ".trigger", layout, context.input).value_or(bounds)
         : bounds;
     result.push_back(WidgetSubtarget{
         node.identity(), "$control", WidgetSubtargetKind::control, 0U, control_bounds,
@@ -343,7 +348,7 @@ Targets select(const WidgetSubtargetContext& context) {
     ));
     const std::size_t count = std::min(maximum, source->list()->values.size());
     const Rect popup = popup_bounds(
-        bounds, root_bounds(layout, bounds), bounds.width,
+        context.input.presented_bounds(node, control_bounds), root_bounds(layout, bounds), bounds.width,
         row_height * static_cast<double>(count)
     );
     add_choice_rows(
@@ -360,14 +365,14 @@ Targets menu(const WidgetSubtargetContext& context) {
     const Rect bounds = context.record.bounds;
     const std::string menu_key = node.description().key.value_or("$menu");
     const Rect control_bounds = property(node, "triggerTemplate") != nullptr
-        ? descendant_bounds(node, menu_key + ".trigger", layout).value_or(bounds)
+        ? descendant_bounds(node, menu_key + ".trigger", layout, context.input).value_or(bounds)
         : bounds;
     result.push_back(WidgetSubtarget{
         node.identity(), "$control", WidgetSubtargetKind::control, 0U, control_bounds,
         runtime::Value{}, {}, {}, true, false, context.record.z_index,
     });
     if (!effective_boolean(node, "open", "$expanded", "defaultOpen", false)) return result;
-    const MenuProjection projection = project_menu(node, layout, context.commands);
+    const MenuProjection projection = project_menu(node, layout, context.input, context.commands);
     const bool authored_popup =
         property(node, "popupTemplate") != nullptr ||
         property(node, "itemTemplate") != nullptr;
@@ -466,6 +471,7 @@ Targets list(const WidgetSubtargetContext& context) {
             node.identity(), id, WidgetSubtargetKind::choice, index, child_layout->bounds,
             runtime::Value(runtime::KeyValue{id}), id, {}, true, false, context.record.z_index,
         });
+        result.back().presentation_identity = child.identity();
     }
     return result;
 }
@@ -506,7 +512,8 @@ Targets menu_bar(const WidgetSubtargetContext& context) {
         bounds.x + width * static_cast<double>(category_index), bounds.y, width, bounds.height,
     };
     const Rect popup = popup_bounds(
-        anchor, root_bounds(context.layout, bounds), number(property(node, "menuWidth"), 200.0),
+        context.input.presented_bounds(node, anchor),
+        root_bounds(context.layout, bounds), number(property(node, "menuWidth"), 200.0),
         row_height * static_cast<double>(category_commands.size())
     );
     for (std::size_t index = 0U; index < category_commands.size(); ++index) {
@@ -580,7 +587,7 @@ Targets toolbar(const WidgetSubtargetContext& context) {
     if (open == nullptr || open->boolean() == nullptr || !*open->boolean()) return result;
     const double row_height = std::max(18.0, number(property(node, "rowHeight"), 28.0));
     const Rect popup = popup_bounds(
-        result.back().bounds,
+        context.input.presented_bounds(node, result.back().bounds),
         root_bounds(context.layout, bounds),
         std::max(
             widths.empty() ? 0.0 : *std::max_element(widths.begin(), widths.end()),
@@ -649,19 +656,22 @@ Targets tooltip(const WidgetSubtargetContext& context) {
     const RetainedNode& node = context.node;
     if (property(node, "contentTemplate") != nullptr) {
         const std::string tooltip_key = node.description().key.value_or("$tooltip");
-        if (const std::optional<Rect> popup =
-                descendant_bounds(node, tooltip_key + ".content", context.layout);
-            popup.has_value()) {
+        const RetainedNode* content = descendant_key(node, tooltip_key + ".content");
+        const LayoutRecord* popup = content != nullptr
+            ? context.layout.find(content->identity()) : nullptr;
+        if (popup != nullptr) {
             result.push_back(WidgetSubtarget{
                 node.identity(), "$tooltip", WidgetSubtargetKind::control, 0U,
-                *popup, runtime::Value{}, {}, {}, true, true, detached_overlay_tooltip_z,
+                popup->bounds, runtime::Value{}, {}, {}, true, true, detached_overlay_tooltip_z,
             });
+            result.back().presentation_identity = content->identity();
         }
         return result;
     }
     static const WidgetTextLayoutResolver no_layout;
     const std::optional<TooltipProjection> projection = project_tooltip(
-        node, context.layout, context.text_layout != nullptr ? *context.text_layout : no_layout
+        node, context.layout, context.input,
+        context.text_layout != nullptr ? *context.text_layout : no_layout
     );
     if (projection.has_value()) {
         result.push_back(WidgetSubtarget{

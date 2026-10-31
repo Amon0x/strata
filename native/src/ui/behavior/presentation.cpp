@@ -102,7 +102,7 @@ void drop_target_overlay(const DescriptionBehavior& attachment, WidgetRenderScop
     const std::string axis = axis_value != nullptr && axis_value->string() != nullptr
                                  ? *axis_value->string()
                                  : std::string{};
-    const Rect bounds = scope.layout().bounds;
+    const Rect bounds = scope.input().presented_bounds(scope.node(), scope.layout().bounds);
     if (state->placement == "on" || axis.empty()) {
         scope.rounded_rect(bounds, tint, RenderBorder{2.0, color, true}, 5.0);
         return;
@@ -146,8 +146,9 @@ void reorder_target_overlay(const DescriptionBehavior& attachment, WidgetRenderS
                                  : "VERTICAL";
     const bool horizontal = axis == "HORIZONTAL" || axis == "horizontal";
     const ReorderInsertion resolved =
-        resolve_reorder_insertion(scope.node(), scope.layout_result(), state->position, horizontal);
-    const Rect bounds = scope.layout().bounds;
+        resolve_reorder_insertion(scope.node(), scope.layout_result(), scope.input(),
+                                  state->position, horizontal);
+    const Rect bounds = scope.input().presented_bounds(scope.node(), scope.layout().bounds);
     const double insertion = resolved.coordinate;
     const RenderColor color{103U, 225U, 164U, 255U};
     scope.rounded_rect(
@@ -178,7 +179,8 @@ void movement_guides_overlay(const DescriptionBehavior& attachment, WidgetRender
     if (shown != nullptr && shown->color() != nullptr)
         color = RenderColor{shown->color()->red, shown->color()->green, shown->color()->blue,
                             shown->color()->alpha};
-    const Rect area = record->viewport.value_or(record->content_bounds);
+    const Rect area = scope.layout_result().surface_bounds(
+        *record, record->viewport.value_or(record->content_bounds));
     const runtime::Value* x = guides->field("x");
     const runtime::Value* y = guides->field("y");
     if (x != nullptr && x->number() != nullptr)

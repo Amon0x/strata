@@ -83,7 +83,6 @@ WidgetRegistry::WidgetRegistry() {
     register_shell_widget_inputs(*this);
     register_collection_widget_inputs(*this);
     register_primitive_widget_inspection(*this);
-    register_shell_widget_inspection(*this);
     register_collection_widget_inspection(*this);
     register_primitive_widget_semantics(*this);
     register_control_widget_semantics(*this);

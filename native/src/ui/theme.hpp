@@ -422,12 +422,6 @@ public:
     );
     void purge(std::uint64_t catalog_generation);
     void clear() noexcept;
-    /** The theme's motion policy as the value each materialized node carries: built once per
-     * theme and shared, so nodes do not rebuild it and comparisons of it are pointer checks. */
-    [[nodiscard]] const runtime::Value* motion_policy(const std::shared_ptr<const Theme>& theme) const;
-    void store_motion_policy(const std::shared_ptr<const Theme>& theme, runtime::Value value);
-    [[nodiscard]] const runtime::Value* palette(const std::shared_ptr<const Theme>& theme) const;
-    void store_palette(const std::shared_ptr<const Theme>& theme, runtime::Value value);
     /** The contribution built once per theme, widget type, variant and scope, as nodes share it. */
     [[nodiscard]] const ThemeWidgetContribution*
     widget_contribution(const std::shared_ptr<const Theme>& theme, std::string_view type,
@@ -454,12 +448,6 @@ private:
     std::map<ContributionKey, ContributionEntry> contributions_;
     std::uint64_t purged_generation_ = 0U;
     std::size_t purge_threshold_ = 0U;
-    struct MotionPolicyEntry final {
-        std::weak_ptr<const Theme> theme;
-        runtime::Value value;
-    };
-    std::map<const Theme*, MotionPolicyEntry> motion_policies_;
-    std::map<const Theme*, MotionPolicyEntry> palettes_;
     struct Entry final {
         std::weak_ptr<const DescriptionNode> source;
         std::weak_ptr<const Theme> effective_theme;

@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "ui/collection/table_model.hpp"
+#include "ui/input.hpp"
 #include "ui/scroll_geometry.hpp"
 #include "ui/text.hpp"
 
@@ -98,8 +99,9 @@ void tree_foreground(WidgetRenderScope& scope) {
     for (const auto& child : scope.node().children()) {
         const LayoutRecord* child_layout = scope.layout_result().find(child->identity());
         if (child_layout == nullptr || !child->description().key.has_value()) continue;
+        const Rect bounds = scope.input().relative_bounds(*child, scope.node(), child_layout->bounds);
         if (row_boolean(*child, "$treeSelected")) {
-            scope.solid_rect(child_layout->bounds, selection_overlay(scope));
+            scope.solid_rect(bounds, selection_overlay(scope));
         }
         const runtime::Value* depth_value = row_property(*child, "$treeDepth");
         const std::size_t depth = depth_value != nullptr && depth_value->number() != nullptr &&
@@ -109,17 +111,17 @@ void tree_foreground(WidgetRenderScope& scope) {
         for (std::size_t guide = 0U; guide < depth; ++guide) {
             scope.solid_rect(
                 Rect{
-                    child_layout->bounds.x + 18.0 * static_cast<double>(guide) + 5.0,
-                    child_layout->bounds.y,
+                    bounds.x + 18.0 * static_cast<double>(guide) + 5.0,
+                    bounds.y,
                     1.0,
-                    child_layout->bounds.height,
+                    bounds.height,
                 },
                 scope.visual().border.has_value() ? scope.visual().border->paint
                                                   : Paint(scope.visual().foreground));
         }
         if (!row_boolean(*child, "$treeExpandable")) continue;
-        const double x = child_layout->bounds.x + 18.0 * static_cast<double>(depth) + 3.0;
-        const double y = child_layout->bounds.y + (child_layout->bounds.height - 10.0) * 0.5;
+        const double x = bounds.x + 18.0 * static_cast<double>(depth) + 3.0;
+        const double y = bounds.y + (bounds.height - 10.0) * 0.5;
         if (row_boolean(*child, "$treeExpanded")) {
             scope.solid_rect(Rect{x, y + 3.5, 10.0, 2.0}, scope.visual().foreground);
         } else {
@@ -147,14 +149,17 @@ void table_foreground(WidgetRenderScope& scope) {
     const std::set<std::string, std::less<>> selected = selected_keys(scope);
     for (const auto& child : scope.node().children()) {
         const LayoutRecord* row = scope.layout_result().find(child->identity());
-        if (row == nullptr || row->bounds.bottom() < viewport.y || row->bounds.y > viewport.bottom()) {
+        if (row == nullptr)
+            continue;
+        const Rect bounds = scope.input().relative_bounds(*child, scope.node(), row->bounds);
+        if (bounds.bottom() < viewport.y || bounds.y > viewport.bottom()) {
             continue;
         }
         if (child->description().key.has_value() && selected.contains(*child->description().key)) {
-            scope.solid_rect(row->bounds, selection_overlay(scope));
+            scope.solid_rect(bounds, selection_overlay(scope));
         }
         scope.solid_rect(
-            Rect{viewport.x, std::max(viewport.y, row->bounds.bottom() - 1.0), viewport.width, 1.0},
+            Rect{viewport.x, std::max(viewport.y, bounds.bottom() - 1.0), viewport.width, 1.0},
             scope.visual().border.has_value() ? scope.visual().border->paint
                                               : Paint(scope.palette("tableRowDivider")));
     }
@@ -264,7 +269,8 @@ void item_grid_overlay(WidgetRenderScope& scope) {
         ? point(marquee->field("currentViewport")) : std::nullopt;
     if (selected.empty() && (!start.has_value() || !current.has_value())) return;
 
-    scope.push_clip(scope.layout().bounds);
+    scope.push_clip(scope.input().presented_clip(scope.node()).value_or(
+        scope.input().presented_bounds(scope.node(), scope.layout().bounds)));
     for (const auto& band : scope.node().children()) {
         for (const auto& item : band->children()) {
             if (!item->description().key.has_value() ||
@@ -273,7 +279,8 @@ void item_grid_overlay(WidgetRenderScope& scope) {
             }
             if (const LayoutRecord* layout = scope.layout_result().find(item->identity());
                 layout != nullptr) {
-                scope.solid_rect(layout->bounds, selection_overlay(scope));
+                scope.solid_rect(scope.input().presented_bounds(*item, layout->bounds),
+                                 selection_overlay(scope));
             }
         }
     }

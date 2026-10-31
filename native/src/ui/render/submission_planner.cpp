@@ -680,7 +680,8 @@ bool retained_text(const std::optional<PreparedTextCacheEntry>& retained,
             --scope.group_depth;
         } else if (const auto* clip = std::get_if<ClipPushRenderCommand>(&source)) {
             clips.push_back(scope.clip);
-            scope.clip = intersect(scope.clip, scope.transform.bounds(clip->rect));
+            if (scope.group == 0U)
+                scope.clip = intersect(scope.clip, scope.transform.bounds(clip->rect));
         } else if (std::holds_alternative<ClipPopRenderCommand>(source)) {
             if (clips.empty())
                 return false;
@@ -2344,7 +2345,8 @@ class Planner final {
             if constexpr (std::is_same_v<Type, ClipPushRenderCommand>) {
                 clip_stack_.push_back(clip_);
                 const Rect presented = transform_.bounds(value.rect);
-                clip_ = intersect(clip_, presented);
+                if (group_ == 0U)
+                    clip_ = intersect(clip_, presented);
                 const CornerRadii safe_radii{
                     std::max(0.0, value.radii.top_left),
                     std::max(0.0, value.radii.top_right),
@@ -2354,7 +2356,8 @@ class Planner final {
                 // A rotated rectangle is not its scissor box: it clips through the same
                 // per-pixel mask a rounded corner does, with square corners.
                 const bool has_rounded_geometry =
-                    (rounded(safe_radii) || !transform_.axis_aligned() || !value.shape.plain()) &&
+                    (group_ != 0U || rounded(safe_radii) ||
+                     !transform_.axis_aligned() || !value.shape.plain()) &&
                     !clip_.empty();
                 rounded_clip_stack_.push_back(has_rounded_geometry);
                 if (has_rounded_geometry) {
@@ -2380,6 +2383,7 @@ class Planner final {
                                 inverse->m12,
                             },
                             value.shape,
+                            group_,
                         });
                         rounded_clips_snapshot_.reset();
                     }

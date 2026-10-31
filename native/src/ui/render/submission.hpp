@@ -52,6 +52,8 @@ struct SubmissionRoundedClip final {
     std::array<double, 6U> inverse_transform{1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
     /** Its shape and fading edges (ClipShape): a plain rounded rectangle unless set. */
     ClipShape shape{};
+    /** Coordinate space of the clip, not necessarily the group of the draw it cuts. */
+    std::uint32_t group = 0U;
     [[nodiscard]] friend bool operator==(const SubmissionRoundedClip&,
                                          const SubmissionRoundedClip&) = default;
 };

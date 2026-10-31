@@ -128,7 +128,7 @@ struct Scissor final {
     [[nodiscard]] friend bool operator==(const Scissor&, const Scissor&) = default;
 };
 
-/** A rounded clip plus the affine map from presented logical pixels into its local bounds. */
+/** A clip and its inverse presentation map, resolved from its own group rather than the draw's. */
 struct RoundedClip final {
     double x = 0.0;
     double y = 0.0;
@@ -145,6 +145,9 @@ struct RoundedClip final {
     std::uint32_t shape = 0U;
     double sides = 0.0;
     std::array<double, 4U> fade{};
+    std::uint32_t group = 0U;
+    /** Homogeneous divisor after the decoder places the clip; source packets are affine. */
+    std::array<double, 3U> inverse_projection{0.0, 0.0, 1.0};
     [[nodiscard]] friend bool operator==(const RoundedClip&, const RoundedClip&) = default;
 };
 

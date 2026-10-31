@@ -323,11 +323,18 @@ struct LayoutRecord final {
      */
     std::optional<Point> translated_subtree;
     LayoutKind kind = LayoutKind::panel;
+    /** Coordinate ancestry, independent of retained ancestry for surface-positioned portals. */
+    std::uint64_t coordinate_parent = 0U;
+    /** The parent's scroll translation applies to this flow child, but not to its own chrome. */
+    bool scroll_content = false;
+    /** Local sticky/pin correction, excluded from layout-move animation origins. */
+    Point position_translation;
     Size measured_size;
     Rect bounds;
     Rect snapped_bounds;
     Rect hit_bounds;
     Rect content_bounds;
+    /** Intersection of clips in this scroll coordinate space; outer spaces remain separate. */
     std::optional<Rect> clip;
     std::optional<Rect> local_clip;
     std::optional<Rect> scroll_frame;
@@ -379,6 +386,11 @@ struct LayoutOperationCounters final {
 
 struct LayoutResult final {
     std::uint64_t generation = 0U;
+    /** Changes only when arranged geometry changes, not when an offset moves scroll content. */
+    std::uint64_t geometry_generation = 0U;
+    /** The journal covers every record written after this layout generation. */
+    std::uint64_t changes_since_generation = 0U;
+    std::vector<std::uint64_t> changed_records;
     std::uint64_t root_identity = 0U;
     std::unordered_map<std::uint64_t, LayoutRecord> records;
     double scale = 1.0;
@@ -388,6 +400,11 @@ struct LayoutResult final {
     std::int64_t maintenance_nanos = 0;
 
     [[nodiscard]] const LayoutRecord* find(std::uint64_t identity) const noexcept;
+    /** Scroll-only translation from a record's stable content coordinates to the surface. */
+    [[nodiscard]] Point surface_offset(const LayoutRecord& record) const noexcept;
+    [[nodiscard]] Rect surface_bounds(const LayoutRecord& record, Rect bounds) const noexcept;
+    /** Intersects ancestor clips only after placing each in surface coordinates. */
+    [[nodiscard]] std::optional<Rect> surface_clip(const LayoutRecord& record) const noexcept;
 };
 
 struct ContentSizeMotionSpec final {
@@ -512,6 +529,8 @@ class LayoutEngine final {
         std::optional<Rect> sticky_viewport;
         /** The arranging parent's content box, which a sticky child never leaves. */
         std::optional<Rect> sticky_container;
+        /** Ancestor viewport in the current content space, read only by windowed subtrees. */
+        std::optional<Rect> visible_clip;
         [[nodiscard]] friend bool operator==(const PinContext&, const PinContext&) = default;
     };
 
@@ -535,6 +554,9 @@ class LayoutEngine final {
         std::optional<Rect> inherited_clip;
         PinContext pin_context;
         std::uint64_t node_arrangement_revision = 0U;
+        std::uint64_t own_arrangement_revision = 0U;
+        /** Cached flow rectangles have monotone vertical starts and ends for viewport queries. */
+        bool scroll_children_ordered = false;
     };
 
     [[nodiscard]] MeasuredNodePtr measure(const RetainedNode& node, const Constraints& constraints,
@@ -563,6 +585,7 @@ class LayoutEngine final {
     [[nodiscard]] static Point resolved_scroll_offset(const RetainedNode& node,
                                                       Point fallback) noexcept;
     [[nodiscard]] std::uint64_t advance_render_generation();
+    void store_record(LayoutRecord&& record, LayoutResult& result);
     [[nodiscard]] bool arranged_in_current_pass(const RetainedNode& node) const noexcept;
 
     IntrinsicMeasure intrinsic_measure_;

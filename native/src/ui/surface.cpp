@@ -510,7 +510,12 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
               const Point origin = editable_text_origin(*viewport, text_layout, multiline,
                                                         input_.editor_scroll(node.identity()));
               Rect caret = text_layout_caret_rect(text_layout, origin, editor.text, editor.caret);
-              caret = input_.presented_bounds(node, caret);
+              if (const std::optional<std::uint64_t> identity = editable_text_coordinate_identity(
+                      widgets_, node, input_.projected_subtargets(node)); identity.has_value()) {
+                  if (const RetainedNode* coordinates = tree_.find_identity(*identity);
+                      coordinates != nullptr)
+                      caret = input_.presented_bounds(*coordinates, caret);
+              }
               return runtime::HostServiceRect{
                   caret.x,
                   caret.y,
@@ -518,7 +523,9 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
                   caret.height,
               };
           },
-          [this](const RetainedNode& node) { return render_engine_.snapshot_subtree(node); }, {},
+          [this](const RetainedNode& node) {
+              return render_engine_.snapshot_subtree(node, layout_engine_.result());
+          }, {},
           host_services,
           [this](const RetainedNode& node, const std::string_view value,
                  const TextLayoutOptions& options) {
@@ -790,8 +797,8 @@ void Surface::settle_scroll_snaps(const std::int64_t frame_time_nanos) {
             if (child_record == nullptr || child->lifecycle() != RetainedLifecycle::attached)
                 continue;
             // The child's place in the scrolled content, independent of the current offset.
-            const double x = child_record->bounds.x - viewport.x + offset.x;
-            const double y = child_record->bounds.y - viewport.y + offset.y;
+            const double x = child_record->bounds.x - viewport.x;
+            const double y = child_record->bounds.y - viewport.y;
             const auto aligned = [snap](const double start, const double extent,
                                         const double view) {
                 return snap == ScrollSnap::start    ? start
@@ -1959,13 +1966,14 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
             if (const LayoutRecord* record = laid_out.find(inspected->identity());
                 record != nullptr) {
                 render_commands_.append(BorderRenderCommand{
-                    record->bounds,
+                    laid_out.surface_bounds(*record, record->bounds),
                     RenderBorder{2.0, RenderColor{255U, 191U, 76U, 255U}, true},
                     CornerRadii::all(3.0),
                 });
-                if (record->clip.has_value()) {
+                if (const std::optional<Rect> clip = input_.presented_clip(*inspected);
+                    clip.has_value()) {
                     render_commands_.append(BorderRenderCommand{
-                        *record->clip,
+                        *clip,
                         RenderBorder{1.0, RenderColor{99U, 179U, 255U, 210U}, true},
                         CornerRadii{},
                     });

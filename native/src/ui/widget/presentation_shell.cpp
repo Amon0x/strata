@@ -589,6 +589,7 @@ void tooltip_overlay(WidgetRenderScope& scope) {
     const std::optional<TooltipProjection> projection = project_tooltip(
         scope.node(),
         scope.layout_result(),
+        scope.input(),
         [&scope](
             const RetainedNode& owner,
             const std::string_view text,

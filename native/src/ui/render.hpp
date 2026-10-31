@@ -575,12 +575,12 @@ using RenderCommand =
 [[nodiscard]] RenderCommand render_command_with_opacity(RenderCommand command, double opacity);
 
 /**
- * A command stream as runs of shared, immutable storage: what a frame drew anew, and runs of
- * earlier frames' storage it reuses as they were (a retained subtree), so reusing drawing never
- * copies it. Read as a vector: by index, in order, and compared.
+ * A command stream as a balanced tree of shared, immutable runs. A retained range shares whole
+ * branches, so recomposition and copies do not visit every fragment accumulated by earlier frames.
+ * The final run stays open while a buffer draws into it; snapshots retain only its published range.
  */
 class RenderCommandView final {
-  public:
+  private:
     struct Segment final {
         std::shared_ptr<const std::vector<RenderCommand>> storage;
         std::size_t begin = 0U;
@@ -591,6 +591,15 @@ class RenderCommandView final {
         [[nodiscard]] friend bool operator==(const Segment&, const Segment&) = default;
     };
 
+    struct Node;
+    using NodePtr = std::shared_ptr<const Node>;
+    struct Range final {
+        const Node* node = nullptr;
+        const Segment* tail = nullptr;
+        std::size_t offset = 0U;
+    };
+
+  public:
     class const_iterator final {
       public:
         using iterator_category = std::random_access_iterator_tag;
@@ -605,10 +614,10 @@ class RenderCommandView final {
             : view_(view), index_(index) {}
 
         [[nodiscard]] reference operator*() const noexcept {
-            return view_->locate(index_, run_);
+            return view_->locate(index_, run_, run_offset_);
         }
         [[nodiscard]] pointer operator->() const noexcept {
-            return &view_->locate(index_, run_);
+            return &view_->locate(index_, run_, run_offset_);
         }
         [[nodiscard]] reference operator[](const difference_type offset) const noexcept {
             return (*view_)[static_cast<std::size_t>(static_cast<difference_type>(index_) + offset)];
@@ -668,7 +677,8 @@ class RenderCommandView final {
         const RenderCommandView* view_ = nullptr;
         std::size_t index_ = 0U;
         /** The run the last read found: iteration walks the runs in order. */
-        mutable std::size_t run_ = 0U;
+        mutable const Segment* run_ = nullptr;
+        mutable std::size_t run_offset_ = 0U;
     };
     using iterator = const_iterator;
     using value_type = RenderCommand;
@@ -682,8 +692,9 @@ class RenderCommandView final {
     }
     /** The command at `index`: a search of the runs. */
     [[nodiscard]] const RenderCommand& operator[](std::size_t index) const noexcept {
-        std::size_t run = 0U;
-        return locate(index, run);
+        const Segment* run = nullptr;
+        std::size_t offset = 0U;
+        return locate(index, run, offset);
     }
     [[nodiscard]] const RenderCommand& front() const noexcept {
         return (*this)[0U];
@@ -697,11 +708,8 @@ class RenderCommandView final {
     [[nodiscard]] const_iterator end() const noexcept {
         return const_iterator(this, size_);
     }
-    [[nodiscard]] const std::vector<Segment>& segments() const noexcept {
-        return segments_;
-    }
-    /** Commands `begin` to `end` as the runs of storage they are in. */
-    [[nodiscard]] std::vector<Segment> slice(std::size_t begin, std::size_t end) const;
+    /** A retained range; complete branches are shared without visiting their runs. */
+    [[nodiscard]] RenderCommandView slice_view(std::size_t begin, std::size_t end) const;
     [[nodiscard]] std::vector<RenderCommand> to_vector() const;
     /**
      * The indices whose commands differ between two streams of one length, in order: runs both
@@ -714,13 +722,22 @@ class RenderCommandView final {
 
   private:
     friend class RenderCommandBuffer;
-    void push(Segment segment);
-    /** The command at `index`, looking in `run` and the one after it before searching. */
-    [[nodiscard]] const RenderCommand& locate(std::size_t index, std::size_t& run) const noexcept;
+    [[nodiscard]] static NodePtr leaf(Segment segment);
+    [[nodiscard]] static NodePtr branch(NodePtr left, NodePtr right);
+    [[nodiscard]] static NodePtr balance(NodePtr left, NodePtr right);
+    [[nodiscard]] static NodePtr join(NodePtr left, NodePtr right);
+    [[nodiscard]] static NodePtr slice_node(const NodePtr& node, std::size_t begin, std::size_t end);
+    [[nodiscard]] static bool compare_range(Range left, Range right, std::size_t length,
+                                             std::size_t index, std::vector<std::size_t>* differences);
+    [[nodiscard]] bool compare(const RenderCommandView& other,
+                               std::vector<std::size_t>* differences) const;
+    void flush_tail();
+    void append_range(const RenderCommandView& source, std::size_t begin, std::size_t end);
+    [[nodiscard]] const RenderCommand& locate(std::size_t index, const Segment*& run,
+                                               std::size_t& run_offset) const noexcept;
 
-    std::vector<Segment> segments_;
-    /** Each run's first index in the stream. */
-    std::vector<std::size_t> offsets_;
+    NodePtr root_;
+    Segment tail_;
     std::size_t size_ = 0U;
 };
 
@@ -735,8 +752,8 @@ class RenderCommandBuffer final {
 
     void append(RenderCommand command);
     void append(const std::vector<RenderCommand>& commands);
-    /** Runs of commands drawn before, read where they are: nothing is copied. */
-    void append(std::span<const RenderCommandView::Segment> segments);
+    /** Appends a retained range directly, without allocating a temporary list of runs. */
+    void append(const RenderCommandView& source, std::size_t begin, std::size_t end);
     void clear() noexcept;
     [[nodiscard]] const RenderCommandView& commands() const noexcept {
         return view_;
@@ -746,7 +763,7 @@ class RenderCommandBuffer final {
     }
     /** Whether both buffers read the same runs: equal commands without comparing them. */
     [[nodiscard]] bool shares_storage(const RenderCommandBuffer& other) const noexcept {
-        return view_.segments_ == other.view_.segments_;
+        return view_.root_ == other.view_.root_ && view_.tail_ == other.view_.tail_;
     }
     /** This frame's presentation groups, ordered by index. Not part of command equality. */
     void set_groups(std::vector<RenderGroup> groups);
@@ -807,7 +824,8 @@ class RenderEngine final {
            const resource::SvgImageRegistry* svg_images, const MaterialRegistry& materials,
            const RenderGenerationToken& generations, RenderCommandBuffer& output);
     /** Captures retained widget fragments for a drag preview before the next frame mutates them. */
-    [[nodiscard]] std::vector<RenderCommand> snapshot_subtree(const RetainedNode& node) const;
+    [[nodiscard]] std::vector<RenderCommand> snapshot_subtree(
+        const RetainedNode& node, const LayoutResult& layout) const;
     void clear();
 
   private:

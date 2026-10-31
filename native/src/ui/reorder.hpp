@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "ui/input.hpp"
 #include "ui/layout.hpp"
 #include "ui/tree.hpp"
 
@@ -20,6 +21,7 @@ struct ReorderInsertion final {
 [[nodiscard]] inline ReorderInsertion resolve_reorder_insertion(
     const RetainedNode& container,
     const LayoutResult& layout,
+    const InputRouter& input,
     const Point position,
     const bool horizontal
 ) {
@@ -32,7 +34,7 @@ struct ReorderInsertion final {
     for (const auto& child : container.children()) {
         if (child->lifecycle() == RetainedLifecycle::exiting) continue;
         if (const LayoutRecord* record = layout.find(child->identity()); record != nullptr) {
-            children.push_back(Child{child.get(), record->bounds});
+            children.push_back(Child{child.get(), input.presented_bounds(*child, record->bounds)});
         }
     }
 
@@ -50,7 +52,8 @@ struct ReorderInsertion final {
     }
 
     const LayoutRecord* container_layout = layout.find(container.identity());
-    const Rect bounds = container_layout != nullptr ? container_layout->bounds : Rect{};
+    const Rect bounds = container_layout != nullptr
+        ? input.presented_bounds(container, container_layout->bounds) : Rect{};
     const auto start = [horizontal](const Rect& value) {
         return horizontal ? value.x : value.y;
     };

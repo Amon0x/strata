@@ -65,6 +65,12 @@ struct PresentationStatics final {
     const Rect& bounds
 ) noexcept;
 
+/** The coordinate transition into a flow child of a scroll container. */
+[[nodiscard]] MotionTransform scroll_presentation_transform(
+    const LayoutRecord& record,
+    const LayoutResult& layout
+) noexcept;
+
 /**
  * True while running motion drives this node's opacity, translation or scale. Such a node renders
  * as a presentation group, so each animation frame updates one group entry instead of its geometry.

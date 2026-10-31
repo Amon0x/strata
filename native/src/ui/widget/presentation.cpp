@@ -17,6 +17,7 @@
 #include "ui/svg_image.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
+#include "ui/theme.hpp"
 
 namespace strata::ui {
 namespace {
@@ -486,7 +487,7 @@ void command_tooltip_overlay(WidgetRenderScope& scope) {
     const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), text);
     const double width = shaped.metrics.width + 16.0;
     const double height = shaped.metrics.height + 10.0;
-    const Rect anchor = scope.layout().bounds;
+    const Rect anchor = scope.input().presented_bounds(scope.node(), scope.layout().bounds);
     const Rect viewport = scope.root_bounds();
     const double x = std::clamp(anchor.x + (anchor.width - width) * 0.5, viewport.x,
                                 std::max(viewport.x, viewport.right() - width));
@@ -1253,14 +1254,9 @@ bool WidgetRenderScope::discarded() const noexcept {
 
 RenderColor WidgetRenderScope::palette(const std::string_view name,
                                        const std::optional<std::uint8_t> alpha) const {
-    const auto found = node_.description().properties.find("$themePalette");
-    const runtime::Value* materialized = found != node_.description().properties.end()
-                                             ? found->second.value()
-                                             : nullptr;
-    const runtime::Value* field = materialized != nullptr ? materialized->field(name) : nullptr;
-    RenderColor color = field != nullptr && field->color() != nullptr
-                            ? *field->color()
-                            : fallback_tokens().palette(name);
+    const auto& theme = node_.description().projected_theme;
+    RenderColor color = theme != nullptr ? theme->tokens().palette(name)
+                                        : fallback_tokens().palette(name);
     if (alpha.has_value())
         color.alpha = *alpha;
     return color;

@@ -13,6 +13,18 @@
 
 namespace strata::ui {
 
+MotionTransform scroll_presentation_transform(const LayoutRecord& record,
+                                               const LayoutResult& layout) noexcept {
+    MotionTransform transform;
+    if (record.scroll_content) {
+        if (const LayoutRecord* parent = layout.find(record.coordinate_parent); parent != nullptr) {
+            transform.translate_x = -parent->scroll_offset.x;
+            transform.translate_y = -parent->scroll_offset.y;
+        }
+    }
+    return transform;
+}
+
 const runtime::Value* visual_value(
     const RetainedNode& node,
     const std::string_view name

@@ -1,6 +1,7 @@
 // How far a change reaches: a write, a publish or a retained value describes again only the
 // instances that read it, and their callers take the new output without being described.
 
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -8,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "compiler/compile.hpp"
@@ -295,6 +297,79 @@ overlay Hosted {
           "the new and changed rows were not described, or more were");
 }
 
+void test_retained_snapshots_disambiguate_keys_and_keep_prior_values() {
+    struct Query {
+        std::string_view key;
+        std::string_view source;
+        std::string_view scope;
+        std::string_view type;
+    };
+    constexpr std::array queries{
+        Query{"shared-key-for-retained-snapshot", "/first", "alpha", "Panel"},
+        Query{"shared-key-for-retained-snapshot", "/first", "beta", "Panel"},
+        Query{"shared-key-for-retained-snapshot", "/second", "alpha", "Panel"},
+        Query{"shared-key-for-retained-snapshot", "/first", "alpha", "Button"},
+        Query{"unique-key-for-retained-snapshot", "/first", "alpha", "Panel"},
+    };
+    const auto root = [&queries](const bool duplicate) {
+        std::vector<std::shared_ptr<const ui::DescriptionNode>> branches;
+        for (std::size_t index = 0U; index < queries.size() + (duplicate ? 1U : 0U); ++index) {
+            const Query& query = queries[index % queries.size()];
+            const auto child = ui::DescriptionNode::create(
+                std::string(query.type), std::string(query.key), std::string(query.source),
+                std::string(query.scope), {},
+                std::make_shared<const ui::EagerDescriptionChildren>(
+                    std::vector<std::shared_ptr<const ui::DescriptionNode>>{}));
+            branches.push_back(ui::DescriptionNode::create(
+                "Panel", "branch." + std::to_string(index), "/branch", "root", {},
+                std::make_shared<const ui::EagerDescriptionChildren>(
+                    std::vector<std::shared_ptr<const ui::DescriptionNode>>{child})));
+        }
+        return ui::DescriptionNode::create(
+            "Panel", "root", "/root", "root", {},
+            std::make_shared<const ui::EagerDescriptionChildren>(std::move(branches)));
+    };
+    const auto observed = [](const ui::RetainedDescriptionSnapshot& snapshot, const Query& query) {
+        const auto* node = snapshot.find_key(query.key, query.source, query.scope, query.type);
+        const runtime::Value* value = node != nullptr ? node->retained_value("value") : nullptr;
+        check(value != nullptr && value->number() != nullptr,
+              "retained query lost its scoped value");
+        return *value->number();
+    };
+    std::shared_ptr<const ui::RetainedDescriptionSnapshot> saved;
+    {
+        ui::RetainedTree tree;
+        static_cast<void>(tree.reconcile(root(false)));
+        for (std::size_t index = 0U; index < queries.size(); ++index) {
+            const auto* branch = tree.find_key("branch." + std::to_string(index));
+            check(branch != nullptr &&
+                      tree.set_retained_value(branch->children().front()->identity(), "value",
+                                              runtime::Value(static_cast<double>(index + 1U))),
+                  "retained snapshot fixture did not store its value");
+        }
+        saved = tree.description_snapshot();
+        for (std::size_t index = 0U; index < queries.size(); ++index)
+            check(observed(*saved, queries[index]) == static_cast<double>(index + 1U),
+                  "retained query selected another source, scope or widget type");
+        check(saved->find_key(queries[0].key) == nullptr &&
+                  saved->find_key(queries[4].key) != nullptr &&
+                  saved->find_key(queries[0].key, "/missing", "alpha", "Panel") == nullptr,
+              "retained snapshot accepted an ambiguous or missing key");
+        const auto* changed = tree.find_key("branch.0")->children().front().get();
+        check(tree.set_retained_value(changed->identity(), "value", runtime::Value(77.0)),
+              "retained snapshot fixture value did not change");
+        check(observed(*tree.description_snapshot(), queries[0]) == 77.0 &&
+                  observed(*saved, queries[0]) == 1.0,
+              "retained write mutated a previously captured snapshot");
+        static_cast<void>(tree.reconcile(root(true)));
+        check(tree.description_snapshot()->find_key(
+                  queries[0].key, queries[0].source, queries[0].scope, queries[0].type) == nullptr,
+              "an empty duplicate stopped a retained query from being ambiguous");
+    }
+    check(observed(*saved, queries[0]) == 1.0 && observed(*saved, queries[4]) == 5.0,
+          "retained snapshot lost its keys or values when its tree was destroyed");
+}
+
 void test_a_retained_write_beside_a_repeater_describes_only_its_reader() {
     const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("invalidation-retained", bundle);
@@ -502,6 +577,7 @@ int strata_test_description_invalidation() {
         test_a_host_publish_describes_only_its_readers();
         test_a_stale_row_is_described_alone();
         test_rows_of_a_new_generation_keep_what_did_not_change();
+        test_retained_snapshots_disambiguate_keys_and_keep_prior_values();
         test_a_retained_write_beside_a_repeater_describes_only_its_reader();
         test_a_slot_in_lazy_rows_takes_the_callers_content();
         test_a_slot_in_a_widgets_generated_rows_takes_the_callers_content();

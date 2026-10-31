@@ -1205,7 +1205,7 @@ DescriptionBuilder::describe_row(ComponentInstance& row,
                 return build_component_template(component, std::move(key), std::move(arguments),
                                                 source->scope);
             },
-            {});
+            {}, &transaction_->layout_defaults);
         described = describe_body(row, nullptr, [&] { return source->factory(item_scope, index); });
         if (described == nullptr)
             throw std::logic_error("generated row evaluator returned a null description");

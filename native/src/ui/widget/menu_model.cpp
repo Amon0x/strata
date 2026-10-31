@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "ui/command.hpp"
+#include "ui/input.hpp"
 #include "ui/tree.hpp"
 
 namespace strata::ui {
@@ -144,14 +145,16 @@ namespace {
 [[nodiscard]] Rect menu_anchor(
     const RetainedNode& node,
     const LayoutRecord& record,
+    const InputRouter& input,
     const bool context
-) noexcept {
-    if (!context) return record.bounds;
+) {
+    const Rect bounds = input.presented_bounds(node, record.bounds);
+    if (!context) return bounds;
     const runtime::Value* x = node.retained_value("$menuAnchorX");
     const runtime::Value* y = node.retained_value("$menuAnchorY");
     return Rect{
-        number(x, record.bounds.x),
-        number(y, record.bounds.y),
+        number(x, bounds.x),
+        number(y, bounds.y),
         0.0,
         0.0,
     };
@@ -173,6 +176,7 @@ namespace {
 [[nodiscard]] std::optional<Rect> authored_panel_bounds(
     const RetainedNode& node,
     const LayoutResult& layout,
+    const InputRouter& input,
     const std::string_view menu_key,
     const std::size_t level
 ) noexcept {
@@ -187,7 +191,8 @@ namespace {
     const LayoutRecord* record = surface != nullptr
         ? layout.find(surface->identity())
         : nullptr;
-    return record != nullptr ? std::optional(record->content_bounds) : std::nullopt;
+    return record != nullptr
+        ? std::optional(input.presented_bounds(*surface, record->content_bounds)) : std::nullopt;
 }
 
 } // namespace
@@ -254,6 +259,7 @@ std::vector<MenuItemModel> parse_menu_items(
 MenuProjection project_menu(
     const RetainedNode& node,
     const LayoutResult& layout,
+    const InputRouter& input,
     const CommandIndex* commands
 ) {
     MenuProjection result;
@@ -269,7 +275,7 @@ MenuProjection project_menu(
     const std::string menu_key = node.description().key.value_or("$menu");
     const Rect viewport = viewport_bounds(layout, record->bounds);
     Rect panel = place_root(
-        menu_anchor(node, *record, result.context),
+        menu_anchor(node, *record, input, result.context),
         viewport,
         result.menu_width,
         result.row_height * static_cast<double>(result.items.size()),
@@ -279,7 +285,7 @@ MenuProjection project_menu(
     std::vector<std::size_t> parent_path;
     for (std::size_t depth = 0U; !level->empty(); ++depth) {
         if (const std::optional<Rect> authored = authored_panel_bounds(
-                node, layout, menu_key, depth
+                node, layout, input, menu_key, depth
             ); authored.has_value() && !authored->empty()) {
             panel = *authored;
         }

@@ -1,11 +1,14 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "ui/motion/model.hpp"
@@ -52,6 +55,18 @@ struct RenderEngine::Impl final {
                                              const LayoutSnapshot&) = default;
     };
 
+    /** The coordinate and opacity context every immediate child is rendered under. */
+    struct ChildContext final {
+        std::optional<Rect> clip;
+        MotionTransform transform;
+        double opacity = 1.0;
+        std::uint32_t group = 0U;
+        std::uint32_t scroll_group = 0U;
+        /** Only the baked fallback carries an offset here; groups carry it in their table. */
+        MotionTransform scroll_transform;
+        [[nodiscard]] friend bool operator==(const ChildContext&, const ChildContext&) = default;
+    };
+
     struct CachedFragment final {
         struct MotionSnapshot final {
             std::vector<std::pair<MotionProperty, MotionValue>> values;
@@ -74,15 +89,12 @@ struct RenderEngine::Impl final {
             MotionTransform inherited_transform;
             double inherited_opacity = 1.0;
             bool render_portals = false;
-            std::vector<RenderCommand> prefix;
-            std::vector<RenderCommand> suffix;
+            std::size_t prefix_size = 0U;
             /** Stable retained identities; raw node pointers become invalid under virtualization.
              */
             std::vector<std::uint64_t> ordered_children;
             std::vector<std::uint64_t> ordered_child_layout_generations;
-            std::optional<Rect> child_render_clip;
-            MotionTransform effective_transform;
-            double descendant_opacity = 1.0;
+            ChildContext child_context;
             bool local_overlay_rendered = false;
             std::uint64_t subtree_node_render_generation = 0U;
             std::uint64_t subtree_presentation_generation = 0U;
@@ -92,7 +104,7 @@ struct RenderEngine::Impl final {
              * The whole subtree's commands, as the runs of storage they were drawn into: any size
              * of subtree is kept, and drawn again, without a copy.
              */
-            std::optional<std::vector<RenderCommandView::Segment>> subtree_commands = std::nullopt;
+            std::optional<RenderCommandView> subtree_commands = std::nullopt;
             std::size_t subtree_node_count = 1U;
             std::size_t subtree_overlay_count = 0U;
             LayoutSnapshot subtree_layout{};
@@ -101,9 +113,69 @@ struct RenderEngine::Impl final {
             bool subtree_contains_clip = false;
             /** Innermost enclosing presentation group when this plan was composed. */
             std::uint32_t inherited_group = 0U;
-            /** The group this node's children inherit: its own when it is a group. */
-            std::uint32_t child_group = 0U;
             bool subtree_contains_group = false;
+            /** Aggregate contribution replaced in constant time after visiting a changed child. */
+            struct ChildContribution final {
+                std::size_t nodes = 0U;
+                std::size_t overlays = 0U;
+                bool contains_clip = false;
+                bool contains_group = false;
+                bool translation_safe = true;
+            };
+            std::vector<std::pair<std::uint64_t, std::size_t>> child_positions;
+            std::vector<std::size_t> child_lengths;
+            /** Fenwick sums keep later offsets current when one child's command count changes. */
+            std::vector<std::size_t> child_sums;
+            std::vector<ChildContribution> child_contributions;
+            std::size_t children_with_clip = 0U;
+            std::size_t children_with_group = 0U;
+            std::size_t children_unsafe_translation = 0U;
+            bool local_contains_clip = false;
+            bool local_contains_group = false;
+            bool local_translation_safe = false;
+
+            [[nodiscard]] std::size_t child_offset(std::size_t index) const noexcept {
+                std::size_t result = prefix_size;
+                for (; index != 0U; index &= index - 1U)
+                    result += child_sums[index];
+                return result;
+            }
+
+            [[nodiscard]] std::optional<std::size_t> child_position(
+                const std::uint64_t identity) const noexcept {
+                const auto found = std::lower_bound(
+                    child_positions.begin(), child_positions.end(), identity,
+                    [](const auto& entry, const std::uint64_t value) { return entry.first < value; });
+                return found != child_positions.end() && found->first == identity
+                    ? std::optional(found->second) : std::nullopt;
+            }
+
+            void index_children(std::vector<std::size_t> lengths) {
+                child_lengths = std::move(lengths);
+                child_sums.assign(child_lengths.size() + 1U, 0U);
+                child_positions.reserve(ordered_children.size());
+                for (std::size_t index = 0U; index < child_lengths.size(); ++index) {
+                    child_positions.emplace_back(ordered_children[index], index);
+                    const std::size_t slot = index + 1U;
+                    child_sums[slot] += child_lengths[index];
+                    const std::size_t parent = slot + (slot & (~slot + 1U));
+                    if (parent < child_sums.size())
+                        child_sums[parent] += child_sums[slot];
+                }
+                std::sort(child_positions.begin(), child_positions.end());
+            }
+
+            void resize_child(const std::size_t index, const std::size_t length) noexcept {
+                const std::size_t previous = child_lengths[index];
+                for (std::size_t slot = index + 1U; slot < child_sums.size();
+                     slot += slot & (~slot + 1U)) {
+                    if (length >= previous)
+                        child_sums[slot] += length - previous;
+                    else
+                        child_sums[slot] -= previous - length;
+                }
+                child_lengths[index] = length;
+            }
         };
 
         /**
@@ -160,14 +232,18 @@ struct RenderEngine::Impl final {
     std::unordered_map<std::uint64_t, Presented> presented;
     /** Presentation groups by node identity; indices stay stable while a group persists. */
     std::unordered_map<std::uint64_t, RenderGroup> groups;
+    /** Scroll content has a separate group so the viewport and its chrome remain stationary. */
+    std::unordered_map<std::uint64_t, RenderGroup> scroll_groups;
     std::vector<std::uint32_t> free_group_indices;
     std::uint32_t next_group_index = 1U;
+    bool group_membership_dirty = true;
+    std::uint64_t published_group_structure = 0U;
     /** A shared-element flight ran last frame: its landing frame composes afresh too. */
     bool flights_last_frame = false;
     /** Returns this node's stable group index, or zero when the group table is full. */
-    std::uint32_t acquire_group(std::uint64_t identity);
+    std::uint32_t acquire_group(std::uint64_t identity, bool scroll_content = false);
     /** Drops groups no longer referenced by the frame and attaches the table to its commands. */
-    void publish_groups(RenderCommandBuffer& output);
+    void publish_groups(RenderCommandBuffer& output, std::uint64_t structure_generation);
     std::uint64_t fragment_tree_generation = 0U;
     /** The portals outside portals, in tree order, as of a structure and layout generation. */
     std::vector<const RetainedNode*> portals;
@@ -182,9 +258,17 @@ struct RenderEngine::Impl final {
     RenderCommandBuffer retained_overlay_commands;
     std::optional<RenderGenerationToken> retained_base_generations;
     std::uint64_t retained_tree_generation = 0U;
+    std::uint64_t retained_structure_generation = 0U;
     std::uint64_t retained_layout_generation = 0U;
     std::uint64_t retained_presentation_generation = 0U;
     std::uint64_t retained_status_generation = 0U;
+    /** Dirty marks can be consumed by another renderer before this one is called. */
+    std::uint64_t retained_render_generation = 0U;
+    std::uint64_t retained_geometry_generation = 0U;
+    std::set<std::uint64_t> overlay_candidates;
+    std::uint64_t overlay_command_generation = 0U;
+    const RetainedTree* journal_tree = nullptr;
+    std::uint64_t journal_generation = 0U;
 
     [[nodiscard]] bool base_matches(const RetainedTree& tree, const LayoutResult& layout,
                                     const InputRouter& input, const MotionRuntime& motion,
@@ -228,7 +312,8 @@ struct RenderEngine::Impl final {
     }
 
     [[nodiscard]] static bool matches(const LayoutSnapshot& snapshot, const RetainedNode& node,
-                                      const LayoutRecord& record, const LayoutResult& layout) {
+                                      const LayoutRecord& record, const LayoutResult& layout,
+                                      const bool children_match) {
         if (snapshot.measured_size != record.measured_size || snapshot.bounds != record.bounds ||
             snapshot.snapped_bounds != record.snapped_bounds ||
             snapshot.hit_bounds != record.hit_bounds ||
@@ -239,12 +324,15 @@ struct RenderEngine::Impl final {
             snapshot.requested_scroll_offset != record.requested_scroll_offset ||
             snapshot.scroll_offset != record.scroll_offset ||
             snapshot.visible_range != record.visible_range || snapshot.z_index != record.z_index ||
-            snapshot.arranged_child_order != record.arranged_child_order ||
-            snapshot.materialized_child_indices != record.materialized_child_indices ||
+            (!children_match &&
+             (snapshot.arranged_child_order != record.arranged_child_order ||
+              snapshot.materialized_child_indices != record.materialized_child_indices)) ||
             snapshot.portal_target != record.portal_target ||
             snapshot.detached_from_parent_clip != record.detached_from_parent_clip) {
             return false;
         }
+        if (children_match)
+            return true;
         std::size_t child_index = 0U;
         for (const auto& child : node.children()) {
             const LayoutRecord* child_layout = layout.find(child->identity());
@@ -323,7 +411,8 @@ struct RenderEngine::Impl final {
     }
 
     [[nodiscard]] static LayoutSnapshot
-    snapshot(const RetainedNode& node, const LayoutRecord& record, const LayoutResult& layout) {
+    snapshot(const RetainedNode& node, const LayoutRecord& record, const LayoutResult& layout,
+             LayoutSnapshot previous = {}, const bool children_match = false) {
         LayoutSnapshot result{
             record.measured_size,
             record.bounds,
@@ -339,12 +428,15 @@ struct RenderEngine::Impl final {
             record.scroll_offset,
             record.visible_range,
             record.z_index,
-            record.arranged_child_order,
-            record.materialized_child_indices,
+            children_match ? std::move(previous.arranged_child_order) : record.arranged_child_order,
+            children_match ? std::move(previous.materialized_child_indices)
+                           : record.materialized_child_indices,
             record.portal_target,
             record.detached_from_parent_clip,
-            {},
+            children_match ? std::move(previous.children) : std::vector<ChildLayoutSnapshot>{},
         };
+        if (children_match)
+            return result;
         result.children.reserve(node.children().size());
         for (const auto& child : node.children()) {
             if (const LayoutRecord* child_layout = layout.find(child->identity());

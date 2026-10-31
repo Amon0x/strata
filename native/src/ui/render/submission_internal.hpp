@@ -203,6 +203,8 @@ struct EncodedDrawPlacement final {
     std::size_t index_count = 0U;
     std::size_t vertex_byte_capacity = 0U;
     std::size_t index_capacity = 0U;
+    /** The enclosing ordered draw batch, whose effective state may cover several draw kinds. */
+    std::size_t batch_index = 0U;
     [[nodiscard]] friend bool operator==(
         const EncodedDrawPlacement&,
         const EncodedDrawPlacement&

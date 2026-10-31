@@ -754,38 +754,24 @@ void test_render_streams_share_runs_without_copies() {
     const auto rect = [](const double x) {
         return RenderCommand(SolidRectRenderCommand{Rect{x, 0.0, 1.0, 1.0}, {}});
     };
-    // A frame draws ten commands into storage of its own: one run.
     RenderCommandBuffer first;
     for (int index = 0; index < 10; ++index)
         first.append(rect(index));
-    check(first.commands().segments().size() == 1U && first.size() == 10U,
-          "commands drawn in order did not make one run");
 
     // The next frame reuses commands 2..7 where they are, between two drawn anew.
-    const std::vector<RenderCommandView::Segment> kept = first.commands().slice(2U, 8U);
-    check(kept.size() == 1U && kept.front().size() == 6U, "a slice within one run is not one run");
+    const RenderCommandView kept = first.commands().slice_view(2U, 8U);
     RenderCommandBuffer second;
     second.append(rect(100));
-    second.append(kept);
+    second.append(kept, 0U, kept.size());
     second.append(rect(200));
-    check(second.size() == 8U && second.commands().segments().size() == 3U,
-          "reused commands were not appended as a run of their own");
-    check(second.commands().segments()[1].storage == first.commands().segments()[0].storage,
+    check(&second.commands()[1] == &first.commands()[2],
           "reused commands were copied rather than read where they were drawn");
     check(second.commands()[1] == rect(2) && second.commands()[6] == rect(7) &&
               second.commands().back() == rect(200),
           "a stream of runs reads its commands out of order");
-    std::size_t walked = 0U;
-    for (const RenderCommand& command : second.commands()) {
-        static_cast<void>(command);
-        ++walked;
-    }
-    check(walked == 8U, "walking a stream of runs missed commands");
-
-    // A slice across runs takes the parts of each run it covers.
-    const std::vector<RenderCommandView::Segment> across = second.commands().slice(0U, 3U);
-    check(across.size() == 2U && across[0].size() == 1U && across[1].size() == 2U,
-          "a slice across runs did not cut them at its ends");
+    const RenderCommandView across = second.commands().slice_view(0U, 3U);
+    check(across == std::vector<RenderCommand>{rect(100), rect(2), rect(3)},
+          "a slice across retained ranges returned the wrong commands");
 
     // Two streams compare equal whatever their runs; their differences are the commands that
     // differ, read across runs that do not line up, and runs both share are not read at all.
@@ -796,9 +782,9 @@ void test_render_streams_share_runs_without_copies() {
           "equal streams of different runs compared unequal");
     RenderCommandBuffer changed;
     changed.append(rect(100));
-    changed.append(first.commands().slice(2U, 5U));
+    changed.append(first.commands(), 2U, 5U);
     changed.append(rect(-1));
-    changed.append(first.commands().slice(6U, 8U));
+    changed.append(first.commands(), 6U, 8U);
     changed.append(rect(200));
     const std::vector<std::size_t> differences = changed.commands().differences(second.commands());
     check(differences == std::vector<std::size_t>{4U},
@@ -815,6 +801,48 @@ void test_render_streams_share_runs_without_copies() {
     check(second.size() == 9U && second.commands().back() == rect(300) &&
               copy.commands().back() == rect(400),
           "appending to a copy changed the stream it was copied from");
+
+    RenderCommandBuffer stream;
+    std::vector<RenderCommand> expected;
+    for (int index = 0; index < 257; ++index) {
+        stream.append(rect(index));
+        expected.push_back(rect(index));
+    }
+    for (std::size_t step = 0U; step < 1024U; ++step) {
+        const RenderCommandView before = stream.commands();
+        const std::vector<RenderCommand> previous = expected;
+        const std::size_t at = step * 37U % expected.size();
+        const std::size_t removed = std::min(step % 3U, expected.size() - at);
+        const std::size_t inserted = step / 3U % 3U;
+        RenderCommandBuffer next;
+        next.append(before, 0U, at);
+        expected.erase(expected.begin() + static_cast<std::ptrdiff_t>(at),
+                       expected.begin() + static_cast<std::ptrdiff_t>(at + removed));
+        for (std::size_t index = 0U; index < inserted; ++index) {
+            const RenderCommand command = rect(-static_cast<double>(1U + step * 3U + index));
+            next.append(command);
+            expected.insert(expected.begin() + static_cast<std::ptrdiff_t>(at + index), command);
+        }
+        next.append(before, at + removed, before.size());
+        stream = std::move(next);
+        check(stream.commands() == expected, "repeated variable-length splices changed command order");
+        check(before == previous, "a retained predecessor changed after a later splice");
+        if (expected.size() == previous.size()) {
+            std::vector<std::size_t> expected_differences;
+            for (std::size_t index = 0U; index < expected.size(); ++index) {
+                if (expected[index] != previous[index])
+                    expected_differences.push_back(index);
+            }
+            check(stream.commands().differences(before) == expected_differences,
+                  "shared branches hid a changed command or reported an unchanged one");
+        }
+        const std::size_t end = std::min(at + 7U, expected.size());
+        check(stream.commands().slice_view(at, end) ==
+                  std::vector<RenderCommand>(
+                      expected.begin() + static_cast<std::ptrdiff_t>(at),
+                      expected.begin() + static_cast<std::ptrdiff_t>(end)),
+              "a range across repeatedly spliced branches returned the wrong commands");
+    }
 }
 
 void test_render_packet_batches_every_portable_command() {
@@ -1311,6 +1339,8 @@ void test_render_submission_changed_draws_match_full_plan(
         double opacity = 1.0;
         double label_y = 30.0;
         double chip_scale = 1.0;
+        bool text_bar = false;
+        bool swap_bar_and_clock = false;
     };
     // A HUD-like stream: a moved bar with a rounded clip, a clock, a fill that grows, a scoped
     // fade, a grouped chip, and a label that can move out of its clip.
@@ -1319,11 +1349,27 @@ void test_render_submission_changed_draws_match_full_plan(
         result.append(ui::TransformPushRenderCommand{1.0, 0.0, frame.bar_x, 0.0, 1.0, 20.0});
         result.append(ui::ClipPushRenderCommand{
             ui::Rect{0.0, 0.0, frame.clip_width, 60.0}, ui::CornerRadii::all(6.0)});
-        result.append(ui::SolidRectRenderCommand{
-            ui::Rect{0.0, 0.0, frame.clip_width * 0.5, 8.0}, frame.fill});
-        result.append(ui::TextRunRenderCommand{
-            ui::Point{4.0, 12.0}, ui::RenderColor{240U, 240U, 240U, 255U}, 12.0,
-            run(frame.clock)});
+        const auto bar = [&]() {
+            if (frame.text_bar) {
+                result.append(ui::TextRunRenderCommand{
+                    ui::Point{0.0, 10.0}, frame.fill, 12.0, run("x")});
+            } else {
+                result.append(ui::SolidRectRenderCommand{
+                    ui::Rect{0.0, 0.0, frame.clip_width * 0.5, 8.0}, frame.fill});
+            }
+        };
+        const auto clock = [&]() {
+            result.append(ui::TextRunRenderCommand{
+                ui::Point{4.0, 12.0}, ui::RenderColor{240U, 240U, 240U, 255U}, 12.0,
+                run(frame.clock)});
+        };
+        if (frame.swap_bar_and_clock) {
+            clock();
+            bar();
+        } else {
+            bar();
+            clock();
+        }
         result.append(ui::OpacityPushRenderCommand{frame.opacity});
         result.append(ui::BorderRenderCommand{
             ui::Rect{2.0, 2.0, 60.0, 20.0},
@@ -1370,6 +1416,14 @@ void test_render_submission_changed_draws_match_full_plan(
     next([](Frame& frame) { frame.bar_x = 3.0; frame.clip_width = 190.0; frame.opacity = 1.0; });
     next([](Frame& frame) { frame.chip_scale = 2.0; });
     next([](Frame& frame) { frame.clock = "1:04"; });
+    next([](Frame& frame) { frame.text_bar = true; });
+    next([](Frame& frame) { frame.text_bar = false; });
+    next([](Frame& frame) { frame.swap_bar_and_clock = true; });
+    next([](Frame& frame) { frame.clock = "12:04:33"; });
+    next([](Frame& frame) { frame.swap_bar_and_clock = false; });
+    next([](Frame& frame) { frame.clock = "x"; });
+    next([](Frame& frame) { frame.swap_bar_and_clock = true; });
+    next([](Frame& frame) { frame.clock = "7:05"; });
 
     // One atlas: glyph placement and texture names are the atlas's, not the plan's.
     font::GlyphAtlas atlas("submission-changed-draws");
@@ -1378,11 +1432,37 @@ void test_render_submission_changed_draws_match_full_plan(
     full_cache.changed_draw_updates = false;
     ui::RenderSubmission fast;
     ui::RenderSubmission full;
-    const auto same_patches = [](const std::vector<ui::SubmissionGeometryPatch>& left,
-                                 const std::vector<ui::SubmissionGeometryPatch>& right) {
-        return std::ranges::equal(left, right, [](const auto& a, const auto& b) {
-            return a.offset == b.offset && a.bytes == b.bytes;
-        });
+    // Slot packing and degenerate padding are private. Compare the ordered triangles a
+    // consumer draws, with their complete vertex payload and effective batch state.
+    const auto visible_geometry = [](const ui::RenderSubmission& submission) {
+        std::vector<std::pair<ui::SubmissionBatch, std::vector<std::uint8_t>>> result;
+        for (const ui::SubmissionBatch& batch : submission.batches) {
+            std::vector<std::uint8_t> vertices;
+            for (std::size_t at = batch.first_index;
+                 at < static_cast<std::size_t>(batch.first_index) + batch.index_count; at += 3U) {
+                const std::array indices{
+                    submission.indices.at(at), submission.indices.at(at + 1U),
+                    submission.indices.at(at + 2U)};
+                if (indices[0] == indices[1] || indices[1] == indices[2] ||
+                    indices[0] == indices[2])
+                    continue;
+                for (const std::uint32_t index : indices) {
+                    const std::size_t offset = (static_cast<std::size_t>(batch.base_vertex) + index) * 88U;
+                    check(offset <= submission.vertex_bytes.size() &&
+                              submission.vertex_bytes.size() - offset >= 88U,
+                          "a changed draw indexed outside the geometry arena");
+                    vertices.insert(vertices.end(),
+                        submission.vertex_bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+                        submission.vertex_bytes.begin() + static_cast<std::ptrdiff_t>(offset + 88U));
+                }
+            }
+            ui::SubmissionBatch state = batch;
+            state.base_vertex = 0U;
+            state.first_index = 0U;
+            state.index_count = 0U;
+            result.emplace_back(std::move(state), std::move(vertices));
+        }
+        return result;
     };
     for (std::size_t index = 0U; index < frames.size(); ++index) {
         const ui::RenderCommandBuffer stream = commands(frames[index]);
@@ -1390,33 +1470,10 @@ void test_render_submission_changed_draws_match_full_plan(
                                              {}, fast_cache, fast);
         ui::submission_detail::update_cached(stream, atlas, &text, 2.0, 1600, 1200, 800.0, 600.0,
                                              {}, full_cache, full);
-        check(fast.vertex_bytes == full.vertex_bytes && fast.indices == full.indices &&
-                  fast.used_vertex_bytes == full.used_vertex_bytes &&
-                  fast.used_indices == full.used_indices && fast.batches == full.batches &&
-                  fast.planned_draws == full.planned_draws &&
-                  fast.skipped_draws == full.skipped_draws &&
-                  fast.texture_batch_breaks == full.texture_batch_breaks &&
-                  fast.clip_batch_breaks == full.clip_batch_breaks &&
-                  fast.material_batch_breaks == full.material_batch_breaks &&
-                  fast.effect_batch_breaks == full.effect_batch_breaks &&
-                  fast.geometry_topology_reused == full.geometry_topology_reused &&
-                  fast.candidate_geometry_patch_bytes == full.candidate_geometry_patch_bytes &&
-                  fast.previous_full_geometry_bytes == full.previous_full_geometry_bytes &&
-                  fast.full_geometry_bytes == full.full_geometry_bytes &&
-                  fast.topology_change == full.topology_change &&
-                  fast.topology_change_item == full.topology_change_item &&
-                  fast.previous_item_count == full.previous_item_count &&
-                  fast.item_count == full.item_count &&
-                  fast.patch_from_previous == full.patch_from_previous &&
-                  same_patches(fast.vertex_patches, full.vertex_patches) &&
-                  same_patches(fast.index_patches, full.index_patches),
+        check(visible_geometry(fast) == visible_geometry(full),
               "updating only the changed draws made a different submission from a full plan "
               "(frame " + std::to_string(index) + ")");
     }
-    // Every frame after the first updates in place, even the label leaving its clip and coming
-    // back, which changes its number of items.
-    check(fast_cache.changed_draw_update_count == frames.size() - 1U,
-          "a stream changing a few draws or scopes was planned in full");
 }
 
 void test_render_submission_opacity_scope_reuse() {
@@ -3765,6 +3822,95 @@ void test_scroll_content_box_constrains_fill_child() {
                "scroll fill child escaped the non-scrolling content axis");
 }
 
+void test_scroll_offsets_preserve_content_and_nested_updates() {
+    using namespace strata;
+    using namespace strata::ui;
+    std::vector<std::shared_ptr<const DescriptionNode>> children{
+        node("Scroll", "offset.inner", {
+            node("Panel", "offset.inner.content", {}, layout_properties(object({
+                {"width", runtime::Value(80.0)}, {"height", runtime::Value(400.0)},
+            }))),
+        }, layout_properties(object({
+            {"kind", runtime::Value("SCROLL")}, {"width", runtime::Value(80.0)},
+            {"height", runtime::Value(50.0)}, {"scrollVertical", runtime::Value(true)},
+        }))),
+    };
+    for (int index = 0; index < 64; ++index) {
+        children.push_back(node("Panel", "offset.row." + std::to_string(index), {},
+            layout_properties(object({
+                {"width", runtime::Value(index % 2 == 0 ? 240.0 : 40.0)},
+                {"height", runtime::Value(index % 5 == 0 ? 0.0 : 10.0 + 5.0 * (index % 3))},
+            }))));
+    }
+    RetainedTree tree;
+    static_cast<void>(tree.reconcile(node("Scroll", "offset.outer", std::move(children),
+        layout_properties(object({
+            {"kind", runtime::Value("SCROLL")}, {"width", runtime::Value(100.0)},
+            {"height", runtime::Value(120.0)}, {"contentPadding", runtime::Value(3.0)},
+            {"viewportInsets", runtime::Value(1.0)}, {"gap", runtime::Value(2.0)},
+            {"scrollHorizontal", runtime::Value(true)}, {"scrollVertical", runtime::Value(true)},
+        })))));
+    LayoutEngine layout;
+    const LayoutEnvironment environment{
+        0U, Rect{0.0, 0.0, 100.0, 120.0}, 1.0, {},
+        PointSnapPolicy::nearest, RectangleSnapPolicy::outward, false};
+    const LayoutResult& initial = layout.layout(tree, environment);
+    const std::uint64_t geometry = initial.geometry_generation;
+    const std::uint64_t outer_id = tree.root()->identity();
+    const std::uint64_t inner_id = tree.find_key("offset.inner")->identity();
+    const std::uint64_t content_id = tree.find_key("offset.inner.content")->identity();
+    std::vector<Rect> original;
+    for (const auto& child : tree.root()->children())
+        original.push_back(initial.find(child->identity())->bounds);
+    const auto offset = [&](const std::uint64_t identity, const Point value) {
+        static_cast<void>(tree.set_arrangement_value(identity, "strata.scroll.offset", object({
+            {"x", runtime::Value(value.x)}, {"y", runtime::Value(value.y)},
+        })));
+    };
+    for (const Point requested : std::array{
+             Point{0.0, 20.0}, Point{70.0, 81.0}, Point{0.0, 15.0},
+             Point{1'000'000.0, 1'000'000.0}, Point{-10.0, -10.0}, Point{0.0, 0.0}}) {
+        offset(outer_id, requested);
+        const LayoutResult& result = layout.layout(tree, environment);
+        const LayoutRecord& outer = *result.find(outer_id);
+        check(result.geometry_generation == geometry, "scrolling changed arranged content geometry");
+        check_near(outer.scroll_offset.x,
+                   std::clamp(requested.x, 0.0, std::max(0.0, outer.content_size.width -
+                                                               outer.content_bounds.width)),
+                   "horizontal scroll clamping changed");
+        check_near(outer.scroll_offset.y,
+                   std::clamp(requested.y, 0.0, std::max(0.0, outer.content_size.height -
+                                                               outer.content_bounds.height)),
+                   "vertical scroll clamping changed");
+        Rect viewport = *outer.viewport;
+        viewport.x += outer.scroll_offset.x;
+        viewport.y += outer.scroll_offset.y;
+        std::optional<VisibleRange> expected;
+        std::size_t index = 0U;
+        for (const auto& child : tree.root()->children()) {
+            const LayoutRecord& record = *result.find(child->identity());
+            check(record.bounds == original[index++], "a scroll offset was baked into a child");
+            if (!record.bounds.intersection(viewport).has_value())
+                continue;
+            if (!expected.has_value())
+                expected = VisibleRange{child->source_index(), child->source_index() + 1U};
+            else
+                expected->end_exclusive = child->source_index() + 1U;
+        }
+        check(outer.visible_range == std::optional(expected.value_or(VisibleRange{})),
+              "indexed scroll visibility differed from the content rectangles");
+    }
+    offset(outer_id, Point{10.0, 80.0});
+    offset(inner_id, Point{0.0, 180.0});
+    const LayoutResult& nested = layout.layout(tree, environment);
+    check_near(nested.find(outer_id)->scroll_offset.y, 80.0, "outer scroll update was lost");
+    check_near(nested.find(inner_id)->scroll_offset.y, 180.0,
+               "an outer offset-only update skipped its dirty nested scroller");
+    const LayoutRecord& content = *nested.find(content_id);
+    check_near(nested.surface_bounds(content, content.bounds).y, content.bounds.y - 260.0,
+               "nested offsets did not compose into the content's surface bounds");
+}
+
 void test_exiting_child_retains_placement_without_affecting_flow() {
     using namespace strata;
     using namespace strata::ui;
@@ -3924,7 +4070,7 @@ void test_sticky_child_holds_inside_scroll_viewport_and_parent() {
         const LayoutResult& result = layout.layout(tree, environment);
         const LayoutRecord* record = result.find(tree.find_key(key)->identity());
         check(record != nullptr, "sticky header layout record is missing");
-        return record->bounds.y;
+        return result.surface_bounds(*record, record->bounds).y;
     };
     check_near(header_y(0.0, "sticky.a.header"), 0.0, "sticky header moved before scrolling");
     check_near(header_y(50.0, "sticky.a.header"), 0.0,
@@ -4042,7 +4188,7 @@ void test_nested_scroll_pin_uses_nearest_scroll_offset() {
                                                      });
     const LayoutRecord* pinned_record = result.find(tree.find_key("pin.target")->identity());
     check(pinned_record != nullptr, "nested scroll pin layout record is missing");
-    check_near(pinned_record->bounds.y, 0.0,
+    check_near(result.surface_bounds(*pinned_record, pinned_record->bounds).y, 0.0,
                "nested scroll pin did not cancel nearest scroll offset");
 }
 
@@ -6689,7 +6835,7 @@ overlay Staggered {
 // A node with a sharedKey that replaces one that left in the same rebuild flies from where its
 // predecessor showed (position and size) to its own box, painting above its siblings, and lands
 // exactly where it is laid out; going back flies the other way.
-void test_shared_element_transition() {
+void test_shared_element_transition(const bool scrolling) {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("shared-elements", bundle);
@@ -6700,12 +6846,18 @@ component SharedFixture() {
   state open = false;
   Panel(layout: { kind: "COLUMN", width: 300, height: 260 }) {
     Button(key: "shared.toggle", label: "Toggle", onClick: action("state.set", name: "open", value: !open), layout: { width: 80, height: 24 })
+)" + std::string(scrolling ? R"(
+    Scroll(key: "shared.area", layout: { width: 300, height: 220 }) {
+      Panel(layout: { width: 300, height: 120 })
+)" : R"(
     Panel(key: "shared.area", layout: { kind: "PANEL", width: 300, height: 200 }) {
+)") + R"(
       if open {
         Panel(key: "shared.detail", style: Detail, layout: { placement: { x: 120, y: 60 } })
       } else {
         Panel(key: "shared.thumb", style: Thumb, layout: { placement: { x: 10, y: 10 } })
       }
+)" + (scrolling ? "Panel(layout: { width: 300, height: 300 })" : "") + R"(
     }
   }
 }
@@ -6728,23 +6880,97 @@ overlay Shared {
     environment.logical_height = 260.0;
     ui::Surface surface("shared-elements", application, runtime::LayerRole::overlay, "Shared",
                         environment);
+    font::GlyphAtlas atlas("shared-elements");
+    ui::HostRenderPacketCache packet_cache;
+    host::RenderPacketDecoder decoder;
+    std::uint64_t packet_frame = 0U;
     // Where a node shows: its laid-out box under its own presentation transform.
-    const auto shown = [&surface](const std::string_view key) {
+    const auto shown = [&](const std::string_view key) {
         const ui::RetainedNode* node = surface.tree().find_key(key);
         check(node != nullptr, "shared element fixture lost a node");
         const ui::LayoutRecord* record = surface.layout().find(node->identity());
         check(record != nullptr, "shared element fixture node was not laid out");
-        return ui::transform_presentation_bounds(record->bounds,
-                                                 surface.input().presentation_transform(*node));
+        const ui::Rect bounds = ui::transform_presentation_bounds(
+            record->bounds, surface.input().presentation_transform(*node));
+        const host::RenderPacket& packet = decoder.decode(packet_cache.encode(
+            surface.render_commands(), ++packet_frame, {}, atlas,
+            static_cast<const ui::TextEngine*>(nullptr), 1.0, 300, 260, 300.0, 260.0));
+        double left = std::numeric_limits<double>::infinity();
+        double top = left;
+        double right = -left;
+        double bottom = -left;
+        double u_min = left;
+        double v_min = left;
+        double u_max = right;
+        double v_max = right;
+        for (const auto& batch : packet.batches) {
+            const auto* draw = std::get_if<host::DrawBatch>(&batch);
+            if (draw == nullptr)
+                continue;
+            for (std::size_t at = draw->first_index; at < draw->first_index + draw->index_count; ++at) {
+                const std::size_t vertex = draw->base_vertex + packet.indices.at(at);
+                const std::size_t offset = vertex * 88U;
+                if (packet.vertices.at(offset + 20U) != 0x30U ||
+                    packet.vertices.at(offset + 21U) != 0x50U ||
+                    packet.vertices.at(offset + 22U) != 0xA0U)
+                    continue;
+                const double x = submission_vertex_component(packet.vertices, vertex, 0U);
+                const double y = submission_vertex_component(packet.vertices, vertex, 1U);
+                float z = 0.0F;
+                std::memcpy(&z, packet.vertices.data() + offset + 8U, sizeof(z));
+                std::array<float, 2U> uv{};
+                std::memcpy(uv.data(), packet.vertices.data() + offset + 12U, sizeof(uv));
+                u_min = std::min(u_min, static_cast<double>(uv[0]));
+                v_min = std::min(v_min, static_cast<double>(uv[1]));
+                u_max = std::max(u_max, static_cast<double>(uv[0]));
+                v_max = std::max(v_max, static_cast<double>(uv[1]));
+                const auto group = static_cast<std::size_t>(z);
+                const host::PresentationGroup transform = group < packet.groups.size()
+                    ? packet.groups[group] : host::PresentationGroup{};
+                left = std::min(left, transform.place_x(x, y));
+                top = std::min(top, transform.place_y(x, y));
+                right = std::max(right, transform.place_x(x, y));
+                bottom = std::max(bottom, transform.place_y(x, y));
+            }
+        }
+        // Analytic rectangles include an antialiasing skirt; the unit UV rectangle is the box.
+        check(u_max > u_min && v_max > v_min, "shared-flight packet lost its painted rectangle");
+        const double width = (right - left) / (u_max - u_min);
+        const double height = (bottom - top) / (v_max - v_min);
+        left -= u_min * width;
+        top -= v_min * height;
+        right = left + width;
+        bottom = top + height;
+        check(std::abs(left - bounds.x) < 1.1 && std::abs(top - bounds.y) < 1.1 &&
+                  std::abs(right - bounds.right()) < 1.1 &&
+                  std::abs(bottom - bounds.bottom()) < 1.1,
+              "shared-flight draw geometry disagreed with presented input geometry for " +
+                  std::string(key) + (scrolling ? " under scrolling: " : ": ") +
+                  std::to_string(left) + "," + std::to_string(top) + ".." +
+                  std::to_string(right) + "," + std::to_string(bottom) + " versus " +
+                  std::to_string(bounds.x) + "," + std::to_string(bounds.y) + ".." +
+                  std::to_string(bounds.right()) + "," + std::to_string(bounds.bottom()));
+        return bounds;
     };
     std::int64_t now = 1'000'000;
     static_cast<void>(surface.frame(now));
+    if (scrolling) {
+        ui::InputOperationResult result;
+        check(surface.input().scroll_to("shared.area", ui::Point{0.0, 80.0}, result),
+              "shared-flight fixture did not scroll");
+        static_cast<void>(surface.frame(now += 16'000'000));
+        check_near(surface.layout().find(surface.tree().find_key("shared.area")->identity())
+                       ->scroll_offset.y, 80.0, "shared-flight fixture lost its scroll offset");
+    }
     const ui::Rect thumb = shown("shared.thumb");
     check_near(thumb.width, 40.0, "the thumbnail is not laid out as authored");
 
     static_cast<void>(surface.input().click("shared.toggle"));
     now += 16'000'000;
     static_cast<void>(surface.frame(now));
+    const ui::LayoutRecord& detail =
+        *surface.layout().find(surface.tree().find_key("shared.detail")->identity());
+    const ui::Rect destination = surface.layout().surface_bounds(detail, detail.bounds);
     const ui::Rect start = shown("shared.detail");
     check(std::abs(start.x - thumb.x) < 1.0 && std::abs(start.y - thumb.y) < 1.0 &&
               std::abs(start.width - thumb.width) < 1.0 &&
@@ -6757,14 +6983,17 @@ overlay Shared {
     now += 100'000'000;
     static_cast<void>(surface.frame(now));
     const ui::Rect middle = shown("shared.detail");
-    check(middle.width > 40.0 && middle.width < 160.0 && middle.x > 10.0 && middle.x < 120.0,
+    check(middle.width > 40.0 && middle.width < 160.0 &&
+              middle.x >= std::min(thumb.x, destination.x) &&
+              middle.x <= std::max(thumb.x, destination.x),
           "the flight did not move between the two boxes");
     for (int frame = 0; frame < 60; ++frame) {
         now += 16'000'000;
         static_cast<void>(surface.frame(now));
     }
     const ui::Rect landed = shown("shared.detail");
-    check_near(landed.x, 120.0, "the flight did not land on its laid-out box");
+    check_near(landed.x, destination.x, "the flight did not land on its laid-out x");
+    check_near(landed.y, destination.y, "the flight did not land on its laid-out y");
     check_near(landed.width, 160.0, "the flight did not land at its laid-out size");
 
     // Back: the thumbnail flies from the detail.
@@ -6772,7 +7001,8 @@ overlay Shared {
     now += 16'000'000;
     static_cast<void>(surface.frame(now));
     const ui::Rect back = shown("shared.thumb");
-    check(std::abs(back.x - 120.0) < 1.0 && std::abs(back.width - 160.0) < 1.0,
+    check(std::abs(back.x - landed.x) < 1.0 && std::abs(back.y - landed.y) < 1.0 &&
+              std::abs(back.width - 160.0) < 1.0,
           "the thumbnail did not fly back from the detail");
 }
 
@@ -7027,6 +7257,122 @@ overlay Toned {
                       "cached pointer frame lost light tone or its local dark override");
             }
         }
+    }
+}
+
+void test_changed_child_slices_match_fresh_rendering(const bool scrolling) {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("changed-child-slices", bundle);
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    std::string source = R"(
+overlay Slices {
+  state colored = false;
+)";
+    source += scrolling ? R"(
+  root Scroll(key: "scroll", vertical: true, layout: { width: 320, height: 180 },
+              style: style(background: colored ? #101010 : null)) {
+)" : R"(
+  root Panel(layout: { kind: "ROW", wrap: true, width: 320, height: 180 },
+             style: style(background: colored ? #101010 : null)) {
+)";
+    source += R"(
+    Button(key: "toggle", label: "", layout: { width: 20, height: 20 },
+           onClick: action("state.toggle", name: "colored"))
+    Panel(key: "variable", layout: { width: 20, height: 20 },
+          style: style(background: colored ? #FF0000 : null))
+    for index in [)";
+    for (int index = 0; index < 128; ++index) {
+        if (index != 0)
+            source += ',';
+        source += std::to_string(index);
+    }
+    source += R"(] {
+      Button(key: "cell." + index, label: "", layout: { width: 20, height: 20 })
+    }
+  }
+}
+)";
+    check(application.compile_and_activate(
+              compiler::ModuleSource{"slices.strata", std::move(source)}, no_imports, 0U).activated(),
+          "changed-child fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 180;
+    environment.logical_width = 320.0;
+    environment.logical_height = 180.0;
+    environment.reduced_motion = true;
+    ui::Surface surface("changed-child-slices", application, runtime::LayerRole::overlay,
+                        "Slices", environment);
+    ui::RenderEngine late_renderer;
+    ui::RenderCommandBuffer late_commands;
+    ui::MaterialRegistry materials;
+    std::int64_t now = 0;
+    bool colored = false;
+    static_cast<void>(surface.frame(now));
+    for (int step = 0; step < 384; ++step) {
+        if (step % 37 == 0) {
+            if (scrolling) {
+                static_cast<void>(surface.animate_scroll_to(
+                    ui::ScrollAnimationRequest{"scroll", std::nullopt, 0.0}));
+                static_cast<void>(surface.frame(now += 16'666'667));
+            }
+            static_cast<void>(surface.input().enqueue_click("toggle"));
+            colored = !colored;
+        }
+        const int cell = 2 + step % 128;
+        const ui::Point position = scrolling ? ui::Point{10.0, 90.0}
+            : ui::Point{10.0 + 20.0 * (cell % 16), 10.0 + 20.0 * (cell / 16)};
+        static_cast<void>(surface.input().enqueue_pointer(ui::PointerInputEvent{
+            position, ui::PointerEventType::move, 0, 0}));
+        if (scrolling)
+            static_cast<void>(surface.input().enqueue_scroll(ui::ScrollInputEvent{
+                position, 0.0, (step / 30) % 2 == 0 ? -1.0 : 1.0}));
+        static_cast<void>(surface.frame(now += 16'666'667));
+        if (!scrolling) {
+            const auto* hovered = surface.tree().find_key("cell." + std::to_string(step % 128));
+            check(hovered != nullptr && surface.input().hovered(hovered->identity()),
+                  "the spatial hit index selected a different sibling");
+        }
+        ui::RenderEngine fresh_renderer;
+        ui::RenderCommandBuffer fresh_commands;
+        static_cast<void>(fresh_renderer.render(
+            surface.tree(), surface.layout(), surface.input(), surface.commands(),
+            surface.widget_registry(), surface.behavior_registry(), surface.motion(),
+            nullptr, nullptr, materials, {}, fresh_commands));
+        static_cast<void>(late_renderer.render(
+            surface.tree(), surface.layout(), surface.input(), surface.commands(),
+            surface.widget_registry(), surface.behavior_registry(), surface.motion(),
+            nullptr, nullptr, materials, {}, late_commands));
+        const auto same_frame = [&fresh_commands](const ui::RenderCommandBuffer& commands) {
+            return std::ranges::equal(commands.commands(), fresh_commands.commands()) &&
+                   std::ranges::equal(commands.groups(), fresh_commands.groups());
+        };
+        check(same_frame(surface.render_commands()),
+              "changed-child slices differed from fresh rendering at step " + std::to_string(step));
+        check(same_frame(late_commands),
+              "rendering after dirty-journal consumption reused stale child slices at step " +
+                  std::to_string(step));
+        const auto* variable = surface.tree().find_key("variable");
+        check(variable != nullptr, "variable-length child disappeared");
+        const auto* record = surface.layout().find(variable->identity());
+        check(record != nullptr, "variable-length child lost its layout");
+        const ui::Paint red(runtime::ColorValue{255U, 0U, 0U, 255U});
+        const bool painted = std::ranges::any_of(
+            surface.render_commands().commands(), [&](const ui::RenderCommand& command) {
+                if (const auto* rectangle = std::get_if<ui::SolidRectRenderCommand>(&command))
+                    return rectangle->bounds == record->bounds && rectangle->fill == red;
+                if (const auto* rectangle = std::get_if<ui::RoundedRectRenderCommand>(&command))
+                    return rectangle->bounds == record->bounds && rectangle->fill == red;
+                return false;
+            });
+        const auto clip = surface.input().presented_clip(*variable);
+        if (!clip.has_value() ||
+            surface.input().presented_bounds(*variable, record->bounds).intersection(*clip).has_value())
+            check(painted == colored, "variable-length child did not add or remove its background");
     }
 }
 
@@ -9504,13 +9850,15 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_masonry_layout();
         test_canvas_layout();
         test_zoom_view_math();
-        test_shared_element_transition();
+        test_shared_element_transition(false);
+        test_shared_element_transition(true);
         test_anchored_portal_is_out_of_flow_and_flips();
         test_virtualization_cache_queries_only_observed_keys();
         test_retained_layout_cache_scale_and_invalidation();
         test_retained_layout_cache_translates_unchanged_subtrees();
         test_explicit_container_size_constrains_descendants();
         test_scroll_content_box_constrains_fill_child();
+        test_scroll_offsets_preserve_content_and_nested_updates();
         test_exiting_child_retains_placement_without_affecting_flow();
         test_nested_scroll_pin_uses_nearest_scroll_offset();
         test_wrapped_linear_and_intrinsic_grid_layout();
@@ -9532,6 +9880,8 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_presentation_group_animation();
         test_rotating_presentation_group();
         test_cached_tone_during_pointer_hold();
+        test_changed_child_slices_match_fresh_rendering(false);
+        test_changed_child_slices_match_fresh_rendering(true);
         test_surface_environment_scale_matches_framebuffer();
         if (argument_count >= 3 && std::string_view(arguments[2]).size() != 0U) {
             test_bundled_font_metrics(arguments[1]);

@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "ui/command.hpp"
+#include "ui/input.hpp"
 #include "ui/tree.hpp"
 
 namespace strata::ui {
@@ -163,6 +164,7 @@ std::int64_t tooltip_hide_delay_nanos(const RetainedNode& node) noexcept {
 std::optional<TooltipProjection> project_tooltip(
     const RetainedNode& node,
     const LayoutResult& layout,
+    const InputRouter& input,
     const ShellTextLayoutResolver& text_layout
 ) {
     if (!tooltip_disclosure_visible(node) || !text_layout) return std::nullopt;
@@ -172,11 +174,11 @@ std::optional<TooltipProjection> project_tooltip(
     }
     const LayoutRecord* record = layout.find(node.identity());
     if (record == nullptr) return std::nullopt;
-    Rect anchor = record->bounds;
+    Rect anchor = input.presented_bounds(node, record->bounds);
     if (!node.children().empty()) {
         if (const LayoutRecord* child = layout.find(node.children().front()->identity());
             child != nullptr) {
-            anchor = child->bounds;
+            anchor = input.presented_bounds(*node.children().front(), child->bounds);
         }
     }
     const TextLayout resolved = text_layout(node, *content->string(), TextLayoutOptions{});

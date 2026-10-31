@@ -3,10 +3,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <memory>
 #include <optional>
-#include <string_view>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -275,147 +276,249 @@ std::optional<CornerRadii> corner_radii_value(const runtime::Value* value) noexc
     };
 }
 
-const RenderCommand& RenderCommandView::locate(const std::size_t index,
-                                               std::size_t& run) const noexcept {
-    const auto holds = [this, index](const std::size_t at) {
-        return at < segments_.size() && index >= offsets_[at] &&
-               index < offsets_[at] + segments_[at].size();
-    };
-    if (!holds(run)) {
-        if (holds(run + 1U)) {
-            ++run;
+/** Immutable AVL branches retain command ranges without retaining a chain of old frames. */
+struct RenderCommandView::Node final {
+    NodePtr left;
+    NodePtr right;
+    Segment run;
+    std::size_t size = 0U;
+    unsigned height = 1U;
+
+    explicit Node(Segment segment) : run(std::move(segment)), size(run.size()) {}
+    Node(NodePtr first, NodePtr second)
+        : left(std::move(first)), right(std::move(second)), size(left->size + right->size),
+          height(1U + std::max(left->height, right->height)) {}
+};
+
+RenderCommandView::NodePtr RenderCommandView::leaf(Segment segment) {
+    return segment.size() != 0U ? std::make_shared<const Node>(std::move(segment)) : nullptr;
+}
+
+RenderCommandView::NodePtr RenderCommandView::branch(NodePtr left, NodePtr right) {
+    if (left == nullptr)
+        return right;
+    if (right == nullptr)
+        return left;
+    if (left->left == nullptr && right->left == nullptr &&
+        left->run.storage == right->run.storage && left->run.end == right->run.begin) {
+        return leaf(Segment{left->run.storage, left->run.begin, right->run.end});
+    }
+    return std::make_shared<const Node>(std::move(left), std::move(right));
+}
+
+RenderCommandView::NodePtr RenderCommandView::balance(NodePtr left, NodePtr right) {
+    if (left == nullptr || right == nullptr)
+        return branch(std::move(left), std::move(right));
+    if (left->height > right->height + 1U) {
+        if (left->left->height >= left->right->height)
+            return branch(left->left, branch(left->right, std::move(right)));
+        return branch(branch(left->left, left->right->left),
+                      branch(left->right->right, std::move(right)));
+    }
+    if (right->height > left->height + 1U) {
+        if (right->right->height >= right->left->height)
+            return branch(branch(std::move(left), right->left), right->right);
+        return branch(branch(std::move(left), right->left->left),
+                      branch(right->left->right, right->right));
+    }
+    return branch(std::move(left), std::move(right));
+}
+
+RenderCommandView::NodePtr RenderCommandView::join(NodePtr left, NodePtr right) {
+    if (left == nullptr || right == nullptr)
+        return branch(std::move(left), std::move(right));
+    if (left->height > right->height + 1U)
+        return balance(left->left, join(left->right, std::move(right)));
+    if (right->height > left->height + 1U)
+        return balance(join(std::move(left), right->left), right->right);
+    return branch(std::move(left), std::move(right));
+}
+
+RenderCommandView::NodePtr RenderCommandView::slice_node(
+    const NodePtr& node, const std::size_t begin, const std::size_t end) {
+    if (begin >= end)
+        return nullptr;
+    if (begin == 0U && end == node->size)
+        return node;
+    if (node->left == nullptr)
+        return leaf(Segment{node->run.storage, node->run.begin + begin, node->run.begin + end});
+    const std::size_t split = node->left->size;
+    if (end <= split)
+        return slice_node(node->left, begin, end);
+    if (begin >= split)
+        return slice_node(node->right, begin - split, end - split);
+    return join(slice_node(node->left, begin, split), slice_node(node->right, 0U, end - split));
+}
+
+const RenderCommand& RenderCommandView::locate(const std::size_t index, const Segment*& run,
+                                               std::size_t& run_offset) const noexcept {
+    if (run == nullptr || index < run_offset || index - run_offset >= run->size()) {
+        const std::size_t prefix = root_ != nullptr ? root_->size : 0U;
+        if (index >= prefix) {
+            run = &tail_;
+            run_offset = prefix;
         } else {
-            run = static_cast<std::size_t>(
-                std::upper_bound(offsets_.begin(), offsets_.end(), index) - offsets_.begin() - 1);
+            const Node* node = root_.get();
+            run_offset = 0U;
+            while (node->left != nullptr) {
+                if (index - run_offset < node->left->size) {
+                    node = node->left.get();
+                } else {
+                    run_offset += node->left->size;
+                    node = node->right.get();
+                }
+            }
+            run = &node->run;
         }
     }
-    const Segment& segment = segments_[run];
-    return (*segment.storage)[segment.begin + (index - offsets_[run])];
+    return (*run->storage)[run->begin + index - run_offset];
 }
 
-void RenderCommandView::push(Segment segment) {
-    const std::size_t added = segment.size();
-    if (added == 0U)
+void RenderCommandView::flush_tail() {
+    if (tail_.size() != 0U)
+        root_ = join(std::move(root_), leaf(tail_));
+    tail_ = Segment{};
+}
+
+void RenderCommandView::append_range(const RenderCommandView& source, const std::size_t begin,
+                                     const std::size_t end) {
+    if (begin >= end)
         return;
-    // Continuing the last run where it ends extends it.
-    if (!segments_.empty() && segments_.back().storage == segment.storage &&
-        segments_.back().end == segment.begin) {
-        segments_.back().end = segment.end;
+    RenderCommandView range = source.slice_view(begin, end);
+    if (range.root_ == nullptr && tail_.storage == range.tail_.storage &&
+        tail_.end == range.tail_.begin) {
+        tail_.end = range.tail_.end;
     } else {
-        offsets_.push_back(size_);
-        segments_.push_back(std::move(segment));
+        flush_tail();
+        root_ = join(std::move(root_), std::move(range.root_));
+        tail_ = std::move(range.tail_);
     }
-    size_ += added;
+    size_ += end - begin;
 }
 
-std::vector<RenderCommandView::Segment> RenderCommandView::slice(const std::size_t begin,
-                                                                 const std::size_t end) const {
-    std::vector<Segment> result;
+RenderCommandView RenderCommandView::slice_view(const std::size_t begin,
+                                                const std::size_t end) const {
+    RenderCommandView result;
     if (begin >= end)
         return result;
-    std::size_t run = static_cast<std::size_t>(
-        std::upper_bound(offsets_.begin(), offsets_.end(), begin) - offsets_.begin() - 1);
-    for (; run < segments_.size() && offsets_[run] < end; ++run) {
-        const Segment& segment = segments_[run];
-        const std::size_t from = std::max(begin, offsets_[run]) - offsets_[run];
-        const std::size_t to = std::min(end, offsets_[run] + segment.size()) - offsets_[run];
-        if (from < to)
-            result.push_back(Segment{segment.storage, segment.begin + from, segment.begin + to});
+    const std::size_t prefix = root_ != nullptr ? root_->size : 0U;
+    if (begin < prefix)
+        result.root_ = slice_node(root_, begin, std::min(end, prefix));
+    if (end > prefix) {
+        result.tail_ = Segment{tail_.storage, tail_.begin + std::max(begin, prefix) - prefix,
+                               tail_.begin + end - prefix};
     }
+    result.size_ = end - begin;
     return result;
 }
 
 std::vector<RenderCommand> RenderCommandView::to_vector() const {
-    std::vector<RenderCommand> result;
-    result.reserve(size_);
-    for (const Segment& segment : segments_) {
-        result.insert(result.end(),
-                      segment.storage->begin() + static_cast<std::ptrdiff_t>(segment.begin),
-                      segment.storage->begin() + static_cast<std::ptrdiff_t>(segment.end));
-    }
-    return result;
+    return std::vector<RenderCommand>(begin(), end());
 }
 
-namespace {
+bool RenderCommandView::compare_range(Range left, Range right, const std::size_t length,
+                                       const std::size_t index,
+                                       std::vector<std::size_t>* const differences) {
+    const auto normalize = [length](Range range) {
+        while (range.node != nullptr && range.node->left != nullptr) {
+            const std::size_t split = range.node->left->size;
+            if (range.offset >= split) {
+                range.offset -= split;
+                range.node = range.node->right.get();
+            } else if (length <= split - range.offset) {
+                range.node = range.node->left.get();
+            } else {
+                break;
+            }
+        }
+        return range;
+    };
+    left = normalize(left);
+    right = normalize(right);
+    if (left.node != nullptr && left.node == right.node && left.offset == right.offset)
+        return true;
+    const Segment* a = left.node == nullptr ? left.tail
+        : left.node->left == nullptr ? &left.node->run : nullptr;
+    const Segment* b = right.node == nullptr ? right.tail
+        : right.node->left == nullptr ? &right.node->run : nullptr;
+    if (a != nullptr && b != nullptr) {
+        const std::size_t first_a = a->begin + left.offset;
+        const std::size_t first_b = b->begin + right.offset;
+        if (a->storage == b->storage && first_a == first_b)
+            return true;
+        bool equal = true;
+        for (std::size_t offset = 0U; offset < length; ++offset) {
+            if ((*a->storage)[first_a + offset] == (*b->storage)[first_b + offset])
+                continue;
+            if (differences == nullptr)
+                return false;
+            differences->push_back(index + offset);
+            equal = false;
+        }
+        return equal;
+    }
+    const std::size_t split = std::min(
+        a != nullptr ? length : left.node->left->size - left.offset,
+        b != nullptr ? length : right.node->left->size - right.offset);
+    const bool first = compare_range(left, right, split, index, differences);
+    if (!first && differences == nullptr)
+        return false;
+    left.offset += split;
+    right.offset += split;
+    const bool last = compare_range(left, right, length - split, index + split, differences);
+    return first && last;
+}
 
-/** Walks two streams of one length run by run, calling `visit(index, run length, same)`. */
-template <typename Visit>
-void walk_runs(const RenderCommandView& left, const RenderCommandView& right, Visit&& visit) {
-    const auto& a = left.segments();
-    const auto& b = right.segments();
-    std::size_t index = 0U;
+bool RenderCommandView::compare(const RenderCommandView& other,
+                                 std::vector<std::size_t>* const differences) const {
+    if (size_ != other.size_)
+        return false;
+    if (root_ == other.root_ && tail_ == other.tail_)
+        return true;
+    std::array<Range, 2U> a{{{root_.get(), nullptr, 0U}, {nullptr, &tail_, 0U}}};
+    std::array<Range, 2U> b{{{other.root_.get(), nullptr, 0U}, {nullptr, &other.tail_, 0U}}};
+    const std::array<std::size_t, 2U> lengths_a{{root_ != nullptr ? root_->size : 0U, tail_.size()}};
+    const std::array<std::size_t, 2U> lengths_b{{other.root_ != nullptr ? other.root_->size : 0U,
+                                              other.tail_.size()}};
     std::size_t sa = 0U;
     std::size_t sb = 0U;
-    std::size_t ia = 0U;
-    std::size_t ib = 0U;
+    std::size_t index = 0U;
+    bool equal = true;
     while (sa < a.size() && sb < b.size()) {
-        const std::size_t run = std::min(a[sa].size() - ia, b[sb].size() - ib);
-        const bool same = a[sa].storage == b[sb].storage && a[sa].begin + ia == b[sb].begin + ib;
-        if (!visit(index, run, same, a[sa].begin + ia, *a[sa].storage, b[sb].begin + ib,
-                   *b[sb].storage))
-            return;
-        index += run;
-        ia += run;
-        ib += run;
-        if (ia == a[sa].size()) {
+        if (a[sa].offset == lengths_a[sa]) {
             ++sa;
-            ia = 0U;
+            continue;
         }
-        if (ib == b[sb].size()) {
+        if (b[sb].offset == lengths_b[sb]) {
             ++sb;
-            ib = 0U;
+            continue;
         }
+        const std::size_t length = std::min(lengths_a[sa] - a[sa].offset,
+                                             lengths_b[sb] - b[sb].offset);
+        if (!compare_range(a[sa], b[sb], length, index, differences)) {
+            if (differences == nullptr)
+                return false;
+            equal = false;
+        }
+        a[sa].offset += length;
+        b[sb].offset += length;
+        index += length;
     }
+    return equal;
 }
-
-} // namespace
 
 std::vector<std::size_t> RenderCommandView::differences(const RenderCommandView& other) const {
     std::vector<std::size_t> result;
-    if (size_ != other.size_)
-        return result;
-    walk_runs(*this, other, [&](const std::size_t index, const std::size_t run, const bool same,
-                                const std::size_t from_a, const std::vector<RenderCommand>& a,
-                                const std::size_t from_b, const std::vector<RenderCommand>& b) {
-        if (same)
-            return true;
-        for (std::size_t offset = 0U; offset < run; ++offset) {
-            if (!(a[from_a + offset] == b[from_b + offset]))
-                result.push_back(index + offset);
-        }
-        return true;
-    });
+    static_cast<void>(compare(other, &result));
     return result;
 }
 
 bool operator==(const RenderCommandView& left, const RenderCommandView& right) {
-    if (left.size_ != right.size_)
-        return false;
-    bool equal = true;
-    walk_runs(left, right, [&](const std::size_t, const std::size_t run, const bool same,
-                               const std::size_t from_a, const std::vector<RenderCommand>& a,
-                               const std::size_t from_b, const std::vector<RenderCommand>& b) {
-        if (same)
-            return true;
-        for (std::size_t offset = 0U; offset < run; ++offset) {
-            if (!(a[from_a + offset] == b[from_b + offset])) {
-                equal = false;
-                return false;
-            }
-        }
-        return true;
-    });
-    return equal;
+    return left.compare(right, nullptr);
 }
 
 bool operator==(const RenderCommandView& left, const std::vector<RenderCommand>& right) {
-    if (left.size() != right.size())
-        return false;
-    for (std::size_t index = 0U; index < right.size(); ++index) {
-        if (!(left[index] == right[index]))
-            return false;
-    }
-    return true;
+    return std::ranges::equal(left, right);
 }
 
 RenderCommandBuffer::RenderCommandBuffer(const RenderCommandBuffer& other)
@@ -440,9 +543,8 @@ void RenderCommandBuffer::open_tail() {
         tail_->reserve(reserve_hint_);
     }
     if (!tail_open_) {
-        view_.offsets_.push_back(view_.size_);
-        view_.segments_.push_back(
-            RenderCommandView::Segment{tail_, tail_->size(), tail_->size()});
+        view_.flush_tail();
+        view_.tail_ = RenderCommandView::Segment{tail_, tail_->size(), tail_->size()};
         tail_open_ = true;
     }
 }
@@ -450,7 +552,7 @@ void RenderCommandBuffer::open_tail() {
 void RenderCommandBuffer::append(RenderCommand command) {
     open_tail();
     tail_->push_back(std::move(command));
-    ++view_.segments_.back().end;
+    ++view_.tail_.end;
     ++view_.size_;
 }
 
@@ -459,17 +561,16 @@ void RenderCommandBuffer::append(const std::vector<RenderCommand>& commands) {
         return;
     open_tail();
     tail_->insert(tail_->end(), commands.begin(), commands.end());
-    view_.segments_.back().end += commands.size();
+    view_.tail_.end += commands.size();
     view_.size_ += commands.size();
 }
 
-void RenderCommandBuffer::append(const std::span<const RenderCommandView::Segment> segments) {
-    for (const RenderCommandView::Segment& segment : segments) {
-        if (segment.size() == 0U)
-            continue;
-        tail_open_ = false;
-        view_.push(segment);
-    }
+void RenderCommandBuffer::append(const RenderCommandView& source, const std::size_t begin,
+                                 const std::size_t end) {
+    if (begin >= end)
+        return;
+    tail_open_ = false;
+    view_.append_range(source, begin, end);
 }
 
 void RenderCommandBuffer::clear() noexcept {

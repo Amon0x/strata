@@ -195,8 +195,11 @@ ReconcileStats RetainedTree::reconcile(std::shared_ptr<const DescriptionNode> ro
         if (reconcile_indexes_changed_) {
             rebuild_indexes();
         } else {
-            for (const std::uint64_t identity : reconcile_dirty_)
+            for (const std::uint64_t identity : reconcile_dirty_) {
                 dirty_index_.insert(identity);
+                if (RetainedNode* node = find_identity(identity); node != nullptr)
+                    note_render_dirty(*node);
+            }
         }
     }
     reconcile_dirty_.clear();

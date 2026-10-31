@@ -15,6 +15,7 @@ cbuffer RoundedClipData : register(b1) {
     // .w of the inverse rows: the clip's shape kind and its sides (RoundedClip::shape, sides).
     float4 roundedClipInverseX[STRATA_MAX_ROUNDED_CLIPS];
     float4 roundedClipInverseY[STRATA_MAX_ROUNDED_CLIPS];
+    float4 roundedClipInverseW[STRATA_MAX_ROUNDED_CLIPS];
     // Fading toward the top, right, bottom and left edges, in logical pixels.
     float4 roundedClipFade[STRATA_MAX_ROUNDED_CLIPS];
     uint roundedClipCount;
@@ -111,6 +112,10 @@ float strataRoundedClipCoverage(float2 logicalPixel) {
             dot(roundedClipInverseY[index].xy, logicalPixel) +
                 roundedClipInverseY[index].z
         );
+        float divisor = dot(roundedClipInverseW[index].xyz, float3(logicalPixel, 1.0));
+        if (divisor <= 0.0)
+            return 0.0;
+        localPixel /= divisor;
         float2 halfSize = roundedClipBounds[index].zw * 0.5;
         float2 center = roundedClipBounds[index].xy + halfSize;
         uint shape = (uint)(roundedClipInverseX[index].w + 0.5);
@@ -167,6 +172,7 @@ struct RoundedClipConstants final {
     std::array<std::array<float, 4U>, host::maximum_rounded_clip_depth> radii{};
     std::array<std::array<float, 4U>, host::maximum_rounded_clip_depth> inverse_x{};
     std::array<std::array<float, 4U>, host::maximum_rounded_clip_depth> inverse_y{};
+    std::array<std::array<float, 4U>, host::maximum_rounded_clip_depth> inverse_w{};
     std::array<std::array<float, 4U>, host::maximum_rounded_clip_depth> fade{};
     std::uint32_t count = 0U;
     std::uint32_t mode = 0U;

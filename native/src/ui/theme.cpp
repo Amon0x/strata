@@ -52,7 +52,6 @@ class ValueFields final {
             return {found, false};
         return {fields_.emplace(found, std::string(name), std::move(value)), true};
     }
-    iterator erase(const const_iterator position) { return fields_.erase(position); }
     std::size_t erase(const std::string_view name) {
         const iterator found = find(name);
         if (found == fields_.end())
@@ -602,10 +601,6 @@ void apply_motion(ValueFields& fields, const ThemeNullable<ThemeAnimationSet>& v
     return value->key() != nullptr ? &value->key()->value : nullptr;
 }
 
-[[nodiscard]] const double* number(const runtime::Value* value) noexcept {
-    return value != nullptr ? value->number() : nullptr;
-}
-
 [[nodiscard]] const runtime::Value* style_field(const DescriptionNode& node,
                                                 const std::string_view name) noexcept {
     const runtime::Value* layout = property(node, "$layout");
@@ -678,70 +673,13 @@ void apply_motion(ValueFields& fields, const ThemeNullable<ThemeAnimationSet>& v
     return std::nullopt;
 }
 
-/** Every palette token resolved for one theme; materialized once per theme onto its nodes. */
-[[nodiscard]] runtime::Value palette_value(const ThemeTokens& tokens) {
-    std::vector<std::pair<std::string, runtime::Value>> fields;
-    fields.reserve(theme_palette_tokens().size());
-    for (const ThemePaletteToken& token : theme_palette_tokens())
-        fields.emplace_back(std::string(token.name), runtime::Value(tokens.palette(token.name)));
-    return runtime::Value(std::move(fields));
-}
-
-[[nodiscard]] runtime::Value motion_policy_value(const ThemeMotionPolicy& policy) {
-    const auto easing_value = [](const MotionEasing& easing) {
-        if (easing.kind != MotionEasingKind::cubic_bezier) {
-            return runtime::Value(motion_easing_name(easing));
-        }
-        return object({
-            {"kind", runtime::Value("cubic-bezier")},
-            {"x1", runtime::Value(easing.x1)},
-            {"x2", runtime::Value(easing.x2)},
-            {"y1", runtime::Value(easing.y1)},
-            {"y2", runtime::Value(easing.y2)},
-        });
-    };
-    const auto repeat_value = [](const MotionRepeat& repeat) {
-        return object({
-            {"iterations", runtime::Value(static_cast<double>(repeat.iterations))},
-            {"kind", runtime::Value(repeat.kind == MotionRepeatKind::forever ? "forever"
-                                    : repeat.kind == MotionRepeatKind::count ? "count"
-                                                                             : "none")},
-        });
-    };
-    const auto fill_value = [](const MotionFillMode fill) {
-        switch (fill) {
-        case MotionFillMode::none:
-            return "none";
-        case MotionFillMode::forwards:
-            return "forwards";
-        case MotionFillMode::backwards:
-            return "backwards";
-        case MotionFillMode::both:
-            return "both";
-        }
-        return "both";
-    };
-    ValueFields timings;
-    for (const auto& [name, timing] : policy.timings()) {
-        timings.emplace(
-            name, object({
-                      {"delayNanos", runtime::Value(static_cast<double>(timing.delay_nanos))},
-                      {"durationNanos", runtime::Value(static_cast<double>(timing.duration_nanos))},
-                      {"easing", easing_value(timing.easing)},
-                      {"fillMode", runtime::Value(fill_value(timing.fill_mode))},
-                      {"repeat", repeat_value(timing.repeat)},
-                      {"reverse", runtime::Value(timing.reverse)},
-                  }));
-    }
-    return object({
-        {"reducedMotion", runtime::Value(policy.reduced_motion())},
-        {"timings", object(std::move(timings))},
-    });
-}
-
 [[nodiscard]] bool has_authored_style_container(const DescriptionNode& node) noexcept {
     return property(node, "style") != nullptr || property(node, "layout") != nullptr;
 }
+
+constexpr std::array<std::string_view, 6U> timing_fields{
+    "motions", "animateChanges", "animateContentSize", "disclosure",
+    "$disclosureDefaults", "$contentSizeMotionDefaults"};
 
 void report_timing_if_unknown(const Theme& theme, const DescriptionNode& node,
                               const runtime::Value* value, const UnknownThemeTiming& callback) {
@@ -762,14 +700,8 @@ void report_unknown_timings(const Theme& theme, const DescriptionNode& node,
             report_timing_if_unknown(theme, node, item.field("policy"), callback);
         }
     }
-    for (const std::string_view field_name : {
-             "animateChanges",
-             "animateContentSize",
-             "disclosure",
-             "$disclosureDefaults",
-             "$contentSizeMotionDefaults",
-         }) {
-        const runtime::Value* declaration = style_field(node, field_name);
+    for (std::size_t index = 1U; index < timing_fields.size(); ++index) {
+        const runtime::Value* declaration = style_field(node, timing_fields[index]);
         if (declaration == nullptr || declaration->object() == nullptr)
             continue;
         const runtime::Value* timing = declaration->field("timing");
@@ -813,12 +745,128 @@ widget_contribution(const Theme& theme, const std::string_view type, const std::
     return result;
 }
 
+constexpr std::array<std::string_view, 4U> style_containers{
+    "$layout", "visualStyle", "textVisualStyle", "textStyle"};
+constexpr std::array<std::string_view, 14U> motion_fields{
+    "animation", "enter", "exit", "hover", "pressed", "focus", "focusVisible", "checked",
+    "move", "animate", "motions", "animateChanges", "disclosure", "animateContentSize"};
+static_assert(motion_fields.size() <= 32U);
+
+using StyleInputs = std::array<const runtime::Value*, style_containers.size()>;
+using ProjectedStyle = std::array<std::optional<runtime::Value>, style_containers.size()>;
+
+/** One recent projection per theme contribution, owned only by the current materialization pass.
+ * Labels, keys and other widget arguments do not affect style and are resolved independently. */
+struct SharedStyle final {
+    ProjectedStyle inputs;
+    ProjectedStyle projected;
+    std::uint32_t motion_overrides = 0U;
+    bool authored_style = false;
+    bool timing_declarations = false;
+
+    [[nodiscard]] bool matches(const StyleInputs& values, const std::uint32_t overrides,
+                               const bool authored) const {
+        if (motion_overrides != overrides || authored_style != authored)
+            return false;
+        for (std::size_t index = 0U; index < values.size(); ++index) {
+            if (inputs[index].has_value() != (values[index] != nullptr) ||
+                (values[index] != nullptr && *inputs[index] != *values[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+using SharedStyles = std::map<const ThemeWidgetContribution*, SharedStyle>;
+
+/** Resolves only the style containers; direct widget arguments remain node-owned. */
+[[nodiscard]] ProjectedStyle project_style(
+    const StyleInputs& inputs, const Theme& theme, const ThemeWidgetContribution* themed,
+    const bool authored_style, const std::uint32_t motion_overrides,
+    ThemeMaterializationStats& stats) {
+    ProjectedStyle result;
+    ValueFields resolved = themed != nullptr ? ValueFields(themed->fields) : ValueFields{};
+    bool authored_color_field = false;
+    bool authored_foreground_field = false;
+    const auto resolve_authored_fields =
+        [&theme, &resolved, &stats, &authored_color_field,
+         &authored_foreground_field](const runtime::Value* container, const bool merge_all,
+                                     const bool project_container) -> std::optional<runtime::Value> {
+        if (container == nullptr || container->object() == nullptr)
+            return std::nullopt;
+        ValueFields concrete_fields;
+        for (const auto& [name, value] : container->object()->fields) {
+            authored_color_field = authored_color_field || name == "color";
+            authored_foreground_field = authored_foreground_field || name == "foreground";
+            if (const runtime::ThemeTokenValue* token = value.theme_token(); token != nullptr) {
+                const std::optional<runtime::Value> concrete =
+                    resolve_token(*token, theme.tokens());
+                if (!concrete.has_value())
+                    continue;
+                if (project_container)
+                    concrete_fields.insert_or_assign(name, *concrete);
+                resolved.insert_or_assign(name, *concrete);
+                if (name == "color") {
+                    resolved.insert_or_assign("foreground", *concrete);
+                } else if (name == "foreground") {
+                    resolved.insert_or_assign("color", *concrete);
+                }
+                ++stats.symbolic_token_patches;
+                continue;
+            }
+            if (std::optional<runtime::Value> concrete =
+                    resolve_nested_tokens(value, theme.tokens());
+                concrete.has_value()) {
+                if (project_container)
+                    concrete_fields.insert_or_assign(name, *concrete);
+                resolved.insert_or_assign(name, std::move(*concrete));
+                ++stats.symbolic_token_patches;
+                continue;
+            }
+            if (project_container)
+                concrete_fields.insert_or_assign(name, value);
+            if (merge_all)
+                resolved.insert_or_assign(name, value);
+        }
+        return project_container ? std::optional(object(std::move(concrete_fields))) : std::nullopt;
+    };
+    const bool has_authored_layout = inputs[0] != nullptr && inputs[0]->object() != nullptr;
+    if (has_authored_layout)
+        static_cast<void>(resolve_authored_fields(inputs[0], true, false));
+    for (std::size_t index = 1U; index < inputs.size(); ++index)
+        result[index] = resolve_authored_fields(inputs[index], index != 3U, true);
+    if (authored_color_field && !authored_foreground_field) {
+        const auto authored_color = resolved.find("color");
+        if (authored_color != resolved.end())
+            resolved.insert_or_assign("foreground", authored_color->second);
+    }
+    if (themed != nullptr) {
+        if (!authored_style) {
+            for (const auto& [name, value] : themed->defaults)
+                resolved.insert_or_assign(name, value);
+        }
+        for (std::size_t index = 0U; index < motion_fields.size(); ++index) {
+            if ((motion_overrides & (1U << index)) == 0U)
+                continue;
+            const std::string_view name = motion_fields[index];
+            resolved.erase(name);
+            if (name == "animateContentSize" || name == "disclosure")
+                resolved.erase("$themeAnimationSet");
+        }
+    }
+    if (themed != nullptr || has_authored_layout)
+        result[0] = object(std::move(resolved));
+    return result;
+}
+
 [[nodiscard]] std::shared_ptr<const DescriptionNode>
 resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCatalog& catalog,
              const std::shared_ptr<const Theme>& inherited,
              const std::optional<std::string>& inherited_scope_namespace,
              const ThemeStyleSchemaResolver& themed_type, const UnknownThemeTiming& unknown_timing,
-             ThemeMaterializationStats& stats, ThemeMaterializationCache* const cache) {
+             ThemeMaterializationStats& stats, ThemeMaterializationCache* const cache,
+             SharedStyles& shared_styles) {
     if (source == nullptr)
         return nullptr;
     std::shared_ptr<const Theme> effective = inherited;
@@ -854,7 +902,7 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
                 for (std::size_t index = 0U; index < source->children->size(); ++index) {
                     children.push_back(resolve_node(source->children->at(index), catalog,
                                                     effective, scope_namespace, themed_type,
-                                                    unknown_timing, stats, cache));
+                                                    unknown_timing, stats, cache, shared_styles));
                 }
                 auto result = std::make_shared<DescriptionNode>(*prior);
                 result->generated_source = source;
@@ -889,69 +937,66 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
             }
         }
     }
-    ValueFields resolved = themed != nullptr ? ValueFields(themed->fields) : ValueFields{};
-    const runtime::Value* authored = property(*source, "$layout");
-    bool authored_color_field = false;
-    bool authored_foreground_field = false;
-    const auto resolve_authored_fields =
-        [&effective, &resolved, &stats, &authored_color_field,
-         &authored_foreground_field](const runtime::Value* container,
-                                     const bool merge_all) -> std::optional<runtime::Value> {
-        if (container == nullptr || container->object() == nullptr)
-            return std::nullopt;
-        ValueFields concrete_fields;
-        for (const auto& [name, value] : container->object()->fields) {
-            authored_color_field = authored_color_field || name == "color";
-            authored_foreground_field = authored_foreground_field || name == "foreground";
-            if (const runtime::ThemeTokenValue* token = value.theme_token(); token != nullptr) {
-                const std::optional<runtime::Value> concrete =
-                    resolve_token(*token, effective->tokens());
-                if (!concrete.has_value())
-                    continue;
-                concrete_fields.insert_or_assign(name, *concrete);
-                resolved.insert_or_assign(name, *concrete);
-                if (name == "color") {
-                    resolved.insert_or_assign("foreground", *concrete);
-                } else if (name == "foreground") {
-                    resolved.insert_or_assign("color", *concrete);
-                }
-                ++stats.symbolic_token_patches;
-                continue;
-            }
-            // Tokens nested in a border, shadows or a paint resolve the same way.
-            if (std::optional<runtime::Value> concrete =
-                    resolve_nested_tokens(value, effective->tokens());
-                concrete.has_value()) {
-                concrete_fields.insert_or_assign(name, *concrete);
-                resolved.insert_or_assign(name, std::move(*concrete));
-                ++stats.symbolic_token_patches;
-                continue;
-            }
-            concrete_fields.insert_or_assign(name, value);
-            if (merge_all)
-                resolved.insert_or_assign(name, value);
-        }
-        return object(std::move(concrete_fields));
-    };
-    const bool has_authored_layout = authored != nullptr && authored->object() != nullptr;
-    if (has_authored_layout) {
-        static_cast<void>(resolve_authored_fields(authored, true));
-    }
-    for (const std::string_view container_name : {"visualStyle", "textVisualStyle"}) {
-        const std::optional<runtime::Value> concrete =
-            resolve_authored_fields(property(*source, container_name), true);
-        if (concrete.has_value()) {
-            properties.insert_or_assign(std::string(container_name),
-                                        runtime::ExpressionValue(*concrete));
+    StyleInputs inputs{};
+    for (std::size_t index = 0U; index < inputs.size(); ++index)
+        inputs[index] = property(*source, style_containers[index]);
+    const bool authored_style = has_authored_style_container(*source);
+    std::uint32_t motion_overrides = 0U;
+    if (themed != nullptr) {
+        for (std::size_t index = 0U; index < motion_fields.size(); ++index) {
+            if (property(*source, motion_fields[index]) != nullptr)
+                motion_overrides |= 1U << index;
         }
     }
-    if (const std::optional<runtime::Value> concrete =
-            resolve_authored_fields(property(*source, "textStyle"), false);
-        concrete.has_value()) {
-        properties.insert_or_assign("textStyle", runtime::ExpressionValue(*concrete));
+    const bool share = cache != nullptr && themed != nullptr;
+    const auto shared_style = share ? shared_styles.find(themed) : shared_styles.end();
+    ProjectedStyle uncached_style;
+    const ProjectedStyle* projected = nullptr;
+    bool possible_timings = unknown_timing != nullptr;
+    if (shared_style != shared_styles.end() &&
+        shared_style->second.matches(inputs, motion_overrides, authored_style)) {
+        projected = &shared_style->second.projected;
+        possible_timings = shared_style->second.timing_declarations;
+    } else {
+        uncached_style = project_style(inputs, *effective, themed, authored_style,
+                                      motion_overrides, stats);
+        if (share) {
+            SharedStyle replacement;
+            for (std::size_t index = 0U; index < inputs.size(); ++index) {
+                if (inputs[index] != nullptr)
+                    replacement.inputs[index] = *inputs[index];
+            }
+            replacement.projected = std::move(uncached_style);
+            replacement.authored_style = authored_style;
+            replacement.motion_overrides = motion_overrides;
+            const auto& layout = replacement.projected[0];
+            replacement.timing_declarations = unknown_timing != nullptr && layout.has_value() &&
+                std::ranges::any_of(timing_fields, [&layout](const std::string_view name) {
+                    return layout->field(name) != nullptr;
+                });
+            possible_timings = replacement.timing_declarations;
+            projected = &shared_styles.insert_or_assign(themed, std::move(replacement))
+                             .first->second.projected;
+        } else {
+            projected = &uncached_style;
+        }
+    }
+    for (std::size_t index = 0U; index < projected->size(); ++index) {
+        if ((*projected)[index].has_value()) {
+            properties.insert_or_assign(std::string(style_containers[index]),
+                                        runtime::ExpressionValue(*(*projected)[index]));
+        }
+    }
+    if (themed != nullptr && themed->has_layout && !authored_style) {
+        properties.insert_or_assign(
+            "$layoutParticipates",
+            runtime::ExpressionValue(runtime::Value(themed->layout_participates)));
     }
     // Widget arguments take tokens too (an image's tint, a Calendar's colours), at any depth.
     for (auto& [name, expression] : properties) {
+        if (!possible_timings && unknown_timing != nullptr &&
+            std::ranges::contains(timing_fields, name))
+            possible_timings = true;
         if (name.starts_with('$') || name == "visualStyle" || name == "textVisualStyle" ||
             name == "textStyle" || name == "style" || name == "layout") {
             continue;
@@ -966,75 +1011,6 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
             ++stats.symbolic_token_patches;
         }
     }
-    if (authored_color_field && !authored_foreground_field) {
-        const auto authored_color = resolved.find("color");
-        if (authored_color != resolved.end()) {
-            resolved.insert_or_assign("foreground", authored_color->second);
-        }
-    }
-
-    if (themed != nullptr) {
-        if (!has_authored_style_container(*source)) {
-            for (const auto& [name, value] : themed->defaults)
-                resolved.insert_or_assign(name, value);
-        }
-        for (const std::string_view motion_field : {
-                 "animation",
-                 "enter",
-                 "exit",
-                 "hover",
-                 "pressed",
-                 "focus",
-                 "focusVisible",
-                 "checked",
-                 "move",
-                 "animate",
-                 "motions",
-                 "animateChanges",
-                 "disclosure",
-                 "animateContentSize",
-             }) {
-            if (property(*source, motion_field) != nullptr) {
-                const auto inherited_motion = resolved.find(motion_field);
-                if (inherited_motion != resolved.end())
-                    resolved.erase(inherited_motion);
-                if (motion_field == "animateContentSize" || motion_field == "disclosure") {
-                    resolved.erase("$themeAnimationSet");
-                }
-            }
-        }
-        if (themed->has_layout && !has_authored_style_container(*source)) {
-            properties.insert_or_assign(
-                "$layoutParticipates",
-                runtime::ExpressionValue(runtime::Value(themed->layout_participates)));
-        }
-    }
-    if (themed != nullptr || has_authored_layout) {
-        properties.insert_or_assign("$layout",
-                                    runtime::ExpressionValue(object(std::move(resolved))));
-    }
-    properties.insert_or_assign("$themeName",
-                                runtime::ExpressionValue(runtime::Value(effective->name())));
-    if (cache != nullptr) {
-        const runtime::Value* shared = cache->motion_policy(effective);
-        if (shared == nullptr) {
-            cache->store_motion_policy(effective, motion_policy_value(effective->motion_policy()));
-            shared = cache->motion_policy(effective);
-        }
-        properties.insert_or_assign("$motionPolicy", runtime::ExpressionValue(*shared));
-        const runtime::Value* palette = cache->palette(effective);
-        if (palette == nullptr) {
-            cache->store_palette(effective, palette_value(effective->tokens()));
-            palette = cache->palette(effective);
-        }
-        properties.insert_or_assign("$themePalette", runtime::ExpressionValue(*palette));
-    } else {
-        properties.insert_or_assign("$themePalette",
-                                    runtime::ExpressionValue(palette_value(effective->tokens())));
-        properties.insert_or_assign(
-            "$motionPolicy", runtime::ExpressionValue(motion_policy_value(effective->motion_policy())));
-    }
-
     const std::size_t child_count = source->children->size();
     MaterializationRange range{0U, child_count};
     const bool lazy = source->materialization.has_value();
@@ -1047,7 +1023,7 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
     for (std::size_t index = range.start; index < range.end_exclusive; ++index) {
         resolved_children.emplace(index, resolve_node(source->children->at(index), catalog,
                                                       effective, scope_namespace, themed_type,
-                                                      unknown_timing, stats, cache));
+                                                      unknown_timing, stats, cache, shared_styles));
     }
 
     auto result = std::make_shared<DescriptionNode>(*source);
@@ -1072,7 +1048,8 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
         }
         result->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
     }
-    report_unknown_timings(*effective, *result, unknown_timing);
+    if (possible_timings)
+        report_unknown_timings(*effective, *result, unknown_timing);
     if (cache != nullptr) {
         cache->store(source, effective, scope_namespace, catalog.generation(), result);
     }
@@ -2128,33 +2105,6 @@ ThemeMaterializationCache::find(const std::shared_ptr<const DescriptionNode>& so
     return materialized;
 }
 
-const runtime::Value*
-ThemeMaterializationCache::motion_policy(const std::shared_ptr<const Theme>& theme) const {
-    const auto found = motion_policies_.find(theme.get());
-    return found != motion_policies_.end() && found->second.theme.lock() == theme ? &found->second.value
-                                                                               : nullptr;
-}
-
-void ThemeMaterializationCache::store_motion_policy(const std::shared_ptr<const Theme>& theme,
-                                                    runtime::Value value) {
-    // A theme that went away may have left its address to a new one: its entry is replaced.
-    std::erase_if(motion_policies_, [](const auto& entry) { return entry.second.theme.expired(); });
-    motion_policies_.insert_or_assign(theme.get(), MotionPolicyEntry{theme, std::move(value)});
-}
-
-const runtime::Value*
-ThemeMaterializationCache::palette(const std::shared_ptr<const Theme>& theme) const {
-    const auto found = palettes_.find(theme.get());
-    return found != palettes_.end() && found->second.theme.lock() == theme ? &found->second.value
-                                                                           : nullptr;
-}
-
-void ThemeMaterializationCache::store_palette(const std::shared_ptr<const Theme>& theme,
-                                              runtime::Value value) {
-    std::erase_if(palettes_, [](const auto& entry) { return entry.second.theme.expired(); });
-    palettes_.insert_or_assign(theme.get(), MotionPolicyEntry{theme, std::move(value)});
-}
-
 void ThemeMaterializationCache::store(const std::shared_ptr<const DescriptionNode>& source,
                                       const std::shared_ptr<const Theme>& effective_theme,
                                       std::optional<std::string> scope_namespace,
@@ -2209,8 +2159,6 @@ void ThemeMaterializationCache::purge(const std::uint64_t catalog_generation) {
 void ThemeMaterializationCache::clear() noexcept {
     purge_threshold_ = 0U;
     entries_.clear();
-    motion_policies_.clear();
-    palettes_.clear();
     contributions_.clear();
 }
 
@@ -2227,8 +2175,9 @@ materialize_theme_tree(const std::shared_ptr<const DescriptionNode>& root,
     if (cache != nullptr)
         cache->purge(catalog.generation());
     ThemeMaterializationResult result;
+    SharedStyles shared_styles;
     result.root = resolve_node(root, catalog, catalog.root(), std::nullopt, themed_type,
-                               unknown_timing, result.stats, cache);
+                               unknown_timing, result.stats, cache, shared_styles);
     return result;
 }
 
@@ -2250,8 +2199,9 @@ ThemeMaterializationResult materialize_theme_subtree(
     if (cache != nullptr)
         cache->purge(catalog.generation());
     ThemeMaterializationResult result;
+    SharedStyles shared_styles;
     result.root = resolve_node(root, catalog, inherited_theme, inherited_scope_namespace,
-                               themed_type, unknown_timing, result.stats, cache);
+                               themed_type, unknown_timing, result.stats, cache, shared_styles);
     return result;
 }
 
@@ -2259,110 +2209,27 @@ bool theme_motion_reduced(const DescriptionNode& description,
                           const bool environment_reduced_motion) noexcept {
     if (environment_reduced_motion)
         return true;
-    const runtime::Value* policy = property(description, "$motionPolicy");
-    const runtime::Value* reduced = policy != nullptr ? policy->field("reducedMotion") : nullptr;
-    return reduced != nullptr && reduced->boolean() != nullptr && *reduced->boolean();
+    return description.projected_theme != nullptr &&
+           description.projected_theme->motion_policy().reduced_motion();
 }
 
 MotionTiming theme_motion_timing(const DescriptionNode& description,
                                  const std::string_view name) noexcept {
-    const runtime::Value* policy = property(description, "$motionPolicy");
-    const runtime::Value* timings = policy != nullptr ? policy->field("timings") : nullptr;
-    const auto decoded =
-        [timings](const std::string_view timing_name) -> std::optional<MotionTiming> {
-        const runtime::Value* value = timings != nullptr ? timings->field(timing_name) : nullptr;
-        if (value == nullptr || value->object() == nullptr)
-            return std::nullopt;
-        const runtime::Value* duration = value->field("durationNanos");
-        const runtime::Value* delay = value->field("delayNanos");
-        const runtime::Value* easing = value->field("easing");
-        if (duration == nullptr || duration->number() == nullptr ||
-            !std::isfinite(*duration->number()) || *duration->number() <= 0.0 ||
-            *duration->number() > static_cast<double>(std::numeric_limits<std::int64_t>::max()) ||
-            delay == nullptr || delay->number() == nullptr || !std::isfinite(*delay->number()) ||
-            *delay->number() < 0.0 ||
-            *delay->number() > static_cast<double>(std::numeric_limits<std::int64_t>::max()) ||
-            easing == nullptr) {
-            return std::nullopt;
-        }
-        MotionEasing parsed_easing;
-        try {
-            if (easing->string() != nullptr) {
-                parsed_easing = MotionEasing(*easing->string());
-            } else if (easing->object() != nullptr && text(easing->field("kind")) != nullptr &&
-                       *text(easing->field("kind")) == "cubic-bezier") {
-                const double* x1 = number(easing->field("x1"));
-                const double* y1 = number(easing->field("y1"));
-                const double* x2 = number(easing->field("x2"));
-                const double* y2 = number(easing->field("y2"));
-                if (x1 == nullptr || y1 == nullptr || x2 == nullptr || y2 == nullptr) {
-                    return std::nullopt;
-                }
-                parsed_easing = MotionEasing::cubic_bezier(*x1, *y1, *x2, *y2);
-            } else {
-                return std::nullopt;
-            }
-        } catch (const std::invalid_argument&) {
-            return std::nullopt;
-        }
-        MotionRepeat repeat;
-        if (const runtime::Value* repeated = value->field("repeat"); repeated != nullptr) {
-            if (repeated->object() == nullptr)
-                return std::nullopt;
-            const std::string* kind = text(repeated->field("kind"));
-            if (kind == nullptr)
-                return std::nullopt;
-            if (*kind == "forever")
-                repeat.kind = MotionRepeatKind::forever;
-            else if (*kind == "count") {
-                const double* iterations = number(repeated->field("iterations"));
-                if (iterations == nullptr || !std::isfinite(*iterations) || *iterations < 1.0 ||
-                    *iterations > static_cast<double>(std::numeric_limits<std::uint32_t>::max())) {
-                    return std::nullopt;
-                }
-                repeat = {MotionRepeatKind::count, static_cast<std::uint32_t>(*iterations)};
-            } else if (*kind != "none")
-                return std::nullopt;
-        }
-        MotionFillMode fill = MotionFillMode::both;
-        if (const std::string* mode = text(value->field("fillMode")); mode != nullptr) {
-            if (*mode == "none")
-                fill = MotionFillMode::none;
-            else if (*mode == "forwards")
-                fill = MotionFillMode::forwards;
-            else if (*mode == "backwards")
-                fill = MotionFillMode::backwards;
-            else if (*mode != "both")
-                return std::nullopt;
-        }
-        const runtime::Value* reversed = value->field("reverse");
-        if (reversed != nullptr && reversed->boolean() == nullptr)
-            return std::nullopt;
-        return MotionTiming{
-            static_cast<std::int64_t>(*duration->number()),
-            static_cast<std::int64_t>(*delay->number()),
-            parsed_easing,
-            repeat,
-            reversed != nullptr ? *reversed->boolean() : false,
-            fill,
-        };
-    };
-    if (const std::optional<MotionTiming> requested = decoded(name); requested.has_value()) {
-        return *requested;
-    }
-    if (const std::optional<MotionTiming> fallback = decoded(default_motion_timing_name);
-        fallback.has_value()) {
-        return *fallback;
+    if (description.projected_theme != nullptr) {
+        const ThemeMotionPolicy& policy = description.projected_theme->motion_policy();
+        if (const MotionTiming* requested = policy.find(name); requested != nullptr)
+            return *requested;
+        if (const MotionTiming* fallback = policy.find(default_motion_timing_name);
+            fallback != nullptr)
+            return *fallback;
     }
     return standard_timing();
 }
 
 bool theme_motion_timing_defined(const DescriptionNode& description,
                                  const std::string_view name) noexcept {
-    const runtime::Value* policy = property(description, "$motionPolicy");
-    const runtime::Value* timings = policy != nullptr ? policy->field("timings") : nullptr;
-    const runtime::Value* timing = timings != nullptr ? timings->field(name) : nullptr;
-    return timing != nullptr && timing->object() != nullptr;
+    return description.projected_theme != nullptr &&
+           description.projected_theme->motion_policy().find(name) != nullptr;
 }
 
 } // namespace strata::ui

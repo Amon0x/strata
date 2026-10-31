@@ -2001,7 +2001,9 @@ typedef struct strata_surface_frame_info {
  * the buffers their batch names as its texture; <strata/render_packet.hpp> documents the layout.
  */
 #define STRATA_RENDER_PACKET_VERSION_24 UINT32_C(24)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_24
+/* Version 25 gives each clip its presentation group, independent of the clipped draw's group. */
+#define STRATA_RENDER_PACKET_VERSION_25 UINT32_C(25)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_25
 /*
  * The deepest balanced content-effect nesting a packet may have. It guards the decoder against a
  * malformed or hostile stream, not what a renderer can draw: the planner, the decoder and the

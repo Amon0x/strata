@@ -1517,7 +1517,9 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_widget_call(con
         SlotDeclarations(program(), current->generated_slots, current->slot_templates)
             .row_templates(call);
     }
-    widgets_.apply_layout_defaults(type, properties);
+    WidgetLayoutDefaultsCache* const layout_defaults =
+        transaction_ != nullptr ? &transaction_->layout_defaults : nullptr;
+    widgets_.apply_layout_defaults(type, properties, layout_defaults);
 
     std::vector<std::shared_ptr<const DescriptionNode>> child_nodes;
     if (call.children != runtime::no_program_id && repeater_children.source == nullptr)
@@ -1534,16 +1536,17 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_widget_call(con
             .generated_widget_children = nullptr,
         },
         scope.instance_path(), application_.bundle()->action_registry(), retained,
-        // Called only while the widget expands, within this call.
+        // Both hooks are called only while the widget expands, within this call.
         [this, &scope](const std::string_view component, std::string template_key,
                        WidgetTemplateArguments arguments) {
             return build_component_template(component, std::move(template_key),
                                             std::move(arguments), scope);
         },
         WidgetRetainedDependencyObserver{
-            [this, retained_query](const std::string_view name, const runtime::Value* const value) {
+            [this, &retained_query](const std::string_view name, const runtime::Value* const value) {
                 observe_retained_value(retained_query, name, value);
-            }});
+            }},
+        layout_defaults);
     std::shared_ptr<const DescriptionChildren> generated_children =
         std::move(expansion.generated_children);
     WidgetGeneratedVirtualization generated_virtualization;
@@ -2081,14 +2084,25 @@ void DescriptionBuilder::observe_retained_value(const RetainedQuery& query,
     std::optional<runtime::Value> observed =
         value != nullptr ? std::optional(*value) : std::nullopt;
     std::vector<RetainedRead>& reads = current->reads.retained;
-    const auto found = std::ranges::find_if(reads, [&](const RetainedRead& read) {
-        return read.name == name && read.query == query;
-    });
-    if (found != reads.end()) {
-        found->value = std::move(observed);
-        return;
+    std::size_t hash = std::hash<std::string_view>{}(name);
+    const auto mix = [&hash](const std::string_view part) {
+        hash ^= std::hash<std::string_view>{}(part) + 0x9e3779b9U + (hash << 6U) + (hash >> 2U);
+    };
+    if (query.key.has_value())
+        mix(*query.key);
+    mix(query.source_path);
+    mix(query.state_scope);
+    mix(query.type);
+    const auto [first, last] = current->retained_read_index.equal_range(hash);
+    for (auto found = first; found != last; ++found) {
+        RetainedRead& read = reads[found->second];
+        if (read.name == name && read.query == query) {
+            read.value = std::move(observed);
+            return;
+        }
     }
     reads.push_back(RetainedRead{query, std::string(name), std::move(observed)});
+    current->retained_read_index.emplace(hash, reads.size() - 1U);
 }
 
 bool DescriptionBuilder::host_read_current(
@@ -2183,6 +2197,8 @@ runtime::Value DescriptionBuilder::resolve_style(const runtime::Value& value,
         return resolve_named_style(*value.string(), resolving);
     if (value.object() == nullptr)
         return runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{});
+    if (value.field("$bases") == nullptr)
+        return value;
     std::map<std::string, runtime::Value, std::less<>> merged;
     if (const runtime::Value* bases = value.field("$bases");
         bases != nullptr && bases->list() != nullptr) {
@@ -2318,21 +2334,30 @@ const runtime::Value* span_style(const DescriptionNode& description, const std::
 }
 
 void DescriptionBuilder::normalize_layout(DescriptionNode::Properties& properties) {
-    std::map<std::string, runtime::Value, std::less<>> merged;
-    bool present = false;
+    const auto style = properties.find("style");
+    const auto layout = properties.find("layout");
+    const runtime::Value* style_value =
+        style != properties.end() ? style->second.value() : nullptr;
+    const runtime::Value* layout_value =
+        layout != properties.end() ? layout->second.value() : nullptr;
+    if (style_value == nullptr && layout_value == nullptr)
+        return;
     std::set<std::string, std::less<>> resolving;
-    if (const auto style = properties.find("style");
-        style != properties.end() && style->second.value() != nullptr) {
-        merge_object(merged, resolve_style(*style->second.value(), resolving));
-        present = true;
+    const std::optional<runtime::Value> resolved_style = style_value != nullptr
+        ? std::optional(resolve_style(*style_value, resolving)) : std::nullopt;
+    // A single immutable object needs no merge or duplicate field storage.
+    const runtime::Value* single = resolved_style.has_value() ? &*resolved_style : layout_value;
+    if ((style_value == nullptr || layout_value == nullptr) && single->object() != nullptr &&
+        single->field("$bases") == nullptr) {
+        properties.insert_or_assign("$layout", ExpressionValue(*single));
+        return;
     }
-    if (const auto layout = properties.find("layout");
-        layout != properties.end() && layout->second.value() != nullptr) {
-        merge_object(merged, *layout->second.value());
-        present = true;
-    }
-    if (present)
-        properties.insert_or_assign("$layout", ExpressionValue(map_value(std::move(merged))));
+    std::map<std::string, runtime::Value, std::less<>> merged;
+    if (resolved_style.has_value())
+        merge_object(merged, *resolved_style);
+    if (layout_value != nullptr)
+        merge_object(merged, *layout_value);
+    properties.insert_or_assign("$layout", ExpressionValue(map_value(std::move(merged))));
 }
 
 } // namespace strata::ui

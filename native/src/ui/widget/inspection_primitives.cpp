@@ -24,7 +24,8 @@ void section(WidgetInspectionScope& scope) {
         if (marker == nullptr || marker->boolean() == nullptr || !*marker->boolean()) continue;
         if (const LayoutRecord* header = scope.surface().layout().find(child->identity());
             header != nullptr) {
-            scope.hit_bounds(header->bounds);
+            scope.hit_bounds(scope.surface().input().relative_bounds(
+                *child, scope.node(), header->bounds));
             return;
         }
     }

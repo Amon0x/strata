@@ -116,4 +116,42 @@ const LayoutRecord* LayoutResult::find(const std::uint64_t identity) const noexc
     const auto found = records.find(identity);
     return found != records.end() ? &found->second : nullptr;
 }
+
+Point LayoutResult::surface_offset(const LayoutRecord& record) const noexcept {
+    Point result;
+    const LayoutRecord* current = &record;
+    while (current->coordinate_parent != 0U) {
+        const LayoutRecord* parent = find(current->coordinate_parent);
+        if (parent == nullptr)
+            break;
+        if (current->scroll_content) {
+            result.x -= parent->scroll_offset.x;
+            result.y -= parent->scroll_offset.y;
+        }
+        current = parent;
+    }
+    return result;
+}
+
+Rect LayoutResult::surface_bounds(const LayoutRecord& record, Rect bounds) const noexcept {
+    const Point offset = surface_offset(record);
+    bounds.x += offset.x;
+    bounds.y += offset.y;
+    return bounds;
+}
+
+std::optional<Rect> LayoutResult::surface_clip(const LayoutRecord& record) const noexcept {
+    std::optional<Rect> result;
+    for (const LayoutRecord* current = &record; current != nullptr;
+         current = find(current->coordinate_parent)) {
+        if (current->clip.has_value()) {
+            const Rect placed = surface_bounds(*current, *current->clip);
+            result = result.has_value() ? std::optional(result->clip_intersection(placed))
+                                        : std::optional(placed);
+        }
+        if (current->coordinate_parent == 0U || current->detached_from_parent_clip)
+            break;
+    }
+    return result;
+}
 } // namespace strata::ui

@@ -90,7 +90,7 @@ struct ItemGeometry final {
         for (const auto& item : band->children()) {
             if (item->description().key.has_value()) {
                 if (const LayoutRecord* layout = scope.layout(*item); layout != nullptr) {
-                    Rect bounds = layout->bounds;
+                    Rect bounds = scope.input().relative_bounds(*item, scope.node(), layout->bounds);
                     bounds.x += offset.x;
                     bounds.y += offset.y;
                     result.push_back(ItemGeometry{*item->description().key, bounds});
@@ -170,10 +170,7 @@ struct ItemGeometry final {
         {"command", runtime::Value(modifiers.control || modifiers.super_key)},
         {"currentViewport", point_value(current_viewport)},
         {"lastFrame", runtime::Value(static_cast<double>(frame_time_nanos))},
-        {"lastScroll", point_value(Point{
-            start_content.x - start_viewport.x,
-            start_content.y - start_viewport.y,
-        })},
+        {"lastContent", point_value(start_content)},
         {"lastSelection", key_list(base)},
         {"shift", runtime::Value(modifiers.shift)},
         {"startContent", point_value(start_content)},
@@ -203,7 +200,8 @@ void update_session_field(
 ) {
     const LayoutRecord* root = scope.layout();
     const Point offset = root != nullptr ? root->scroll_offset : Point{};
-    const Point current_content{current_viewport.x + offset.x, current_viewport.y + offset.y};
+    const Point local = scope.local_position(current_viewport);
+    const Point current_content{local.x + offset.x, local.y + offset.y};
     const Point start = point(session.field("startContent")).value_or(current_content);
     const Rect marquee = between(start, current_content);
     const std::vector<ItemGeometry> items = geometry(scope, marquee);
@@ -247,9 +245,10 @@ void update_session(
     std::vector<std::pair<std::string, runtime::Value>> fields = session.object()->fields;
     const LayoutRecord* root = scope.layout();
     const Point scroll = root != nullptr ? root->scroll_offset : Point{};
+    const Point local = scope.local_position(current);
     for (auto& [name, value] : fields) {
         if (name == "currentViewport") value = point_value(current);
-        else if (name == "lastScroll") value = point_value(scroll);
+        else if (name == "lastContent") value = point_value(Point{local.x + scroll.x, local.y + scroll.y});
         else if (name == "lastSelection") value = key_list(transition.selected);
     }
     scope.set_presentation(std::string(marquee_key), runtime::Value(std::move(fields)));
@@ -276,7 +275,8 @@ bool marquee_pointer(WidgetInputScope& scope) {
         if (event->button != 0 || pointer_on_item(scope)) return false;
         const LayoutRecord* root = scope.layout();
         const Point offset = root != nullptr ? root->scroll_offset : Point{};
-        const Point content{event->position.x + offset.x, event->position.y + offset.y};
+        const Point local = scope.local_position(event->position);
+        const Point content{local.x + offset.x, local.y + offset.y};
         scope.set_presentation(
             std::string(marquee_key),
             session_value(
@@ -334,14 +334,15 @@ bool advance(WidgetInputScope& scope) {
     }
     const std::optional<Point> current = point(active_session->field("currentViewport"));
     if (!current.has_value()) return false;
+    const Point local = scope.local_position(*current);
     const double inset = std::max(1.0, scope.number("marqueeEdgeInset", 28.0));
     const double speed = std::max(1.0, scope.number("marqueeMaximumScrollSpeed", 480.0));
     const Rect& viewport = *layout->viewport;
     const double velocity_x = edge_velocity(
-        current->x, viewport.x, viewport.right(), inset, speed
+        local.x, viewport.x, viewport.right(), inset, speed
     );
     const double velocity_y = edge_velocity(
-        current->y, viewport.y, viewport.bottom(), inset, speed
+        local.y, viewport.y, viewport.bottom(), inset, speed
     );
     if (velocity_x == 0.0 && velocity_y == 0.0) return false;
     const runtime::Value* prior_value = active_session->field("lastFrame");
@@ -365,9 +366,10 @@ bool after_layout(WidgetInputScope& scope) {
     if (layout == nullptr) return false;
     const std::optional<Point> current = point(active_session->field("currentViewport"));
     if (!current.has_value()) return false;
-    const std::optional<Point> previous_scroll = point(active_session->field("lastScroll"));
-    if (previous_scroll.has_value() && previous_scroll->x == layout->scroll_offset.x &&
-        previous_scroll->y == layout->scroll_offset.y) {
+    const Point local = scope.local_position(*current);
+    const Point content{local.x + layout->scroll_offset.x, local.y + layout->scroll_offset.y};
+    const std::optional<Point> previous = point(active_session->field("lastContent"));
+    if (previous.has_value() && *previous == content) {
         return false;
     }
     static_cast<void>(preview_marquee(scope, *active_session, *current));

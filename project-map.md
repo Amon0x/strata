@@ -30,7 +30,7 @@
   between C structures and engine types.
 - `native/host` — reusable packet decoding, extension selection, safe module-path resolution, and
   `host::Session`, the portable application session every native host shell runs on.
-- `native/d3d11` — target-independent packet-v10 pipeline, textures, blur, HLSL materials, low-level
+- `native/d3d11` — target-independent packet-v25 pipeline, textures, blur, HLSL materials, low-level
   packet submission, and the optional host-owned-target Surface presenter with C/C++ handles.
 - `native/win32` — optional Win32 message-to-Surface input translation with C/C++ handles for
   embedding hosts.

@@ -120,7 +120,8 @@ void collect_geometry(const JsonValue& node, const BrowserBounds& viewport,
                       const std::optional<BrowserBounds>& inherited_clip, GeometryIndex& output) {
     if (node.object() == nullptr)
         return;
-    std::optional<BrowserBounds> effective_clip = inherited_clip;
+    std::optional<BrowserBounds> effective_clip =
+        text(node.find("layoutKind")) == "portal" ? std::optional(viewport) : inherited_clip;
     if (const std::optional<BrowserBounds> local = bounds(node.find("clip")); local.has_value()) {
         effective_clip = effective_clip.has_value() ? intersection(*effective_clip, *local) : local;
     }
@@ -139,8 +140,12 @@ void collect_geometry(const JsonValue& node, const BrowserBounds& viewport,
                 if (!raw.has_value())
                     continue;
                 const bool detached = boolean(value.find("detached"));
-                const std::optional<BrowserBounds> clip =
+                std::optional<BrowserBounds> clip =
                     detached ? std::optional(viewport) : effective_clip;
+                if (const std::optional<BrowserBounds> own = bounds(value.find("clip"));
+                    own.has_value()) {
+                    clip = clip.has_value() ? intersection(*clip, *own) : own;
+                }
                 const std::optional<BrowserBounds> clipped =
                     clip.has_value() ? intersection(*raw, *clip) : std::nullopt;
                 if (!clipped.has_value())

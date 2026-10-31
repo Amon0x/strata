@@ -1,9 +1,12 @@
 #pragma once
 
+#include <concepts>
+#include <cstdint>
 #include <initializer_list>
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -18,7 +21,10 @@ using WidgetLayoutFields = std::map<std::string, runtime::Value, std::less<>>;
 /** Typed layout-default capability used by one widget's describe hook. */
 class WidgetLayoutDefaultsScope final {
 public:
-    explicit WidgetLayoutDefaultsScope(const DescriptionNode::Properties& properties) noexcept;
+    explicit WidgetLayoutDefaultsScope(
+        const DescriptionNode::Properties& properties,
+        std::span<std::uint8_t> observed = {}
+    ) noexcept;
 
     [[nodiscard]] const runtime::Value* property(std::string_view name) const noexcept;
     [[nodiscard]] double number(std::string_view name, double fallback) const noexcept;
@@ -32,6 +38,7 @@ public:
 
 private:
     const DescriptionNode::Properties& properties_;
+    std::span<std::uint8_t> observed_;
     WidgetLayoutFields fields_;
 };
 
@@ -45,7 +52,8 @@ public:
         const WidgetRegistry& registry,
         const RetainedDescriptionSnapshot::Node* retained,
         WidgetTemplateInstantiator instantiate_template,
-        WidgetRetainedDependencyObserver observe_retained
+        WidgetRetainedDependencyObserver observe_retained,
+        WidgetLayoutDefaultsCache* layout_defaults
     ) noexcept;
 
     [[nodiscard]] WidgetDescriptionExpansion& description() noexcept;
@@ -78,11 +86,15 @@ public:
     [[nodiscard]] runtime::Value presentation_state(
         WidgetLayoutFields fields = {}
     ) const;
-    /** Instantiates, marks, and installs one input/semantics-transparent authored presentation. */
+    /** Builds arguments and observes their dependencies only when an authored presentation exists. */
+    template<std::invocable Factory>
     [[nodiscard]] bool install_presentation(
         std::string_view template_property,
-        WidgetTemplateArguments arguments
-    );
+        Factory&& arguments
+    ) {
+        if (property(template_property) == nullptr) return false;
+        return install_presentation(template_property, std::forward<Factory>(arguments)());
+    }
 
     void set_layout(DescriptionNode::Properties& properties, std::string name, runtime::Value value) const;
     void set_layout(std::string name, runtime::Value value);
@@ -108,6 +120,11 @@ public:
     void synthesized(std::size_t count = 1U) noexcept;
 
 private:
+    [[nodiscard]] bool install_presentation(
+        std::string_view template_property,
+        WidgetTemplateArguments arguments
+    );
+
     WidgetDescriptionExpansion& description_;
     std::string_view state_scope_;
     const runtime::RuntimeActionRegistry& actions_;
@@ -115,6 +132,7 @@ private:
     const RetainedDescriptionSnapshot::Node* retained_ = nullptr;
     WidgetTemplateInstantiator instantiate_template_;
     WidgetRetainedDependencyObserver observe_retained_;
+    WidgetLayoutDefaultsCache* layout_defaults_ = nullptr;
 };
 
 [[nodiscard]] runtime::Value widget_object(

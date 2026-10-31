@@ -73,7 +73,7 @@ void section_content(WidgetRenderScope& scope) {
             continue;
         if (const LayoutRecord* record = scope.layout_result().find(child->identity());
             record != nullptr) {
-            header = record->bounds;
+            header = scope.input().relative_bounds(*child, scope.node(), record->bounds);
         }
         break;
     }
@@ -343,7 +343,7 @@ void menu_overlay(WidgetRenderScope& scope) {
     if (authored_popup && authored_items)
         return;
     const MenuProjection projection =
-        project_menu(scope.node(), scope.layout_result(), &scope.command_index());
+        project_menu(scope.node(), scope.layout_result(), scope.input(), &scope.command_index());
     const Paint background = scope.visual().background.value_or(scope.palette("popupSurface"));
     if (!authored_popup) {
         for (const MenuPanelModel& panel : projection.panels) {

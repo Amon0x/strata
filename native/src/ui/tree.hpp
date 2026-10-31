@@ -214,8 +214,7 @@ struct DescriptionNode final {
     std::shared_ptr<const DescriptionMaterialization> materialization_result;
     /** Keeps a weakly cached generated source alive exactly while a transformed row is retained. */
     std::shared_ptr<const DescriptionNode> generated_source;
-    /** Effective inherited theme context for collection-local projection of entering virtual rows.
-     */
+    /** Immutable effective theme shared by palette/motion consumers and entering virtual rows. */
     std::shared_ptr<const Theme> projected_theme;
     std::optional<std::string> projected_theme_scope;
     std::uint64_t projected_theme_generation = 0U;
@@ -319,8 +318,10 @@ class RetainedDescriptionSnapshot final {
 
   private:
     friend class RetainedTree;
+    using KeyEntry = std::pair<std::string_view, const Node*>;
     std::vector<std::unique_ptr<Node>> nodes_;
-    std::map<std::string, std::vector<const Node*>, std::less<>> key_index_;
+    /** Sorted borrowed keys; nodes_ owns their strings for this snapshot's lifetime. */
+    std::vector<KeyEntry> key_index_;
     std::map<std::string, std::vector<const Node*>, std::less<>> source_index_;
 };
 
@@ -343,6 +344,8 @@ class RetainedNode final {
     [[nodiscard]] std::size_t preorder() const noexcept;
     [[nodiscard]] std::uint64_t revision() const noexcept;
     [[nodiscard]] std::uint64_t arrangement_revision() const noexcept;
+    /** Separates a viewport's own offset mutations from arrangement work below it. */
+    [[nodiscard]] std::uint64_t own_arrangement_revision() const noexcept;
     [[nodiscard]] std::uint64_t render_generation() const noexcept;
     /** Monotonic render identity for this node and every retained descendant. */
     [[nodiscard]] std::uint64_t subtree_render_generation() const noexcept;
@@ -410,10 +413,12 @@ class RetainedNode final {
     std::string structural_path_;
     std::uint64_t revision_ = 1U;
     std::uint64_t arrangement_revision_ = 1U;
+    std::uint64_t own_arrangement_revision_ = 1U;
     std::uint64_t render_generation_ = 0U;
     std::uint64_t subtree_render_generation_ = 0U;
     std::uint64_t presentation_generation_ = 0U;
     std::uint64_t subtree_presentation_generation_ = 0U;
+    std::uint64_t render_dirty_epoch_ = 0U;
     RetainedLifecycle lifecycle_ = RetainedLifecycle::attached;
     DirtySet dirty_;
     std::array<std::uint64_t, 11U> dirty_generations_{};
@@ -522,6 +527,10 @@ class RetainedTree final {
     [[nodiscard]] std::size_t dirty_count() const noexcept;
     /** Stable-identity scheduler input; contains only nodes with unconsumed dirty reasons. */
     [[nodiscard]] std::vector<RetainedNode*> dirty_nodes() const;
+    /** Render changes survive layout's dirty consumption until the frame completes. */
+    [[nodiscard]] std::span<const std::uint64_t> render_dirty_nodes() const noexcept;
+    [[nodiscard]] std::uint64_t render_change_generation() const noexcept;
+    [[nodiscard]] std::uint64_t render_changes_since_generation() const noexcept;
     [[nodiscard]] bool mark(std::uint64_t identity, DirtyReason reason);
     [[nodiscard]] bool set_retained_value(std::uint64_t identity, std::string_view name,
                                           runtime::Value value,
@@ -575,6 +584,7 @@ class RetainedTree final {
     [[nodiscard]] std::uint64_t next_identity();
     void invalidate_layout();
     void bump_dirty_generation(DirtyReason reason);
+    void note_render_dirty(RetainedNode& node);
     void hydrate_persistence(RetainedNode& node);
     void persist_retained_value(const RetainedNode& node, std::string_view name,
                                 const runtime::Value& value);
@@ -595,6 +605,10 @@ class RetainedTree final {
     std::size_t indexed_nodes_ = 0U;
     std::uint64_t structure_generation_ = 0U;
     std::set<std::uint64_t> dirty_index_;
+    std::vector<std::uint64_t> render_dirty_index_;
+    std::uint64_t render_dirty_epoch_ = 1U;
+    std::uint64_t render_change_generation_ = 0U;
+    std::uint64_t render_changes_since_generation_ = 0U;
     /** During a reconcile: whether anything the indexes or the description snapshot hold changed
      * (a node created, removed, moved or retyped in scope, its semantics, materialization, virtual
      * sequence or persisted values), and the nodes it left dirty. Otherwise only property values

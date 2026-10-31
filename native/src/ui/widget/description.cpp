@@ -1,6 +1,10 @@
 #include "ui/widget/description.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
+#include <ranges>
 #include <stdexcept>
 #include <utility>
 
@@ -138,11 +142,16 @@ DescriptionNode::Properties widget_text_properties(std::string text, runtime::Va
 }
 
 WidgetLayoutDefaultsScope::WidgetLayoutDefaultsScope(
-    const DescriptionNode::Properties& properties
-) noexcept : properties_(properties) {}
+    const DescriptionNode::Properties& properties,
+    const std::span<std::uint8_t> observed
+) noexcept : properties_(properties), observed_(observed) {}
 
 const runtime::Value* WidgetLayoutDefaultsScope::property(const std::string_view name) const noexcept {
-    return property_value(properties_, name);
+    const auto found = properties_.find(name);
+    if (found == properties_.end()) return nullptr;
+    const auto index = static_cast<std::size_t>(found - properties_.begin());
+    if (index < observed_.size()) observed_[index] = 1U;
+    return found->second.data_value();
 }
 
 double WidgetLayoutDefaultsScope::number(
@@ -205,14 +214,16 @@ WidgetDescriptionScope::WidgetDescriptionScope(
     const WidgetRegistry& registry,
     const RetainedDescriptionSnapshot::Node* const retained,
     WidgetTemplateInstantiator instantiate_template,
-    WidgetRetainedDependencyObserver observe_retained
+    WidgetRetainedDependencyObserver observe_retained,
+    WidgetLayoutDefaultsCache* const layout_defaults
 ) noexcept : description_(description),
     state_scope_(state_scope),
     actions_(actions),
     registry_(registry),
     retained_(retained),
     instantiate_template_(std::move(instantiate_template)),
-    observe_retained_(std::move(observe_retained)) {}
+    observe_retained_(std::move(observe_retained)),
+    layout_defaults_(layout_defaults) {}
 
 WidgetDescriptionExpansion& WidgetDescriptionScope::description() noexcept { return description_; }
 const WidgetDescriptionExpansion& WidgetDescriptionScope::description() const noexcept { return description_; }
@@ -329,7 +340,6 @@ bool WidgetDescriptionScope::install_presentation(
     const std::string_view template_property,
     WidgetTemplateArguments arguments
 ) {
-    if (property(template_property) == nullptr) return false;
     if (!description_.key.has_value()) {
         throw std::logic_error(
             "validated authored presentation owner must have an explicit key"
@@ -377,7 +387,7 @@ void WidgetDescriptionScope::apply_layout_defaults(
     const std::string_view type,
     DescriptionNode::Properties& properties
 ) const {
-    registry_.apply_layout_defaults(type, properties);
+    registry_.apply_layout_defaults(type, properties, layout_defaults_);
 }
 
 std::shared_ptr<const DescriptionNode> WidgetDescriptionScope::with_layout(
@@ -438,7 +448,8 @@ void WidgetDescriptionScope::synthesized(const std::size_t count) noexcept {
 
 void WidgetRegistry::apply_layout_defaults(
     const std::string_view type,
-    DescriptionNode::Properties& properties
+    DescriptionNode::Properties& properties,
+    WidgetLayoutDefaultsCache* const cache
 ) const {
     const WidgetLifecycle* widget = find(type);
     if (widget == nullptr) return;
@@ -449,7 +460,32 @@ void WidgetRegistry::apply_layout_defaults(
         );
     }
     if (widget->describe.layout_defaults == nullptr) return;
-    WidgetLayoutDefaultsScope scope(properties);
+    if (cache != nullptr && (cache->registry_ != this || cache->revision_ != revision())) {
+        cache->projections_.clear();
+        cache->registry_ = this;
+        cache->revision_ = revision();
+    }
+    // Keep noexcept property reads allocation-free; wider argument maps use the uncached path.
+    constexpr std::size_t observed_capacity = 64U;
+    const bool memoize = cache != nullptr && properties.size() <= observed_capacity;
+    if (memoize) {
+        const auto found = cache->projections_.find(widget);
+        if (found != cache->projections_.end() &&
+            std::ranges::equal(std::as_const(properties), found->second.inputs,
+                               [](const auto& property, const auto& input) {
+                                   return property.first == input.name &&
+                                       (!input.value.has_value() ||
+                                        runtime::same_expression_value(property.second,
+                                                                       *input.value));
+                               })) {
+            properties.insert_or_assign("$layout", runtime::ExpressionValue(found->second.layout));
+            return;
+        }
+    }
+    std::array<std::uint8_t, observed_capacity> observed{};
+    WidgetLayoutDefaultsScope scope(
+        properties, memoize ? std::span(observed).first(properties.size())
+                            : std::span<std::uint8_t>{});
     widget->describe.layout_defaults(scope);
     WidgetLayoutFields merged = scope.take();
     const runtime::Value* authored = property_value(properties, "$layout");
@@ -458,10 +494,22 @@ void WidgetRegistry::apply_layout_defaults(
             merged.insert_or_assign(name, value);
         }
     }
-    properties.insert_or_assign(
-        "$layout",
-        runtime::ExpressionValue(fields_value(std::move(merged)))
-    );
+    runtime::Value layout = fields_value(std::move(merged));
+    if (memoize) {
+        WidgetLayoutDefaultsCache::Projection projection;
+        projection.inputs.reserve(properties.size());
+        std::size_t index = 0U;
+        for (const auto& [name, value] : std::as_const(properties)) {
+            projection.inputs.push_back(WidgetLayoutDefaultsCache::Input{
+                name,
+                observed[index++] != 0U || name == "$layout"
+                    ? std::optional(value) : std::nullopt,
+            });
+        }
+        projection.layout = layout;
+        cache->projections_.insert_or_assign(widget, std::move(projection));
+    }
+    properties.insert_or_assign("$layout", runtime::ExpressionValue(std::move(layout)));
 }
 
 WidgetDescriptionExpansion WidgetRegistry::expand_description(
@@ -470,7 +518,8 @@ WidgetDescriptionExpansion WidgetRegistry::expand_description(
     const runtime::RuntimeActionRegistry& actions,
     const RetainedDescriptionSnapshot::Node* const retained,
     WidgetTemplateInstantiator instantiate_template,
-    WidgetRetainedDependencyObserver observe_retained
+    WidgetRetainedDependencyObserver observe_retained,
+    WidgetLayoutDefaultsCache* const layout_defaults
 ) const {
     const std::string authoring_type = description.type;
     const WidgetLifecycle* widget = find(authoring_type);
@@ -496,7 +545,8 @@ WidgetDescriptionExpansion WidgetRegistry::expand_description(
             *this,
             retained,
             std::move(instantiate_template),
-            std::move(observe_retained)
+            std::move(observe_retained),
+            layout_defaults
         );
         widget->describe.expand(scope);
     }

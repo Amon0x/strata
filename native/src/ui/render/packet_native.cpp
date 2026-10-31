@@ -247,6 +247,7 @@ struct IdTables final {
         output.number(clip.radii.bottom_left);
         for (const double value : clip.inverse_transform)
             output.number(value);
+        output.integer(clip.group);
         output.integer(clip.shape.kind);
         output.number(clip.shape.sides);
         for (const double value : clip.shape.fade)

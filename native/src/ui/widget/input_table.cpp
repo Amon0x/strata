@@ -133,16 +133,17 @@ bool pointer(WidgetInputScope& scope) {
     const PointerInputEvent* event = scope.pointer();
     const LayoutRecord* layout = scope.layout();
     if (event == nullptr || layout == nullptr) return false;
+    const Point position = scope.local_position(event->position);
     const collection::TableGeometry current_geometry = geometry(scope);
     const double header_height = scope.number("headerHeight", 32.0);
-    const bool in_header = event->position.y >= current_geometry.viewport.y &&
-        event->position.y <= current_geometry.viewport.y + header_height;
+    const bool in_header = position.y >= current_geometry.viewport.y &&
+        position.y <= current_geometry.viewport.y + header_height;
     const runtime::Value* active_session = session(scope);
 
     if (event->type == PointerEventType::press) {
         if (event->button != 0 || !in_header) return false;
-        const collection::TableTrack* resize = current_geometry.resize_at(event->position.x);
-        const collection::TableTrack* hit = current_geometry.column_at(event->position.x);
+        const collection::TableTrack* resize = current_geometry.resize_at(position.x);
+        const collection::TableTrack* hit = current_geometry.column_at(position.x);
         const collection::TableTrack* chosen = resize != nullptr ? resize : hit;
         if (chosen == nullptr) return true;
         scope.set_retained(
@@ -150,7 +151,7 @@ bool pointer(WidgetInputScope& scope) {
             header_session(
                 resize != nullptr ? "resize" : "reorder",
                 chosen->column.id,
-                event->position.x,
+                position.x,
                 chosen->column.width,
                 collection::encode_widths(columns(current_geometry))
             ),
@@ -176,7 +177,7 @@ bool pointer(WidgetInputScope& scope) {
         return true;
     }
     if (event->type == PointerEventType::move) {
-        const double delta = event->position.x - *start_x;
+        const double delta = position.x - *start_x;
         if (*mode == "resize") {
             std::vector<collection::TableColumn> resolved = columns(current_geometry);
             const auto changed = std::ranges::find(resolved, *column_id, &collection::TableColumn::id);
@@ -202,7 +203,7 @@ bool pointer(WidgetInputScope& scope) {
                 })
             );
         } else if (std::abs(delta) >= drag_slop) {
-            const std::size_t index = insertion_index(current_geometry, *column_id, event->position.x);
+            const std::size_t index = insertion_index(current_geometry, *column_id, position.x);
             scope.set_retained(
                 std::string(preview_key),
                 runtime::Value(static_cast<double>(index)),
@@ -265,7 +266,8 @@ bool click(WidgetInputScope& scope) {
     if (!handled || scope.pointer() == nullptr || scope.pointer()->button != 0) return handled;
     if (scope.string("focusMode", "ROW") == "CELL") {
         const collection::TableGeometry current = geometry(scope);
-        if (const collection::TableTrack* hit = current.column_at(scope.pointer()->position.x);
+        if (const collection::TableTrack* hit =
+                current.column_at(scope.local_position(scope.pointer()->position).x);
             hit != nullptr) {
             scope.set_retained(
                 "strata.table.activeColumn",

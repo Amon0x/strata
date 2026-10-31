@@ -84,7 +84,7 @@ rasterizer in the loop, use `strata_core_benchmark`. It drives a headless scenar
 that draws nothing, so its numbers are comparable across machines and stable enough to profile:
 
 ```bat
-cmake --build --preset windows-x64 --target strata_core_benchmark
+cmake --build --preset windows-x64 --target strata_core_benchmark --parallel 16
 build\cmake\windows-x64\native\RelWithDebInfo\strata_core_benchmark.exe src\main\resources native\tests\fixtures\headless\showcase.json 3
 ```
 
@@ -93,6 +93,25 @@ the tab-switch click frame and the frames that settle it, scrolling, and a movin
 phase prints its frame-time distribution and its heaviest profiler sections in milliseconds per
 frame. The optional last argument scales the iteration counts; `cold` measures only the cold start,
 which is the mode to repeat under a CPU sampler when working on startup.
+
+### Retained frame-cost stress workloads
+
+The scroll and hover fixtures each retain 2,000 cells without virtualization. Two bounded
+1,000-item loops respect the language's eager-loop limit while keeping all cells as siblings.
+Run the matching workload mode; unlike the showcase modes, these do not look for showcase tabs:
+
+```bat
+build\cmake\windows-x64\native\RelWithDebInfo\strata_core_benchmark.exe src\main\resources native\tests\fixtures\headless\frame-cost-scroll.json scroll
+build\cmake\windows-x64\native\RelWithDebInfo\strata_core_benchmark.exe src\main\resources native\tests\fixtures\headless\frame-cost-hover.json hover
+```
+
+Each run reports cold setup and the first frame, warms for 60 frames, then measures 600 input
+frames. An additional argument overrides the measured count (`hover 6000` exercises repeated full
+sweeps and retained-storage fragmentation). Scrolling reverses every 30 frames; hovering moves
+between grid cells. Section timing and input/layout/render/text work counters distinguish retained
+geometry from repeated work. Use `cold` with
+either fixture to profile description without the input sweep. The same scenarios run through
+`strata_headless` to inspect their actual rendered surfaces.
 
 ## Scenario format
 

@@ -55,7 +55,6 @@ private:
 };
 
 void register_primitive_widget_inspection(WidgetRegistry& registry);
-void register_shell_widget_inspection(WidgetRegistry& registry);
 void register_collection_widget_inspection(WidgetRegistry& registry);
 
 /** Canonical widget-owned hit geometry shared by input routing and inspection output. */

@@ -38,6 +38,9 @@ class WidgetInputScope final {
     [[nodiscard]] std::string_view input_text() const noexcept;
     [[nodiscard]] const KeyModifiers& modifiers() const noexcept;
     [[nodiscard]] const PointerInputEvent* pointer() const noexcept;
+    /** Maps a surface event position into the widget's stable layout coordinate space. */
+    [[nodiscard]] Point local_position(Point surface_position) const;
+    [[nodiscard]] Point local_position(const RetainedNode& node, Point surface_position) const;
     [[nodiscard]] const ScrollInputEvent* scroll() const noexcept;
     [[nodiscard]] RetainedNode* pointer_target() const noexcept;
     [[nodiscard]] std::size_t click_count() const noexcept;
@@ -58,6 +61,7 @@ class WidgetInputScope final {
     [[nodiscard]] const LayoutRecord* layout() const noexcept;
     [[nodiscard]] const LayoutRecord* layout(const RetainedNode& node) const noexcept;
     [[nodiscard]] const LayoutResult* layout_result() const noexcept;
+    [[nodiscard]] const InputRouter& input() const noexcept;
     [[nodiscard]] double scale() const noexcept;
     [[nodiscard]] const CommandIndex* command_index() const noexcept;
     [[nodiscard]] NotificationService& notifications() noexcept;

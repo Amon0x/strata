@@ -11,6 +11,7 @@
 namespace strata::ui {
 
 class CommandIndex;
+class InputRouter;
 class RetainedNode;
 
 struct MenuItemModel final {
@@ -61,6 +62,7 @@ struct MenuProjection final {
 [[nodiscard]] MenuProjection project_menu(
     const RetainedNode& node,
     const LayoutResult& layout,
+    const InputRouter& input,
     const CommandIndex* commands
 );
 

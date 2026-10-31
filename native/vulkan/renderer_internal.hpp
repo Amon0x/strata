@@ -64,6 +64,7 @@ inline gpu::RoundedClipConstants clip_constants(std::span<const host::RoundedCli
         for (std::size_t j = 0; j < 3; ++j) {
             data.inverse_x[i][j] = static_cast<float>(c.inverse_transform[j]);
             data.inverse_y[i][j] = static_cast<float>(c.inverse_transform[j + 3]);
+            data.inverse_w[i][j] = static_cast<float>(c.inverse_projection[j]);
         }
         data.inverse_x[i][3] = static_cast<float>(c.shape);
         data.inverse_y[i][3] = static_cast<float>(c.sides);

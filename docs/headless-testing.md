@@ -3,7 +3,7 @@
 `strata_headless` is a deterministic host for complete `.strata` applications. It is not a second
 UI runtime and it contains no widget-specific test hooks. The tool uses the public C ABI to compile
 and activate an application, create a normal `Surface`, enqueue ordinary input, frame it against a
-caller-owned clock, and consume render packet v16.
+caller-owned clock, and consume render packet v25.
 
 Each capture contains both views needed by automated testing:
 
@@ -94,6 +94,10 @@ and selector-clickable even though they are painted by one retained widget. Gene
 retain their stable item keys. A tool can therefore discover `DATA`, click it, inspect the resulting
 screen, discover `Folder 0`, and click that folder without reading the `.strata` source or guessing
 coordinates. Selector clicks still enqueue ordinary pointer move/press/release events.
+Inspection `bounds` include ancestor scrolling; `hitBounds` also include presentation transforms.
+Node and subtarget `clip` rectangles are in surface coordinates. A portal resets inherited
+coordinate ancestry, and detached subtargets retain their own clip rather than inheriting a
+structural ancestor's viewport.
 
 A failed request returns `{"ok":false,"event":"error",...}` without terminating the session, so a
 controller can inspect again and recover. The platform-specific interactive CTest scenarios verify

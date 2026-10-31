@@ -26,10 +26,12 @@ void button_defaults(WidgetLayoutDefaultsScope& scope) {
 
 void button_expand(WidgetDescriptionScope& scope) {
     static_cast<void>(scope.install_presentation(
-        "presentationTemplate", WidgetTemplateArguments{
-                                    {"label", runtime::Value(scope.string("label"))},
-                                    {"control", scope.presentation_state()},
-                                }));
+        "presentationTemplate", [&scope] {
+            return WidgetTemplateArguments{
+                {"label", runtime::Value(scope.string("label"))},
+                {"control", scope.presentation_state()},
+            };
+        }));
 }
 
 void image_defaults(WidgetLayoutDefaultsScope& scope) {

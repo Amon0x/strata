@@ -126,7 +126,7 @@ with the existing HLSL materials and effects. See [Vulkan hosting](vulkan-hostin
 image ownership, synchronous submission, and Surface release ordering.
 
 Custom renderers can instead link `Strata::render_host` and include `<strata/render_packet.hpp>`
-to consume packet-v16 without duplicating parsing:
+to consume packet-v25 without duplicating parsing:
 
 ```cpp
 strata::host::RenderPacketDecoder decoder;
@@ -186,6 +186,9 @@ implementation, presentation, and the Surface release-packet barrier.
 Native submission keeps used geometry inside retained capacity arenas. A local draw-topology change
 that still fits those arenas is byte-diffed against the preceding epoch and remains a geometry
 patch; it does not force a complete Surface payload merely because planned-item counts changed.
+Adjacent changed draws in one batch can redistribute their existing slot capacity without
+re-encoding unchanged draws. Painter order and the batch's effective material, texture, blend and
+clip state remain unchanged.
 Backends should apply those ranges directly to retained buffers. Capacity growth or a patch larger
 than replacement remains an explicit full-epoch boundary.
 
@@ -199,6 +202,14 @@ unless the group rotates) and multiplies material opacity (draw-data float
 15) by the group opacity; the shared `native/gpu` vertex shader already does. The decoder presents
 grouped blur/effect bounds itself, and a changed table adds dirty regions covering the moved
 content. Settled nodes leave their group and bake their final presentation back into geometry.
+Scroll content stays in its own presentation group: changing the offset moves its content without
+moving the viewport or scrollbars. Layout coordinates beneath a scroller remain unscrolled.
+Each packet clip names its own group, independently of the draw's group, so nested scroll clips
+move with the content that owns them rather than with every descendant draw. The decoder resolves
+`RoundedClip::inverse_transform` and `inverse_projection` into an inverse homogeneous map from
+surface pixels to clip coordinates. Custom renderers divide the two affine numerators by
+`inverse_projection[0] * x + inverse_projection[1] * y + inverse_projection[2]`; a nonpositive
+divisor is outside the clip. D3D11, Vulkan and the reference renderer share this contract.
 Resource operations that replace texels add the bounds of the draws sampling them, so
 `geometry_dirty_all` and `geometry_dirty_regions` describe everything a retained effect sample may
 have read; a sample is stale when they touch its bounds grown by its blur or shader reach
@@ -356,10 +367,10 @@ runners and remote protocols whose schema is selected only at runtime.
 
 Adopt a complete Surface environment generation atomically: framebuffer and logical sizes, scale,
 safe insets, snapping, density, reduced-motion preference, and input capabilities. Enqueue input in
-ordered batches, call `strata_surface_frame`, then read packet v16 through a bytes sink.
+ordered batches, call `strata_surface_frame`, then read packet v25 through a bytes sink.
 
 The packet bytes are borrowed only during the sink callback. Copy them if the backend submits later;
-consume them directly if submission is synchronous. Packet-v10 full packets contain native geometry,
+consume them directly if submission is synchronous. Packet-v25 full packets contain native geometry,
 indices, scissors, materials, textures, and draw/blur/effect batches. Compact packets reference the
 last full geometry epoch in the ordered stream; both forms can carry one-shot GPU resource
 operations. Hosts must not redo layout, glyph generation, or batch planning.
@@ -399,6 +410,12 @@ Colors are `"#RRGGBB"` or `"#RRGGBBAA"` strings, and an
 omitted token keeps the registered parent's value (or the default). Unknown fields and mistyped
 tokens are rejected with `STRATA_STATUS_INVALID_ARGUMENT` and a diagnostic. Widget styles and motion policies are not part of
 the JSON document yet; they still go through `strata_theme`.
+
+Each projected node retains its immutable effective theme. Native popup palettes and motion
+policies read that context directly, so changing or removing a local scope updates already-open
+chrome without resetting the widget's retained state. Identical style projections may share
+immutable values within one materialization pass; this does not retain arbitrary authored styles
+in a process-wide cache.
 
 ## Reactivation and failure recovery
 

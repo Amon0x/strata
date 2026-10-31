@@ -61,6 +61,8 @@ public:
     [[nodiscard]] const runtime::Value* retained(std::string_view name) const noexcept;
     [[nodiscard]] const LayoutRecord* layout() const noexcept;
     [[nodiscard]] const LayoutRecord* layout(const RetainedNode& node) const noexcept;
+    /** Places layout geometry on the surface without including the behavior's movement offset. */
+    [[nodiscard]] Rect surface_bounds(const LayoutRecord& record, Rect bounds) const noexcept;
     [[nodiscard]] RetainedNode* find_key(std::string_view key) const noexcept;
     [[nodiscard]] bool passive_pointer_descendant() const noexcept;
     [[nodiscard]] bool press_matches(bool include_descendants = false) const noexcept;

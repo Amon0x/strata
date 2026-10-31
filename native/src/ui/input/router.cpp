@@ -311,14 +311,64 @@ void InputRouter::update_tooltip_disclosures() {
 void InputRouter::synchronize_authored_presentations() {
     if (tree_ == nullptr || tree_->root() == nullptr)
         return;
-    // The state is a function of focus, hover and press over the current nodes: nodes and their
-    // properties only change with the tree generation, so an unchanged input set has nothing new.
     AuthoredPresentationInputs& last = authored_presentation_inputs_;
     if (last.tree == tree_ && last.generation == tree_->generation() &&
         last.structure_generation == tree_->structure_generation() && last.focused == focused_ &&
         last.focus_visible == focus_highlight_visible_ && last.active == active_ &&
-        last.hovered == hovered_)
+        last.hovered == hovered_) {
+        last.render_generation = tree_->render_change_generation();
         return;
+    }
+    std::set<std::uint64_t> changed_nodes;
+    const auto has_presentation = [this](const RetainedNode& node) {
+        const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
+        return lifecycle != nullptr && !lifecycle->describe.authored_presentation_property.empty() &&
+               scalar_property(node, lifecycle->describe.authored_presentation_property) != nullptr;
+    };
+    if (last.tree != tree_ || last.structure_generation != tree_->structure_generation() ||
+        (last.generation != tree_->generation() &&
+         last.render_generation < tree_->render_changes_since_generation())) {
+        last.candidates.clear();
+        for (const RetainedNode* node : tree_->nodes_of_types(widgets_.authored_presentation_types())) {
+            if (has_presentation(*node))
+                last.candidates.insert(node->identity());
+        }
+        changed_nodes = last.candidates;
+    } else if (last.generation != tree_->generation()) {
+        // Description changes preserve identities; the render journal survives layout consuming
+        // the property marks, and tells which controls gained, lost or changed a template.
+        for (const std::uint64_t identity : tree_->render_dirty_nodes()) {
+            const RetainedNode* node = tree_->find_identity(identity);
+            if (node != nullptr && has_presentation(*node)) {
+                last.candidates.insert(identity);
+                changed_nodes.insert(identity);
+            } else {
+                last.candidates.erase(identity);
+            }
+        }
+    }
+    const auto changed = [&](const std::optional<std::uint64_t> identity) {
+        if (identity.has_value() && last.candidates.contains(*identity))
+            changed_nodes.insert(*identity);
+    };
+    if (!last.candidates.empty()) {
+        if (last.focused != focused_ || last.focus_visible != focus_highlight_visible_) {
+            changed(last.focused);
+            changed(focused_);
+        }
+        if (last.active != active_) {
+            changed(last.active);
+            changed(active_);
+        }
+        for (const std::uint64_t identity : last.hovered) {
+            if (!hovered_.contains(identity))
+                changed(identity);
+        }
+        for (const std::uint64_t identity : hovered_) {
+            if (!last.hovered.contains(identity))
+                changed(identity);
+        }
+    }
     last.tree = tree_;
     last.generation = tree_->generation();
     last.structure_generation = tree_->structure_generation();
@@ -327,10 +377,10 @@ void InputRouter::synchronize_authored_presentations() {
     last.active = active_;
     if (last.hovered != hovered_)
         last.hovered = hovered_;
-    bool changed = false;
-    for (RetainedNode* const node : tree_->nodes_of_types(widgets_.authored_presentation_types())) {
-        const WidgetLifecycle* lifecycle = widgets_.find(node->description().type);
-        if (scalar_property(*node, lifecycle->describe.authored_presentation_property) == nullptr)
+    bool invalidated = false;
+    for (const std::uint64_t identity : changed_nodes) {
+        const RetainedNode* node = tree_->find_identity(identity);
+        if (node == nullptr)
             continue;
         runtime::Value state(std::vector<std::pair<std::string, runtime::Value>>{
             {"focused", runtime::Value(focused(node->identity()))},
@@ -338,12 +388,13 @@ void InputRouter::synchronize_authored_presentations() {
             {"hovered", runtime::Value(hovered(node->identity()))},
             {"pressed", runtime::Value(active(node->identity()))},
         });
-        changed =
+        invalidated =
             tree_->set_retained_value(node->identity(), std::string(authored_presentation_state),
                                       std::move(state), DirtyReason::properties) ||
-            changed;
+            invalidated;
     }
-    if (changed && description_invalidator_)
+    last.render_generation = tree_->render_change_generation();
+    if (invalidated && description_invalidator_)
         description_invalidator_(nullptr, {});
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -35,6 +36,13 @@ struct WidgetSubtarget;
     const WidgetRegistry& widgets,
     const RetainedNode& node,
     const LayoutRecord& layout,
+    std::span<const WidgetSubtarget> subtargets
+) noexcept;
+
+/** Coordinate owner of the text viewport; no identity means an already surface-placed overlay. */
+[[nodiscard]] std::optional<std::uint64_t> editable_text_coordinate_identity(
+    const WidgetRegistry& widgets,
+    const RetainedNode& node,
     std::span<const WidgetSubtarget> subtargets
 ) noexcept;
 

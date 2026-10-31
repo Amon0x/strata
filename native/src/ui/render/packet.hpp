@@ -15,7 +15,7 @@
 namespace strata::ui {
 
 /** Packet format the encoder writes. The C ABI pins it to STRATA_RENDER_PACKET_VERSION_CURRENT. */
-inline constexpr std::uint32_t render_packet_version = 24U;
+inline constexpr std::uint32_t render_packet_version = 25U;
 
 /** The resource record that appends to a Surface's vector glyph buffers (see VectorGlyphPool). */
 inline constexpr std::uint32_t packet_resource_vector_glyphs = 5U;

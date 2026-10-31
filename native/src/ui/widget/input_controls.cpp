@@ -49,7 +49,7 @@ bool slider_change_at_pointer(WidgetInputScope& scope) {
     const double maximum = scope.number("max", 1.0);
     const LayoutRecord* layout = scope.layout();
     const PointerInputEvent* pointer = scope.pointer();
-    const Point position = pointer != nullptr ? pointer->position : Point{};
+    const Point position = pointer != nullptr ? scope.local_position(pointer->position) : Point{};
     const bool vertical = scope.property("axis") != nullptr &&
                           scope.property("axis")->string() != nullptr &&
                           *scope.property("axis")->string() == "VERTICAL";

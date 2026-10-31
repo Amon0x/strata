@@ -1601,6 +1601,7 @@ void encode(
             geometry.indices.size(),
             vertex_capacity,
             index_capacity,
+            open_batch_index,
         };
         if (topology_reused) {
             if (previous_placement == nullptr) {
@@ -1890,18 +1891,91 @@ bool encode_changed_draws(
         const std::optional<EncodedDrawPlacement>& placement = cache.placements[item_index];
         if (draw == nullptr || !retained.has_value() || !placement.has_value()) return false;
         if (retained->source == *draw) continue;
-        // The full encode would batch it as before and keep its slot, so every other draw's
-        // placement and batch stay as they are.
-        if (key(*draw) != key(retained->source)) return false;
-        EncodedDrawCacheEntry geometry = encoded_geometry(retained, *draw, context);
-        if (geometry.vertex_bytes.size() > placement->vertex_byte_capacity ||
-            geometry.indices.size() > placement->index_capacity) {
-            return false;
+        // A draw may change kind while remaining valid under its batch's already-promoted
+        // texture and blend. No other draw or batch needs to move when the slot also fits.
+        if (key(*draw) != key(retained->source)) {
+            if (placement->batch_index >= output.batches.size())
+                return false;
+            const SubmissionBatch& batch = output.batches[placement->batch_index];
+            const BatchKey next = key(*draw);
+            const SubmissionBlend blend = submission_blend(next.blend_mode);
+            const std::optional<std::string_view> texture = batch.texture.has_value()
+                ? std::optional<std::string_view>(*batch.texture) : std::nullopt;
+            if (batch.kind != SubmissionBatchKind::draw || next.material != batch.material ||
+                next.scissor != batch.scissor ||
+                !std::ranges::equal(next.rounded_clips, batch.rounded_clips) ||
+                (next.texture_sampled && next.texture != texture) ||
+                (blend != batch.blend_mode &&
+                 !(blend == SubmissionBlend::straight_alpha &&
+                   batch.blend_mode == SubmissionBlend::subpixel_text)))
+                return false;
         }
+        EncodedDrawCacheEntry geometry = encoded_geometry(retained, *draw, context);
         EncodedDrawPlacement next = *placement;
         next.vertex_byte_count = geometry.vertex_bytes.size();
         next.index_count = geometry.indices.size();
         updates.push_back(Update{item_index, std::move(geometry), next});
+    }
+    // Adjacent changed draws can exchange room without moving an unchanged slot. In particular,
+    // inserting one draw and removing another need not grow every intervening text/shape slot.
+    for (std::size_t begin = 0U; begin < updates.size();) {
+        std::size_t end = begin + 1U;
+        while (end < updates.size()) {
+            const Update& previous = updates[end - 1U];
+            const Update& next = updates[end];
+            if (next.item != previous.item + 1U ||
+                next.placement.batch_index != previous.placement.batch_index ||
+                next.placement.vertex_byte_offset != previous.placement.vertex_byte_offset +
+                                                         previous.placement.vertex_byte_capacity ||
+                next.placement.index_offset != previous.placement.index_offset +
+                                                   previous.placement.index_capacity)
+                break;
+            ++end;
+        }
+        const EncodedDrawPlacement& first = updates[begin].placement;
+        const EncodedDrawPlacement& last = updates[end - 1U].placement;
+        const std::size_t vertex_end = last.vertex_byte_offset + last.vertex_byte_capacity;
+        const std::size_t index_end = last.index_offset + last.index_capacity;
+        std::size_t required_vertices = 0U;
+        std::size_t required_indices = 0U;
+        bool fits = true;
+        for (std::size_t at = begin; at < end; ++at) {
+            const EncodedDrawPlacement& slot = updates[at].placement;
+            fits = fits && slot.vertex_byte_count <= slot.vertex_byte_capacity &&
+                           slot.index_count <= slot.index_capacity;
+            required_vertices += slot.vertex_byte_count;
+            required_indices += slot.index_count;
+        }
+        if (!fits) {
+            const std::size_t vertex_capacity = vertex_end - first.vertex_byte_offset;
+            const std::size_t index_capacity = index_end - first.index_offset;
+            if (required_vertices > vertex_capacity || required_indices > index_capacity)
+                return false;
+            if (first.batch_index >= output.batches.size() ||
+                output.batches[first.batch_index].kind != SubmissionBatchKind::draw)
+                return false;
+            std::size_t vertex_offset = first.vertex_byte_offset;
+            std::size_t index_offset = first.index_offset;
+            const std::uint32_t base_vertex = output.batches[first.batch_index].base_vertex;
+            for (std::size_t at = begin; at < end; ++at) {
+                EncodedDrawPlacement& slot = updates[at].placement;
+                slot.vertex_byte_offset = vertex_offset;
+                slot.index_offset = index_offset;
+                // An empty draw's padding can use any vertex in the batch, but not the
+                // one-past-end offset when preceding draws consumed all remaining vertices.
+                slot.batch_local_vertex = slot.vertex_byte_count == 0U ? 0U :
+                    static_cast<std::uint32_t>(vertex_offset / vertex_bytes - base_vertex);
+                slot.vertex_byte_capacity = slot.vertex_byte_count;
+                slot.index_capacity = slot.index_count;
+                if (at + 1U == end) {
+                    slot.vertex_byte_capacity = vertex_end - vertex_offset;
+                    slot.index_capacity = index_end - index_offset;
+                }
+                vertex_offset += slot.vertex_byte_capacity;
+                index_offset += slot.index_capacity;
+            }
+        }
+        begin = end;
     }
     output.previous_item_count = items.size();
     output.item_count = items.size();

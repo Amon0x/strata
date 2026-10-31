@@ -363,6 +363,8 @@ class DescriptionBuilder final : public runtime::AnimationHost {
     struct Frame final {
         ComponentInstance* instance = nullptr;
         InstanceReads reads;
+        /** Indexes read identities during this build without copying their owned query strings. */
+        std::unordered_multimap<std::size_t, std::size_t> retained_read_index;
         std::vector<ChildRef> children;
         /** Children by the output this body holds of them. */
         std::unordered_map<const DescriptionNode*, std::size_t> child_index;
@@ -393,10 +395,11 @@ class DescriptionBuilder final : public runtime::AnimationHost {
     };
 
     /**
-     * What a build (or one row's realization) changes outside the builder. Describing reads only;
-     * these are applied once the whole description succeeded.
+     * One build's temporary projections and effects. Describing reads only; effects outside the
+     * builder are applied once the whole description succeeded.
      */
     struct Transaction final {
+        WidgetLayoutDefaultsCache layout_defaults;
         std::vector<StateInitialization> states;
         std::vector<std::string> erased_application_values;
         std::vector<std::pair<std::string, std::string>> erased_widget_values;

@@ -271,11 +271,13 @@ struct MovementLimits final {
     const LayoutRecord* parent_layout = parent != nullptr ? scope.layout(*parent) : nullptr;
     if (node_layout == nullptr || parent_layout == nullptr)
         return std::nullopt;
-    const Rect area = parent_layout->viewport.value_or(parent_layout->content_bounds);
-    const double min_x = area.x - node_layout->bounds.x;
-    const double max_x = area.right() - node_layout->bounds.right();
-    const double min_y = area.y - node_layout->bounds.y;
-    const double max_y = area.bottom() - node_layout->bounds.bottom();
+    const Rect area = scope.surface_bounds(
+        *parent_layout, parent_layout->viewport.value_or(parent_layout->content_bounds));
+    const Rect placed = scope.surface_bounds(*node_layout, node_layout->bounds);
+    const double min_x = area.x - placed.x;
+    const double max_x = area.right() - placed.right();
+    const double min_y = area.y - placed.y;
+    const double max_y = area.bottom() - placed.bottom();
     return MovementLimits{std::min(min_x, max_x), std::max(min_x, max_x), std::min(min_y, max_y),
                           std::max(min_y, max_y), boolean(scope.option("rubberBand"), false)};
 }
@@ -343,7 +345,7 @@ struct MovementLimits final {
     const LayoutRecord* layout = parent != nullptr ? scope.layout(*parent) : nullptr;
     if (layout == nullptr)
         return std::nullopt;
-    return layout->viewport.value_or(layout->content_bounds);
+    return scope.surface_bounds(*layout, layout->viewport.value_or(layout->content_bounds));
 }
 
 /** The lines a snapped move aligned to, in surface coordinates; empty when unsnapped. */
@@ -386,8 +388,9 @@ struct AxisSnap final {
     const double limit = std::max(0.0, number(field(snap, "distance"), 6.0));
     const double margin = number(field(snap, "margin"), 0.0);
     const double gap = number(field(snap, "gap"), margin);
-    const Rect box{own->bounds.x + offset.x, own->bounds.y + offset.y, own->bounds.width,
-                   own->bounds.height};
+    const Rect box = scope.surface_bounds(*own,
+        Rect{own->bounds.x + offset.x, own->bounds.y + offset.y, own->bounds.width,
+             own->bounds.height});
     AxisSnap x;
     AxisSnap y;
     const auto against = [&](const Rect& target, const double inset, const bool beside) {
@@ -410,7 +413,7 @@ struct AxisSnap final {
             if (child.get() == &scope.node() || !movable(*child))
                 continue;
             if (const LayoutRecord* record = scope.layout(*child); record != nullptr)
-                against(moved_bounds(*child, *record), 0.0, true);
+                against(scope.surface_bounds(*record, moved_bounds(*child, *record)), 0.0, true);
         }
     }
     guides.x = x.line;
@@ -440,8 +443,9 @@ struct AxisSnap final {
     const LayoutRecord* own = scope.layout();
     const std::optional<Rect> area = movement_area(scope);
     const Rect bounds = own != nullptr
-                            ? Rect{own->bounds.x + offset.x, own->bounds.y + offset.y,
-                                   own->bounds.width, own->bounds.height}
+                            ? scope.surface_bounds(*own,
+                                  Rect{own->bounds.x + offset.x, own->bounds.y + offset.y,
+                                       own->bounds.width, own->bounds.height})
                             : Rect{};
     return scope.emit(
         "moved",
@@ -606,8 +610,9 @@ enum class SettleMode { rest = 0, coast = 1, spring = 2 };
 [[nodiscard]] bool emit_settled(BehaviorInputScope& scope, const Point offset,
                                 const runtime::Value* settle) {
     const LayoutRecord* own = scope.layout();
-    const Rect bounds = own != nullptr ? Rect{own->bounds.x + offset.x, own->bounds.y + offset.y,
-                                              own->bounds.width, own->bounds.height}
+    const Rect bounds = own != nullptr ? scope.surface_bounds(*own,
+                                            Rect{own->bounds.x + offset.x, own->bounds.y + offset.y,
+                                                 own->bounds.width, own->bounds.height})
                                        : Rect{};
     const runtime::Value* snapped = field(settle, "snapped");
     const runtime::Value* snapped_x = field(settle, "snappedX");

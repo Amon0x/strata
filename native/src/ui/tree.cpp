@@ -296,34 +296,27 @@ RetainedDescriptionSnapshot::Node::retained_value(const std::string_view name) c
 
 const RetainedDescriptionSnapshot::Node*
 RetainedDescriptionSnapshot::find_key(const std::string_view key) const noexcept {
-    const auto found = key_index_.find(key);
-    return found != key_index_.end() && found->second.size() == 1U ? found->second.front()
-                                                                   : nullptr;
+    const auto found =
+        std::ranges::equal_range(key_index_, key, runtime::NameLess{}, &KeyEntry::first);
+    return found.size() == 1U ? found.begin()->second : nullptr;
 }
 
 const RetainedDescriptionSnapshot::Node* RetainedDescriptionSnapshot::find_key(
     const std::string_view key, const std::string_view source_path,
     const std::string_view state_scope, const std::string_view type) const noexcept {
-    const auto found = key_index_.find(key);
-    if (found == key_index_.end())
-        return nullptr;
-    // The type is the one the widget describes as, which retained nodes carry.
-    const auto compatible_type = [type](const Node* candidate) { return candidate->type == type; };
-    const auto unique_match = [&found](const auto& predicate) {
-        const Node* result = nullptr;
-        for (const Node* candidate : found->second) {
-            if (!predicate(candidate))
-                continue;
-            if (result != nullptr)
-                return static_cast<const Node*>(nullptr);
-            result = candidate;
-        }
-        return result;
-    };
-    return unique_match([compatible_type, source_path, state_scope](const Node* value) {
-        return compatible_type(value) && value->source_path == source_path &&
-               value->state_scope == state_scope;
-    });
+    const auto found =
+        std::ranges::equal_range(key_index_, key, runtime::NameLess{}, &KeyEntry::first);
+    const Node* result = nullptr;
+    for (const KeyEntry& entry : found) {
+        const Node* candidate = entry.second;
+        if (candidate->type != type || candidate->source_path != source_path ||
+            candidate->state_scope != state_scope)
+            continue;
+        if (result != nullptr)
+            return nullptr;
+        result = candidate;
+    }
+    return result;
 }
 
 const std::vector<const RetainedDescriptionSnapshot::Node*>*
@@ -419,6 +412,9 @@ std::uint64_t RetainedNode::revision() const noexcept {
 }
 std::uint64_t RetainedNode::arrangement_revision() const noexcept {
     return arrangement_revision_;
+}
+std::uint64_t RetainedNode::own_arrangement_revision() const noexcept {
+    return own_arrangement_revision_;
 }
 std::uint64_t RetainedNode::render_generation() const noexcept {
     return render_generation_;
@@ -581,6 +577,8 @@ std::shared_ptr<const RetainedDescriptionSnapshot> RetainedTree::description_sna
         description_snapshot_ = snapshot;
         return snapshot;
     }
+    snapshot->nodes_.reserve(identity_index_.size());
+    snapshot->key_index_.reserve(key_index_.size());
     const auto append = [&snapshot](const auto& self, const RetainedNode& retained) -> void {
         auto node = std::make_unique<RetainedDescriptionSnapshot::Node>();
         node->identity = retained.identity_;
@@ -594,7 +592,7 @@ std::shared_ptr<const RetainedDescriptionSnapshot> RetainedTree::description_sna
         const RetainedDescriptionSnapshot::Node* const indexed = node.get();
         snapshot->nodes_.push_back(std::move(node));
         if (indexed->key.has_value()) {
-            snapshot->key_index_[*indexed->key].push_back(indexed);
+            snapshot->key_index_.emplace_back(*indexed->key, indexed);
         }
         snapshot->source_index_[indexed->source_path].push_back(indexed);
         for (const std::unique_ptr<RetainedNode>& child : retained.children_) {
@@ -602,6 +600,8 @@ std::shared_ptr<const RetainedDescriptionSnapshot> RetainedTree::description_sna
         }
     };
     append(append, *root_);
+    std::ranges::sort(snapshot->key_index_, runtime::NameLess{},
+                      &RetainedDescriptionSnapshot::KeyEntry::first);
     description_snapshot_ = snapshot;
     return description_snapshot_;
 }
@@ -693,6 +693,28 @@ std::vector<RetainedNode*> RetainedTree::dirty_nodes() const {
     return result;
 }
 
+std::span<const std::uint64_t> RetainedTree::render_dirty_nodes() const noexcept {
+    return render_dirty_index_;
+}
+
+std::uint64_t RetainedTree::render_change_generation() const noexcept {
+    return render_change_generation_;
+}
+
+std::uint64_t RetainedTree::render_changes_since_generation() const noexcept {
+    return render_changes_since_generation_;
+}
+
+void RetainedTree::note_render_dirty(RetainedNode& node) {
+    if (render_change_generation_ == std::numeric_limits<std::uint64_t>::max())
+        throw std::overflow_error("retained render change generation exhausted");
+    ++render_change_generation_;
+    if (node.render_dirty_epoch_ == render_dirty_epoch_)
+        return;
+    render_dirty_index_.push_back(node.identity());
+    node.render_dirty_epoch_ = render_dirty_epoch_;
+}
+
 runtime::StateScopeSet attached_description_state_scopes(const RetainedTree& tree) {
     runtime::StateScopeSet result;
     if (tree.root() == nullptr)
@@ -720,6 +742,7 @@ bool RetainedTree::mark(const std::uint64_t identity, const DirtyReason reason) 
         return false;
     const bool was_dirty = node->dirty_.contains(reason);
     node->mark_dirty(reason);
+    note_render_dirty(*node);
     dirty_index_.insert(identity);
     bump_dirty_generation(reason);
     if (affects_layout(reason)) {
@@ -764,6 +787,7 @@ bool RetainedTree::set_presentation_value(const std::uint64_t identity, std::str
         throw std::overflow_error("retained node presentation generation exhausted");
     }
     ++node->presentation_generation_;
+    note_render_dirty(*node);
     for (RetainedNode* current = node; current != nullptr; current = current->parent_) {
         if (current->subtree_presentation_generation_ ==
             std::numeric_limits<std::uint64_t>::max()) {
@@ -813,6 +837,9 @@ bool RetainedTree::set_arrangement_value(const std::uint64_t identity, std::stri
     persist_retained_value(*node, name, value);
     // Viewport state changes where children are placed, not their intrinsic size. A separate
     // ancestor revision lane invalidates only the affected arrangement-cache path.
+    if (node->own_arrangement_revision_ == std::numeric_limits<std::uint64_t>::max())
+        throw std::overflow_error("retained node own arrangement revision exhausted");
+    ++node->own_arrangement_revision_;
     for (RetainedNode* current = node; current != nullptr; current = current->parent_) {
         if (current->arrangement_revision_ == std::numeric_limits<std::uint64_t>::max()) {
             throw std::overflow_error("retained node arrangement revision exhausted");
@@ -864,11 +891,16 @@ void RetainedTree::persist_retained_value(const RetainedNode& node, const std::s
 }
 
 void RetainedTree::clear_dirty() {
+    if (render_dirty_epoch_ == std::numeric_limits<std::uint64_t>::max())
+        throw std::overflow_error("retained render dirty epoch exhausted");
     for (const std::uint64_t identity : dirty_index_) {
         if (RetainedNode* node = find_identity(identity); node != nullptr)
             node->dirty_.clear();
     }
     dirty_index_.clear();
+    render_dirty_index_.clear();
+    render_changes_since_generation_ = render_change_generation_;
+    ++render_dirty_epoch_;
 }
 
 void RetainedTree::invalidate_description_snapshot() noexcept {
@@ -895,6 +927,8 @@ void RetainedTree::consume_layout_dirty() {
 }
 
 void RetainedTree::clear() {
+    render_dirty_index_.clear();
+    render_changes_since_generation_ = render_change_generation_;
     release_detached();
     const std::optional<std::uint64_t> hold = std::exchange(detach_hold_, std::nullopt);
     detach(std::move(root_), nullptr);
@@ -997,8 +1031,10 @@ void RetainedTree::index(RetainedNode& node) {
         node.description_->materialization.has_value()) {
         virtual_index_.push_back(&node);
     }
-    if (!node.dirty_.empty())
+    if (!node.dirty_.empty()) {
         dirty_index_.insert(node.identity_);
+        note_render_dirty(node);
+    }
     for (auto& child : node.children_)
         index(*child);
 }

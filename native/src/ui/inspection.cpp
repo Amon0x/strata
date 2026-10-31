@@ -79,13 +79,21 @@ using data::JsonValue;
 [[nodiscard]] JsonValue subtargets(const Surface& surface, const RetainedNode& node) {
     std::vector<JsonValue> values;
     for (const WidgetSubtarget& target : surface.input().subtargets(node.identity())) {
+        const RetainedNode* coordinates = target.presentation_identity.has_value()
+            ? surface.tree().find_identity(*target.presentation_identity)
+            : target.detached ? nullptr : &node;
+        const Rect bounds = coordinates != nullptr
+            ? surface.input().presented_bounds(*coordinates, target.bounds) : target.bounds;
+        const std::optional<Rect> clip = coordinates != nullptr
+            ? surface.input().presented_clip(*coordinates) : target.presentation_clip;
         std::vector<JsonValue> path;
         path.reserve(target.path.size());
         for (const std::size_t index : target.path) {
             path.emplace_back(static_cast<std::int64_t>(index));
         }
         values.push_back(object({
-            {"bounds", rectangle(target.bounds)},
+            {"bounds", rectangle(bounds)},
+            {"clip", clip.has_value() ? rectangle(*clip) : JsonValue{}},
             {"commandId", target.command_id.empty() ? JsonValue{} : JsonValue(target.command_id)},
             {"detached", JsonValue(target.detached)},
             {"enabled", JsonValue(target.enabled)},
@@ -439,18 +447,16 @@ action_policy_name(const runtime::ActionDispatchPolicy policy) noexcept {
 
 /** `depth` limits nested children; std::numeric_limits<std::size_t>::max() inspects the subtree. */
 [[nodiscard]] JsonValue node_inspection(const Surface& surface, const RetainedNode& node,
-                                        const MotionTransform inherited_transform,
                                         const std::size_t depth) {
     const LayoutRecord* layout = surface.layout().find(node.identity());
     if (layout == nullptr)
         throw std::logic_error("retained inspection node has no layout record");
-    const MotionTransform effective_transform = concatenate_presentation_transform(
-        inherited_transform, local_presentation_transform(node, surface.motion(), layout->bounds));
+    const std::optional<Rect> clip = surface.input().presented_clip(node);
     std::vector<JsonValue> children;
     if (depth > 0U) {
         children.reserve(node.children().size());
         for (const auto& child : node.children()) {
-            children.push_back(node_inspection(surface, *child, effective_transform, depth - 1U));
+            children.push_back(node_inspection(surface, *child, depth - 1U));
         }
     }
     DirtySet descendant_dirty;
@@ -464,9 +470,9 @@ action_policy_name(const runtime::ActionDispatchPolicy policy) noexcept {
         {"actions", actions(surface, node)},
         {"authoringType", authoring_type(node)},
         {"behaviors", behaviors(node)},
-        {"bounds", rectangle(layout->bounds)},
+        {"bounds", rectangle(surface.layout().surface_bounds(*layout, layout->bounds))},
         {"children", array(std::move(children))},
-        {"clip", layout->clip.has_value() ? rectangle(*layout->clip) : JsonValue{}},
+        {"clip", clip.has_value() ? rectangle(*clip) : JsonValue{}},
         {"collection", inspection.collection()},
         {"commands", commands(surface, node)},
         {"componentType", JsonValue(component_type(node))},
@@ -474,7 +480,7 @@ action_policy_name(const runtime::ActionDispatchPolicy policy) noexcept {
         {"descendantLayoutDirtyReasons", dirty_set(descendant_dirty)},
         {"dirtyReasons", dirty_set(node.dirty())},
         {"hitBounds",
-         rectangle(transform_presentation_bounds(inspection.hit_bounds(), effective_transform))},
+         rectangle(surface.input().presented_bounds(node, inspection.hit_bounds()))},
         {"interaction",
          object({
              {"active", JsonValue(surface.input().active(node.identity()))},
@@ -579,7 +585,7 @@ JsonValue inspect_surface(const Surface& surface) {
          })},
         {"pendingNavigationTargets", array(std::move(pending_navigation))},
         {"root",
-         root != nullptr ? node_inspection(surface, *root, MotionTransform{},
+         root != nullptr ? node_inspection(surface, *root,
                                                      std::numeric_limits<std::size_t>::max())
                                    : JsonValue{}},
         {"selectedKey", selected != nullptr && selected->description().key.has_value()
@@ -650,19 +656,7 @@ JsonValue inspect_node(const Surface& surface, const std::string_view key, const
     const RetainedNode* node = surface.tree().find_key(key);
     if (node == nullptr || surface.layout().find(node->identity()) == nullptr)
         return JsonValue{};
-    // Presentation transforms compose from the root, so bounds match the full inspection exactly.
-    std::vector<const RetainedNode*> ancestors;
-    for (const RetainedNode* current = node->parent(); current != nullptr; current = current->parent())
-        ancestors.push_back(current);
-    MotionTransform inherited;
-    for (auto ancestor = ancestors.rbegin(); ancestor != ancestors.rend(); ++ancestor) {
-        const LayoutRecord* layout = surface.layout().find((*ancestor)->identity());
-        if (layout == nullptr)
-            continue;
-        inherited = concatenate_presentation_transform(
-            inherited, local_presentation_transform(**ancestor, surface.motion(), layout->bounds));
-    }
-    return node_inspection(surface, *node, inherited, depth);
+    return node_inspection(surface, *node, depth);
 }
 
 JsonValue inspect_selection(const Surface& surface) {
@@ -674,7 +668,7 @@ JsonValue inspect_selection(const Surface& surface) {
         return JsonValue{};
     return object({
         {"actions", actions(surface, *node)},
-        {"bounds", rectangle(layout->bounds)},
+        {"bounds", rectangle(surface.layout().surface_bounds(*layout, layout->bounds))},
         {"componentType", JsonValue(component_type(*node))},
         {"key",
          node->description().key.has_value() ? JsonValue(*node->description().key) : JsonValue{}},

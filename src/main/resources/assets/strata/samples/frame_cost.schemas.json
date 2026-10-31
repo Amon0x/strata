@@ -1,0 +1,15 @@
+{
+  "widgets": {"definitions": []},
+  "actions": {"definitions": []},
+  "host": [{
+    "path": "items",
+    "nullable": false,
+    "type": {
+      "kind": "list",
+      "minimumItems": 1000,
+      "maximumItems": 1000,
+      "elementNullable": false,
+      "element": {"kind": "number"}
+    }
+  }]
+}

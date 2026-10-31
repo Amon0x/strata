@@ -1,19 +1,19 @@
-#include <algorithm>
 #include <strata/render_packet.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <array>
 #include <limits>
 #include <map>
 #include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace strata::host {
@@ -210,6 +210,9 @@ class Reader final {
         clip.height = input.number();
         for (double& radius : clip.radii) radius = input.number();
         for (double& value : clip.inverse_transform) value = input.number();
+        clip.group = input.u32();
+        if (clip.group > maximum_presentation_group)
+            throw std::invalid_argument("render clip group exceeds the maximum group index");
         clip.shape = input.u32();
         clip.sides = input.number();
         for (double& value : clip.fade)
@@ -637,45 +640,58 @@ void append_texture_regions(const RenderPacket& packet,
     return index;
 }
 
-/**
- * The presented box surrounds what a turned group draws. Map presented pixels back into the group
- * and mask by the batch's own rounded rectangle there, so a blur or effect keeps its turned shape;
- * clips authored inside the group map back the same way.
- */
+/** Places a clip from its own coordinate space, including perspective inherited from ancestors. */
+void present_clip(RoundedClip& clip, const PresentationGroup& group) {
+    const double a = group.scale_x, b = group.shear_x, c = group.translate_x;
+    const double d = group.shear_y, e = group.scale_y, f = group.translate_y;
+    const double g = group.project_x, h = group.project_y, i = group.project_w;
+    const std::array<double, 9U> adjugate{
+        e * i - f * h, c * h - b * i, b * f - c * e,
+        f * g - d * i, a * i - c * g, c * d - a * f,
+        d * h - e * g, b * g - a * h, a * e - b * d,
+    };
+    const double determinant = a * adjugate[0] + b * adjugate[3] + c * adjugate[6];
+    if (determinant == 0.0 || !std::isfinite(determinant)) {
+        clip.width = 0.0;
+        clip.height = 0.0;
+        return;
+    }
+    const std::array<double, 6U> local = clip.inverse_transform;
+    for (std::size_t column = 0U; column < 3U; ++column) {
+        clip.inverse_transform[column] =
+            (local[0] * adjugate[column] + local[1] * adjugate[column + 3U] +
+             local[2] * adjugate[column + 6U]) / determinant;
+        clip.inverse_transform[column + 3U] =
+            (local[3] * adjugate[column] + local[4] * adjugate[column + 3U] +
+             local[5] * adjugate[column + 6U]) / determinant;
+        clip.inverse_projection[column] = adjugate[column + 6U] / determinant;
+    }
+}
+
+/** A turned effect samples its enclosing box but keeps the exact shape of its own plane. */
 void mask_turned_group(const PresentationGroup& group, const double x, const double y,
                        const double width, const double height,
                        const std::array<double, 4U>& radii, std::vector<RoundedClip>& clips) {
-    if (group.shear_x == 0.0 && group.shear_y == 0.0)
+    if (group.shear_x == 0.0 && group.shear_y == 0.0 &&
+        group.project_x == 0.0 && group.project_y == 0.0)
         return;
-    const double determinant = group.scale_x * group.scale_y - group.shear_x * group.shear_y;
-    if (determinant == 0.0 || !std::isfinite(determinant))
-        return;
-    const double a = group.scale_y / determinant;
-    const double b = -group.shear_x / determinant;
-    const double c = -group.shear_y / determinant;
-    const double d = group.scale_x / determinant;
-    const std::array<double, 6U> inverse{
-        a, b, -(a * group.translate_x + b * group.translate_y),
-        c, d, -(c * group.translate_x + d * group.translate_y),
-    };
-    for (RoundedClip& clip : clips) {
-        const std::array<double, 6U> m = clip.inverse_transform;
-        clip.inverse_transform = {
-            m[0U] * inverse[0U] + m[1U] * inverse[3U],
-            m[0U] * inverse[1U] + m[1U] * inverse[4U],
-            m[0U] * inverse[2U] + m[1U] * inverse[5U] + m[2U],
-            m[3U] * inverse[0U] + m[4U] * inverse[3U],
-            m[3U] * inverse[1U] + m[4U] * inverse[4U],
-            m[3U] * inverse[2U] + m[4U] * inverse[5U] + m[5U],
-        };
+    if (clips.size() < maximum_rounded_clip_depth) {
+        clips.push_back(RoundedClip{x, y, width, height, radii});
+        present_clip(clips.back(), group);
     }
-    if (clips.size() < maximum_rounded_clip_depth)
-        clips.push_back(RoundedClip{x, y, width, height, radii, inverse});
 }
 
 /** Writes the presented bounds of a group-local blur/effect batch into `target` (same kind). */
 void present(const SubmissionBatch& local, const std::vector<PresentationGroup>& groups,
              SubmissionBatch& target) {
+    std::visit([&](const auto& source) {
+        auto& output = std::get<std::decay_t<decltype(source)>>(target);
+        output.rounded_clips = source.rounded_clips;
+        for (RoundedClip& clip : output.rounded_clips) {
+            if (clip.group != 0U)
+                present_clip(clip, group_of(groups, clip.group));
+        }
+    }, local);
     // A rotated group's effects are sampled over the box around their turned rectangle.
     const auto place = [](const PresentationGroup& group, const double x, const double y,
                           const double width, const double height, auto& output) {
@@ -689,8 +705,6 @@ void present(const SubmissionBatch& local, const std::vector<PresentationGroup>&
         const PresentationGroup group = group_of(groups, blur->group);
         BlurBatch& output = std::get<BlurBatch>(target);
         place(group, blur->x, blur->y, blur->width, blur->height, output);
-        // The batch is presented again whenever the table moves: start from its own clips.
-        output.rounded_clips = blur->rounded_clips;
         mask_turned_group(group, blur->x, blur->y, blur->width, blur->height, {},
                           output.rounded_clips);
     } else if (const auto* effect = std::get_if<EffectBatch>(&local); effect != nullptr) {
@@ -725,7 +739,6 @@ void present(const SubmissionBatch& local, const std::vector<PresentationGroup>&
                 values[6] *= area;
             }
         }
-        output.rounded_clips = effect->rounded_clips;
         mask_turned_group(group, effect->x, effect->y, effect->width, effect->height,
                           effect->radii, output.rounded_clips);
     }
@@ -886,7 +899,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
         input.u32() != STRATA_RENDER_PACKET_VERSION_CURRENT) {
-        throw std::invalid_argument("render packet decoder requires protocol v16");
+        throw std::invalid_argument("render packet decoder requires the current protocol");
     }
     const std::uint32_t resource_count = input.count();
     const std::uint32_t batch_count = input.count();
@@ -1172,7 +1185,12 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         const SubmissionBatch& batch = result.batches[position];
         const BlurBatch* blur = std::get_if<BlurBatch>(&batch);
         const EffectBatch* effect = std::get_if<EffectBatch>(&batch);
-        if ((blur != nullptr && blur->group != 0U) || (effect != nullptr && effect->group != 0U))
+        const bool grouped_clip = std::visit([](const auto& value) {
+            return std::ranges::any_of(value.rounded_clips,
+                                      [](const RoundedClip& clip) { return clip.group != 0U; });
+        }, batch);
+        if (grouped_clip || (blur != nullptr && blur->group != 0U) ||
+            (effect != nullptr && effect->group != 0U))
             grouped.emplace_back(position, batch);
     }
     for (const auto& [position, local] : grouped)

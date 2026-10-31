@@ -2842,7 +2842,8 @@ overlay Reveal {
     check(target != nullptr && inner != nullptr && inner->viewport.has_value(),
           "reveal fixture has no layout");
     check(offset("reveal.inner") > 0.0, "a post-layout reveal never reached the layout");
-    check(std::abs(target->bounds.bottom() + 10.0 - inner->viewport->bottom()) < 0.5,
+    check(std::abs(surface->layout().surface_bounds(*target, target->bounds).bottom() + 10.0 -
+                   surface->layout().surface_bounds(*inner, *inner->viewport).bottom()) < 0.5,
           "a reveal ignored its padding");
     // The inner scroller already brought the target into the outer viewport: the outer one, which
     // must reveal where the inner scroll left the target, does not move.
@@ -2903,9 +2904,11 @@ overlay StickyTable {
     bool row_beneath = false;
     for (const auto& row : table->children()) {
         const ui::LayoutRecord* row_layout = surface->layout().find(row->identity());
-        row_beneath = row_beneath ||
-                      (row_layout != nullptr && row_layout->bounds.y <= under_header.y &&
-                       row_layout->bounds.bottom() >= under_header.y);
+        if (row_layout != nullptr) {
+            const ui::Rect bounds = surface->input().presented_bounds(*row, row_layout->bounds);
+            row_beneath = row_beneath ||
+                          (bounds.y <= under_header.y && bounds.bottom() >= under_header.y);
+        }
     }
     check(row_beneath, "sticky table fixture has no row beneath its header");
     const ui::RetainedNode* hit = surface->input().inspection_target(under_header);
@@ -3867,8 +3870,9 @@ overlay LongCode {
         if (record == nullptr)
             return std::nullopt;
         const double height = record->content_bounds.height / 80.0;
-        return ui::Point{record->content_bounds.x + 1.0,
-                         record->content_bounds.y +
+        const ui::Rect bounds = surface->layout().surface_bounds(*record, record->content_bounds);
+        return ui::Point{bounds.x + 1.0,
+                         bounds.y +
                              (static_cast<double>(line - 1U - first) + 0.5) * height};
     };
     frames(4);
@@ -4021,9 +4025,11 @@ overlay LongPage {
     // Select all and copy from a row in the middle: the whole file.
     const ui::LayoutRecord* middle = record("page.code.r1920.t");
     const ui::LayoutRecord* viewport = record("page.scroll");
-    const double y = std::clamp(viewport->viewport->y + 100.0, middle->content_bounds.y + 1.0,
-                                middle->content_bounds.bottom() - 1.0);
-    const ui::Point inside{middle->content_bounds.x + 4.0, y};
+    const ui::Rect middle_bounds = surface->layout().surface_bounds(*middle, middle->content_bounds);
+    const ui::Rect shown = surface->layout().surface_bounds(*viewport, *viewport->viewport);
+    const double y = std::clamp(shown.y + 100.0, middle_bounds.y + 1.0,
+                                middle_bounds.bottom() - 1.0);
+    const ui::Point inside{middle_bounds.x + 4.0, y};
     std::vector<ui::SurfaceInputEvent> copy;
     copy.emplace_back(ui::PointerInputEvent{inside, ui::PointerEventType::press, 5, 0});
     copy.emplace_back(ui::PointerInputEvent{inside, ui::PointerEventType::release, 5, 0});

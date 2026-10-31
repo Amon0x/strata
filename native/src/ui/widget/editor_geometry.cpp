@@ -54,6 +54,20 @@ TextLayoutOptions editable_text_layout_options(const Rect viewport, const bool m
     return options;
 }
 
+std::optional<std::uint64_t> editable_text_coordinate_identity(
+    const WidgetRegistry& widgets, const RetainedNode& node,
+    const std::span<const WidgetSubtarget> subtargets) noexcept {
+    const WidgetLifecycle* lifecycle = widgets.find(node.description().type);
+    if (lifecycle == nullptr || !lifecycle->input.editor_viewport.has_value())
+        return node.identity();
+    const auto editor = std::ranges::find(
+        subtargets, lifecycle->input.editor_viewport->subtarget, &WidgetSubtarget::id);
+    if (editor == subtargets.end())
+        return node.identity();
+    return editor->presentation_identity.has_value() ? editor->presentation_identity
+        : editor->detached ? std::nullopt : std::optional(node.identity());
+}
+
 Point editable_text_scroll_limit(
     const Rect viewport,
     const TextLayout& layout,

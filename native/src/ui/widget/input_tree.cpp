@@ -156,7 +156,7 @@ bool advance(WidgetInputScope& scope) {
         !expandable(model, key)) {
         return false;
     }
-    return pointer->position.x <= layout->bounds.x +
+    return scope.local_position(*item, pointer->position).x <= layout->bounds.x +
         static_cast<double>(depth(model, key)) * scope.number("indent", 18.0) +
         scope.number("disclosureSize", 10.0) + 7.0;
 }

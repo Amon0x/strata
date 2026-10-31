@@ -218,14 +218,15 @@ bool color_picker_pointer(WidgetInputScope& scope) {
         return false;
     const ColorPickerState state = color_picker_state(scope.node());
     const ColorPickerProjection projection = color_picker_projection(state, layout->bounds);
+    const Point position = scope.local_position(pointer->position);
     if (pointer->type == PointerEventType::press) {
-        const std::string region = region_at(projection, pointer->position);
+        const std::string region = region_at(projection, position);
         scope.set_retained("$drag", runtime::Value(region), DirtyReason::input);
         if (region.starts_with("swatch:")) {
             const std::size_t index = static_cast<std::size_t>(std::stoul(region.substr(7U)));
             color_picker_set(scope, state, ColorPickerHsv::from(state.swatches[index], state.hsv.hue));
         } else {
-            color_picker_drag(scope, state, projection, region, pointer->position);
+            color_picker_drag(scope, state, projection, region, position);
         }
         // Left unconsumed, the press still focuses the picker for its keys.
         return false;
@@ -235,7 +236,7 @@ bool color_picker_pointer(WidgetInputScope& scope) {
         return false;
     const runtime::Value* region = scope.retained("$drag");
     if (pointer->type == PointerEventType::move && region != nullptr && region->string() != nullptr) {
-        color_picker_drag(scope, state, projection, *region->string(), pointer->position);
+        color_picker_drag(scope, state, projection, *region->string(), position);
         return true;
     }
     return pointer->type == PointerEventType::release ||

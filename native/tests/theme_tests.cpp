@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "compiler/source.hpp"
@@ -23,6 +24,7 @@
 #include "runtime/value.hpp"
 #include "ui/layout.hpp"
 #include "ui/layout/detail_algorithms.hpp"
+#include "ui/render.hpp"
 #include "ui/surface.hpp"
 #include "compiler/semantic.hpp"
 #include "ui/theme.hpp"
@@ -194,18 +196,6 @@ void test_defaults_and_validation() {
         check(token.light != token.dark || token.name == "shadow",
               "a palette token has no light-theme value of its own");
     }
-    ui::ThemeCatalog light_catalog;
-    check(light_catalog.set_root(ui::Theme("light-root", light)), "light root did not install");
-    const ui::ThemeMaterializationResult light_tree =
-        ui::materialize_theme_tree(node("Panel", "palette.root"), light_catalog, widget_schemas(""));
-    const auto palette = light_tree.root->properties.find("$themePalette");
-    const runtime::Value* materialized =
-        palette != light_tree.root->properties.end() ? palette->second.value() : nullptr;
-    const runtime::Value* popup =
-        materialized != nullptr ? materialized->field("popupSurface") : nullptr;
-    check(popup != nullptr && popup->color() != nullptr &&
-              *popup->color() == light.palette("popupSurface"),
-          "materialization did not carry the effective theme's palette to its nodes");
     check(compact.visual->radius == 0.0 && compact.text_layout->pixel_size == 10.8 &&
               compact.text_layout->primary_font == "strata:fonts/default-medium",
           "compact control typography or theme semantics changed");
@@ -417,6 +407,125 @@ void test_scopes_styles_tokens_and_lazy_ranges() {
         ui::materialize_theme_tree(lazy, catalog, widget_schemas(""));
     check(lazy_resolver_calls == 3U && lazy_result.stats.resolved_nodes == 4U,
           "theme resolution requested an offscreen lazy child");
+}
+
+void test_shared_styles_match_fresh_materialization() {
+    using namespace strata;
+    ui::ThemedWidgetStyle style;
+    style.layout.emplace();
+    style.layout->width = ui::LayoutSize{ui::LayoutSize::Kind::fixed, 80.0};
+    style.layout->participates = false;
+    style.motion.emplace(ui::ThemeAnimationSet{});
+    ui::ThemeCatalog catalog;
+    check(catalog.set_root(ui::Theme("shared", ui::ThemeTokens{}, nullptr, std::nullopt,
+                                    {{{"Button", "default"}, style}})),
+          "shared-style fixture theme did not install");
+    ui::ThemeMaterializationCache cache;
+    const auto value = [](std::initializer_list<std::pair<std::string, runtime::Value>> fields) {
+        return runtime::Value(std::vector<std::pair<std::string, runtime::Value>>(fields));
+    };
+    const auto children = [&value](const std::string& prefix, const double width) {
+        std::vector<std::shared_ptr<const ui::DescriptionNode>> result;
+        for (unsigned variant = 0U; variant < 32U; ++variant) {
+            for (unsigned copy = 0U; copy < 2U; ++copy) {
+                const std::string key =
+                    prefix + "." + std::to_string(variant) + "." + std::to_string(copy);
+                auto props = properties(std::nullopt, {
+                    {"width", runtime::Value(width)},
+                    {"color", runtime::Value(runtime::ThemeTokenValue{"danger"})},
+                    {"animateChanges", value({
+                        {"policy", runtime::Value("missing")},
+                        {"properties", runtime::Value(std::vector<runtime::Value>{
+                            runtime::Value("radius")})},
+                    })},
+                });
+                if ((variant & 1U) != 0U)
+                    props.emplace("style", runtime::ExpressionValue(value({})));
+                if ((variant & 2U) != 0U) {
+                    props.emplace("visualStyle", runtime::ExpressionValue(value({
+                        {"color", runtime::Value(runtime::ColorValue{1U, 2U, 3U, 255U})},
+                        {"radius", runtime::Value(7.0)},
+                    })));
+                }
+                if ((variant & 4U) != 0U) {
+                    props.emplace("textVisualStyle", runtime::ExpressionValue(value({
+                        {"foreground", runtime::Value(runtime::ThemeTokenValue{"accent"})},
+                    })));
+                }
+                if ((variant & 8U) != 0U) {
+                    props.emplace("textStyle", runtime::ExpressionValue(value({
+                        {"pixelSize", runtime::Value(runtime::ThemeTokenValue{"spacingUnit"})},
+                    })));
+                }
+                if ((variant & 16U) != 0U) {
+                    props.emplace("hover", runtime::ExpressionValue(runtime::Value{}));
+                    props.emplace("animateContentSize", runtime::ExpressionValue(runtime::Value{}));
+                    props.emplace("animateChanges", runtime::ExpressionValue(value({
+                        {"policy", runtime::Value(copy == 0U ? "missing-first" : "missing-second")},
+                        {"properties", runtime::Value(std::vector<runtime::Value>{
+                            runtime::Value("radius")})},
+                    })));
+                    props.emplace("$disclosureDefaults", runtime::ExpressionValue(value({
+                        {"timing", runtime::Value("missing-disclosure")},
+                    })));
+                }
+                props.emplace("label", runtime::ExpressionValue(runtime::Value(key)));
+                props.emplace("tint", runtime::ExpressionValue(runtime::Value(
+                    runtime::ThemeTokenValue{copy == 0U ? "accent" : "danger"})));
+                result.push_back(node("Button", key, std::move(props)));
+            }
+        }
+        return result;
+    };
+    const auto compare = [](const auto& self, const ui::DescriptionNode& shared,
+                            const ui::DescriptionNode& fresh) -> void {
+        check(shared.key == fresh.key && shared.type == fresh.type &&
+                  std::ranges::equal(shared.properties, fresh.properties,
+                                     [](const auto& left, const auto& right) {
+                                         return left.first == right.first &&
+                                             runtime::same_expression_value(left.second,
+                                                                            right.second);
+                                     }) &&
+                  shared.children->size() == fresh.children->size(),
+              "shared style changed projected properties or node structure");
+        for (std::size_t index = 0U; index < shared.children->size(); ++index)
+            self(self, *shared.children->at(index), *fresh.children->at(index));
+    };
+    for (unsigned revision = 0U; revision < 3U; ++revision) {
+        ui::ThemeTokens local_tokens;
+        local_tokens.spacing_unit = 6.0 + revision;
+        local_tokens.accent = runtime::ColorValue{
+            static_cast<std::uint8_t>(20U + revision), 30U, 40U, 255U};
+        check(catalog.set_scoped_theme(
+                  "local", ui::Theme("local-theme", local_tokens, nullptr, std::nullopt,
+                                    {{{"Button", "default"}, style}})),
+              "shared-style fixture scope did not update");
+        auto nodes = children("root", 30.0 + revision);
+        nodes.push_back(node("ThemeScope", "local", {}, children("local", 40.0 + revision)));
+        const auto source = node("ThemeScope", "root", {}, std::move(nodes));
+        std::vector<std::string> shared_diagnostics;
+        std::vector<std::string> fresh_diagnostics;
+        const auto diagnostics = [](std::vector<std::string>& messages) {
+            return [&messages](const std::string_view name, const ui::DescriptionNode& owner) {
+                messages.push_back(*owner.key + ":" + std::string(name));
+            };
+        };
+        const auto shared = ui::materialize_theme_tree(
+            source, catalog, widget_schemas(), diagnostics(shared_diagnostics), &cache);
+        const auto fresh = ui::materialize_theme_tree(
+            source, catalog, widget_schemas(), diagnostics(fresh_diagnostics));
+        compare(compare, *shared.root, *fresh.root);
+        check(shared_diagnostics == fresh_diagnostics,
+              "sharing a style suppressed or misattributed a node's timing diagnostic");
+        const ui::DescriptionNode* framework = keyed(*shared.root, "root.0.1");
+        const ui::DescriptionNode* authored = keyed(*shared.root, "root.1.1");
+        check(framework != nullptr && authored != nullptr &&
+                  ui::layout_style(*framework).width ==
+                      ui::LayoutSize(ui::LayoutSize::Kind::fixed, 80.0) &&
+                  ui::layout_style(*authored).width ==
+                      ui::LayoutSize(ui::LayoutSize::Kind::fixed, 30.0 + revision),
+              "shared style confused framework defaults with authored layout precedence");
+    }
 }
 
 void test_catalog_and_motion_policy() {
@@ -1036,6 +1145,97 @@ void test_unicode_recursive_layout_and_typed_motion_contracts() {
         };
 }
 
+void test_default_projection_respects_property_inputs() {
+    using namespace strata;
+    runtime::ApplicationContext application("default-inputs", load_bundle());
+    constexpr std::string_view source = R"(
+overlay Main {
+  root Panel(key: "root", layout: { kind: "COLUMN", width: 500, height: 500 }) {
+    Slider(key: "implicit")
+    Slider(key: "vertical", axis: "VERTICAL")
+    Slider(key: "horizontal", axis: "HORIZONTAL")
+    Slider(key: "narrow", axis: "HORIZONTAL", layout: { width: 101 })
+    Slider(key: "wide", axis: "HORIZONTAL", layout: { width: 137 })
+  }
+}
+)";
+    check(application.compile_and_activate(
+              compiler::ModuleSource{"default-inputs.strata", std::string(source)},
+              no_imports(), 0U).activated(),
+          "default-input fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 500;
+    environment.framebuffer_height = 500;
+    environment.logical_width = 500.0;
+    environment.logical_height = 500.0;
+    ui::Surface surface("default-inputs", application, runtime::LayerRole::overlay, "Main",
+                        environment);
+    static_cast<void>(surface.frame(1'000'000));
+    const auto bounds = [&surface](const std::string_view key) {
+        const ui::RetainedNode* node = surface.tree().find_key(key);
+        const ui::LayoutRecord* record =
+            node != nullptr ? surface.layout().find(node->identity()) : nullptr;
+        check(record != nullptr, "default-input control was not arranged");
+        return record->bounds;
+    };
+    const ui::Rect implicit = bounds("implicit");
+    const ui::Rect vertical = bounds("vertical");
+    const ui::Rect horizontal = bounds("horizontal");
+    check(implicit.width > implicit.height && vertical.height > vertical.width &&
+              horizontal.width > horizontal.height,
+          "default reuse ignored property presence or a changed orientation");
+    check(bounds("narrow").width == 101.0 && bounds("wide").width == 137.0,
+          "default reuse ignored authored layout overrides");
+}
+
+void test_popup_palette_follows_theme_scope() {
+    using namespace strata;
+    runtime::ApplicationContext application("theme-palette", load_bundle());
+    check(application.compile_and_activate(
+              compiler::ModuleSource{"theme-palette.strata",
+                                     "overlay Main { root DatePicker(key: \"picker\") }"},
+              no_imports(), 0U).activated(),
+          "palette rendering fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 400;
+    environment.framebuffer_height = 400;
+    environment.logical_width = 400.0;
+    environment.logical_height = 400.0;
+    const runtime::ColorValue root_color{19U, 41U, 73U, 255U};
+    const runtime::ColorValue local_color{91U, 127U, 163U, 255U};
+    ui::ThemeTokens root_tokens;
+    root_tokens.set("popupSurface", root_color);
+    ui::Surface surface("theme-palette", application, runtime::LayerRole::overlay, "Main",
+                        environment, {}, ui::WidgetRegistry{}, ui::BehaviorRegistry{}, nullptr,
+                        ui::Theme("palette-root", root_tokens));
+    static_cast<void>(surface.frame(1'000'000));
+    const ui::RetainedNode* picker = surface.tree().find_key("picker");
+    check(picker != nullptr &&
+              surface.tree().set_retained_value(
+                  picker->identity(), "$expanded", runtime::Value(true), ui::DirtyReason::paint),
+          "palette fixture popup did not open");
+    const auto paints = [&surface](const runtime::ColorValue expected) {
+        return std::ranges::any_of(
+            surface.render_commands().commands(), [expected](const ui::RenderCommand& command) {
+                const auto* rectangle = std::get_if<ui::RoundedRectRenderCommand>(&command);
+                return rectangle != nullptr && rectangle->fill.representative() == expected;
+            });
+    };
+    static_cast<void>(surface.frame(2'000'000));
+    check(paints(root_color), "native popup did not paint its effective palette");
+    ui::ThemeTokens local_tokens;
+    local_tokens.set("popupSurface", local_color);
+    check(surface.set_scoped_theme("picker", ui::Theme("palette-local", local_tokens)),
+          "popup theme scope did not install");
+    static_cast<void>(surface.frame(3'000'000));
+    check(paints(local_color) && !paints(root_color),
+          "open native popup retained its previous palette after a scope change");
+    check(surface.clear_scoped_theme("picker"), "popup theme scope did not clear");
+    static_cast<void>(surface.frame(4'000'000));
+    check(paints(root_color) && !paints(local_color),
+          "native popup did not restore its inherited palette after scope removal");
+}
+
 void test_scroll_animation_lifecycle() {
     using namespace strata;
     constexpr std::string_view source = R"(
@@ -1282,10 +1482,13 @@ int strata_test_theme() {
         test_compiler_theme_tokens_match_runtime();
         test_compiled_theme_tokens_resolve_against_the_effective_theme();
         test_scopes_styles_tokens_and_lazy_ranges();
+        test_shared_styles_match_fresh_materialization();
         test_catalog_and_motion_policy();
         test_exact_resolution_validation_and_local_scope();
         test_full_style_round_trip_and_nullability();
         test_unicode_recursive_layout_and_typed_motion_contracts();
+        test_default_projection_respects_property_inputs();
+        test_popup_palette_follows_theme_scope();
         test_scroll_animation_lifecycle();
         std::cout << "strata_theme_tests: OK\n";
         return 0;

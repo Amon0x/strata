@@ -196,6 +196,7 @@ void LayoutEngine::arrange(
     const MeasuredNode& measured = *measured_ptr;
     const Rect arrangement_bounds = bounds;
     const std::uint64_t identity = measured.node->identity();
+    bool scroll_children_ordered = false;
     const PinContext cache_pin_context{
         measured.subtree_pins_horizontal || measured.subtree_sticky ? pin_context.horizontal_offset
                                                                     : std::nullopt,
@@ -203,6 +204,7 @@ void LayoutEngine::arrange(
                                                                   : std::nullopt,
         measured.subtree_sticky ? pin_context.sticky_viewport : std::nullopt,
         measured.subtree_sticky ? pin_context.sticky_container : std::nullopt,
+        measured.subtree_windowed ? pin_context.visible_clip : std::nullopt,
     };
     const auto cached = arrangement_cache_.find(identity);
     const std::shared_ptr<const MeasuredNode> cached_measured =
@@ -216,6 +218,69 @@ void LayoutEngine::arrange(
         result_.records.contains(identity)) {
         current_arranged_subtree_roots_.insert(identity);
         return;
+    }
+    if (cached != arrangement_cache_.end() && cached_measured == measured_ptr &&
+        cached->second.bounds == arrangement_bounds &&
+        cached->second.inherited_clip == inherited_clip &&
+        cached->second.pin_context == cache_pin_context &&
+        cached->second.scroll_children_ordered && measured.style.kind == LayoutKind::scroll &&
+        !measured.style.virtual_list.has_value() && !measured.subtree_portals &&
+        !measured.subtree_windowed && !measured.subtree_sticky &&
+        !measured.subtree_pins_horizontal && !measured.subtree_pins_vertical &&
+        measured.node->arrangement_revision() - cached->second.node_arrangement_revision ==
+            measured.node->own_arrangement_revision() - cached->second.own_arrangement_revision) {
+        LayoutRecord& retained = result.records.at(identity);
+        const Point requested = resolved_scroll_offset(*measured.node, measured.style.scroll_offset);
+        if (retained.viewport.has_value() && std::isfinite(retained.viewport->y) &&
+            std::isfinite(retained.viewport->bottom()) &&
+            std::isfinite(requested.x) && std::isfinite(requested.y)) {
+            const Point offset{
+                measured.style.scroll_horizontal
+                    ? clamped_scroll(requested.x, retained.content_size.width,
+                                     retained.content_bounds.width) : 0.0,
+                measured.style.scroll_vertical
+                    ? clamped_scroll(requested.y, retained.content_size.height,
+                                     retained.content_bounds.height) : 0.0};
+            if (offset != retained.scroll_offset) {
+                const Rect viewport = translated_rect(*retained.viewport, offset);
+                const std::span<const MeasuredNodePtr> children{
+                    measured.children.data(), measured.flow_child_count};
+                const auto rectangle = [this](const MeasuredNodePtr& child) -> const Rect& {
+                    return arrangement_cache_.at(child->node->identity()).bounds;
+                };
+                const auto first = std::upper_bound(
+                    children.begin(), children.end(), viewport.y,
+                    [&](const double y, const MeasuredNodePtr& child) {
+                        return y < rectangle(child).bottom();
+                    });
+                const auto last = std::lower_bound(
+                    first, children.end(), viewport.bottom(),
+                    [&](const MeasuredNodePtr& child, const double y) {
+                        return rectangle(child).y < y;
+                    });
+                std::size_t begin = std::numeric_limits<std::size_t>::max();
+                std::size_t end = 0U;
+                for (auto child = first; child != last; ++child) {
+                    if (rectangle(*child).intersection(viewport).has_value()) {
+                        begin = std::min(begin, (*child)->node->source_index());
+                        end = std::max(end, (*child)->node->source_index() + 1U);
+                    }
+                }
+                retained.visible_range = begin != std::numeric_limits<std::size_t>::max()
+                    ? VisibleRange{begin, end} : VisibleRange{};
+            }
+            retained.requested_scroll_offset = requested;
+            retained.scroll_offset = offset;
+            retained.generation = result.generation;
+            retained.render_generation = advance_render_generation();
+            retained.subtree_render_generation = advance_render_generation();
+            result.changed_records.push_back(identity);
+            ++result.operations.arranged_nodes;
+            cached->second.node_arrangement_revision = measured.node->arrangement_revision();
+            cached->second.own_arrangement_revision = measured.node->own_arrangement_revision();
+            current_arranged_subtree_roots_.insert(identity);
+            return;
+        }
     }
     const Point translation{
         arrangement_bounds.x -
@@ -252,6 +317,10 @@ void LayoutEngine::arrange(
                 record.translated_subtree.value_or(Point{});
             record.generation = result.generation;
             translate_record(record, translation, environment);
+            if (result.geometry_generation == std::numeric_limits<std::uint64_t>::max())
+                throw std::overflow_error("layout geometry generation exhausted");
+            ++result.geometry_generation;
+            result.changed_records.push_back(record.identity);
             record.render_generation = advance_render_generation();
             record.subtree_render_generation = advance_render_generation();
             record.translated_subtree = Point{
@@ -315,6 +384,14 @@ void LayoutEngine::arrange(
     record.identity = measured.node->identity();
     record.generation = result.generation;
     record.kind = style.kind;
+    record.position_translation = Point{bounds.x - arrangement_bounds.x,
+                                        bounds.y - arrangement_bounds.y};
+    if (measured.node->parent() != nullptr && style.kind != LayoutKind::portal) {
+        record.coordinate_parent = measured.node->parent()->identity();
+        record.scroll_content =
+            node_style(*measured.node->parent()).kind == LayoutKind::scroll &&
+            style.position != LayoutPosition::absolute && style.anchor_target.empty();
+    }
     record.measured_size = measured.measured_size;
     record.bounds = border_bounds;
     record.snapped_bounds = snap_rectangle(border_bounds, environment);
@@ -351,6 +428,8 @@ void LayoutEngine::arrange(
     };
     // Sticky children are held inside the box their parent lays them out in.
     pin_context.sticky_container = content_bounds;
+    if (local_clip.has_value())
+        pin_context.visible_clip = intersect_optional(pin_context.visible_clip, *local_clip);
 
     if ((style.kind == LayoutKind::row || style.kind == LayoutKind::column) && style.wrap) {
         const bool horizontal = style.kind == LayoutKind::row;
@@ -461,10 +540,11 @@ void LayoutEngine::arrange(
     } else if (style.kind == LayoutKind::grid) {
         if (!measured.grid.has_value()) {
             record.render_generation = advance_render_generation();
-            result.records.insert_or_assign(record.identity, std::move(record));
+            store_record(std::move(record), result);
             arrangement_cache_.insert_or_assign(identity, ArrangementCacheEntry{
                 measured_ptr, arrangement_bounds, inherited_clip, cache_pin_context,
                 measured.node->arrangement_revision(),
+                measured.node->own_arrangement_revision(), scroll_children_ordered,
             });
             return;
         }
@@ -609,16 +689,22 @@ void LayoutEngine::arrange(
         PinContext child_pin_context = pin_context;
         if (style.scroll_horizontal) child_pin_context.horizontal_offset = record.scroll_offset.x;
         if (style.scroll_vertical) child_pin_context.vertical_offset = record.scroll_offset.y;
-        child_pin_context.sticky_viewport = scroll_viewport;
+        child_pin_context.sticky_viewport = translated_rect(scroll_viewport, record.scroll_offset);
         child_pin_context.sticky_container = Rect{
-            content_bounds.x - record.scroll_offset.x,
-            content_bounds.y - record.scroll_offset.y,
+            content_bounds.x,
+            content_bounds.y,
             std::max(content_bounds.width, scroll_content.width),
             std::max(content_bounds.height, scroll_content.height),
         };
-        double cursor = content_bounds.y - record.scroll_offset.y;
+        child_pin_context.visible_clip =
+            translated_rect(pin_context.visible_clip, record.scroll_offset);
+        const Rect content_viewport = translated_rect(scroll_viewport, record.scroll_offset);
+        double cursor = content_bounds.y;
         std::size_t first_visible = std::numeric_limits<std::size_t>::max();
         std::size_t last_visible = 0U;
+        scroll_children_ordered = !style.virtual_list.has_value();
+        double previous_start = -std::numeric_limits<double>::infinity();
+        double previous_end = previous_start;
         for (const MeasuredNodePtr& child : flow_children) {
             // A lazy provider can change count before Surface converges its retained realization.
             // Rows from the previous provider are transiently stale and must not index the new
@@ -627,17 +713,17 @@ void LayoutEngine::arrange(
                 child->node->source_index() >= virtual_extents->extents.size()) {
                 continue;
             }
-            const double x = content_bounds.x - record.scroll_offset.x;
+            const double x = content_bounds.x;
             double child_x = x;
             double child_y = cursor;
             if (style.virtual_list.has_value()) {
                 const VirtualListSpec& virtual_list = *style.virtual_list;
                 const double position = virtual_extents->extents.start(child->node->source_index());
                 if (virtual_list.axis == LayoutAxis::vertical) {
-                    child_y = content_bounds.y + position - record.scroll_offset.y;
+                    child_y = content_bounds.y + position;
                 } else if (virtual_list.axis == LayoutAxis::horizontal) {
-                    child_x = content_bounds.x + position - record.scroll_offset.x;
-                    child_y = content_bounds.y - record.scroll_offset.y;
+                    child_x = content_bounds.x + position;
+                    child_y = content_bounds.y;
                 }
             }
             double child_width = child->measured_size.width;
@@ -651,11 +737,18 @@ void LayoutEngine::arrange(
                 else child_width = child_extent;
             }
             const Rect child_bounds{child_x, child_y, child_width, child_height};
-            if (child_bounds.intersection(scroll_viewport).has_value()) {
+            if (scroll_children_ordered) {
+                scroll_children_ordered = std::isfinite(child_bounds.y) &&
+                    std::isfinite(child_bounds.bottom()) && child_bounds.y >= previous_start &&
+                    child_bounds.bottom() >= previous_end;
+                previous_start = child_bounds.y;
+                previous_end = child_bounds.bottom();
+            }
+            if (child_bounds.intersection(content_viewport).has_value()) {
                 first_visible = std::min(first_visible, child->node->source_index());
                 last_visible = std::max(last_visible, child->node->source_index() + 1U);
             }
-            arrange(child, child_bounds, child_clip, child_pin_context, environment, result);
+            arrange(child, child_bounds, std::nullopt, child_pin_context, environment, result);
             cursor += child->measured_size.height + style.gap.y;
         }
         if (style.virtual_list.has_value()) {
@@ -667,7 +760,7 @@ void LayoutEngine::arrange(
                 // Its own viewport holds every item; what shows is the part of it inside the
                 // viewports around it (or the window's, with none).
                 const std::optional<Rect> shown =
-                    inherited_clip.value_or(environment.viewport).intersection(scroll_viewport);
+                    pin_context.visible_clip.value_or(environment.viewport).intersection(scroll_viewport);
                 offset = !shown.has_value() ? 0.0
                          : vertical         ? shown->y - content_bounds.y + record.scroll_offset.y
                                             : shown->x - content_bounds.x + record.scroll_offset.x;
@@ -823,11 +916,12 @@ void LayoutEngine::arrange(
     }
     record.render_generation = advance_render_generation();
     record.subtree_render_generation = advance_render_generation();
-    result.records.insert_or_assign(record.identity, std::move(record));
+    store_record(std::move(record), result);
     current_arranged_records_.insert(identity);
     arrangement_cache_.insert_or_assign(identity, ArrangementCacheEntry{
         measured_ptr, arrangement_bounds, inherited_clip, cache_pin_context,
         measured.node->arrangement_revision(),
+        measured.node->own_arrangement_revision(), scroll_children_ordered,
     });
 }
 } // namespace strata::ui

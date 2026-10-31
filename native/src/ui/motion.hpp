@@ -65,8 +65,6 @@ struct MotionMoveOrigin final {
     double y = 0.0;
     double width = 0.0;
     double height = 0.0;
-    double ancestor_scroll_x = 0.0;
-    double ancestor_scroll_y = 0.0;
 };
 
 /** Returns the effective retained disclosure contract for any widget that declares one. */

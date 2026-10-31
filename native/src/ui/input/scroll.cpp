@@ -131,13 +131,14 @@ bool InputRouter::route_scrollbar_pointer(
 ) {
     const auto update_drag = [this, &result](
                                  const ScrollbarDrag& drag,
-                                 const Point point
+                                 Point point
                              ) {
         RetainedNode* owner = tree_ != nullptr ? tree_->find_identity(drag.identity) : nullptr;
         const LayoutRecord* layout = owner != nullptr && layout_ != nullptr
                                          ? layout_->find(owner->identity())
                                          : nullptr;
         if (owner == nullptr || layout == nullptr) return;
+        point = logical_pointer_position(*owner, point);
         const std::optional<ScrollbarGeometry> geometry = scrollbar_geometry(
             *layout, LayoutEngine::node_style(*owner), drag.axis
         );
@@ -192,7 +193,8 @@ bool InputRouter::route_scrollbar_pointer(
             const std::optional<ScrollbarGeometry> geometry = scrollbar_geometry(
                 *layout, style, axis
             );
-            if (geometry.has_value() && contains(geometry->hit_bounds, event.position)) {
+            if (geometry.has_value() &&
+                contains(geometry->hit_bounds, logical_pointer_position(*current, event.position))) {
                 hit = Hit{current, *geometry};
                 break;
             }
@@ -203,9 +205,10 @@ bool InputRouter::route_scrollbar_pointer(
 
     hover_route(hit->owner);
     if (event.type == PointerEventType::press && event.button == 0) {
+        const Point point = logical_pointer_position(*hit->owner, event.position);
         const double coordinate = hit->geometry.axis == ScrollbarAxis::vertical
-                                      ? event.position.y
-                                      : event.position.x;
+                                      ? point.y
+                                      : point.x;
         const bool within_thumb = coordinate >= hit->geometry.thumb_start &&
             coordinate <= hit->geometry.thumb_start + hit->geometry.thumb_length;
         scrollbar_drag_ = ScrollbarDrag{
@@ -287,6 +290,8 @@ void InputRouter::reveal_rect(const RetainedNode& node, Rect revealed, const dou
                               InputOperationResult& result) {
     if (layout_ == nullptr)
         return;
+    if (const LayoutRecord* record = layout_->find(node.identity()); record != nullptr)
+        revealed = layout_->surface_bounds(*record, revealed);
     // Every scroller moves the target by its own change: an outer scroller brings into view where
     // the inner ones left the target, not where this layout placed it.
     const auto axis_offset = [](
@@ -302,11 +307,17 @@ void InputRouter::reveal_rect(const RetainedNode& node, Rect revealed, const dou
         if (end + margin > viewport_end) return offset + end + margin - viewport_end;
         return offset;
     };
+    const LayoutRecord* child = layout_->find(node.identity());
     for (const RetainedNode* current = node.parent(); current != nullptr; current = current->parent()) {
+        if (child == nullptr || child->coordinate_parent == 0U)
+            break;
+        const bool follows_scroll = child->scroll_content;
         const LayoutRecord* scroll = layout_->find(current->identity());
+        child = scroll;
         const std::optional<Point> limits = scroll_limits(*current);
-        if (scroll == nullptr || !scroll->viewport.has_value() || !limits.has_value()) continue;
-        const Rect& viewport = *scroll->viewport;
+        if (scroll == nullptr || !scroll->viewport.has_value() || !limits.has_value() ||
+            !follows_scroll) continue;
+        const Rect viewport = layout_->surface_bounds(*scroll, *scroll->viewport);
         const Point next{
             std::clamp(
                 axis_offset(scroll->scroll_offset.x, revealed.x, revealed.right(), viewport.x,

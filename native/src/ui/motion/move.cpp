@@ -22,46 +22,17 @@ namespace {
     return result;
 }
 
-struct ScrollContext final {
-    double x = 0.0;
-    double y = 0.0;
-    std::optional<double> nearest_x;
-    std::optional<double> nearest_y;
-};
-
-[[nodiscard]] Point scroll_influence(
-    const RetainedNode& node,
-    const LayoutResult& layout
-) {
-    ScrollContext context;
-    std::vector<const RetainedNode*> ancestors;
-    for (const RetainedNode* current = node.parent(); current != nullptr;
-         current = current->parent()) {
-        ancestors.push_back(current);
+/** Sticky and pinned placement follows scrolling, not a change of the box's flow position. */
+[[nodiscard]] Point flow_origin(const LayoutRecord& record, const LayoutResult& layout) {
+    Point origin{record.bounds.x, record.bounds.y};
+    for (const LayoutRecord* current = &record; current != nullptr;
+         current = layout.find(current->coordinate_parent)) {
+        origin.x -= current->position_translation.x;
+        origin.y -= current->position_translation.y;
+        if (current->coordinate_parent == 0U)
+            break;
     }
-    for (auto current = ancestors.rbegin(); current != ancestors.rend(); ++current) {
-        const LayoutRecord* const record = layout.find((*current)->identity());
-        if (record == nullptr) continue;
-        if (record->scroll_horizontal) {
-            context.x += record->scroll_offset.x;
-            context.nearest_x = record->scroll_offset.x;
-        }
-        if (record->scroll_vertical) {
-            context.y += record->scroll_offset.y;
-            context.nearest_y = record->scroll_offset.y;
-        }
-    }
-    const LayoutRecord* const record = layout.find(node.identity());
-    return Point{
-        context.x -
-            (record != nullptr && record->pin_horizontal
-                 ? context.nearest_x.value_or(0.0)
-                 : 0.0),
-        context.y -
-            (record != nullptr && record->pin_vertical
-                 ? context.nearest_y.value_or(0.0)
-                 : 0.0),
-    };
+    return origin;
 }
 
 /**
@@ -81,8 +52,20 @@ struct ScrollContext final {
         const LayoutRecord* const record = layout.find((*current)->identity());
         if (record == nullptr)
             continue;
+        if (record->coordinate_parent == 0U)
+            transform = {};
+        transform = concatenate_presentation_transform(
+            transform, scroll_presentation_transform(*record, layout));
         transform = concatenate_presentation_transform(
             transform, local_presentation_transform(**current, motion, record->bounds));
+    }
+    if (!self) {
+        if (const LayoutRecord* record = layout.find(node.identity()); record != nullptr) {
+            if (record->coordinate_parent == 0U)
+                transform = {};
+            transform = concatenate_presentation_transform(
+                transform, scroll_presentation_transform(*record, layout));
+        }
     }
     return transform;
 }
@@ -201,15 +184,13 @@ std::vector<MotionMoveOrigin> MotionRuntime::capture_move_origins(
             record == nullptr || record->bounds.empty()) {
             continue;
         }
-        const Point influence = scroll_influence(*node, layout);
+        const Point origin = flow_origin(*record, layout);
         result.push_back(MotionMoveOrigin{
             identity,
-            record->bounds.x,
-            record->bounds.y,
+            origin.x,
+            origin.y,
             record->bounds.width,
             record->bounds.height,
-            influence.x,
-            influence.y,
         });
     }
     return result;
@@ -234,11 +215,9 @@ void MotionRuntime::apply_move_transitions(
             !state_entry->second.move_template.has_value()) {
             continue;
         }
-        const Point influence = scroll_influence(*node, after);
-        const double dx = previous.x - current->bounds.x -
-            (influence.x - previous.ancestor_scroll_x);
-        const double dy = previous.y - current->bounds.y -
-            (influence.y - previous.ancestor_scroll_y);
+        const Point origin = flow_origin(*current, after);
+        const double dx = previous.x - origin.x;
+        const double dy = previous.y - origin.y;
         if (std::abs(dx) < 0.001 && std::abs(dy) < 0.001) continue;
         CompiledMotion animation = *state_entry->second.move_template;
         animation.timing.delay_nanos = 0;

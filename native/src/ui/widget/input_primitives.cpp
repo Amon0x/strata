@@ -109,7 +109,7 @@ void close_menu(WidgetInputScope& scope) {
     const LayoutResult* layout = scope.layout_result();
     if (layout == nullptr)
         return std::nullopt;
-    return project_menu(scope.node(), *layout, scope.command_index());
+    return project_menu(scope.node(), *layout, scope.input(), scope.command_index());
 }
 
 [[nodiscard]] std::size_t adjacent_menu_item(const std::vector<MenuItemModel>& items,

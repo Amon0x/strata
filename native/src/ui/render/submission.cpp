@@ -133,7 +133,11 @@ void retain_drawn_pages(PreparationCache& cache, const std::span<const CommandRa
     std::vector<CommandRange> ranges;
     std::size_t covered = 0U;
     for (const std::size_t index : current.differences(previous)) {
-        if (current[index].index() != previous[index].index()) return false;
+        // Draw vocabulary can change without changing the scope seen by later commands.
+        // Only changing a scope's kind makes its retained planner state unusable.
+        if (current[index].index() != previous[index].index() &&
+            (!draw_command(current[index]) || !draw_command(previous[index])))
+            return false;
         if (index < covered) continue;
         CommandRange range{index, index};
         if (!draw_command(current[index])) {
@@ -199,7 +203,7 @@ void retain_drawn_pages(PreparationCache& cache, const std::span<const CommandRa
         output.topology_change = SubmissionTopologyChange::none;
         output.topology_change_item = 0U;
     } else {
-        // A draw changed batch (a moved subtree's scissors), outgrew its slot or changed its
+        // A draw changed batch (a moved subtree's scissors), outgrew its changed run or changed its
         // number of items: encode the items again, as a full update would after its plan.
         output.planned_draws = 0U;
         output.texture_batch_breaks = 0U;

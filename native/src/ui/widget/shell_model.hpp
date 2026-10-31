@@ -17,6 +17,7 @@
 namespace strata::ui {
 
 class CommandIndex;
+class InputRouter;
 class RetainedNode;
 
 inline constexpr std::string_view tooltip_shown_state = "strata.tooltip.shown";
@@ -58,6 +59,7 @@ using ShellTextLayoutResolver = std::function<TextLayout(
 [[nodiscard]] std::optional<TooltipProjection> project_tooltip(
     const RetainedNode& node,
     const LayoutResult& layout,
+    const InputRouter& input,
     const ShellTextLayoutResolver& text_layout
 );
 

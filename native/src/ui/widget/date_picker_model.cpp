@@ -95,7 +95,8 @@ void date_picker_content(WidgetRenderScope& scope) {
 void date_picker_overlay(WidgetRenderScope& scope) {
     if (!expanded(scope.node()))
         return;
-    const DatePickerPopup popup = date_picker_popup(scope.layout().bounds, scope.root_bounds());
+    const DatePickerPopup popup = date_picker_popup(
+        scope.input().presented_bounds(scope.node(), scope.layout().bounds), scope.root_bounds());
     scope.shadow(popup.surface, CornerRadii::all(8.0), scope.palette("shadow", std::uint8_t{90U}),
                  14.0, 1.0);
     scope.rounded_rect(popup.surface, Paint(scope.palette("popupSurface")), scope.visual().border,
@@ -119,7 +120,8 @@ std::vector<WidgetSubtarget> date_picker_subtargets(const WidgetSubtargetContext
     if (!expanded(node))
         return result;
     const DatePickerPopup popup =
-        date_picker_popup(context.record.bounds, root_of(context.layout, context.record.bounds));
+        date_picker_popup(context.input.presented_bounds(node, context.record.bounds),
+                          root_of(context.layout, context.record.bounds));
     // The surface comes first so the days and buttons above it are hit before it.
     WidgetSubtarget surface{node.identity(), "$popup", WidgetSubtargetKind::separator, 1U,
                             popup.surface, runtime::Value{}, {}, {}, false, true,

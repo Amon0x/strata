@@ -124,6 +124,30 @@ std::uint64_t LayoutEngine::advance_render_generation() {
     return ++next_render_generation_;
 }
 
+void LayoutEngine::store_record(LayoutRecord&& record, LayoutResult& result) {
+    const LayoutRecord* previous = result.find(record.identity);
+    const bool same_geometry = previous != nullptr &&
+        previous->kind == record.kind && previous->bounds == record.bounds &&
+        previous->snapped_bounds == record.snapped_bounds &&
+        previous->hit_bounds == record.hit_bounds &&
+        previous->content_bounds == record.content_bounds && previous->clip == record.clip &&
+        previous->local_clip == record.local_clip && previous->viewport == record.viewport &&
+        previous->scroll_frame == record.scroll_frame &&
+        previous->coordinate_parent == record.coordinate_parent &&
+        previous->scroll_content == record.scroll_content &&
+        previous->z_index == record.z_index && previous->positioned == record.positioned &&
+        previous->detached_from_parent_clip == record.detached_from_parent_clip &&
+        previous->clip_shaped == record.clip_shaped &&
+        previous->arranged_child_order == record.arranged_child_order;
+    if (!same_geometry) {
+        if (result.geometry_generation == std::numeric_limits<std::uint64_t>::max())
+            throw std::overflow_error("layout geometry generation exhausted");
+        ++result.geometry_generation;
+    }
+    result.changed_records.push_back(record.identity);
+    result.records.insert_or_assign(record.identity, std::move(record));
+}
+
 bool LayoutEngine::requires_layout(const RetainedTree& tree,
                                    const LayoutEnvironment& environment) const {
     environment.validate();
@@ -155,6 +179,8 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
     if (root == nullptr)
         throw std::invalid_argument("layout requires a retained root");
     if (frame_index == 0U || translation_frame_index_ != frame_index) {
+        result_.changes_since_generation = result_.generation;
+        result_.changed_records.clear();
         for (const std::uint64_t identity : translated_records_) {
             if (auto record = result_.records.find(identity); record != result_.records.end()) {
                 record->second.translated_subtree.reset();
@@ -465,8 +491,17 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
                                        },
                                        environment, next.operations);
         }
+        Rect anchor_bounds = next.surface_bounds(*anchor_record, anchor_record->bounds);
+        if (const RetainedNode* parent = pending.measured->node->parent(); parent != nullptr) {
+            if (const LayoutRecord* parent_record = next.find(parent->identity());
+                parent_record != nullptr) {
+                const Point offset = next.surface_offset(*parent_record);
+                anchor_bounds.x -= offset.x;
+                anchor_bounds.y -= offset.y;
+            }
+        }
         arrange(pending.measured,
-                anchor_placement(anchor_record->bounds, pending.containing_bounds,
+                anchor_placement(anchor_bounds, pending.containing_bounds,
                                  pending.measured->measured_size, style),
                 pending.inherited_clip, pending.pin_context, environment, next);
     }
@@ -498,9 +533,11 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
                                        Constraints{0.0, viewport.width, 0.0, viewport.height},
                                        environment, next.operations);
         }
+        const Rect parent_bounds = parent_record != nullptr
+            ? next.surface_bounds(*parent_record, parent_record->content_bounds) : viewport;
         Rect portal_bounds{
-            parent_record != nullptr ? parent_record->content_bounds.x : viewport.x,
-            parent_record != nullptr ? parent_record->content_bounds.y : viewport.y,
+            parent_bounds.x,
+            parent_bounds.y,
             pending.measured->measured_size.width,
             pending.measured->measured_size.height,
         };
@@ -517,11 +554,15 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
                                            environment, next.operations);
             }
             const Rect anchor_bounds =
-                point_anchor.has_value() ? *point_anchor : anchor_record->bounds;
+                point_anchor.has_value()
+                    ? *point_anchor : next.surface_bounds(*anchor_record, anchor_record->bounds);
             portal_bounds =
                 anchor_placement(anchor_bounds, viewport, pending.measured->measured_size, style);
         }
-        arrange(pending.measured, portal_bounds, pending.inherited_clip, pending.pin_context,
+        const std::optional<Rect> portal_clip =
+            !style.detach_from_parent_clip && parent_record != nullptr
+                ? next.surface_clip(*parent_record) : std::nullopt;
+        arrange(pending.measured, portal_bounds, portal_clip, {},
                 environment, next);
     }
     pending_portals_.clear();
@@ -564,7 +605,7 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
                 style.kind == LayoutKind::portal ? style.portal_target : std::string{};
             record.detached_from_parent_clip =
                 style.kind == LayoutKind::portal && style.detach_from_parent_clip;
-            next.records.insert_or_assign(node.identity(), std::move(record));
+            store_record(std::move(record), next);
             current_arranged_records_.insert(node.identity());
         }
         for (const auto& child : node.children())

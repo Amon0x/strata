@@ -66,7 +66,8 @@ InputRouter::DragTarget InputRouter::resolve_drag_target(const DragSession& sess
     RetainedNode* modal = active_modal();
     while (node != nullptr) {
         const LayoutRecord* record = layout_->find(node->identity());
-        if (record != nullptr && contains(record->bounds, position) &&
+        const Point local = logical_pointer_position(*node, position);
+        if (record != nullptr && contains(record->bounds, local) &&
             motion_input_eligible(*node) && (modal == nullptr || descendant_of(*node, *modal))) {
             if (const DescriptionBehavior* attachment = behavior(*node, "strata.drop-target");
                 attachment != nullptr) {
@@ -91,7 +92,7 @@ InputRouter::DragTarget InputRouter::resolve_drag_target(const DragSession& sess
                              *placement_mode->string() == "tree")) {
                             const double fraction =
                                 record->bounds.height > 0.0
-                                    ? (position.y - record->bounds.y) / record->bounds.height
+                                    ? (local.y - record->bounds.y) / record->bounds.height
                                     : 0.5;
                             placement = fraction < 0.25   ? "before"
                                         : fraction > 0.75 ? "after"
@@ -102,12 +103,12 @@ InputRouter::DragTarget InputRouter::resolve_drag_target(const DragSession& sess
                             const std::string normalized = lower_ascii(*axis->string());
                             if (normalized == "horizontal") {
                                 placement =
-                                    position.x < record->bounds.x + record->bounds.width * 0.5
+                                    local.x < record->bounds.x + record->bounds.width * 0.5
                                         ? "before"
                                         : "after";
                             } else if (normalized == "vertical") {
                                 placement =
-                                    position.y < record->bounds.y + record->bounds.height * 0.5
+                                    local.y < record->bounds.y + record->bounds.height * 0.5
                                         ? "before"
                                         : "after";
                             }
@@ -177,7 +178,7 @@ void InputRouter::emit_drag_lifecycle(DragSession& session, const std::string_vi
         const bool horizontal =
             axis != nullptr && axis->string() != nullptr &&
             (*axis->string() == "HORIZONTAL" || *axis->string() == "horizontal");
-        insertion = resolve_reorder_insertion(*target.node, *layout_, position, horizontal);
+        insertion = resolve_reorder_insertion(*target.node, *layout_, *this, position, horizontal);
     }
     const auto event = [this, &allowed, &drag_source, &payload, phase, position, &target,
                         &insertion, has_target](const RetainedNode& recipient,
@@ -293,19 +294,20 @@ bool InputRouter::auto_scroll_drag(DragSession& session, InputOperationResult& r
          current != nullptr; current = current->parent()) {
         const LayoutRecord* record = layout_->find(current->identity());
         const std::optional<Point> limits = scroll_limits(*current);
+        const Point position = logical_pointer_position(*current, session.position);
         if (record == nullptr || !record->viewport.has_value() || !limits.has_value() ||
-            !contains(*record->viewport, session.position)) {
+            !contains(*record->viewport, position)) {
             continue;
         }
         const LayoutStyle& style = LayoutEngine::node_style(*current);
         Point next = record->scroll_offset;
         if (style.scroll_horizontal) {
-            next.x += edge_velocity(session.position.x, record->viewport->x,
+            next.x += edge_velocity(position.x, record->viewport->x,
                                     record->viewport->right(), input_config_) *
                       elapsed_seconds;
         }
         if (style.scroll_vertical) {
-            next.y += edge_velocity(session.position.y, record->viewport->y,
+            next.y += edge_velocity(position.y, record->viewport->y,
                                     record->viewport->bottom(), input_config_) *
                       elapsed_seconds;
         }

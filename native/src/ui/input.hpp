@@ -496,6 +496,11 @@ class InputRouter final {
     [[nodiscard]] MotionTransform presentation_transform(const RetainedNode& node) const;
     /** Node-local bounds where the node's presentation draws them. */
     [[nodiscard]] Rect presented_bounds(const RetainedNode& node, Rect bounds) const;
+    /** Places one node's geometry in another node's drawing space without changing ownership. */
+    [[nodiscard]] Rect relative_bounds(const RetainedNode& source, const RetainedNode& target,
+                                       Rect bounds) const;
+    /** Effective rectangular clipping in surface coordinates, respecting coordinate roots. */
+    [[nodiscard]] std::optional<Rect> presented_clip(const RetainedNode& node) const;
     /** Runs the node's lifecycle `inspection.subtargets` hook afresh, uncached. */
     [[nodiscard]] std::vector<WidgetSubtarget> project_subtargets(const RetainedNode& node) const;
     [[nodiscard]] bool subtarget_hovered(std::uint64_t identity,
@@ -686,10 +691,9 @@ class InputRouter final {
     };
     struct PointerHitEntry final {
         RetainedNode* node = nullptr;
+        /** Bounds in the anchor's space; scrolling never rewrites descendant entries. */
         Rect bounds;
-        std::optional<Rect> traversal_clip;
-        MotionTransform transform;
-        /** The hit bounds before `transform`, for exact tests against a rotated node. */
+        /** Hit bounds before the node's relative transform, for exact rotated-shape tests. */
         Rect local_bounds;
         /** The anchor it is placed within (see PointerAnchor), or none. */
         std::int32_t anchor = -1;
@@ -711,8 +715,8 @@ class InputRouter final {
     };
     /**
      * A presentation group's root as hit testing sees it. Entries within it are kept relative to
-     * it, so a frame that only moves anchors (a pan, a zoom, a transform animation) places their
-     * entries again from these instead of walking the tree. Its transform and clips are kept
+     * it, so a frame that only moves anchors (scroll, pan, zoom or animation) inverts the
+     * pointer into that space instead of rewriting descendants. Its transform and clips are kept
      * within its parent anchor (on the surface for one at the top).
      */
     struct PointerAnchor final {
@@ -731,16 +735,37 @@ class InputRouter final {
         /** The opacity it inherits; a fully faded anchor's content has no entries at all. */
         double inherited_opacity = 1.0;
         bool visible = true;
+        /** The scroll view's content, distinct from its stationary viewport and chrome. */
+        bool scroll_content = false;
     };
-    /** A placed node's transform within its anchor (presentation_transforms_ composes it). */
+    /** A placed node's transform within its anchor, composed only when queried. */
     struct PointerPlacement final {
-        std::uint64_t identity = 0U;
         std::int32_t anchor = -1;
         MotionTransform relative;
     };
+    /** A broad-phase region in one anchor's space; first_entry preserves painter-order priority. */
+    struct PointerHitBranch final {
+        Rect bounds;
+        std::size_t first_entry = 0U;
+        std::size_t begin = 0U;
+        std::size_t end = 0U;
+        /** Zero for a leaf; otherwise the left branch immediately follows this one. */
+        std::size_t right = 0U;
+        /** Overflowing projected regions keep exact linear hit tests instead of invalid sorting. */
+        bool bounded = true;
+    };
+    struct PointerHitRoot final {
+        std::size_t begin = 0U;
+        std::size_t end = 0U;
+        std::size_t branch = 0U;
+    };
+    [[nodiscard]] MotionTransform placed_transform(std::int32_t anchor,
+                                                    MotionTransform relative) const noexcept;
+    [[nodiscard]] MotionTransform entry_transform(const PointerHitEntry& entry) const noexcept;
+    [[nodiscard]] std::optional<Rect> entry_clip(const PointerHitEntry& entry) const noexcept;
     /**
-     * Places the entries within anchors that moved, when every change since the geometry was
-     * built is an anchor's presentation; else false, and the geometry is built again.
+     * Updates anchor transforms when arranged geometry is unchanged and every presentation
+     * change belongs to an existing anchor; else false, and the geometry is built again.
      */
     [[nodiscard]] bool place_moved_anchors() const;
 
@@ -755,6 +780,8 @@ class InputRouter final {
 
   private:
     void prepare_pointer_geometry() const;
+    /** Rebuilt with arranged geometry, never just because an anchor moved. */
+    void index_pointer_geometry() const;
     void prepare_detached_subtargets() const;
     [[nodiscard]] RetainedNode* hit_test(Point position) const noexcept;
     /** Whether `position` is inside the clip shapes of the nodes `entry` is drawn within. */
@@ -1069,6 +1096,9 @@ class InputRouter final {
         const RetainedTree* tree = nullptr;
         std::uint64_t generation = 0U;
         std::uint64_t structure_generation = 0U;
+        std::uint64_t render_generation = 0U;
+        /** Only controls with an authored template need interaction state projected into DSL. */
+        std::set<std::uint64_t> candidates;
         std::optional<std::uint64_t> focused;
         bool focus_visible = false;
         std::optional<std::uint64_t> active;
@@ -1253,6 +1283,8 @@ class InputRouter final {
     mutable const MotionRuntime* pointer_geometry_motion_ = nullptr;
     mutable std::uint64_t pointer_geometry_tree_generation_ = 0U;
     mutable std::uint64_t pointer_geometry_layout_generation_ = 0U;
+    mutable std::uint64_t pointer_geometry_generation_ = 0U;
+    mutable std::uint64_t pointer_geometry_render_generation_ = 0U;
     mutable std::uint64_t pointer_geometry_notification_generation_ = 0U;
     /** Toolbars and menus project their items from the commands: a rebuild redoes them. */
     mutable std::uint64_t pointer_geometry_command_generation_ = 0U;
@@ -1260,9 +1292,12 @@ class InputRouter final {
     mutable std::vector<PointerHitEntry> pointer_hit_entries_;
     // Node identity to its entry in pointer_hit_entries_.
     mutable std::map<std::uint64_t, std::size_t> pointer_hit_index_;
-    mutable std::unordered_map<std::uint64_t, MotionTransform> presentation_transforms_;
     mutable std::vector<PointerAnchor> pointer_anchors_;
-    mutable std::vector<PointerPlacement> pointer_placements_;
+    mutable std::unordered_map<std::uint64_t, PointerPlacement> pointer_placements_;
+    /** Root zero is surface space; every following root belongs to anchor index root - 1. */
+    mutable std::vector<PointerHitRoot> pointer_hit_roots_;
+    mutable std::vector<PointerHitBranch> pointer_hit_branches_;
+    mutable std::vector<std::size_t> pointer_hit_order_;
     mutable std::map<std::uint64_t, std::vector<WidgetSubtarget>> projected_subtargets_;
     mutable std::vector<WidgetSubtarget> detached_subtargets_;
     mutable bool pointer_geometry_ready_ = false;

@@ -19,6 +19,7 @@
 #include "ui/behavior/input.hpp"
 #include "ui/command.hpp"
 #include "ui/input/detail.hpp"
+#include "ui/presentation_geometry.hpp"
 #include "ui/status.hpp"
 #include "ui/widget/input.hpp"
 #include "ui/widget/registry.hpp"
@@ -115,10 +116,11 @@ void InputRouter::track_pointer(const PointerInputEvent& event, InputOperationRe
         if (behavior == nullptr || entry == pointer_hit_index_.end())
             continue;
         const PointerHitEntry& hit = pointer_hit_entries_[entry->second];
-        if (!(hit.bounds.width > 0.0) || !(hit.bounds.height > 0.0))
+        const Rect bounds = transform_presentation_bounds(hit.local_bounds, entry_transform(hit));
+        if (!(bounds.width > 0.0) || !(bounds.height > 0.0))
             continue;
-        const double u = (event.position.x - hit.bounds.x) / hit.bounds.width;
-        const double v = (event.position.y - hit.bounds.y) / hit.bounds.height;
+        const double u = (event.position.x - bounds.x) / bounds.width;
+        const double v = (event.position.y - bounds.y) / bounds.height;
         pointer_trackers_.insert(identity);
         BehaviorInputScope scope(*this, *node, *behavior, InputEventPhase::target, result);
         static_cast<void>(scope.emit(

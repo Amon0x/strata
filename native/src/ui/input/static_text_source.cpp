@@ -10,6 +10,7 @@
 
 #include "ui/input/detail.hpp"
 #include "ui/layout.hpp"
+#include "ui/presentation_geometry.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
 
@@ -235,10 +236,9 @@ void InputRouter::extend_sourced_static_text_selection(RetainedNode* candidate,
         return;
     // Beyond the source's viewport the pointer selects up to the edge of what is shown.
     Point point = position;
-    if (const LayoutRecord* record = layout_->find(holder->identity());
-        record != nullptr && record->clip.has_value() && record->clip->width > 0.0 &&
-        record->clip->height > 0.0) {
-        point = clamp_into(point, presented_bounds(*holder, *record->clip));
+    if (const std::optional<Rect> clip = presented_clip(*holder);
+        clip.has_value() && clip->width > 0.0 && clip->height > 0.0) {
+        point = clamp_into(point, *clip);
     }
     const auto belongs = [&](const RetainedNode& node) {
         const std::optional<StaticTextSource> located = static_text_source(node);
@@ -381,8 +381,12 @@ bool InputRouter::move_sourced_static_text_selection(RetainedNode& node,
                     layout_ != nullptr ? layout_->find(here->node->identity()) : nullptr;
                 const LayoutRecord* to =
                     layout_ != nullptr ? layout_->find(adjacent->node->identity()) : nullptr;
-                if (from != nullptr && to != nullptr)
-                    x_goal += from->content_bounds.x - to->content_bounds.x;
+                if (from != nullptr && to != nullptr) {
+                    const Point source_point{from->content_bounds.x + x_goal, from->content_bounds.y};
+                    const Point placed = transform_presentation_point(
+                        source_point, presentation_transform(*here->node));
+                    x_goal = logical_pointer_position(*adjacent->node, placed).x - to->content_bounds.x;
+                }
                 const TextLayout target =
                     text_layout_resolver_(*adjacent->node, adjacent->text, TextLayoutOptions{});
                 if (target.lines.empty()) {

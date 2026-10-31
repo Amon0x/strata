@@ -152,7 +152,7 @@ bool range_slider_pointer(WidgetInputScope& scope) {
         return false;
     const RangeSliderState state = range_slider_state(scope.node());
     const Rect track = range_slider_track(layout->bounds);
-    const double value = value_at(state, track, pointer->position.x);
+    const double value = value_at(state, track, scope.local_position(pointer->position).x);
     if (pointer->type == PointerEventType::press) {
         const double to_start = std::abs(value - state.start);
         const double to_end = std::abs(value - state.end);

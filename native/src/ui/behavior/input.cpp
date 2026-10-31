@@ -114,6 +114,10 @@ const LayoutRecord* BehaviorInputScope::layout(const RetainedNode& node) const n
     return router_.layout_ != nullptr ? router_.layout_->find(node.identity()) : nullptr;
 }
 
+Rect BehaviorInputScope::surface_bounds(const LayoutRecord& record, const Rect bounds) const noexcept {
+    return router_.layout_ != nullptr ? router_.layout_->surface_bounds(record, bounds) : Rect{};
+}
+
 RetainedNode* BehaviorInputScope::find_key(const std::string_view key) const noexcept {
     return router_.tree_ != nullptr ? router_.tree_->find_key(key) : nullptr;
 }

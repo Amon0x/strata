@@ -27,6 +27,7 @@ namespace strata::ui {
 class InputRouter;
 class WidgetInputScope;
 class WidgetInspectionScope;
+class WidgetRegistry;
 class WidgetRenderScope;
 class WidgetSemanticsScope;
 class WidgetDescriptionScope;
@@ -62,7 +63,10 @@ struct WidgetDescriptionExpansion final {
 
 using WidgetPresentHook = std::function<void(WidgetRenderScope& scope)>;
 using WidgetClipHook = std::function<std::optional<Rect>(WidgetRenderScope& scope)>;
-/** Whether a widget's overlay has anything to show now, decided without presenting it. */
+/**
+ * Whether an overlay has anything to show, without presenting it. Like retained paint hooks,
+ * changes to inputs owned by a node (including timer visibility) must mark that node dirty.
+ */
 using WidgetOverlayShown = bool (*)(const RetainedNode& node, const InputRouter& input);
 using WidgetInputHook = std::function<bool(WidgetInputScope& scope)>;
 /** Handles `<namespace>.<operation>` for a widget that is that namespace's target. */
@@ -86,6 +90,7 @@ using WidgetDescriptionHook = std::function<void(WidgetDescriptionScope& scope)>
 using WidgetParticipationHook = bool (*)(const RetainedNode& node) noexcept;
 using WidgetSubtargetsHook =
     std::function<std::vector<WidgetSubtarget>(const WidgetSubtargetContext& context)>;
+/** Pure default projection; dependencies come only from properties read through the scope. */
 using WidgetLayoutDefaultsHook = std::function<void(WidgetLayoutDefaultsScope& scope)>;
 /** Resolves a default action from the attached retained node, including its final key. */
 using WidgetDefaultActionFactory = std::function<std::shared_ptr<const runtime::ActionValue>(
@@ -293,6 +298,26 @@ struct WidgetLifecycle final {
 };
 
 /**
+ * Pass-owned default projections. Property names preserve missing-read semantics; only values
+ * the hook read and the authored layout affect reuse. No authored values survive the pass here.
+ */
+class WidgetLayoutDefaultsCache final {
+  private:
+    friend class WidgetRegistry;
+    struct Input final {
+        std::string name;
+        std::optional<runtime::ExpressionValue> value;
+    };
+    struct Projection final {
+        std::vector<Input> inputs;
+        runtime::Value layout;
+    };
+    const WidgetRegistry* registry_ = nullptr;
+    std::uint64_t revision_ = 0U;
+    std::unordered_map<const WidgetLifecycle*, Projection> projections_;
+};
+
+/**
  * Surface-owned built-in/extension lifecycle table. Generic tree engines know lifecycle phases,
  * never widget names; widget modules own their description, input, semantics, and presentation.
  */
@@ -352,13 +377,15 @@ class WidgetRegistry final {
     void register_style_schema(std::string type, ThemeStyleSchema schema);
 
     void apply_layout_defaults(std::string_view type,
-                               DescriptionNode::Properties& properties) const;
+                               DescriptionNode::Properties& properties,
+                               WidgetLayoutDefaultsCache* cache = nullptr) const;
     [[nodiscard]] WidgetDescriptionExpansion
     expand_description(WidgetDescriptionExpansion description, std::string_view state_scope,
                        const runtime::RuntimeActionRegistry& actions,
                        const RetainedDescriptionSnapshot::Node* retained = nullptr,
                        WidgetTemplateInstantiator instantiate_template = {},
-                       WidgetRetainedDependencyObserver observe_retained = {}) const;
+                       WidgetRetainedDependencyObserver observe_retained = {},
+                       WidgetLayoutDefaultsCache* layout_defaults = nullptr) const;
 
   private:
     struct TypeHash final {

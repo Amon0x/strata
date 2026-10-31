@@ -70,8 +70,7 @@ std::vector<DetachedOverlayRoot> detached_overlay_roots(
     const bool behavior_candidates,
     const DetachedOverlayPredicate& participates
 ) {
-    std::vector<DetachedOverlayRoot> result;
-    if (tree.root() == nullptr || !participates) return result;
+    if (tree.root() == nullptr || !participates) return {};
     std::vector<RetainedNode*> candidates = tree.nodes_of_types(candidate_types);
     if (behavior_candidates && !tree.behavior_nodes().empty()) {
         const std::size_t typed = candidates.size();
@@ -87,6 +86,18 @@ std::vector<DetachedOverlayRoot> detached_overlay_roots(
                            candidates.end(), by_preorder);
         candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
     }
+    return detached_overlay_roots(layout, widgets, candidates, participates);
+}
+
+std::vector<DetachedOverlayRoot> detached_overlay_roots(
+    const LayoutResult& layout,
+    const WidgetRegistry& widgets,
+    const std::span<RetainedNode* const> candidates,
+    const DetachedOverlayPredicate& participates
+) {
+    std::vector<DetachedOverlayRoot> result;
+    if (!participates)
+        return result;
     for (const RetainedNode* const node : candidates) {
         // Whether it has anything to show is cheap; whether it and every ancestor are laid out
         // is a walk.

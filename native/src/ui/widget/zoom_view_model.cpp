@@ -170,6 +170,7 @@ bool zoom_view_pointer(WidgetInputScope& scope) {
     const PointerInputEvent* pointer = scope.pointer();
     if (pointer == nullptr)
         return false;
+    const Point position = scope.local_position(pointer->position);
     const runtime::Value* pan = scope.retained(pan_value);
     const bool panning = pan != nullptr && pan->object() != nullptr &&
                          finite(pan->field("pointerId"), -1.0) == pointer->pointer_id;
@@ -191,8 +192,8 @@ bool zoom_view_pointer(WidgetInputScope& scope) {
             pan_value,
             runtime::Value(Fields{
                 {"pointerId", runtime::Value(static_cast<double>(pointer->pointer_id))},
-                {"startX", runtime::Value(pointer->position.x)},
-                {"startY", runtime::Value(pointer->position.y)},
+                {"startX", runtime::Value(position.x)},
+                {"startY", runtime::Value(position.y)},
                 {"viewX", runtime::Value(view.x)},
                 {"viewY", runtime::Value(view.y)},
                 {"middle", runtime::Value(middle)},
@@ -222,10 +223,10 @@ bool zoom_view_pointer(WidgetInputScope& scope) {
         }
         // Read before the session is replaced, which releases what `pan` points to.
         const ZoomViewport next{
-            finite(pan->field("viewX"), 0.0) + pointer->position.x -
-                finite(pan->field("startX"), pointer->position.x),
-            finite(pan->field("viewY"), 0.0) + pointer->position.y -
-                finite(pan->field("startY"), pointer->position.y),
+            finite(pan->field("viewX"), 0.0) + position.x -
+                finite(pan->field("startX"), position.x),
+            finite(pan->field("viewY"), 0.0) + position.y -
+                finite(pan->field("startY"), position.y),
             zoom_view_current(scope.node()).zoom,
         };
         if (!panned) {
@@ -277,7 +278,8 @@ bool zoom_view_event(WidgetInputScope& scope) {
         return true;
     }
     const Point origin = content_origin(scope);
-    const Point anchor{wheel.position.x - origin.x, wheel.position.y - origin.y};
+    const Point position = scope.local_position(wheel.position);
+    const Point anchor{position.x - origin.x, position.y - origin.y};
     const double zoom = limits(scope).clamp(base.zoom * std::pow(wheel_zoom_step, wheel.delta_y));
     ease_to(scope, zoom_view_about(current, anchor, zoom), anchor);
     scope.consume();

@@ -21,6 +21,7 @@ struct ActionValue;
 namespace strata::ui {
 
 class CommandIndex;
+class InputRouter;
 class NotificationService;
 class RetainedNode;
 class RetainedTree;
@@ -66,6 +67,13 @@ using DetachedOverlayPredicate = std::function<bool(const RetainedNode&)>;
     const WidgetRegistry& widgets,
     std::span<const std::string_view> candidate_types,
     bool behavior_candidates,
+    const DetachedOverlayPredicate& participates
+);
+/** Orders an already indexed candidate set, applying the same layout and visibility checks. */
+[[nodiscard]] std::vector<DetachedOverlayRoot> detached_overlay_roots(
+    const LayoutResult& layout,
+    const WidgetRegistry& widgets,
+    std::span<RetainedNode* const> candidates,
     const DetachedOverlayPredicate& participates
 );
 
@@ -115,7 +123,7 @@ struct WidgetSubtarget final {
     bool has_children = false;
     std::optional<bool> checked = std::nullopt;
     std::optional<std::uint64_t> notification_id = std::nullopt;
-    /** Retained node whose animated presentation determines whether this region can be hit. */
+    /** Coordinate owner of bounds/shape; absent means the widget, or surface for detached output. */
     std::optional<std::uint64_t> presentation_identity = std::nullopt;
     /** Presented ancestor clip resolved for an authored detached target. */
     std::optional<Rect> presentation_clip = std::nullopt;
@@ -135,6 +143,7 @@ struct WidgetSubtargetContext final {
     const LayoutResult& layout;
     /** The node's own layout record. */
     const LayoutRecord& record;
+    const InputRouter& input;
     const CommandIndex* commands = nullptr;
     const WidgetTextWidthResolver* text_width = nullptr;
     const WidgetTextLayoutResolver* text_layout = nullptr;

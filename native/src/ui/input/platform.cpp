@@ -214,7 +214,7 @@ std::optional<Rect> InputRouter::capture_rectangle(const std::string_view key) c
     Rect bounds = presented_bounds(*node, record->bounds);
     if (const auto entry = pointer_hit_index_.find(node->identity());
         entry != pointer_hit_index_.end()) {
-        if (const std::optional<Rect>& clip = pointer_hit_entries_[entry->second].traversal_clip;
+        if (const std::optional<Rect> clip = entry_clip(pointer_hit_entries_[entry->second]);
             clip.has_value()) {
             bounds = bounds.clip_intersection(*clip);
         }

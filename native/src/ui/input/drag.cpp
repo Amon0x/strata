@@ -276,13 +276,15 @@ InputOperationResult InputRouter::drag(
     if (pressed_pointer_targets_.contains(0)) {
         throw std::logic_error("deterministic drag cannot reuse an active pointer");
     }
+    const Rect source_bounds = presented_bounds(*source_node, source_layout->bounds);
+    const Rect destination_bounds = presented_bounds(*destination_node, destination_layout->bounds);
     const Point start{
-        source_layout->bounds.x + source_layout->bounds.width * 0.5,
-        source_layout->bounds.y + source_layout->bounds.height * 0.5,
+        source_bounds.x + source_bounds.width * 0.5,
+        source_bounds.y + source_bounds.height * 0.5,
     };
     const Point end{
-        destination_layout->bounds.x + destination_layout->bounds.width * 0.5,
-        destination_layout->bounds.y + destination_layout->bounds.height * 0.5,
+        destination_bounds.x + destination_bounds.width * 0.5,
+        destination_bounds.y + destination_bounds.height * 0.5,
     };
     InputOperationResult result;
     append(result, pointer(PointerInputEvent{start, PointerEventType::move, 0, 0}));

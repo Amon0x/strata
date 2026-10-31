@@ -1,6 +1,7 @@
 #include <strata/render_packet.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -270,6 +271,68 @@ void test_rounded_clip_batches_round_trip(const std::filesystem::path& resources
               content_draw != nullptr && content_draw->rounded_clips.empty() &&
               std::holds_alternative<host::ContentEffectEndBatch>(packet.batches[5U]),
           "content isolation applied an inherited rounded clip to both input and composite");
+}
+
+void test_clips_keep_their_coordinate_owner(const std::filesystem::path& resources) {
+    using namespace strata;
+    const auto text = ui::TextEngine::load_control_font(
+        resources, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
+    font::GlyphAtlas atlas("scroll-clip-packet");
+    ui::HostRenderPacketCache cache;
+    host::RenderPacketDecoder decoder;
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::ClipPushRenderCommand{
+        ui::Rect{0.0, 0.0, 100.0, 80.0}, ui::CornerRadii::all(8.0)});
+    commands.append(ui::GroupPushRenderCommand{1U});
+    commands.append(ui::ClipPushRenderCommand{
+        ui::Rect{0.0, 100.0, 100.0, 60.0}, ui::CornerRadii::all(4.0)});
+    commands.append(ui::GroupPushRenderCommand{2U});
+    commands.append(ui::SolidRectRenderCommand{
+        ui::Rect{0.0, 120.0, 50.0, 40.0}, ui::RenderColor{255U, 0U, 0U, 255U}});
+    commands.append(ui::GroupPopRenderCommand{});
+    commands.append(ui::ClipPopRenderCommand{});
+    commands.append(ui::GroupPopRenderCommand{});
+    commands.append(ui::ClipPopRenderCommand{});
+    std::uint64_t epoch = 0U;
+    for (std::uint64_t frame = 1U; frame <= 4U; ++frame) {
+        const double step = static_cast<double>(frame);
+        ui::RenderGroup outer{.index = 1U, .translate_y = -90.0 - 10.0 * step};
+        if (frame >= 3U) {
+            outer.shear_x = 0.1 * step;
+            outer.project_y = 0.0005 * step;
+        }
+        commands.set_groups({outer, ui::RenderGroup{.index = 2U, .parent = 1U, .translate_y = -20.0}});
+        const host::RenderPacket& packet = decoder.decode(
+            cache.encode(commands, frame, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0));
+        const auto* draw = std::get_if<host::DrawBatch>(&packet.batches.at(0U));
+        check(draw != nullptr && draw->rounded_clips.size() == 2U,
+              "nested scroll clips lost the fixed viewport or moving content clip");
+        const auto mapped = [](const host::RoundedClip& clip, const double x, const double y) {
+            const double divisor = clip.inverse_projection[0] * x +
+                                   clip.inverse_projection[1] * y + clip.inverse_projection[2];
+            return ui::Point{
+                (clip.inverse_transform[0] * x + clip.inverse_transform[1] * y +
+                 clip.inverse_transform[2]) / divisor,
+                (clip.inverse_transform[3] * x + clip.inverse_transform[4] * y +
+                 clip.inverse_transform[5]) / divisor};
+        };
+        const ui::Point fixed = mapped(draw->rounded_clips[0], 10.0, 10.0);
+        check(std::abs(fixed.x - 10.0) < 0.0001 && std::abs(fixed.y - 10.0) < 0.0001,
+              "a content scroll moved the viewport clip");
+        const host::PresentationGroup& owner = packet.groups.at(1U);
+        const ui::Point local = mapped(draw->rounded_clips[1],
+                                      owner.place_x(10.0, 120.0), owner.place_y(10.0, 120.0));
+        check(std::abs(local.x - 10.0) < 0.0001 && std::abs(local.y - 120.0) < 0.0001,
+              "a nested draw's transform replaced its clip's coordinate owner");
+        // Entering perspective changes text's raster eligibility; moving within either
+        // presentation class must keep the geometry already prepared for that class.
+        if (frame == 2U || frame == 4U) {
+            check(packet.geometry_epoch == epoch && !packet.full_geometry_payload,
+                  "moving a clip's group rebuilt retained draw geometry at frame " +
+                      std::to_string(frame));
+        }
+        epoch = packet.geometry_epoch;
+    }
 }
 
 void test_large_scale_rounded_clip_round_trip(const std::filesystem::path& resources) {
@@ -1059,6 +1122,7 @@ int strata_test_render_packet(const int argument_count, const char* const* const
         test_effect_batches_round_trip(arguments[1]);
         test_layer_composite_round_trip(arguments[1]);
         test_rounded_clip_batches_round_trip(arguments[1]);
+        test_clips_keep_their_coordinate_owner(arguments[1]);
         test_large_scale_rounded_clip_round_trip(arguments[1]);
         test_invalid_effect_refresh_rate_is_rejected(arguments[1]);
         test_invalid_effect_backdrop_source_is_rejected(arguments[1]);

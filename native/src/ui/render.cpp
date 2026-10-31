@@ -1,14 +1,20 @@
 #include "ui/render.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iterator>
 #include <limits>
+#include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "ui/behavior/backdrop.hpp"
 #include "ui/behavior/presentation.hpp"
@@ -340,13 +346,6 @@ void append_fragment(RenderCommandBuffer& output, const std::vector<RenderComman
     return first->clip_intersection(*second);
 }
 
-[[nodiscard]] std::vector<RenderCommand>
-command_slice(const RenderCommandBuffer& commands, const std::size_t begin, const std::size_t end) {
-    const RenderCommandView& source = commands.commands();
-    return std::vector<RenderCommand>(source.begin() + static_cast<std::ptrdiff_t>(begin),
-                                      source.begin() + static_cast<std::ptrdiff_t>(end));
-}
-
 } // namespace
 
 LogicalGlyphRun::LogicalGlyphRun() : glyphs_(std::make_shared<const std::vector<LogicalGlyph>>()) {}
@@ -424,6 +423,7 @@ bool RenderEngine::Impl::base_matches(const RetainedTree& tree, const LayoutResu
                                       const RenderGenerationToken& generations) const noexcept {
     return retained_base_generations.has_value() && *retained_base_generations == generations &&
            tree.dirty_count() == 0U && motion.active_count() == 0U &&
+           retained_render_generation == tree.render_change_generation() &&
            retained_tree_generation == tree.generation() &&
            retained_layout_generation == layout.generation &&
            retained_presentation_generation ==
@@ -508,8 +508,12 @@ bool RenderEngine::Impl::presentation_frame(const RetainedTree& tree, const Layo
         was.tone = update.tone;
     }
     std::vector<RenderGroup> table;
-    table.reserve(groups.size());
+    table.reserve(groups.size() + scroll_groups.size());
     for (const auto& [identity, group] : groups) {
+        static_cast<void>(identity);
+        table.push_back(group);
+    }
+    for (const auto& [identity, group] : scroll_groups) {
         static_cast<void>(identity);
         table.push_back(group);
     }
@@ -517,6 +521,7 @@ bool RenderEngine::Impl::presentation_frame(const RetainedTree& tree, const Layo
     retained_base_commands.set_groups(std::move(table));
     retained_presentation_generation =
         tree.root() != nullptr ? tree.root()->subtree_presentation_generation() : 0U;
+    retained_render_generation = tree.render_change_generation();
     // Composition holds the old table: compose again over the updated base.
     retained_composed_commands.clear();
     return true;
@@ -529,15 +534,26 @@ void RenderEngine::Impl::retain_base(const RetainedTree& tree, const LayoutResul
     retained_base_commands = commands;
     retained_base_generations = generations;
     retained_tree_generation = tree.generation();
+    retained_structure_generation = tree.structure_generation();
     retained_layout_generation = layout.generation;
     retained_presentation_generation =
         tree.root() != nullptr ? tree.root()->subtree_presentation_generation() : 0U;
     retained_status_generation = input.status_feedback().generation();
+    retained_render_generation = tree.render_change_generation();
+    retained_geometry_generation = layout.geometry_generation;
 }
 
-std::vector<RenderCommand> RenderEngine::snapshot_subtree(const RetainedNode& node) const {
+std::vector<RenderCommand> RenderEngine::snapshot_subtree(
+    const RetainedNode& node, const LayoutResult& layout) const {
     std::vector<RenderCommand> result;
-    const auto collect = [this, &result](const auto& self, const RetainedNode& current) -> void {
+    const auto collect = [this, &result, &node, &layout](
+                             const auto& self, const RetainedNode& current) -> void {
+        const LayoutRecord* record = layout.find(current.identity());
+        const MotionTransform scroll = record != nullptr && &current != &node
+            ? scroll_presentation_transform(*record, layout) : MotionTransform{};
+        if (!scroll.identity())
+            result.emplace_back(TransformPushRenderCommand{
+                1.0, 0.0, scroll.translate_x, 0.0, 1.0, scroll.translate_y});
         const auto found = implementation_->fragments.find(current.identity());
         if (found != implementation_->fragments.end() &&
             Impl::fragment_generations_match(found->second.node_generations,
@@ -558,8 +574,14 @@ std::vector<RenderCommand> RenderEngine::snapshot_subtree(const RetainedNode& no
                 result.emplace_back(TransformPopRenderCommand{});
             }
         }
+        if (record != nullptr && record->local_clip.has_value())
+            result.emplace_back(ClipPushRenderCommand{*record->local_clip});
         for (const auto& child : current.children())
             self(self, *child);
+        if (record != nullptr && record->local_clip.has_value())
+            result.emplace_back(ClipPopRenderCommand{});
+        if (!scroll.identity())
+            result.emplace_back(TransformPopRenderCommand{});
     };
     collect(collect, node);
     return result;
@@ -574,17 +596,58 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                      RenderCommandBuffer& output) {
     output.clear();
     RenderOperationCounters counters;
+    const bool journal_complete =
+        implementation_->journal_tree == &tree &&
+        implementation_->journal_generation >= tree.render_changes_since_generation() &&
+        implementation_->retained_structure_generation == tree.structure_generation() &&
+        implementation_->retained_layout_generation >= layout.changes_since_generation;
+    implementation_->journal_tree = &tree;
+    implementation_->journal_generation = tree.render_change_generation();
     const auto collect_overlays = [&]() {
-        return detached_overlay_roots(
-            tree, layout, widgets, widgets.detached_overlay_types(), true,
-            [&widgets, &behaviors, &input](const RetainedNode& node) {
+        const auto participates = [&widgets, &behaviors, &input](const RetainedNode& node) {
                 const WidgetLifecycle* lifecycle = widgets.find(node.description().type);
                 return (lifecycle != nullptr && lifecycle->present.overlay != nullptr &&
                         lifecycle->present.detached_overlay &&
                         (lifecycle->present.overlay_shown == nullptr ||
                          lifecycle->present.overlay_shown(node, input))) ||
                        has_behavior_overlay(behaviors, node, input, true);
-            });
+        };
+        auto& indexed = implementation_->overlay_candidates;
+        if (!journal_complete ||
+            implementation_->overlay_command_generation != commands.generation() ||
+            implementation_->retained_status_generation != input.status_feedback().generation()) {
+            std::vector<DetachedOverlayRoot> roots = detached_overlay_roots(
+                tree, layout, widgets, widgets.detached_overlay_types(), true, participates);
+            indexed.clear();
+            for (const DetachedOverlayRoot& root : roots)
+                indexed.insert(root.node->identity());
+            implementation_->overlay_command_generation = commands.generation();
+            return roots;
+        }
+        const auto reconsider = [&](const std::uint64_t identity) {
+            const RetainedNode* node = tree.find_identity(identity);
+            if (node != nullptr && participates(*node))
+                indexed.insert(identity);
+            else
+                indexed.erase(identity);
+        };
+        for (const std::uint64_t identity : tree.render_dirty_nodes())
+            reconsider(identity);
+        // Behavior overlays can read transient drag sessions rather than node-owned state.
+        // Preserve their per-frame predicate contract; ordinary controls are not in this index.
+        for (const RetainedNode* node : tree.behavior_nodes())
+            reconsider(node->identity());
+        if (implementation_->retained_layout_generation != layout.generation) {
+            for (const std::uint64_t identity : layout.changed_records)
+                reconsider(identity);
+        }
+        std::vector<RetainedNode*> candidates;
+        candidates.reserve(indexed.size());
+        for (const std::uint64_t identity : indexed) {
+            if (RetainedNode* node = tree.find_identity(identity); node != nullptr)
+                candidates.push_back(node);
+        }
+        return detached_overlay_roots(layout, widgets, candidates, participates);
     };
     const auto append_detached_overlays = [&](const std::vector<DetachedOverlayRoot>& overlays) {
         for (const DetachedOverlayRoot& overlay_root : overlays) {
@@ -606,7 +669,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     };
 
     if (implementation_->base_matches(tree, layout, input, motion, generations) ||
-        implementation_->presentation_frame(tree, layout, input, motion, widgets, generations)) {
+        (journal_complete &&
+         implementation_->presentation_frame(tree, layout, input, motion, widgets, generations))) {
         // Overlays are drawn into a scratch stream first: when they match the last frame's, the
         // composed stream is shared rather than the whole base copied again.
         output = RenderCommandBuffer{};
@@ -620,7 +684,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             // The base is read where it is, its overlays after it: nothing is copied.
             RenderCommandBuffer overlays = std::move(output);
             output = implementation_->retained_base_commands;
-            output.append(overlays.commands().segments());
+            output.append(overlays.commands(), 0U, overlays.size());
             implementation_->retained_composed_commands = output;
             retained_overlays = std::move(overlays);
         } else {
@@ -682,6 +746,159 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     // clips of its own subtree.
     bool drawing_flights = false;
     implementation_->flights_last_frame = flights_now;
+    const bool sparse_frame = journal_complete && !compose_fresh &&
+        implementation_->retained_base_generations == generations &&
+        implementation_->retained_status_generation == input.status_feedback().generation();
+    std::unordered_map<std::uint64_t, std::vector<std::uint64_t>> changed_children;
+    if (sparse_frame) {
+        std::unordered_set<std::uint64_t> edges;
+        const auto record_path = [&](const std::uint64_t identity) {
+            const RetainedNode* child = tree.find_identity(identity);
+            for (; child != nullptr && child->parent() != nullptr; child = child->parent()) {
+                if (!edges.insert(child->identity()).second)
+                    break;
+                changed_children[child->parent()->identity()].push_back(child->identity());
+            }
+        };
+        for (const std::uint64_t identity : tree.render_dirty_nodes())
+            record_path(identity);
+        if (implementation_->retained_layout_generation != layout.generation) {
+            for (const std::uint64_t identity : layout.changed_records)
+                record_path(identity);
+        }
+    }
+    using CompositionPlan = Impl::CachedFragment::CompositionPlan;
+    const auto child_changes = [&](const RetainedNode& node, const CompositionPlan& plan)
+        -> std::optional<std::vector<std::size_t>> {
+        if (!sparse_frame || plan.generations != generations ||
+            plan.subtree_status_generation != input.status_feedback().generation() ||
+            !plan.subtree_commands.has_value() || plan.subtree_translation != Point{} ||
+            plan.child_lengths.size() != plan.ordered_children.size() ||
+            plan.child_contributions.size() != plan.ordered_children.size() ||
+            plan.ordered_child_layout_generations.size() != plan.ordered_children.size())
+            return std::nullopt;
+        std::vector<std::size_t> positions;
+        if (const auto changed = changed_children.find(node.identity());
+            changed != changed_children.end()) {
+            positions.reserve(changed->second.size());
+            for (const std::uint64_t identity : changed->second) {
+                const std::optional<std::size_t> position = plan.child_position(identity);
+                const LayoutRecord* record = layout.find(identity);
+                if (!position.has_value() || record == nullptr ||
+                    (record->render_generation != plan.ordered_child_layout_generations[*position] &&
+                     layout.geometry_generation != implementation_->retained_geometry_generation))
+                    return std::nullopt;
+                positions.push_back(*position);
+            }
+            std::ranges::sort(positions);
+        }
+        return positions;
+    };
+    const auto scroll_child = [&layout](const std::uint64_t identity) {
+        const LayoutRecord* record = layout.find(identity);
+        return record != nullptr && record->scroll_content;
+    };
+    const auto draw_child = [&](const auto& self, const RetainedNode& child,
+                                const bool render_portals, const Impl::ChildContext& context,
+                                const bool scrolling, const bool begin_scroll,
+                                const bool end_scroll) {
+        if (!scrolling) {
+            self(self, child, render_portals, context.clip, context.transform,
+                 context.opacity, context.group);
+            return;
+        }
+        if (begin_scroll) {
+            if (context.scroll_group != 0U)
+                output.append(GroupPushRenderCommand{context.scroll_group});
+            else
+                output.append(TransformPushRenderCommand{
+                    1.0, 0.0, context.scroll_transform.translate_x,
+                    0.0, 1.0, context.scroll_transform.translate_y});
+            ++counters.commands_emitted;
+        }
+        self(self, child, render_portals, std::nullopt,
+             context.scroll_group != 0U ? MotionTransform{}
+                 : concatenate_presentation_transform(context.transform, context.scroll_transform),
+             context.scroll_group != 0U ? 1.0 : context.opacity,
+             context.scroll_group != 0U ? context.scroll_group : context.group);
+        if (end_scroll) {
+            if (context.scroll_group != 0U)
+                output.append(GroupPopRenderCommand{});
+            else
+                output.append(TransformPopRenderCommand{});
+            ++counters.commands_emitted;
+        }
+    };
+    const auto append_changed_children =
+        [&](const auto& self, CompositionPlan& plan, const std::span<const std::size_t> positions,
+            const bool render_portals) {
+        using Contribution = CompositionPlan::ChildContribution;
+        struct Update final {
+            std::size_t index;
+            std::size_t length;
+            std::uint64_t layout_generation;
+            Contribution contribution;
+        };
+        std::vector<Update> updates;
+        updates.reserve(positions.size());
+        std::size_t cursor = plan.prefix_size;
+        const std::size_t end = plan.child_offset(plan.ordered_children.size());
+        counters.fragments_reused += plan.subtree_node_count - 1U;
+        counters.overlays_rendered += plan.subtree_overlay_count -
+                                     (plan.local_overlay_rendered ? 1U : 0U);
+        for (const std::size_t index : positions) {
+            const std::size_t begin = plan.child_offset(index);
+            output.append(*plan.subtree_commands, cursor, begin);
+            counters.commands_emitted += begin - cursor;
+            const Contribution previous = plan.child_contributions[index];
+            counters.fragments_reused -= previous.nodes;
+            counters.overlays_rendered -= previous.overlays;
+            const std::uint64_t identity = plan.ordered_children[index];
+            const RetainedNode* child = tree.find_identity(identity);
+            const LayoutRecord* record = layout.find(identity);
+            if (child == nullptr || record == nullptr)
+                throw std::logic_error("retained render slice referenced a detached child");
+            const std::size_t before = output.size();
+            draw_child(self, *child, render_portals, plan.child_context, record->scroll_content,
+                       index == 0U || !scroll_child(plan.ordered_children[index - 1U]),
+                       index + 1U == plan.ordered_children.size() ||
+                           !scroll_child(plan.ordered_children[index + 1U]));
+            Contribution contribution{.translation_safe = false};
+            if (const auto fragment = implementation_->fragments.find(identity);
+                fragment != implementation_->fragments.end() &&
+                fragment->second.composition.has_value()) {
+                const CompositionPlan& child_plan = *fragment->second.composition;
+                contribution = Contribution{
+                    child_plan.subtree_node_count, child_plan.subtree_overlay_count,
+                    child_plan.subtree_contains_clip, child_plan.subtree_contains_group,
+                    child_plan.subtree_translation_safe};
+            }
+            updates.push_back(Update{index, output.size() - before, record->render_generation,
+                                      contribution});
+            cursor = begin + plan.child_lengths[index];
+        }
+        output.append(*plan.subtree_commands, cursor, end);
+        counters.commands_emitted += end - cursor;
+        for (const Update& update : updates) {
+            const Contribution previous = plan.child_contributions[update.index];
+            const Contribution& next = update.contribution;
+            plan.subtree_node_count = plan.subtree_node_count - previous.nodes + next.nodes;
+            plan.subtree_overlay_count = plan.subtree_overlay_count - previous.overlays + next.overlays;
+            plan.children_with_clip = plan.children_with_clip - (previous.contains_clip ? 1U : 0U) +
+                                      (next.contains_clip ? 1U : 0U);
+            plan.children_with_group = plan.children_with_group - (previous.contains_group ? 1U : 0U) +
+                                       (next.contains_group ? 1U : 0U);
+            plan.children_unsafe_translation = plan.children_unsafe_translation -
+                (previous.translation_safe ? 0U : 1U) + (next.translation_safe ? 0U : 1U);
+            plan.child_contributions[update.index] = next;
+            plan.ordered_child_layout_generations[update.index] = update.layout_generation;
+            plan.resize_child(update.index, update.length);
+        }
+        plan.subtree_contains_clip = plan.local_contains_clip || plan.children_with_clip != 0U;
+        plan.subtree_contains_group = plan.local_contains_group || plan.children_with_group != 0U;
+        plan.subtree_translation_safe = plan.local_translation_safe &&
+            plan.children_unsafe_translation == 0U && !plan.subtree_contains_group;
+    };
     const auto visit = [&](const auto& self, const RetainedNode& node, const bool render_portals,
                            const std::optional<Rect> inherited_render_clip,
                            const MotionTransform inherited_transform,
@@ -698,6 +915,9 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         const bool hovered = input.hovered(node.identity());
         const bool active = input.active(node.identity());
         auto found = implementation_->fragments.find(node.identity());
+        std::optional<std::vector<std::size_t>> changed_positions;
+        if (found != implementation_->fragments.end() && found->second.composition.has_value())
+            changed_positions = child_changes(node, *found->second.composition);
         if (!compose_fresh && found != implementation_->fragments.end() &&
             found->second.composition.has_value()) {
             Impl::CachedFragment::CompositionPlan& retained = *found->second.composition;
@@ -714,7 +934,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                     ++counters.commands_emitted;
                 }
                 const std::size_t begin = output.size();
-                output.append(*plan.subtree_commands);
+                output.append(*plan.subtree_commands, 0U, plan.subtree_commands->size());
                 counters.commands_emitted += output.size() - begin;
                 if (plan.subtree_translation != Point{}) {
                     output.append(TransformPopRenderCommand{});
@@ -789,47 +1009,39 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             const bool external_matches =
                 !retained.depends_on_status_feedback ||
                 retained.external_generation == input.status_feedback().generation();
-            bool child_layout_matches = retained.ordered_children.size() ==
-                                        retained.ordered_child_layout_generations.size();
-            for (std::size_t index = 0U;
-                 child_layout_matches && index < retained.ordered_children.size(); ++index) {
-                const LayoutRecord* child_record = layout.find(retained.ordered_children[index]);
-                child_layout_matches =
-                    tree.find_identity(retained.ordered_children[index]) != nullptr &&
-                    child_record != nullptr &&
-                    child_record->render_generation ==
-                        retained.ordered_child_layout_generations[index];
-            }
-            if (retained.generations == generations &&
+            if (changed_positions.has_value() && retained.generations == generations &&
                 retained.node_render_generation == node.render_generation() &&
                 retained.node_presentation_generation == node.presentation_generation() &&
                 retained.layout_render_generation == record->render_generation &&
-                external_matches && child_layout_matches && retained.focused == focused &&
+                external_matches && retained.focused == focused &&
                 retained.focus_visible == focus_visible && retained.hovered == hovered &&
                 retained.active == active &&
                 retained.inherited_render_clip == inherited_render_clip &&
                 retained.inherited_transform == inherited_transform &&
                 retained.inherited_opacity == inherited_opacity &&
                 retained.inherited_group == inherited_group &&
-                retained.render_portals == render_portals &&
-                retained.subtree_translation == Point{}) {
+                retained.render_portals == render_portals) {
                 ++counters.fragments_reused;
-                append_fragment(output, retained.prefix, counters);
-                for (const std::uint64_t child_identity : retained.ordered_children) {
-                    const RetainedNode* child = tree.find_identity(child_identity);
-                    if (child == nullptr) {
-                        throw std::logic_error(
-                            "retained render composition referenced a detached child");
-                    }
-                    self(self, *child, render_portals, retained.child_render_clip,
-                         retained.effective_transform, retained.descendant_opacity,
-                         retained.child_group);
-                }
-                append_fragment(output, retained.suffix, counters);
-                if (retained.local_overlay_rendered)
-                    ++counters.overlays_rendered;
+                counters.overlays_rendered += retained.local_overlay_rendered ? 1U : 0U;
+                const std::size_t begin = output.size();
+                const std::size_t suffix = retained.child_offset(retained.ordered_children.size());
+                output.append(*retained.subtree_commands, 0U, retained.prefix_size);
+                counters.commands_emitted += retained.prefix_size;
+                append_changed_children(self, retained, *changed_positions, render_portals);
+                output.append(*retained.subtree_commands, suffix, retained.subtree_commands->size());
+                counters.commands_emitted += retained.subtree_commands->size() - suffix;
+                retained.subtree_node_render_generation = node.subtree_render_generation();
+                retained.subtree_presentation_generation = node.subtree_presentation_generation();
+                retained.subtree_layout_render_generation = record->subtree_render_generation;
+                retained.subtree_status_generation = input.status_feedback().generation();
+                retained.subtree_commands = output.commands().slice_view(begin, output.size());
                 return;
             }
+        }
+        std::optional<CompositionPlan> previous_composition;
+        if (changed_positions.has_value()) {
+            previous_composition = std::move(*found->second.composition);
+            found->second.composition.reset();
         }
         const WidgetLifecycle* lifecycle = widgets.find(node.description().type);
         const bool depends_on_status_feedback =
@@ -887,6 +1099,12 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
              presentation_in_depth(node, motion) || parent_content_view(node).has_value())) {
             group = implementation_->acquire_group(node.identity());
         }
+        if (const auto prior = implementation_->presented.find(node.identity());
+            prior != implementation_->presented.end() && prior->second.grouped != (group != 0U))
+            implementation_->group_membership_dirty = true;
+        if (record->kind != LayoutKind::scroll &&
+            implementation_->scroll_groups.contains(node.identity()))
+            implementation_->group_membership_dirty = true;
         implementation_->presented.insert_or_assign(
             node.identity(),
             Impl::Presented{transform, local_opacity, tone, group != 0U, inherited_transform,
@@ -940,8 +1158,11 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             found->second.external_generation == external_generation &&
             found->second.focused == focused && found->second.focus_visible == focus_visible &&
             found->second.hovered == hovered && found->second.active == active;
+        const bool fragment_children_match = previous_composition.has_value() &&
+            found->second.layout.bounds == previous_composition->subtree_layout.bounds;
         const bool retained_layout_matches =
-            retained_state_matches && Impl::matches(found->second.layout, node, *record, layout);
+            retained_state_matches && Impl::matches(found->second.layout, node, *record, layout,
+                                                     fragment_children_match);
         Point fragment_translation{};
         bool has_fragment_translation = false;
         if (retained_state_matches && !retained_layout_matches) {
@@ -966,10 +1187,15 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 focus_visible,
                 hovered,
                 active,
-                Impl::snapshot(node, *record, layout),
+                Impl::snapshot(node, *record, layout,
+                    fragment_children_match ? std::move(found->second.layout)
+                                            : Impl::LayoutSnapshot{},
+                    fragment_children_match),
                 std::move(fragment),
                 {},
             };
+            if (found != implementation_->fragments.end())
+                next.presentation = std::move(found->second.presentation);
             found =
                 implementation_->fragments.insert_or_assign(node.identity(), std::move(next)).first;
             ++counters.fragments_built;
@@ -1169,53 +1395,100 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             ++counters.commands_emitted;
         }
         const std::size_t composition_prefix_end = output.size();
-        // A child flying in from a shared element's place paints above its siblings.
-        const auto child_z_index = [&layout, &motion](const RetainedNode& child) {
-            const LayoutRecord* child_layout = layout.find(child.identity());
-            const bool flying = motion.in_shared_flight(child.identity());
-            return child_layout != nullptr
-                       ? std::tuple{child_layout->z_index, child_layout->positioned, flying}
-                       : std::tuple{0, false, flying};
-        };
-        const auto& retained_children = node.children();
-        bool children_already_ordered = true;
-        for (std::size_t index = 1U; index < retained_children.size(); ++index) {
-            if (child_z_index(*retained_children[index - 1U]) >
-                child_z_index(*retained_children[index])) {
-                children_already_ordered = false;
-                break;
+        std::uint32_t scroll_group = 0U;
+        MotionTransform scroll_transform;
+        if (record->kind == LayoutKind::scroll) {
+            scroll_group = implementation_->acquire_group(node.identity(), true);
+            scroll_transform.translate_x = -record->scroll_offset.x;
+            scroll_transform.translate_y = -record->scroll_offset.y;
+            const MotionTransform placed =
+                concatenate_presentation_transform(effective_transform, scroll_transform);
+            if (scroll_group != 0U) {
+                implementation_->scroll_groups.insert_or_assign(
+                    node.identity(),
+                    RenderGroup{scroll_group, group != 0U ? group : inherited_group,
+                                placed.scale_x, placed.scale_y, placed.translate_x,
+                                placed.translate_y, child_descendant_opacity, -1.0,
+                                placed.shear_x, placed.shear_y, placed.project_x,
+                                placed.project_y, placed.project_w});
             }
         }
-        std::vector<const RetainedNode*> ordered_children;
-        ordered_children.reserve(retained_children.size());
-        for (const auto& child : retained_children)
-            ordered_children.push_back(child.get());
-        if (!children_already_ordered) {
-            std::ranges::stable_sort(ordered_children, [&child_z_index](const RetainedNode* left,
-                                                                        const RetainedNode* right) {
-                return child_z_index(*left) < child_z_index(*right);
-            });
-        }
-        for (const RetainedNode* child : ordered_children) {
-            if (flights_now && !render_portals && motion.in_shared_flight(child->identity())) {
-                flights.push_back(Flight{child, effective_transform, child_descendant_opacity,
-                                         group != 0U ? group : inherited_group});
-                continue;
-            }
-            self(self, *child, render_portals, child_render_clip, effective_transform,
-                 child_descendant_opacity, group != 0U ? group : inherited_group);
-        }
+        const Impl::ChildContext child_context{
+            child_render_clip, effective_transform, child_descendant_opacity,
+            group != 0U ? group : inherited_group, scroll_group,
+            scroll_group == 0U ? scroll_transform : MotionTransform{}};
+        const bool reuse_children = previous_composition.has_value() &&
+            previous_composition->child_context == child_context &&
+            previous_composition->render_portals == render_portals;
+        std::vector<std::size_t> child_lengths;
         std::vector<std::uint64_t> ordered_child_layout_generations;
         std::vector<std::uint64_t> ordered_child_identities;
-        ordered_child_identities.reserve(ordered_children.size());
-        ordered_child_layout_generations.reserve(ordered_children.size());
-        for (const RetainedNode* child : ordered_children) {
-            ordered_child_identities.push_back(child->identity());
-            const LayoutRecord* child_record = layout.find(child->identity());
-            ordered_child_layout_generations.push_back(
-                child_record != nullptr ? child_record->render_generation : 0U);
+        if (reuse_children) {
+            append_changed_children(self, *previous_composition, *changed_positions, render_portals);
+            ordered_child_identities = std::move(previous_composition->ordered_children);
+            ordered_child_layout_generations =
+                std::move(previous_composition->ordered_child_layout_generations);
+        } else {
+            // A child flying in from a shared element's place paints above its siblings.
+            const auto child_z_index = [&layout, &motion](const RetainedNode& child) {
+                const LayoutRecord* child_layout = layout.find(child.identity());
+                const bool flying = motion.in_shared_flight(child.identity());
+                return child_layout != nullptr
+                           ? std::tuple{child_layout->z_index, child_layout->positioned, flying}
+                           : std::tuple{0, false, flying};
+            };
+            const auto& retained_children = node.children();
+            bool children_already_ordered = true;
+            for (std::size_t index = 1U; index < retained_children.size(); ++index) {
+                if (child_z_index(*retained_children[index - 1U]) >
+                    child_z_index(*retained_children[index])) {
+                    children_already_ordered = false;
+                    break;
+                }
+            }
+            std::vector<const RetainedNode*> ordered_children;
+            ordered_children.reserve(retained_children.size());
+            for (const auto& child : retained_children)
+                ordered_children.push_back(child.get());
+            if (!children_already_ordered) {
+                std::ranges::stable_sort(ordered_children, [&child_z_index](const RetainedNode* left,
+                                                                            const RetainedNode* right) {
+                    return child_z_index(*left) < child_z_index(*right);
+                });
+            }
+            const auto scrolling = [&](const std::size_t index) {
+                const std::uint64_t identity = ordered_children[index]->identity();
+                return scroll_child(identity) &&
+                    !(flights_now && !render_portals && motion.in_shared_flight(identity));
+            };
+            child_lengths.reserve(ordered_children.size());
+            ordered_child_identities.reserve(ordered_children.size());
+            ordered_child_layout_generations.reserve(ordered_children.size());
+            for (std::size_t index = 0U; index < ordered_children.size(); ++index) {
+                const RetainedNode* child = ordered_children[index];
+                const LayoutRecord* child_record = layout.find(child->identity());
+                ordered_child_identities.push_back(child->identity());
+                ordered_child_layout_generations.push_back(
+                    child_record != nullptr ? child_record->render_generation : 0U);
+                if (flights_now && !render_portals && motion.in_shared_flight(child->identity())) {
+                    const bool content = child_record != nullptr && child_record->scroll_content;
+                    flights.push_back(Flight{
+                        child, content && scroll_group != 0U ? MotionTransform{}
+                            : content ? concatenate_presentation_transform(effective_transform,
+                                                                            scroll_transform)
+                                      : effective_transform,
+                        content && scroll_group != 0U ? 1.0 : child_descendant_opacity,
+                        content && scroll_group != 0U ? scroll_group : child_context.group});
+                    child_lengths.push_back(0U);
+                    continue;
+                }
+                const std::size_t begin = output.size();
+                draw_child(self, *child, render_portals, child_context, scrolling(index),
+                           index == 0U || !scrolling(index - 1U),
+                           index + 1U == ordered_children.size() || !scrolling(index + 1U));
+                child_lengths.push_back(output.size() - begin);
+            }
         }
-        const std::size_t composition_suffix_begin = output.size();
         if (record->local_clip.has_value()) {
             output.append(ClipPopRenderCommand{});
             ++counters.commands_emitted;
@@ -1230,7 +1503,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             throw std::logic_error("render fragment disappeared before presentation");
         }
         Impl::CachedFragment& cached_fragment = found->second;
-        const auto& retained_presentation = cached_fragment.presentation;
+        auto& retained_presentation = cached_fragment.presentation;
         const bool retained_presentation_state_matches =
             retained_presentation.has_value() &&
             retained_presentation->generations == generations &&
@@ -1244,9 +1517,13 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             retained_presentation->focused == focused &&
             retained_presentation->focus_visible == focus_visible &&
             retained_presentation->hovered == hovered && retained_presentation->active == active;
+        const bool presentation_children_match = previous_composition.has_value() &&
+            retained_presentation.has_value() &&
+            retained_presentation->layout.bounds == previous_composition->subtree_layout.bounds;
         const bool retained_presentation_layout_matches =
             retained_presentation_state_matches &&
-            Impl::matches(retained_presentation->layout, node, *record, layout);
+            Impl::matches(retained_presentation->layout, node, *record, layout,
+                          presentation_children_match);
         const std::optional<Point> presentation_translation =
             retained_presentation_state_matches && !retained_presentation_layout_matches
                 ? Impl::uniform_translation(retained_presentation->layout, node, *record, layout)
@@ -1281,7 +1558,10 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 focus_visible,
                 hovered,
                 active,
-                Impl::snapshot(node, *record, layout),
+                Impl::snapshot(node, *record, layout,
+                    presentation_children_match
+                        ? std::move(retained_presentation->layout) : Impl::LayoutSnapshot{},
+                    presentation_children_match),
                 std::move(presentation),
                 local_overlay_rendered,
             };
@@ -1372,13 +1652,10 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             inherited_transform,
             inherited_opacity,
             render_portals,
-            command_slice(output, composition_prefix_begin, composition_prefix_end),
-            command_slice(output, composition_suffix_begin, composition_suffix_end),
+            composition_prefix_end - composition_prefix_begin,
             std::move(ordered_child_identities),
             std::move(ordered_child_layout_generations),
-            child_render_clip,
-            effective_transform,
-            child_descendant_opacity,
+            child_context,
             local_overlay_rendered,
         };
         Impl::CachedFragment::CompositionPlan& composition = *found->second.composition;
@@ -1387,44 +1664,68 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         composition.subtree_layout_render_generation = record->subtree_render_generation;
         composition.subtree_status_generation = input.status_feedback().generation();
         composition.subtree_overlay_count = local_overlay_rendered ? 1U : 0U;
-        composition.subtree_layout = Impl::snapshot(node, *record, layout);
+        composition.subtree_layout = Impl::snapshot(node, *record, layout,
+            previous_composition.has_value() ? std::move(previous_composition->subtree_layout)
+                                             : Impl::LayoutSnapshot{},
+            previous_composition.has_value());
         composition.subtree_translation_safe =
             record->kind != LayoutKind::scroll && record->kind != LayoutKind::portal &&
             !record->virtual_axis.has_value() && !record->virtual_item_extents.has_value() &&
             !record->visible_range.has_value();
         composition.subtree_contains_clip = scope_clip_changed || descendant_local_clip.has_value();
         composition.inherited_group = inherited_group;
-        composition.child_group = group != 0U ? group : inherited_group;
-        composition.subtree_contains_group = group != 0U;
-        for (const std::uint64_t child_identity : composition.ordered_children) {
-            const auto child_fragment = implementation_->fragments.find(child_identity);
-            if (child_fragment == implementation_->fragments.end() ||
-                !child_fragment->second.composition.has_value()) {
-                composition.subtree_translation_safe = false;
-                continue;
+        composition.local_contains_group = group != 0U || scroll_group != 0U;
+        composition.local_contains_clip = composition.subtree_contains_clip;
+        composition.local_translation_safe = composition.subtree_translation_safe;
+        if (reuse_children) {
+            composition.child_positions = std::move(previous_composition->child_positions);
+            composition.child_lengths = std::move(previous_composition->child_lengths);
+            composition.child_sums = std::move(previous_composition->child_sums);
+            composition.child_contributions = std::move(previous_composition->child_contributions);
+            composition.children_with_clip = previous_composition->children_with_clip;
+            composition.children_with_group = previous_composition->children_with_group;
+            composition.children_unsafe_translation = previous_composition->children_unsafe_translation;
+            composition.subtree_node_count = previous_composition->subtree_node_count;
+            composition.subtree_overlay_count += previous_composition->subtree_overlay_count -
+                (previous_composition->local_overlay_rendered ? 1U : 0U);
+        } else {
+            composition.index_children(std::move(child_lengths));
+            composition.child_contributions.reserve(composition.ordered_children.size());
+            for (const std::uint64_t child_identity : composition.ordered_children) {
+                const auto child_fragment = implementation_->fragments.find(child_identity);
+                if (child_fragment == implementation_->fragments.end() ||
+                    !child_fragment->second.composition.has_value()) {
+                    composition.child_contributions.push_back(
+                        Impl::CachedFragment::CompositionPlan::ChildContribution{
+                            .translation_safe = false});
+                    ++composition.children_unsafe_translation;
+                    continue;
+                }
+                const auto& child_plan = *child_fragment->second.composition;
+                composition.child_contributions.push_back(
+                    Impl::CachedFragment::CompositionPlan::ChildContribution{
+                        child_plan.subtree_node_count, child_plan.subtree_overlay_count,
+                        child_plan.subtree_contains_clip, child_plan.subtree_contains_group,
+                        child_plan.subtree_translation_safe});
+                composition.children_with_clip += child_plan.subtree_contains_clip ? 1U : 0U;
+                composition.children_with_group += child_plan.subtree_contains_group ? 1U : 0U;
+                composition.children_unsafe_translation += child_plan.subtree_translation_safe ? 0U : 1U;
+                composition.subtree_node_count += child_plan.subtree_node_count;
+                composition.subtree_overlay_count += child_plan.subtree_overlay_count;
             }
-            composition.subtree_translation_safe =
-                composition.subtree_translation_safe &&
-                child_fragment->second.composition->subtree_translation_safe;
-            composition.subtree_contains_clip =
-                composition.subtree_contains_clip ||
-                child_fragment->second.composition->subtree_contains_clip;
-            composition.subtree_contains_group =
-                composition.subtree_contains_group ||
-                child_fragment->second.composition->subtree_contains_group;
-            composition.subtree_node_count +=
-                child_fragment->second.composition->subtree_node_count;
-            composition.subtree_overlay_count +=
-                child_fragment->second.composition->subtree_overlay_count;
         }
         // A translated retained stream cannot move group geometry: groups restart the planner's
         // transform stack and their table entries would not see the translation.
-        if (composition.subtree_contains_group)
-            composition.subtree_translation_safe = false;
+        composition.subtree_contains_group =
+            composition.local_contains_group || composition.children_with_group != 0U;
+        composition.subtree_contains_clip =
+            composition.local_contains_clip || composition.children_with_clip != 0U;
+        composition.subtree_translation_safe = composition.local_translation_safe &&
+            composition.children_unsafe_translation == 0U && !composition.subtree_contains_group;
         // The whole subtree is this frame's stream from its prefix to its suffix: kept as the
         // runs of storage it is in, whatever its size.
         composition.subtree_commands =
-            output.commands().slice(composition_prefix_begin, composition_suffix_end);
+            output.commands().slice_view(composition_prefix_begin, composition_suffix_end);
     };
     if (tree.root() != nullptr) {
         visit(visit, *tree.root(), false, std::nullopt, MotionTransform{}, 1.0, 0U);
@@ -1450,7 +1751,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         }
     }
     // Cache the presentation table with its commands; cache hits must retain tone and motion.
-    implementation_->publish_groups(output);
+    implementation_->publish_groups(output, tree.structure_generation());
     implementation_->retain_base(tree, layout, input, generations, output);
     implementation_->retained_composed_commands.clear();
     implementation_->retained_overlay_commands.clear();
@@ -1459,9 +1760,12 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     return counters;
 }
 
-std::uint32_t RenderEngine::Impl::acquire_group(const std::uint64_t identity) {
-    if (const auto found = groups.find(identity); found != groups.end())
+std::uint32_t RenderEngine::Impl::acquire_group(const std::uint64_t identity,
+                                              const bool scroll_content) {
+    const auto& table = scroll_content ? scroll_groups : groups;
+    if (const auto found = table.find(identity); found != table.end())
         return found->second.index;
+    group_membership_dirty = true;
     if (!free_group_indices.empty()) {
         const std::uint32_t index = free_group_indices.back();
         free_group_indices.pop_back();
@@ -1470,43 +1774,60 @@ std::uint32_t RenderEngine::Impl::acquire_group(const std::uint64_t identity) {
     return next_group_index <= maximum_render_groups ? next_group_index++ : 0U;
 }
 
-void RenderEngine::Impl::publish_groups(RenderCommandBuffer& output) {
-    if (groups.empty()) {
+void RenderEngine::Impl::publish_groups(RenderCommandBuffer& output,
+                                       const std::uint64_t structure_generation) {
+    if (groups.empty() && scroll_groups.empty()) {
         output.set_groups({});
         return;
     }
-    std::vector<bool> referenced(maximum_render_groups + 1U, false);
-    for (const RenderCommand& command : output.commands()) {
-        if (const auto* push = std::get_if<GroupPushRenderCommand>(&command);
-            push != nullptr && push->group <= maximum_render_groups) {
-            referenced[push->group] = true;
+    const bool collect = group_membership_dirty || published_group_structure != structure_generation;
+    std::vector<bool> referenced;
+    if (collect) {
+        referenced.resize(maximum_render_groups + 1U, false);
+        for (const RenderCommand& command : output.commands()) {
+            if (const auto* push = std::get_if<GroupPushRenderCommand>(&command);
+                push != nullptr && push->group <= maximum_render_groups) {
+                referenced[push->group] = true;
+            }
         }
     }
     std::vector<RenderGroup> table;
-    table.reserve(groups.size());
-    for (auto entry = groups.begin(); entry != groups.end();) {
-        if (!referenced[entry->second.index]) {
-            free_group_indices.push_back(entry->second.index);
-            entry = groups.erase(entry);
-            continue;
+    table.reserve(groups.size() + scroll_groups.size());
+    for (auto* source : {&groups, &scroll_groups}) {
+        for (auto entry = source->begin(); entry != source->end();) {
+            if (collect && !referenced[entry->second.index]) {
+                free_group_indices.push_back(entry->second.index);
+                entry = source->erase(entry);
+                continue;
+            }
+            table.push_back(entry->second);
+            ++entry;
         }
-        table.push_back(entry->second);
-        ++entry;
     }
     std::ranges::sort(table, {}, &RenderGroup::index);
     output.set_groups(std::move(table));
+    group_membership_dirty = false;
+    published_group_structure = structure_generation;
 }
 
 void RenderEngine::clear() {
     implementation_->presented.clear();
     implementation_->groups.clear();
+    implementation_->scroll_groups.clear();
     implementation_->free_group_indices.clear();
     implementation_->next_group_index = 1U;
+    implementation_->group_membership_dirty = true;
+    implementation_->published_group_structure = 0U;
     implementation_->fragments.clear();
     implementation_->retained_base_commands.clear();
     implementation_->retained_composed_commands.clear();
     implementation_->retained_overlay_commands.clear();
     implementation_->retained_base_generations.reset();
+    implementation_->retained_structure_generation = 0U;
+    implementation_->journal_tree = nullptr;
+    implementation_->journal_generation = 0U;
+    implementation_->overlay_candidates.clear();
+    implementation_->overlay_command_generation = 0U;
     implementation_->fragment_tree_generation = 0U;
     implementation_->portals.clear();
     implementation_->portals_generations.reset();

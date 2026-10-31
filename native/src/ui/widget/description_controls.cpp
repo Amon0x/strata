@@ -26,15 +26,16 @@ void icon_button_defaults(WidgetLayoutDefaultsScope& scope) {
 }
 
 void icon_button_expand(WidgetDescriptionScope& scope) {
-    const runtime::Value* icon = scope.property("icon");
-    const runtime::Value* source = scope.property("source");
     static_cast<void>(scope.install_presentation(
-        "presentationTemplate",
-        WidgetTemplateArguments{
-            {"label", runtime::Value(scope.string("label"))},
-            {"icon", icon != nullptr ? *icon : runtime::Value{}},
-            {"source", source != nullptr ? *source : runtime::Value{}},
-            {"control", scope.presentation_state()},
+        "presentationTemplate", [&scope] {
+            const runtime::Value* icon = scope.property("icon");
+            const runtime::Value* source = scope.property("source");
+            return WidgetTemplateArguments{
+                {"label", runtime::Value(scope.string("label"))},
+                {"icon", icon != nullptr ? *icon : runtime::Value{}},
+                {"source", source != nullptr ? *source : runtime::Value{}},
+                {"control", scope.presentation_state()},
+            };
         }
     ));
 }
@@ -92,14 +93,15 @@ void boolean_control_expand(
     WidgetDescriptionScope& scope
 ) {
     static_cast<void>(scope.install_presentation(
-        "presentationTemplate",
-        WidgetTemplateArguments{
-            {"label", runtime::Value(scope.string("label"))},
-            {"description", runtime::Value(scope.string("description"))},
-            {"control",
-             scope.presentation_state(WidgetLayoutFields{
-                 {"checked", runtime::Value(boolean_control_checked(scope))},
-             })},
+        "presentationTemplate", [&scope] {
+            return WidgetTemplateArguments{
+                {"label", runtime::Value(scope.string("label"))},
+                {"description", runtime::Value(scope.string("description"))},
+                {"control",
+                 scope.presentation_state(WidgetLayoutFields{
+                     {"checked", runtime::Value(boolean_control_checked(scope))},
+                 })},
+            };
         }
     ));
 }
@@ -141,26 +143,26 @@ void slider_defaults(WidgetLayoutDefaultsScope& scope) {
 }
 
 void slider_expand(WidgetDescriptionScope& scope) {
-    if (scope.property("presentationTemplate") == nullptr) return;
-    const double minimum = scope.number("min", 0.0);
-    const double maximum = scope.number("max", 1.0);
-    const double value =
-        effective_number(scope, "value", "$value", "defaultValue", minimum);
-    const double fraction = maximum > minimum
-        ? std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0)
-        : 0.0;
-    const runtime::Value* step = scope.property("step");
     static_cast<void>(scope.install_presentation(
-        "presentationTemplate",
-        WidgetTemplateArguments{
-            {"control", scope.presentation_state(WidgetLayoutFields{
-                {"axis", runtime::Value(scope.string("axis", "HORIZONTAL"))},
-                {"fraction", runtime::Value(fraction)},
-                {"maximum", runtime::Value(maximum)},
-                {"minimum", runtime::Value(minimum)},
-                {"step", step != nullptr ? *step : runtime::Value{}},
-                {"value", runtime::Value(value)},
-            })},
+        "presentationTemplate", [&scope] {
+            const double minimum = scope.number("min", 0.0);
+            const double maximum = scope.number("max", 1.0);
+            const double value =
+                effective_number(scope, "value", "$value", "defaultValue", minimum);
+            const double fraction = maximum > minimum
+                ? std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0)
+                : 0.0;
+            const runtime::Value* step = scope.property("step");
+            return WidgetTemplateArguments{
+                {"control", scope.presentation_state(WidgetLayoutFields{
+                    {"axis", runtime::Value(scope.string("axis", "HORIZONTAL"))},
+                    {"fraction", runtime::Value(fraction)},
+                    {"maximum", runtime::Value(maximum)},
+                    {"minimum", runtime::Value(minimum)},
+                    {"step", step != nullptr ? *step : runtime::Value{}},
+                    {"value", runtime::Value(value)},
+                })},
+            };
         }
     ));
 }
@@ -199,22 +201,23 @@ void progress_defaults(WidgetLayoutDefaultsScope& scope) {
 }
 
 void progress_expand(WidgetDescriptionScope& scope) {
-    const double minimum = scope.number("min", 0.0);
-    const double maximum = scope.number("max", 1.0);
-    const double value = scope.number("value", minimum);
-    const double fraction = maximum > minimum
-        ? std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0)
-        : 0.0;
     static_cast<void>(scope.install_presentation(
-        "presentationTemplate",
-        WidgetTemplateArguments{
-            {"control", scope.presentation_state(WidgetLayoutFields{
-                {"fraction", runtime::Value(fraction)},
-                {"indeterminate", runtime::Value(scope.boolean("indeterminate", false))},
-                {"maximum", runtime::Value(maximum)},
-                {"minimum", runtime::Value(minimum)},
-                {"value", runtime::Value(value)},
-            })},
+        "presentationTemplate", [&scope] {
+            const double minimum = scope.number("min", 0.0);
+            const double maximum = scope.number("max", 1.0);
+            const double value = scope.number("value", minimum);
+            const double fraction = maximum > minimum
+                ? std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0)
+                : 0.0;
+            return WidgetTemplateArguments{
+                {"control", scope.presentation_state(WidgetLayoutFields{
+                    {"fraction", runtime::Value(fraction)},
+                    {"indeterminate", runtime::Value(scope.boolean("indeterminate", false))},
+                    {"maximum", runtime::Value(maximum)},
+                    {"minimum", runtime::Value(minimum)},
+                    {"value", runtime::Value(value)},
+                })},
+            };
         }
     ));
     if (!scope.boolean("indeterminate", false) || scope.property("animation") != nullptr) return;

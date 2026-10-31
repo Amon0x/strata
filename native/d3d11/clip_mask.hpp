@@ -80,6 +80,12 @@ class RoundedClipBuffer final {
                 static_cast<float>(clip.inverse_transform[5U]),
                 static_cast<float>(clip.sides),
             };
+            constants.inverse_w[index] = {
+                static_cast<float>(clip.inverse_projection[0U]),
+                static_cast<float>(clip.inverse_projection[1U]),
+                static_cast<float>(clip.inverse_projection[2U]),
+                0.0F,
+            };
             for (std::size_t edge = 0U; edge < 4U; ++edge)
                 constants.fade[index][edge] = static_cast<float>(clip.fade[edge]);
         }

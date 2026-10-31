@@ -3,7 +3,7 @@
 // It measures Strata's own work — compile, describe, layout, render planning, packet encoding and
 // decoding — without a GPU or rasterizer in the loop, so runs are comparable on any machine.
 //
-// usage: strata_core_benchmark <resource-root> <scenario.json> [iterations-scale | cold | first]
+// usage: strata_core_benchmark <resource-root> <scenario.json> [scale | cold | first | scroll | hover] [stress-frames]
 // `cold` measures only the cold start, for profiling startup over many runs. `first` opens every
 // showcase tab once, in order, and reports each first opening: the hitch a user sees the first
 // time a page appears, with the sections it spent its time in.
@@ -12,6 +12,7 @@
 #include <array>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <functional>
@@ -39,7 +40,7 @@ struct Phase final {
     std::vector<double> frames;
     /** Section path -> nanoseconds summed over this phase's frames, from each frame's samples. */
     std::map<std::string, double> sections;
-    /** Text counters summed over this phase's frames: how much text work a frame does. */
+    /** Work counters summed over this phase's frames, independent of clock speed. */
     std::map<std::string, double> counters;
 };
 
@@ -51,7 +52,8 @@ void attribute(const ApplicationHost& host, Phase& phase) {
             phase.sections[section.path] += static_cast<double>(section.last_nanoseconds);
     }
     for (const strata::ProfilerCounter& counter : snapshot.counters) {
-        if (counter.name.starts_with("text."))
+        if (counter.name.starts_with("text.") || counter.name.starts_with("layout.") ||
+            counter.name.starts_with("render.") || counter.name.starts_with("input."))
             phase.counters[counter.name] += static_cast<double>(counter.value);
     }
 }
@@ -78,7 +80,7 @@ void breakdown(const Phase& phase) {
                     ordered[index].second / 1e6 / frames);
     }
     for (const auto& [name, total] : phase.counters) {
-        if (name.ends_with("_nanos"))
+        if (name.ends_with("_nanos") || name.ends_with(".nanos"))
             std::printf("    %-52s %8.3f ms/frame\n", name.c_str(), total / 1e6 / frames);
         else
             std::printf("    %-52s %8.1f /frame\n", name.c_str(), total / frames);
@@ -162,7 +164,7 @@ class Driver final {
 int main(int argc, char** argv) {
     try {
         if (argc < 3) {
-            std::fprintf(stderr, "usage: strata_core_benchmark <resource-root> <scenario.json> [scale|cold|switch|first]\n");
+            std::fprintf(stderr, "usage: strata_core_benchmark <resource-root> <scenario.json> [scale|cold|switch|first|scroll|hover] [stress-frames]\n");
             return 2;
         }
         const std::filesystem::path resources = argv[1];
@@ -170,6 +172,8 @@ int main(int argc, char** argv) {
         // "switch" measures only tab switching, at length: what profiling the cold path wants.
         const bool switch_only = argc > 3 && std::string_view(argv[3]) == "switch";
         const bool first_opens = argc > 3 && std::string_view(argv[3]) == "first";
+        const bool scroll_stress = argc > 3 && std::string_view(argv[3]) == "scroll";
+        const bool hover_stress = argc > 3 && std::string_view(argv[3]) == "hover";
         const int scale = switch_only ? 10
                           : argc > 3 && !cold_only && !first_opens ? std::max(1, std::atoi(argv[3]))
                                                                    : 1;
@@ -194,6 +198,30 @@ int main(int argc, char** argv) {
 
         breakdown(first);
         if (cold_only) {
+            host.close();
+            return 0;
+        }
+        if (scroll_stress || hover_stress) {
+            for (int index = 0; index < 60; ++index)
+                static_cast<void>(driver.frame());
+            Phase changed{scroll_stress ? "scroll stress" : "hover stress", {}};
+            const int frames = argc > 4 ? std::max(1, std::atoi(argv[4])) : 600;
+            changed.frames.reserve(static_cast<std::size_t>(frames));
+            for (int index = 0; index < frames; ++index) {
+                if (scroll_stress) {
+                    driver.scroll(scenario.width * 0.5, scenario.height * 0.5,
+                                  (index / 30) % 2 == 0 ? -4.0 : 4.0);
+                } else {
+                    const int cell = index % 2000;
+                    driver.pointer(STRATA_INPUT_POINTER_MOVE,
+                                   12.0 + static_cast<double>(cell % 50) * 24.0,
+                                   10.0 + static_cast<double>(cell / 50) * 20.0);
+                }
+                changed.frames.push_back(driver.frame());
+                attribute(host, changed);
+            }
+            report(changed);
+            breakdown(changed);
             host.close();
             return 0;
         }

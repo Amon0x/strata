@@ -239,16 +239,20 @@ struct PixelRect final {
 ) noexcept {
     const auto distance = [](const host::RoundedClip& clip, const float x, const float y) {
         const auto local = [&clip](const float logical_x_value, const float logical_y_value) {
+            const double divisor = std::max(
+                1.0e-12, clip.inverse_projection[0U] * logical_x_value +
+                             clip.inverse_projection[1U] * logical_y_value +
+                             clip.inverse_projection[2U]);
             return std::array<float, 2U>{
                 static_cast<float>(
-                    clip.inverse_transform[0U] * logical_x_value +
+                    (clip.inverse_transform[0U] * logical_x_value +
                     clip.inverse_transform[1U] * logical_y_value +
-                    clip.inverse_transform[2U]
+                    clip.inverse_transform[2U]) / divisor
                 ),
                 static_cast<float>(
-                    clip.inverse_transform[3U] * logical_x_value +
+                    (clip.inverse_transform[3U] * logical_x_value +
                     clip.inverse_transform[4U] * logical_y_value +
-                    clip.inverse_transform[5U]
+                    clip.inverse_transform[5U]) / divisor
                 ),
             };
         };
@@ -327,6 +331,11 @@ struct PixelRect final {
     };
     float coverage = 1.0F;
     for (const host::RoundedClip& clip : clips) {
+        const double divisor = clip.inverse_projection[0U] * logical_x +
+                               clip.inverse_projection[1U] * logical_y +
+                               clip.inverse_projection[2U];
+        if (divisor <= 0.0)
+            return 0.0F;
         const float center = distance(clip, logical_x, logical_y);
         const float derivative =
             std::abs(distance(clip, logical_x + logical_pixel_width, logical_y) - center) +
@@ -338,10 +347,12 @@ struct PixelRect final {
         );
         if (clip.fade[0U] > 0.0 || clip.fade[1U] > 0.0 || clip.fade[2U] > 0.0 ||
             clip.fade[3U] > 0.0) {
-            const double x = clip.inverse_transform[0U] * logical_x +
-                             clip.inverse_transform[1U] * logical_y + clip.inverse_transform[2U];
-            const double y = clip.inverse_transform[3U] * logical_x +
-                             clip.inverse_transform[4U] * logical_y + clip.inverse_transform[5U];
+            const double x = (clip.inverse_transform[0U] * logical_x +
+                              clip.inverse_transform[1U] * logical_y + clip.inverse_transform[2U]) /
+                             divisor;
+            const double y = (clip.inverse_transform[3U] * logical_x +
+                              clip.inverse_transform[4U] * logical_y + clip.inverse_transform[5U]) /
+                             divisor;
             const auto ramp = [](const double distance, const double fade) {
                 return fade > 0.0 ? static_cast<float>(std::clamp(distance / fade, 0.0, 1.0))
                                   : 1.0F;

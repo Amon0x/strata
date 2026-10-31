@@ -543,7 +543,9 @@ component AuthoredTogglePresentation(
 component AuthoredButtonPresentation(key: key, label: string, control: buttonState) {
   Scroll(key: key, layout: { width: 120, height: 28 }) {
     Panel(layout: { kind: "ROW", width: 120, height: 80 }) {
-      Text(key: "authored.button.copy", text: format("{0}:{1}", label, control.enabled ? "on" : "off"))
+      Text(key: "authored.button.copy", text: format(
+        "{0}:{1}:{2}:{3}", label, control.enabled ? "on" : "off",
+        control.hovered ? "hover" : "idle", control.pressed ? "pressed" : "released"))
     }
   }
 }
@@ -864,6 +866,33 @@ overlay Main { root AuthoredControls() }
         slider_copy != nullptr && slider_copy->starts_with("Quarter:50:0.5"),
         "authored Slider presentation did not track native pointer state"
     );
+    button = surface.tree().find_key("authored.button");
+    button_layout = button != nullptr ? surface.layout().find(button->identity()) : nullptr;
+    check(button_layout != nullptr, "authored Button lost its input geometry");
+    const strata::ui::Rect button_bounds = surface.input().presented_bounds(*button, button_layout->bounds);
+    const strata::ui::Point at{button_bounds.x + button_bounds.width * 0.5,
+                               button_bounds.y + button_bounds.height * 0.5};
+    std::int64_t now = 3'000'000;
+    for (const auto& [event, expected] :
+         std::initializer_list<std::pair<strata::ui::PointerEventType, std::string_view>>{
+             {strata::ui::PointerEventType::move, "Apply:on:hover:released"},
+             {strata::ui::PointerEventType::press, "Apply:on:hover:pressed"},
+             {strata::ui::PointerEventType::release, "Apply:on:hover:released"}}) {
+        static_cast<void>(surface.input().enqueue_pointer(
+            strata::ui::PointerInputEvent{at, event, 1, 0}));
+        static_cast<void>(surface.frame(now += 1'000'000));
+        const std::string* label = string_property(
+            surface.tree().find_key("authored.button.copy"), "text");
+        check(label != nullptr && *label == expected,
+              "authored Button did not synchronize its changed hover or press state");
+    }
+    static_cast<void>(surface.input().enqueue_pointer(strata::ui::PointerInputEvent{
+        {319.0, 259.0}, strata::ui::PointerEventType::move, 1, 0}));
+    static_cast<void>(surface.frame(now += 1'000'000));
+    const std::string* released = string_property(
+        surface.tree().find_key("authored.button.copy"), "text");
+    check(released != nullptr && *released == "Apply:on:idle:released",
+          "an authored Button kept the previous hover route's state");
 }
 
 void test_section_content_and_activation_contract(
@@ -1820,7 +1849,7 @@ overlay Main {
     );
 }
 
-void test_scrolled_clipped_subtree_render_cache(
+void test_scrolled_clips_follow_content(
     const std::filesystem::path& resource_root,
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
 ) {
@@ -1884,89 +1913,51 @@ overlay Main {
         )
     );
     static_cast<void>(surface.frame(1'000'000));
-    check(
-        surface.animate_scroll_to(strata::ui::ScrollAnimationRequest{
-            "cache.scroll", std::nullopt, 160.0, "standard", std::nullopt,
-        }),
-        "scroll clip-cache fixture did not accept a scroll offset"
-    );
-    static_cast<void>(surface.frame(2'000'000));
 
-    const strata::ui::RetainedNode* bottom = surface.tree().find_key("cache.bottom");
-    const strata::ui::LayoutRecord* bottom_layout = bottom != nullptr
-        ? surface.layout().find(bottom->identity())
-        : nullptr;
-    check(
-        bottom_layout != nullptr && bottom_layout->clip.has_value() &&
-            !bottom_layout->clip->empty(),
-        "scrolled clipped subtree did not enter the viewport"
-    );
-    check(
-        bottom_layout->local_clip.has_value(),
-        "scrolled clipped subtree lost its raw local clip"
-    );
-    strata::ui::Point translation;
-    strata::ui::Rect effective_clip{0.0, 0.0, 320.0, 180.0};
-    std::vector<strata::ui::Point> translation_stack;
-    std::vector<strata::ui::Rect> clip_stack;
-    bool emitted_current_clip = false;
-    bool emitted_rounded_current_clip = false;
-    bool reused_translated_clip = false;
-    for (const strata::ui::RenderCommand& command : surface.render_commands().commands()) {
-        if (const auto* transform_push =
-                std::get_if<strata::ui::TransformPushRenderCommand>(&command);
-            transform_push != nullptr) {
-            check(
-                transform_push->m00 == 1.0 && transform_push->m01 == 0.0 &&
-                    transform_push->m10 == 0.0 && transform_push->m11 == 1.0,
-                "scroll clip-cache fixture unexpectedly emitted a non-translation transform"
-            );
-            translation_stack.push_back(translation);
-            translation.x += transform_push->m02;
-            translation.y += transform_push->m12;
-        } else if (std::holds_alternative<strata::ui::TransformPopRenderCommand>(command)) {
-            check(!translation_stack.empty(), "scroll clip-cache transform stack underflow");
-            translation = translation_stack.back();
-            translation_stack.pop_back();
-        } else if (const auto* clip_push =
-                       std::get_if<strata::ui::ClipPushRenderCommand>(&command);
-                   clip_push != nullptr) {
-            clip_stack.push_back(effective_clip);
-            const strata::ui::Rect translated{
-                clip_push->rect.x + translation.x,
-                clip_push->rect.y + translation.y,
-                clip_push->rect.width,
-                clip_push->rect.height,
-            };
-            effective_clip = effective_clip.clip_intersection(translated);
-            if (translated == *bottom_layout->local_clip) {
-                emitted_current_clip = effective_clip == *bottom_layout->clip;
-                emitted_rounded_current_clip =
-                    clip_push->radii == strata::ui::CornerRadii::all(12.0);
-                reused_translated_clip = translation != strata::ui::Point{};
+    const auto check_visible_child = [](const strata::ui::Surface& current,
+                                        const std::string_view scroll_key,
+                                        const std::string_view child_key) {
+        const strata::ui::RetainedNode* scroll = current.tree().find_key(scroll_key);
+        const strata::ui::RetainedNode* child = current.tree().find_key(child_key);
+        check(scroll != nullptr && child != nullptr, "scrolled clip fixture lost its nodes");
+        const strata::ui::LayoutRecord* viewport = current.layout().find(scroll->identity());
+        const strata::ui::LayoutRecord* content = current.layout().find(child->identity());
+        check(viewport != nullptr && content != nullptr && viewport->viewport.has_value(),
+              "scrolled clip fixture lost its viewport");
+        const strata::ui::Rect frame = current.layout().surface_bounds(*viewport, *viewport->viewport);
+        const strata::ui::Rect shown = current.input().presented_bounds(*child, content->bounds);
+        const auto visible = shown.intersection(frame);
+        check(visible.has_value(), "scrolling did not expose the clipped child");
+        const auto hits_child = [&](const strata::ui::Point point) {
+            for (const strata::ui::RetainedNode* hit = current.input().inspection_target(point);
+                 hit != nullptr; hit = hit->parent()) {
+                if (hit == child)
+                    return true;
             }
-        } else if (std::holds_alternative<strata::ui::ClipPopRenderCommand>(command)) {
-            check(!clip_stack.empty(), "scroll clip-cache clip stack underflow");
-            effective_clip = clip_stack.back();
-            clip_stack.pop_back();
+            return false;
+        };
+        check(hits_child({visible->x + visible->width * 0.5,
+                          visible->y + visible->height * 0.5}),
+              "a clipped child exposed by scrolling lost its input region");
+        check(!hits_child({visible->x + visible->width * 0.5, frame.bottom() + 5.0}),
+              "scrolled content received input beyond its viewport");
+    };
+    const auto exercise_scroll = [&](strata::ui::Surface& current,
+                                      const std::string_view scroll_key,
+                                      const std::string_view top_key,
+                                      const std::string_view bottom_key) {
+        check_visible_child(current, scroll_key, top_key);
+        for (std::int64_t step = 0; step < 6; ++step) {
+            const bool bottom = step % 2 == 0;
+            check(current.animate_scroll_to(strata::ui::ScrollAnimationRequest{
+                      std::string(scroll_key), std::nullopt, bottom ? 160.0 : 0.0,
+                      "standard", std::nullopt}),
+                  "scroll clip fixture did not accept an offset");
+            static_cast<void>(current.frame((step + 2) * 1'000'000));
+            check_visible_child(current, scroll_key, bottom ? bottom_key : top_key);
         }
-    }
-    check(
-        translation_stack.empty() && clip_stack.empty(),
-        "scroll clip-cache fixture left render state unbalanced"
-    );
-    check(
-        emitted_current_clip,
-        "retained subtree translation did not recompute the visible clip intersection"
-    );
-    check(
-        emitted_rounded_current_clip,
-        "layout clipping discarded the authored descendant corner radius"
-    );
-    check(
-        reused_translated_clip,
-        "clip-cache regression recomposed instead of exercising subtree translation reuse"
-    );
+    };
+    exercise_scroll(surface, "cache.scroll", "cache.top", "cache.bottom");
 
     constexpr std::string_view scaled_source = R"(
 overlay Main {
@@ -2008,47 +1999,7 @@ overlay Main {
         )
     );
     static_cast<void>(scaled_surface.frame(1'000'000));
-    check(
-        scaled_surface.animate_scroll_to(strata::ui::ScrollAnimationRequest{
-            "scaled.scroll", std::nullopt, 160.0, "standard", std::nullopt,
-        }),
-        "scaled scroll clip-cache fixture did not accept a scroll offset"
-    );
-    static_cast<void>(scaled_surface.frame(2'000'000));
-    const strata::ui::RetainedNode* scaled_scroll =
-        scaled_surface.tree().find_key("scaled.scroll");
-    const strata::ui::RetainedNode* scaled_bottom =
-        scaled_surface.tree().find_key("scaled.bottom");
-    const strata::ui::LayoutRecord* scaled_scroll_layout = scaled_scroll != nullptr
-        ? scaled_surface.layout().find(scaled_scroll->identity())
-        : nullptr;
-    const strata::ui::LayoutRecord* scaled_bottom_layout = scaled_bottom != nullptr
-        ? scaled_surface.layout().find(scaled_bottom->identity())
-        : nullptr;
-    check(
-        scaled_scroll != nullptr && scaled_scroll_layout != nullptr &&
-            scaled_bottom_layout != nullptr && scaled_bottom_layout->local_clip.has_value(),
-        "scaled clipped subtree lost its raw local clip"
-    );
-    const strata::ui::Rect expected_scaled_clip = strata::ui::inverse_presentation_bounds(
-        *scaled_bottom_layout->local_clip,
-        strata::ui::local_presentation_transform(
-            *scaled_scroll,
-            scaled_surface.motion(),
-            scaled_scroll_layout->bounds
-        )
-    );
-    const bool emitted_recomposed_scaled_clip = std::ranges::any_of(
-        scaled_surface.render_commands().commands(),
-        [&expected_scaled_clip](const strata::ui::RenderCommand& command) {
-            const auto* clip = std::get_if<strata::ui::ClipPushRenderCommand>(&command);
-            return clip != nullptr && clip->rect == expected_scaled_clip;
-        }
-    );
-    check(
-        emitted_recomposed_scaled_clip,
-        "scaled clipped subtree incorrectly reused a clip with scaled translation"
-    );
+    exercise_scroll(scaled_surface, "scaled.scroll", "scaled.top", "scaled.bottom");
 }
 
 void test_typed_host_keys_and_derived_collection_metadata() {
@@ -2165,7 +2116,7 @@ int strata_test_widget_binding(const int argument_count, const char* const* cons
         test_independent_menu_popup_template(resource_root, bundle);
         test_cached_component_refresh_through_loop_root(resource_root, bundle);
         test_parent_local_retained_queries(resource_root, bundle);
-        test_scrolled_clipped_subtree_render_cache(resource_root, bundle);
+        test_scrolled_clips_follow_content(resource_root, bundle);
         test_typed_host_keys_and_derived_collection_metadata();
         std::cout << "strata_widget_binding_tests: OK\n";
         return 0;

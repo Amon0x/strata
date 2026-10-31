@@ -1,0 +1,28 @@
+overlay ScrollStress {
+  root Scroll(key: "stress.scroll", vertical: true, horizontal: false,
+              layout: { width: { weight: 1 }, height: { weight: 1 } }) {
+    Panel(key: "stress.content", layout: { kind: "COLUMN", width: { weight: 1 } }) {
+      for index in items {
+        Button(key: `stress.row.${index}`, label: `Row ${index}`,
+               layout: { width: { weight: 1 }, height: 24 })
+      }
+      for index in items {
+        Button(key: `stress.row.${index + 1000}`, label: `Row ${index + 1000}`,
+               layout: { width: { weight: 1 }, height: 24 })
+      }
+    }
+  }
+}
+
+overlay HoverStress {
+  root Panel(key: "stress.grid", layout: {
+    kind: "ROW", wrap: true, width: { weight: 1 }, height: { weight: 1 }
+  }) {
+    for index in items {
+      Button(key: `stress.cell.${index}`, label: "x", layout: { width: 24, height: 20 })
+    }
+    for index in items {
+      Button(key: `stress.cell.${index + 1000}`, label: "x", layout: { width: 24, height: 20 })
+    }
+  }
+}
