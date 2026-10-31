@@ -54,8 +54,22 @@ struct BatchKey final {
            left.texture_sampled == right.texture_sampled;
 }
 
+/**
+ * Whether draws of two blends can share a batch. Subpixel text blends each colour channel by its
+ * own alpha, which the pixel stage writes as the draw's alpha for every other draw: a straight
+ * alpha draw blends exactly the same in a subpixel text batch, so a shape between two runs of
+ * text (a cell's background, then its label) does not split them into a batch each.
+ */
+[[nodiscard]] bool blends_compatible(const std::string_view left,
+                                     const std::string_view right) noexcept {
+    const auto straight_or_subpixel = [](const std::string_view blend) {
+        return blend == "straight_alpha" || blend == "subpixel_text";
+    };
+    return left == right || (straight_or_subpixel(left) && straight_or_subpixel(right));
+}
+
 [[nodiscard]] bool compatible(const BatchKey& left, const BatchKey& right) noexcept {
-    if (left.material != right.material || left.blend_mode != right.blend_mode ||
+    if (left.material != right.material || !blends_compatible(left.blend_mode, right.blend_mode) ||
         !same_clips(left, right)) return false;
     return !(left.texture_sampled && right.texture_sampled && left.texture != right.texture);
 }
@@ -1490,7 +1504,7 @@ void encode(
         if (!open_key.has_value() || !compatible(*open_key, next)) {
             if (open_key.has_value()) {
                 if (open_key->material != next.material ||
-                    open_key->blend_mode != next.blend_mode) {
+                    !blends_compatible(open_key->blend_mode, next.blend_mode)) {
                     ++output.material_batch_breaks;
                 }
                 if (!same_clips(*open_key, next)) {
@@ -1525,10 +1539,17 @@ void encode(
             });
             open_batch_index = next_batches.size() - 1U;
             open_key = std::move(next);
-        } else if (!open_key->texture_sampled && next.texture_sampled) {
-            open_key->texture_sampled = true;
-            open_key->texture = next.texture;
-            next_batches[open_batch_index].texture = owned(next.texture);
+        } else {
+            if (!open_key->texture_sampled && next.texture_sampled) {
+                open_key->texture_sampled = true;
+                open_key->texture = next.texture;
+                next_batches[open_batch_index].texture = owned(next.texture);
+            }
+            // A batch holding subpixel text blends as subpixel text, its other draws included.
+            if (open_key->blend_mode != next.blend_mode && next.blend_mode == "subpixel_text") {
+                open_key->blend_mode = next.blend_mode;
+                next_batches[open_batch_index].blend_mode = submission_blend(next.blend_mode);
+            }
         }
         std::optional<EncodedDrawCacheEntry>& retained = cache.geometry[item_index];
         if (!retained.has_value() || retained->source != draw) {

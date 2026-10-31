@@ -129,9 +129,14 @@ The same trace, by inclusive time: on the hover page the desktop host's D3D11 su
 Most of `draw` is `RoundedClipBuffer::bind`, which maps, fills and unmaps the clip constant buffer
 for every batch (`Map` with `WRITE_DISCARD`), then `TextureStore::bind`.
 
-- [ ] Count batches and clip uploads per frame on the hover and showcase pages, to know whether
-  the cost is many batches or expensive uploads.
-- [ ] Upload every batch's clip stack once per frame into one buffer and give each draw its offset
-  (as the vertex stream already is), instead of a constant-buffer update per draw.
-- [ ] Measure CPU time spent submitting, with presentation excluded, before and after.
+- [x] Count batches and clip uploads per frame. The hover page submitted 4,001 draws a frame with
+  one clip stack among them all: the clips were the same every time; the batches were many. Each
+  cell's background (straight alpha) and its label (subpixel text, dual-source blended) had
+  different blends, so every cell split the batch twice.
+- [x] Straight alpha draws join subpixel text batches: the pixel stage writes a straight alpha
+  draw's per-channel alpha as its alpha, so it blends identically there (on every backend, the
+  reference renderer included). The hover page went from 4,001 draws a frame to 1 and its
+  submission loop from 0.58 ms to 0.001 ms; the primitives sample from 60 draws to 21.
+- [ ] Uploading clip stacks once per frame instead of per draw is no longer worth doing for these
+  pages; revisit if a page with many distinct clips shows the uploads.
 - [ ] Measure: the hover page's first frame describes in under 15 ms.

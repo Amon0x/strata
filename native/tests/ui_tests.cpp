@@ -962,6 +962,33 @@ void test_subpixel_text_runs(const std::filesystem::path& resource_root) {
     const auto gray = materials(font::SubpixelOrder::none);
     check(gray.first == 0U && gray.second >= 1U,
           "a surface that asked for gray text drew subpixel text");
+
+    // Cells that each draw a background and then a label alternate a straight alpha draw with
+    // subpixel text. Straight alpha blends the same in a subpixel batch, so they are one batch,
+    // not one per draw.
+    ui::RenderCommandBuffer cells;
+    for (int index = 0; index < 50; ++index) {
+        const double x = 10.0 + index * 12.0;
+        cells.append(ui::RoundedRectRenderCommand{ui::Rect{x - 2.0, 28.0, 12.0, 16.0},
+                                                  ui::CornerRadii::all(3.0),
+                                                  ui::RenderColor{40U, 60U, 90U, 255U}});
+        cells.append(run(x));
+    }
+    font::GlyphAtlas cell_atlas("subpixel-cells-test");
+    ui::RenderSubmissionCache cell_cache;
+    const ui::RenderSubmission& celled = cell_cache.resolve(
+        cells, cell_atlas, *text_engine,
+        ui::RenderSubmissionEnvironment{1.0, 640, 480, 640.0, 480.0, font::SubpixelOrder::rgb});
+    std::size_t draws = 0U;
+    for (const ui::SubmissionBatch& batch : celled.batches) {
+        if (batch.kind != ui::SubmissionBatchKind::draw)
+            continue;
+        ++draws;
+        check(batch.blend_mode == ui::SubmissionBlend::subpixel_text,
+              "a batch of shapes and subpixel text did not blend as subpixel text");
+    }
+    check(draws == 1U, "shapes between subpixel text runs split them into " +
+                           std::to_string(draws) + " batches");
 }
 
 void test_render_submission_cache(const std::filesystem::path& resource_root) {
