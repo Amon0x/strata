@@ -23,6 +23,7 @@
 #include "ui/behavior/registry.hpp"
 #include "ui/command.hpp"
 #include "ui/description.hpp"
+#include "ui/frame_pace.hpp"
 #include "ui/input.hpp"
 #include "ui/layout.hpp"
 #include "ui/lottie/scene.hpp"
@@ -540,6 +541,7 @@ class Surface final {
     bool frame_sliced_ = false;
     bool late_slice_used_ = false;
     std::chrono::steady_clock::time_point frame_clock_started_{};
+    FramePace frame_pace_;
     bool frame_slicing_ = false;
     bool rendered_once_ = false;
     /** Open until the first frame and any let-go content have reached a packet. */

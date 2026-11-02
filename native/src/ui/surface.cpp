@@ -633,14 +633,12 @@ void Surface::note_packet_encoded() noexcept {
 bool Surface::slice_frame(const SliceStage stage) {
     if (!frame_slicing_ || application_.tasks().execution() != base::TaskExecution::asynchronous)
         return false;
-    // A stage can cost 5-7 ms on a large page. Content nobody sees yet stops early enough for the
-    // next to fit 8 ms; any other frame stops only once it has spent most of them already.
     const auto spent = std::chrono::steady_clock::now() - frame_clock_started_;
-    if (spent < (slicing_ ? std::chrono::microseconds(1500) : std::chrono::microseconds(5000)))
+    if (spent < (slicing_ ? frame_pace_.hidden_budget() : frame_pace_.visible_budget()))
         return false;
     // Each stage stops once per packet, and one more when already late, so a busy page still draws.
     if (stage <= slice_stage_) {
-        if (spent < std::chrono::microseconds(5000) || late_slice_used_)
+        if (spent < frame_pace_.visible_budget() || late_slice_used_)
             return false;
         late_slice_used_ = true;
     }
@@ -1887,7 +1885,10 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     }
     pending_lazy_materializations_.clear();
     frame_started_nanos_ = frame_time_nanos;
-    frame_clock_started_ = std::chrono::steady_clock::now();
+    const auto frame_clock = std::chrono::steady_clock::now();
+    if (frame_clock_started_ != std::chrono::steady_clock::time_point{})
+        frame_pace_.record(frame_clock - frame_clock_started_);
+    frame_clock_started_ = frame_clock;
     frame_task_baseline_ = task_statistics_;
     auto profiler_frame = profiler_.frame(last_frame_.frame_index + 1U);
     status_feedback_.advance_frame(frame_time_nanos);

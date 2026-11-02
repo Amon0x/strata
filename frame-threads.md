@@ -887,8 +887,10 @@ layout was 4.5 ms of an 11.7 ms frame, with an authored timer in `run_timers` ta
 after the build stage had only fired after a rebuild. Parallel shaping, the obvious fix for "slow layout",
 would have missed it: shaping is 2.4 ms there.
 
-The cost is latency: an open takes up to four frames more, and a tab highlight in the same frame waits
-with it, so at 60 Hz a click can take about 66 ms to show. That replaces one long frame.
+The cost is latency: an open takes more frames, and a tab highlight in the same frame waits with it. With
+fixed budgets that was the same number of frames on any display, measured from outside at 100-130 ms from
+click to page at 60 Hz against 50-80 ms at 180 Hz. Budgets now follow the display (`ui::FramePace`, the
+pace frames arrive at, so hosts report nothing): 180 Hz is unchanged and 60 Hz is 55-100 ms.
 
 - [x] Describing and laying out a large new subtree is split across UI-thread turns with a
   budget, the render thread showing the previous commit meanwhile; a boundary (Phase 4) decides
@@ -898,13 +900,66 @@ with it, so at 60 Hz a click can take about 66 ms to show. That replaces one lon
   one frame per open. TYPE and LAYOUT also touch 8.4-8.7 ms in some runs.
 - Dropped: shaping runs in parallel on the pool. Too small a share on both LAYOUT and CONTENT.
 
+## Verification
+
+`strata_thread_soak` (native/tests/thread_soak.cpp, 5 s in CTest) runs the real showcase on real threads,
+each window with a threaded Presentation and asynchronous Sessions, and at random switches tabs, scrolls
+from the render thread and from a thread of its own, resizes, minimizes, reloads, toggles an overlay, drops
+preparations part way, floods input past the queue, and closes either in order or by abandoning everything.
+Pass means nothing threw and nothing hung; a window that stops turning aborts with what it was doing.
+
+| Run | Result |
+| --- | --- |
+| ThreadSanitizer, Linux (`-DSTRATA_ENABLE_TSAN=ON`): whole suite | 0 reports |
+| ThreadSanitizer: 350 s of soak, up to 4 windows, also with one pool worker | 0 reports, no hang: 240 adoptions, 600 cancelled preparations, 31 orderly closes, 21 abandons |
+| AddressSanitizer, Windows: suite, 60 s soak on the reference renderer and 60 s on D3D11, a real window through first opens | clean |
+| Linux preset's configuration, warnings as errors | builds, suite passes |
+
+ThreadSanitizer needs `setarch x86_64 -R` under WSL, whose address randomization it cannot start with, and
+`allocator_may_return_null=1`. It does not see FreeType (built without it), the D3D11 driver or the Win32
+host, whose wheel hook only ASan and the traces above have exercised.
+
+No race turned up. What those runs, and a read of the image, Lottie and font code that runs off the UI
+thread, did find, all fixed:
+
+- A wheel for a retired stream ended the render thread, and by reading, any wheel after the presentation
+  failed would throw through the `noexcept` poll inside a frame. Wheels now drop in both cases.
+- A full input queue threw out of `Session::enqueue` and closed the application. `enqueue` now returns false
+  and the diagnostic stands: too busy to read input is not a failure.
+- A recursive component about 75 levels deep overflowed the stack and ended the process with no word why.
+  Executables now reserve 8 MiB on Windows as Linux and macOS do, and the per-node walks check how much
+  stack is left and fail the frame with a diagnostic (`base::check_stack`). Getting there needed
+  `describe_body` to stop catching and rethrowing: on Windows each rethrow stays on the stack until the
+  exception ends, so one per level overflowed what it was unwinding.
+- One unreadable font file name (or one failed allocation) during the off-thread scan failed every later
+  Surface in the process, permanently. Such a file is now skipped and nothing is cached from a failure.
+- `*view.array()` in a range-for relied on C++23's temporary lifetime rule, which GCC 13 lacks: a crash on
+  Linux. The Linux preset also no longer built at all, for several smaller reasons.
+
+Real window on fewer cores and slower displays (`--windowed-timing`, first opens under PresentMon, process
+affinity limiting it to 4 or 2 logical processors with 3 workers; 60 Hz paced by waiting three vblanks of the
+180 Hz display). Late means over 1.5 display intervals, and the late frame at about 830 ms is the window
+startup noted in Phase 6.
+
+| Threads | 180 Hz: intervals, late | 60 Hz: intervals, late |
+| --- | --- | --- |
+| 16 | 1,604, 8 | 535, 1 |
+| 4 | 1,602, 6 | 532, 1 |
+| 2 | 1,581, 12 | 521, 6 |
+
+So tab opens hold their frame rate down to 4 threads, and 2 starts to show. This does not model a slower
+core or GPU: a machine with those is still unmeasured, and first-open uploads (8-11.5 ms on the render
+thread here) are the first place to look.
+
+Still open: the Vulkan preview under ThreadSanitizer (the WSL image has no SDL or Vulkan headers); a physical
+wheel; single stages of up to 27 ms on a 2,000-cell rebuild, during which hover and clicks wait.
+
 ## Risks
 
 - Shared caches are the bug farm: every one found in the Phase 3 audit needs an owner or a lock
   before anything moves, and the audit comes first.
 - Determinism: golden tests stay on the deterministic mode; the asynchronous paths get their own
-  tests through `settle`. The Linux preview build can run them under ThreadSanitizer, which MSVC
-  does not have.
+  tests through `settle`, and the soak (see Verification).
 - The ABI changes (owned packets, prepare, wake) are breaking for hosts; the single-thread mode
   stays for embedders that drive their own loop.
 - Pending content needs a look in every widget that shows text or images; the default must be

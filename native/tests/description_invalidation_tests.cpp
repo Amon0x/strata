@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "base/pending.hpp"
+#include "base/stack_guard.hpp"
 #include "base/task_pool.hpp"
 #include "compiler/compile.hpp"
 #include "data/json.hpp"
@@ -740,6 +741,65 @@ overlay Main {
           "held or outgoing scrollers were offered to the render thread");
 }
 
+/** Nesting past what the stack holds fails the frame, where it can be reported, not the process. */
+void test_too_deep_a_tree_fails_the_frame() {
+    const auto frame_at_depth = [](const int depth) {
+        runtime::ApplicationContext application("too-deep", runtime::ApplicationBundle::create());
+        activate(application, "too-deep", R"(
+component Nest(depth: number) {
+  root Panel(layout: { kind: "COLUMN", width: 100, height: 100 }) {
+    if depth > 0 { Nest(depth: depth - 1) }
+  }
+}
+overlay Main { root Panel(layout: { width: 100, height: 100 }) { Nest(depth: )" +
+                                                   std::to_string(depth) + R"() } }
+)");
+        ui::SurfaceEnvironment environment;
+        environment.framebuffer_width = 100;
+        environment.framebuffer_height = 100;
+        environment.logical_width = 100.0;
+        environment.logical_height = 100.0;
+        ui::Surface surface("too-deep", application, runtime::LayerRole::overlay, "Main", environment,
+                            {}, ui::WidgetRegistry{});
+        try {
+            static_cast<void>(surface.frame(16'000'000));
+            return true;
+        } catch (const base::StackExhausted&) {
+            return false;
+        }
+    };
+    check(frame_at_depth(10), "an ordinary nested tree did not frame");
+    check(!frame_at_depth(100'000), "a tree far too deep for the stack did not fail its frame");
+}
+
+/** A frame split over several takes about the same time on any display, not the same frame count. */
+void test_frame_budgets_follow_the_display() {
+    using std::chrono::microseconds;
+    using std::chrono::milliseconds;
+    ui::FramePace pace;
+    check(pace.hidden_budget() == microseconds(1500) && pace.visible_budget() == milliseconds(5),
+          "frame budgets before any frames arrived were not the short ones");
+    for (int frame = 0; frame < 32; ++frame)
+        pace.record(microseconds(5556));
+    check(pace.interval() == microseconds(5556) && pace.hidden_budget() == microseconds(1500) &&
+              pace.visible_budget() == milliseconds(5),
+          "a fast display did not keep the short budgets");
+    for (int frame = 0; frame < 32; ++frame)
+        pace.record(microseconds(16667));
+    check(pace.hidden_budget() == microseconds(9667) && pace.visible_budget() == microseconds(13667),
+          "a 60 Hz display did not get a 60 Hz frame's budget");
+    // Idle gaps say nothing about the display.
+    for (int frame = 0; frame < 32; ++frame)
+        pace.record(milliseconds(800));
+    check(pace.interval() == microseconds(16667), "an idle gap changed the measured display interval");
+    // Nor do frames that overran it: a few long ones must not allow every later frame more.
+    for (int frame = 0; frame < 32; ++frame)
+        pace.record(microseconds(5556));
+    for (int frame = 0; frame < 12; ++frame)
+        pace.record(microseconds(11111));
+    check(pace.interval() == microseconds(5556), "overrunning frames raised the measured display interval");
+}
+
 /** A widget with an input hook that ignores the wheel must not keep it from scrolling the page. */
 void test_only_wheel_consumers_are_listed() {
     const ui::WidgetRegistry widgets;
@@ -1241,6 +1301,8 @@ int strata_test_description_invalidation() {
         test_content_hold_needs_asynchronous_preparation();
         test_held_scrollers_take_no_wheel();
         test_only_wheel_consumers_are_listed();
+        test_frame_budgets_follow_the_display();
+        test_too_deep_a_tree_fails_the_frame();
         test_readiness_reaches_cached_widgets_and_each_surface();
         test_preparation_reaches_cached_paint_without_redescribing();
         test_runtime_image_metadata_reaches_cached_fit();
