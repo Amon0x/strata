@@ -163,7 +163,11 @@ class HostRenderPacketCache final {
                              std::span<const std::string> textures);
     /** The atlas shape coverage masks pack into, beside the glyph atlas; it must outlive this. */
     void set_shape_atlas(font::GlyphAtlas* atlas) noexcept;
-    void set_scrollers(const std::vector<RenderScroller>& scrollers) { scroller_input_ = scrollers; }
+    void set_scrollers(const std::vector<RenderScroller>& scrollers,
+                       const std::vector<RenderWheelRegion>& wheel_regions) {
+        scroller_input_ = scrollers;
+        wheel_regions_ = wheel_regions;
+    }
     /**
      * Where text drawn from its outlines keeps its glyphs; it must outlive this. Their buffers
      * reach the host in this cache's packets, and its terminal packet releases them.
@@ -185,6 +189,7 @@ class HostRenderPacketCache final {
     std::vector<RenderGroup> groups_;
     /** The latest frame's scrollers and, for each, the groups moving with it. */
     std::vector<RenderScroller> scroller_input_;
+    std::vector<RenderWheelRegion> wheel_regions_;
     std::vector<std::vector<std::uint32_t>> scroller_moved_;
     HostRenderPacketTelemetry telemetry_;
     std::size_t skipped_draws_ = 0U;

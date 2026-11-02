@@ -677,10 +677,12 @@ void LayoutEngine::arrange(
         record.scroll_frame = base_content_bounds.deflate(style.scroll_viewport_insets);
         record.viewport = scroll_viewport;
         record.content_size = scroll_content;
+        // A list's own window is fine: only its built rows can show. One windowed by viewports
+        // around it, or anything placed relative to the clip, depends on the offset itself.
         record.scroll_moves_only_groups =
-            !measured.style.virtual_list.has_value() && !measured.subtree_portals &&
-            !measured.subtree_windowed && !measured.subtree_sticky &&
-            !measured.subtree_pins_horizontal && !measured.subtree_pins_vertical;
+            !measured.subtree_portals && !measured.subtree_sticky &&
+            !measured.subtree_pins_horizontal && !measured.subtree_pins_vertical &&
+            (!measured.subtree_windowed || measured.style.virtual_list.has_value());
         record.scroll_offset = Point{
             style.scroll_horizontal ? clamped_scroll(resolved_scroll_offset.x, scroll_content.width, content_bounds.width) : 0.0,
             style.scroll_vertical ? clamped_scroll(resolved_scroll_offset.y, scroll_content.height, content_bounds.height) : 0.0,

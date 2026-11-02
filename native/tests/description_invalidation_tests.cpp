@@ -684,6 +684,62 @@ overlay Main {
           "returning to the page on screen did not end its hold");
 }
 
+/** Held content is on screen for nobody, so a wheel cannot reach it or scroll what it covers. */
+void test_held_scrollers_take_no_wheel() {
+    base::TaskPool pool(1U);
+    base::TaskOwner owner(base::TaskExecution::asynchronous, {}, &pool);
+    runtime::ApplicationContext application(
+        "held-scrollers", runtime::ApplicationBundle::create(), {}, &owner);
+    activate(application, "held-scrollers", R"(
+animation Swap {
+  from { opacity: 0 }
+  to { opacity: 1 }
+  duration: 100ms;
+}
+overlay Main {
+  state page = "a";
+  root Panel(key: "host", contentKey: page, contentTransition: Swap, contentHold: 200,
+             contentTransitionMode: "TOGETHER",
+             layout: { kind: "COLUMN", width: 200, height: 100 }) {
+    if page == "a" {
+      Scroll(key: "scroll.a", vertical: true, layout: { width: 200, height: 100 }) {
+        Panel(layout: { width: 200, height: 400 })
+      }
+    } else {
+      Scroll(key: "scroll.b", vertical: true, layout: { width: 200, height: 100 }) {
+        Panel(layout: { width: 200, height: 400 })
+      }
+    }
+  }
+}
+)");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 200;
+    environment.framebuffer_height = 100;
+    environment.logical_width = 200.0;
+    environment.logical_height = 100.0;
+    ui::Surface surface("held-scrollers", application, runtime::LayerRole::overlay, "Main",
+                        environment, {}, ui::WidgetRegistry{});
+    std::int64_t now = 0;
+    for (int pass = 0; pass < 4; ++pass) {
+        static_cast<void>(surface.frame(now += 16'000'000));
+        surface.note_packet_encoded();
+    }
+    const auto listed = [&surface](const std::string_view key) {
+        const ui::RetainedNode* const node = mounted(surface, key);
+        return node != nullptr &&
+               std::ranges::any_of(surface.render_scrollers(), [node](const auto& scroller) {
+                   return scroller.identity == node->identity();
+               });
+    };
+    check(listed("scroll.a"), "a scroller on screen was not offered to the render thread");
+    write_state(application, "overlay Main", "page", runtime::Value("b"));
+    static_cast<void>(surface.frame(now += 1'000'000));
+    static_cast<void>(surface.frame(now += 1'000'000));
+    check(mounted(surface, "scroll.b") != nullptr && !listed("scroll.a") && !listed("scroll.b"),
+          "held or outgoing scrollers were offered to the render thread");
+}
+
 /** Inline preparation has nothing to wait for, so deterministic frames never hold. */
 void test_content_hold_needs_asynchronous_preparation() {
     runtime::ApplicationContext application("content-hold", runtime::ApplicationBundle::create());
@@ -1172,6 +1228,7 @@ int strata_test_description_invalidation() {
         test_a_slot_in_a_widgets_generated_rows_takes_the_callers_content();
         test_content_hold_keeps_outgoing_until_incoming_is_ready();
         test_content_hold_needs_asynchronous_preparation();
+        test_held_scrollers_take_no_wheel();
         test_readiness_reaches_cached_widgets_and_each_surface();
         test_preparation_reaches_cached_paint_without_redescribing();
         test_runtime_image_metadata_reaches_cached_fit();

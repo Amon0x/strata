@@ -274,7 +274,7 @@ struct PresentationGroup final {
 /**
  * A scroll view whose content is a presentation group. `viewport` is in the space of `parent_group`
  * (zero is layout space), and `moved` lists the groups that follow it, itself included. A wheel over
- * an ineligible scroller waits for the UI thread.
+ * an ineligible scroller waits for the UI thread. So does one over a wheel region.
  */
 struct PresentationScroller final {
     std::uint64_t identity = 0U;
@@ -289,7 +289,21 @@ struct PresentationScroller final {
     double offset_y = 0.0;
     double limit_x = 0.0;
     double limit_y = 0.0;
+    /** Offsets a wheel can reach here; a virtual list stops where its built rows do. */
+    double reach_from_x = 0.0;
+    double reach_from_y = 0.0;
+    double reach_to_x = 0.0;
+    double reach_to_y = 0.0;
     std::vector<std::uint32_t> moved;
+};
+
+/** Where a widget takes the wheel itself, in the space of `group`: that wheel waits for the UI. */
+struct PresentationWheelRegion final {
+    std::uint32_t group = 0U;
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
 };
 
 /**
@@ -533,6 +547,7 @@ struct RenderPacket final {
     std::vector<PresentationGroup> groups;
     /** What a render thread may scroll while the UI thread is busy. */
     std::vector<PresentationScroller> scrollers;
+    std::vector<PresentationWheelRegion> wheel_regions;
 };
 
 /** Texel dimensions of each live texture, by texture id. */

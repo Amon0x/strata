@@ -488,6 +488,7 @@ encode_packet(Bytes storage, const RenderSubmission& submission, const std::uint
               const std::uint64_t geometry_epoch, const std::span<const RenderGroup> groups,
               const std::span<const RenderScroller> scrollers,
               const std::span<const std::vector<std::uint32_t>> scroller_moved,
+              const std::span<const RenderWheelRegion> wheel_regions,
               const std::span<const TextureUpload> texture_uploads,
               const std::span<const font::AtlasOperation> resources,
               const bool include_geometry = true, const bool patch_geometry = false,
@@ -573,9 +574,21 @@ encode_packet(Bytes storage, const RenderSubmission& submission, const std::uint
         output.number(scroller.offset.y);
         output.number(scroller.limit.x);
         output.number(scroller.limit.y);
+        output.number(scroller.reach_from.x);
+        output.number(scroller.reach_from.y);
+        output.number(scroller.reach_to.x);
+        output.number(scroller.reach_to.y);
         output.integer(checked_count(scroller_moved[at].size(), "render scroller group count"));
         for (const std::uint32_t moved : scroller_moved[at])
             output.integer(moved);
+    }
+    output.integer(checked_count(wheel_regions.size(), "render wheel region count"));
+    for (const RenderWheelRegion& region : wheel_regions) {
+        output.integer(region.group);
+        output.number(region.bounds.x);
+        output.number(region.bounds.y);
+        output.number(region.bounds.width);
+        output.number(region.bounds.height);
     }
     // Resource operations preserve atlas order, and every release precedes the texture creations
     // that may reuse a Surface-scoped host id.
@@ -843,7 +856,7 @@ const EncodedPacket& HostRenderPacketCache::encode(
     const auto serialization_started = std::chrono::steady_clock::now();
     EncodedPacket next = EncodedPacket::recycle(std::move(spare_packet_));
     next.writable_bytes() = encode_packet(
-        std::move(next.writable_bytes()), submission, frame_index, encoded_geometry_epoch, groups_, scroller_input_, scroller_moved_,
+        std::move(next.writable_bytes()), submission, frame_index, encoded_geometry_epoch, groups_, scroller_input_, scroller_moved_, wheel_regions_,
         texture_uploads, resources, geometry_changed, patch_geometry, vector_glyphs_, &vector_append);
     telemetry_.serialization_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - serialization_started).count();
@@ -891,7 +904,7 @@ bool HostRenderPacketCache::reuse(const std::uint64_t frame_index) {
     retained_submission.skipped_draws = skipped_draws_;
     EncodedPacket next = EncodedPacket::recycle(std::move(spare_packet_));
     next.writable_bytes() = encode_packet(std::move(next.writable_bytes()), retained_submission,
-                                         frame_index, geometry_epoch_, groups_, scroller_input_, scroller_moved_, {}, {}, false);
+                                         frame_index, geometry_epoch_, groups_, scroller_input_, scroller_moved_, wheel_regions_, {}, {}, false);
     spare_packet_ = std::move(current_packet_);
     current_packet_ = std::move(next);
     telemetry_.geometry_reused = true;
@@ -923,7 +936,7 @@ const EncodedPacket& HostRenderPacketCache::prepare_resource_release(
     const std::uint64_t next_geometry_epoch = geometry_epoch_ + 1U;
     EncodedPacket next = EncodedPacket::recycle(std::move(spare_packet_));
     next.writable_bytes() = encode_packet(std::move(next.writable_bytes()), empty_submission,
-                                         frame_index, next_geometry_epoch, {}, {}, {}, {}, operations);
+                                         frame_index, next_geometry_epoch, {}, {}, {}, {}, {}, operations);
 
     // Owning-reference moves and the remaining resource transitions cannot allocate.
     spare_packet_ = {};

@@ -772,26 +772,49 @@ at the keyboard. The render thread does not need to receive input, only to apply
   `PeekMessage` runs the window procedure for any sent message, even when filtered by queue. So a pending
   sent message ends polling for that stall, and the window procedure sends to `DefWindowProc` whatever
   slips in between the check and the peek. An earlier version re-entered the window procedure mid-frame.
-- Packet v26 carries a table of scrollers: viewport, offset, limit, eligibility, and the groups moving with
-  each. The render thread targets the innermost with room and adds the delta over the commit's group table.
+- Packet v26 carries a table of scrollers (viewport, offset, limit, reach, eligibility, and the groups
+  moving with each) and the regions where a widget takes the wheel itself. The render thread targets the
+  innermost scroller with room and adds the delta over the commit's group table.
 - The owner adopts each applied scroll on its next frame (`strata_surface_adopt_scroll`), and a commit
   whose packet includes it acknowledges its serial, so it is not applied twice. A wheel it did not apply
   goes back to the owner, which routes it as ordinary input. Normal scrolling is untouched.
 
-The gate, on D3D11: `samples/scroll_stall.strata` stalls in a script every 1.5 s, and wheels were posted
-during five stalls under PresentMon: 2,007 display intervals, median 5.556 ms, p99 5.596 ms, with the only
-late ones at startup. Photos during a stall show the list moved 96 px while its "Stalls so far" text stays
-frozen, and the same position afterwards when the UI has adopted it. A control with polling suppressed
-during a confirmed stall shows no movement. `strata.presentation` covers the same behaviour with real
-pixels on each backend, including Vulkan, whose window host has no hook yet.
+Coverage was the first version's real problem. A scroller containing any widget that might take the wheel
+was disqualified, and counting showed that left **no eligible scroller on any of the 20 showcase pages**.
+Plain `Text` even counted, since `text_edit_mode` also covers static selection. The packet now carries where
+those widgets are, so only a wheel over one goes back to the UI, and only a live editor counts as one.
+Every showcase page now has eligible scrollers; two on CONTENT are not, and those were not investigated.
+A virtual list can move as far as its built rows reach. With the default overscan of one row that is short:
+about 50 px in the test's 200 px list, after which the wheel waits for the UI.
+
+The gate, on D3D11, stalling about 250 ms in a script every 1.5 s with wheels posted during the stalls:
+
+| Page | Display intervals | Median | p99 | Late after startup |
+|---|---:|---:|---:|---:|
+| `samples/scroll_stall.strata` | 2,007 | 5.556 ms | 5.596 ms | 0 |
+| 2,000 rows of buttons | 2,114 | 5.556 ms | 5.595 ms | 1 (11.1 ms) |
+| Showcase, LAYOUT page | 1,973 | 5.556 ms | see below | 1 (11.1 ms) |
+
+The LAYOUT trace's p99 is 116.7 ms only because it includes 2.9 s of the host idling before F7, where
+presenting slowly is correct; after that it has the one late interval above.
+
+The showcase and 2,000-row pages used a throwaway stall timer, which is not committed. Photos during a stall
+show the sample's list moved 96 px with its "Stalls so far" text frozen, the 2,000-row page moved from row 8
+to 12, and LAYOUT's reading pane moved with the UI thread 89-100% busy between the photos by its CPU time.
+A control with polling suppressed during a confirmed stall shows no movement. `strata.presentation` covers
+this with real pixels on each backend, including Vulkan, whose window host has no hook yet.
 
 What it does not do:
 - A stall in native host code is not covered: nothing polls there.
 - Only wheels, on Win32 hosts. A touch drag still waits for the UI thread, and the SDL preview has no hook.
-- These scrollers wait for the UI: virtual lists, and anything with sticky, pinned, portal or windowed
-  content, or a text field or a widget with its own input hook inside. So does everything under a modal.
+- These scrollers wait for the UI: anything with sticky, pinned, portal or windowed content, and lists past
+  their built rows. So does a wheel over a live editor or a widget with a generic input hook (a range slider
+  counts, though it ignores the wheel), and everything under a modal.
 - During the stall, scrollbars stay where they were, `strata.scroll` and authored parallax wait, and
-  hover does not update. A wheel over an open popup can move the content underneath it.
+  hover does not update. LAYOUT's hero art visibly moves at content speed during a stall, then snaps back to
+  its half-speed position when the UI returns. A wheel over an open popup can move the content under it.
+- A wheel region uses the widget's layout bounds, so a static transform on the way down shifts where it
+  applies. The worst case is a wheel handed back or a widget that misses one wheel during a stall.
 
 Why not tracks. Their main case in the showcase was page transitions stuttering while fonts and glyphs
 adopt. The hold now finishes that work before the transition starts. What they would still improve is
@@ -803,9 +826,9 @@ a running animation during a slice: a sliced open pauses UI-driven motion for up
 - [x] Scrolling: the wheel moves eligible content on the render thread during a UI stall, within the limits
   above, and the owner adopts the result.
 - [ ] Time-driven presentation values as packet tracks: not built, see above.
-- [x] Measure: scrolling through a UI stall keeps every frame on the display's interval (a 250 ms script
-  stall, on D3D11). The 2,000-cell page and the LAYOUT reading pane were not traced by name, and input
-  latency during a stall was not measured.
+- [x] Measure: scrolling the 2,000-row page and the LAYOUT reading pane through a UI stall keeps frames on
+  the display's interval, with one 11.1 ms interval in each trace (a stall of about 250 ms, on D3D11, with
+  injected wheel messages). Input latency during a stall was not measured.
 
 ## Phase 7: parallel and sliced preparation
 

@@ -1413,22 +1413,48 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                                 placed.shear_x, placed.shear_y, placed.project_x,
                                 placed.project_y, placed.project_w});
                 const LayoutStyle& scroll_style = LayoutEngine::node_style(node);
+                const Rect viewport = record->viewport.value_or(record->content_bounds);
+                const Point limit{
+                    scroll_style.scroll_horizontal
+                        ? std::max(0.0, record->content_size.width - record->content_bounds.width)
+                        : 0.0,
+                    scroll_style.scroll_vertical
+                        ? std::max(0.0, record->content_size.height - record->content_bounds.height)
+                        : 0.0};
+                Point reach_from;
+                Point reach_to = limit;
+                // A virtual list shows only what is built: past that there is nothing to draw.
+                if (scroll_style.virtual_list.has_value()) {
+                    double first = std::numeric_limits<double>::infinity();
+                    double last = -std::numeric_limits<double>::infinity();
+                    const bool vertical = scroll_style.virtual_list->axis == LayoutAxis::vertical;
+                    for (const auto& child : node.children()) {
+                        const LayoutRecord* const row = layout.find(child->identity());
+                        if (row == nullptr || child->lifecycle() != RetainedLifecycle::attached)
+                            continue;
+                        // A row's place in the content, independent of the current offset.
+                        first = std::min(first, vertical ? row->bounds.y - viewport.y
+                                                         : row->bounds.x - viewport.x);
+                        last = std::max(last, vertical
+                                                  ? row->bounds.bottom() - viewport.y
+                                                  : row->bounds.right() - viewport.x);
+                    }
+                    const double offset =
+                        vertical ? record->scroll_offset.y : record->scroll_offset.x;
+                    const double extent = vertical ? viewport.height : viewport.width;
+                    const double from = std::min(offset, std::isfinite(first) ? first : offset);
+                    const double to = std::max(offset, std::isfinite(last) ? last - extent : offset);
+                    (vertical ? reach_from.y : reach_from.x) =
+                        std::max(vertical ? reach_from.y : reach_from.x, from);
+                    (vertical ? reach_to.y : reach_to.x) =
+                        std::min(vertical ? reach_to.y : reach_to.x, to);
+                }
                 implementation_->scrollers.insert_or_assign(
                     node.identity(),
                     RenderScroller{
                         node.identity(), scroll_group, group != 0U ? group : inherited_group,
-                        layout_clip(record->viewport.value_or(record->content_bounds),
-                                    effective_transform),
-                        record->scroll_offset,
-                        Point{scroll_style.scroll_horizontal
-                                  ? std::max(0.0, record->content_size.width -
-                                                      record->content_bounds.width)
-                                  : 0.0,
-                              scroll_style.scroll_vertical
-                                  ? std::max(0.0, record->content_size.height -
-                                                      record->content_bounds.height)
-                                  : 0.0},
-                        record->scroll_moves_only_groups});
+                        layout_clip(viewport, effective_transform), record->scroll_offset, limit,
+                        record->scroll_moves_only_groups, reach_from, reach_to});
             }
         }
         const Impl::ChildContext child_context{
@@ -1769,7 +1795,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     }
     // Cache the presentation table with its commands; cache hits must retain tone and motion.
     implementation_->publish_groups(output, tree.structure_generation());
-    implementation_->publish_scrollers(tree, input, widgets);
+    implementation_->publish_scrollers(tree, layout, input, widgets);
     implementation_->retain_base(tree, layout, input, generations, output);
     implementation_->retained_composed_commands.clear();
     implementation_->retained_overlay_commands.clear();
@@ -1830,22 +1856,13 @@ void RenderEngine::Impl::publish_groups(RenderCommandBuffer& output,
     published_group_structure = structure_generation;
 }
 
-void RenderEngine::Impl::publish_scrollers(const RetainedTree& tree, const InputPresentation& input,
+void RenderEngine::Impl::publish_scrollers(const RetainedTree& tree, const LayoutResult& layout,
+                                           const InputPresentation& input,
                                            const WidgetRegistry& widgets) {
     published_scrollers.clear();
+    published_wheel_regions.clear();
     if (scrollers.empty())
         return;
-    if (wheel_blocked_structure != tree.structure_generation()) {
-        wheel_blocked_structure = tree.structure_generation();
-        wheel_blocked.clear();
-        for (const std::span<const std::string_view> types :
-             {widgets.wheel_consumer_types(), widgets.text_editable_types()}) {
-            for (const RetainedNode* consumer : tree.nodes_of_types(types)) {
-                for (const RetainedNode* node = consumer; node != nullptr; node = node->parent())
-                    wheel_blocked.insert(node->identity());
-            }
-        }
-    }
     const bool modal = input.modal_active();
     published_scrollers.reserve(scrollers.size());
     for (const auto& [identity, scroller] : scrollers) {
@@ -1855,14 +1872,58 @@ void RenderEngine::Impl::publish_scrollers(const RetainedTree& tree, const Input
             !std::isfinite(scroller.offset.x) || !std::isfinite(scroller.offset.y) ||
             !std::isfinite(scroller.limit.x) || !std::isfinite(scroller.limit.y))
             continue;
+        // Content that is held offstage or on its way out takes no input from anywhere.
+        const RetainedNode* const node = tree.find_identity(identity);
+        if (node == nullptr || node->lifecycle() != RetainedLifecycle::attached ||
+            node->content_hold() != ContentHold::none)
+            continue;
         RenderScroller& published = published_scrollers.emplace_back(scroller);
-        published.eligible = scroller.eligible && !modal && !wheel_blocked.contains(identity);
+        published.eligible = scroller.eligible && !modal;
     }
     std::ranges::sort(published_scrollers, {}, &RenderScroller::group);
+    if (wheel_consumers_structure != tree.structure_generation()) {
+        wheel_consumers_structure = tree.structure_generation();
+        wheel_consumers.clear();
+        wheel_editors.clear();
+        for (const RetainedNode* const consumer : tree.nodes_of_types(widgets.wheel_consumer_types()))
+            wheel_consumers.push_back(consumer->identity());
+        // Plain text is selectable too, but only a live editor scrolls under the wheel.
+        for (const RetainedNode* const editable : tree.nodes_of_types(widgets.text_editable_types()))
+            wheel_editors.push_back(editable->identity());
+    }
+    published_wheel_regions.reserve(wheel_consumers.size());
+    const auto publish_region = [&](const std::uint64_t identity) {
+        const RetainedNode* const consumer = tree.find_identity(identity);
+        const LayoutRecord* const record = consumer != nullptr ? layout.find(identity) : nullptr;
+        if (record == nullptr || consumer->lifecycle() != RetainedLifecycle::attached)
+            return;
+        // Its bounds are in the space of the nearest group around it.
+        std::uint32_t group = 0U;
+        for (const RetainedNode* node = consumer->parent(); node != nullptr && group == 0U;
+             node = node->parent()) {
+            if (const auto scroll = scroll_groups.find(node->identity());
+                scroll != scroll_groups.end()) {
+                group = scroll->second.index;
+            } else if (const auto moving = groups.find(node->identity()); moving != groups.end()) {
+                group = moving->second.index;
+            }
+        }
+        published_wheel_regions.push_back(RenderWheelRegion{group, record->bounds});
+    };
+    for (const std::uint64_t identity : wheel_consumers)
+        publish_region(identity);
+    for (const std::uint64_t identity : wheel_editors) {
+        if (input.edited_text(identity) != nullptr)
+            publish_region(identity);
+    }
 }
 
 const std::vector<RenderScroller>& RenderEngine::scrollers() const noexcept {
     return implementation_->published_scrollers;
+}
+
+const std::vector<RenderWheelRegion>& RenderEngine::wheel_regions() const noexcept {
+    return implementation_->published_wheel_regions;
 }
 
 void RenderEngine::clear() {
@@ -1871,7 +1932,10 @@ void RenderEngine::clear() {
     implementation_->scroll_groups.clear();
     implementation_->scrollers.clear();
     implementation_->published_scrollers.clear();
-    implementation_->wheel_blocked_structure.reset();
+    implementation_->published_wheel_regions.clear();
+    implementation_->wheel_consumers.clear();
+    implementation_->wheel_editors.clear();
+    implementation_->wheel_consumers_structure.reset();
     implementation_->free_group_indices.clear();
     implementation_->next_group_index = 1U;
     implementation_->group_membership_dirty = true;

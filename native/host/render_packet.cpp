@@ -597,6 +597,16 @@ void append_texture_regions(const RenderPacket& packet,
         scroller.offset_y = input.number();
         scroller.limit_x = input.number();
         scroller.limit_y = input.number();
+        scroller.reach_from_x = input.number();
+        scroller.reach_from_y = input.number();
+        scroller.reach_to_x = input.number();
+        scroller.reach_to_y = input.number();
+        if (!std::isfinite(scroller.reach_from_x) || !std::isfinite(scroller.reach_from_y) ||
+            !std::isfinite(scroller.reach_to_x) || !std::isfinite(scroller.reach_to_y) ||
+            scroller.reach_from_x > scroller.reach_to_x ||
+            scroller.reach_from_y > scroller.reach_to_y) {
+            throw std::invalid_argument("render scroller reach is invalid");
+        }
         if (scroller.group == 0U || scroller.group > maximum_presentation_group ||
             scroller.parent_group > maximum_presentation_group ||
             !std::isfinite(scroller.x) || !std::isfinite(scroller.y) ||
@@ -614,6 +624,27 @@ void append_texture_regions(const RenderPacket& packet,
             scroller.moved.push_back(index);
         }
         result.push_back(std::move(scroller));
+    }
+    return result;
+}
+
+[[nodiscard]] std::vector<PresentationWheelRegion> presentation_wheel_regions(Reader& input) {
+    const std::uint32_t count = input.count();
+    std::vector<PresentationWheelRegion> result;
+    result.reserve(input.plausible(count, 8U));
+    for (std::uint32_t record = 0U; record < count; ++record) {
+        PresentationWheelRegion region;
+        region.group = input.u32();
+        region.x = input.number();
+        region.y = input.number();
+        region.width = input.number();
+        region.height = input.number();
+        if (region.group > maximum_presentation_group || !std::isfinite(region.x) ||
+            !std::isfinite(region.y) || !std::isfinite(region.width) ||
+            !std::isfinite(region.height)) {
+            throw std::invalid_argument("render wheel region is invalid");
+        }
+        result.push_back(region);
     }
     return result;
 }
@@ -972,6 +1003,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     }
     std::vector<PresentationGroup> groups = presentation_groups(input);
     std::vector<PresentationScroller> scrollers = presentation_scrollers(input);
+    std::vector<PresentationWheelRegion> wheel_regions = presentation_wheel_regions(input);
     regions_drawn_ = false;
 
     std::vector<ResourceOperation> resources;
@@ -999,6 +1031,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         TextureSizes sizes = texture_sizes_;
         const TextureChanges changed_textures = texture_changes(resources, sizes);
         retained_->scrollers = std::move(scrollers);
+        retained_->wheel_regions = std::move(wheel_regions);
         retained_->frame_index = frame_index;
         retained_->planned_draw_count = planned_draw_count;
         retained_->skipped_draw_count = skipped_draw_count;
@@ -1299,6 +1332,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     }
     result.groups = std::move(groups);
     result.scrollers = std::move(scrollers);
+    result.wheel_regions = std::move(wheel_regions);
     if (!has_geometry_patches && retained_.has_value())
         spare_ = std::move(*retained_);
     retained_ = std::move(result);

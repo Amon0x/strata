@@ -1702,6 +1702,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
               packet_u32(release_packet, release_offset) == 0U &&
               packet_u32(release_packet, release_offset) == 0U &&
               packet_u32(release_packet, release_offset) == 0U &&
+              packet_u32(release_packet, release_offset) == 0U &&
               packet_u32(release_packet, release_offset) == 0U,
           "surface teardown packet retained render geometry, draw accounting, groups or scrollers");
     std::vector<std::string> released_textures;

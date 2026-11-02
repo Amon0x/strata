@@ -290,6 +290,7 @@ enum class Geometry { complete, patch, retained };
                                0.0, 0.0, 0.0, 0.0, 1.0})
         packet.number(value);
     packet.integer(0U);
+    packet.integer(0U);
     if (upload_image) {
         Writer image;
         image.text("image");

@@ -823,8 +823,17 @@ struct RenderScroller final {
     Rect viewport;
     Point offset;
     Point limit;
-    /** Only its table entry depends on the offset, and nothing under it takes the wheel itself. */
+    /** Only its table entry depends on the offset. */
     bool eligible = false;
+    /** Offsets a wheel can reach here: a virtual list stops where its built rows do. */
+    Point reach_from;
+    Point reach_to;
+};
+
+/** Where a widget takes the wheel itself, so the wheel over it has to wait for the UI thread. */
+struct RenderWheelRegion final {
+    std::uint32_t group = 0U;
+    Rect bounds;
 };
 
 /** Retained fragment planner producing one backend-independent command stream per surface frame. */
@@ -846,6 +855,7 @@ class RenderEngine final {
         const RetainedNode& node, const LayoutResult& layout) const;
     /** What the render thread may scroll, as of the last render. */
     [[nodiscard]] const std::vector<RenderScroller>& scrollers() const noexcept;
+    [[nodiscard]] const std::vector<RenderWheelRegion>& wheel_regions() const noexcept;
     void clear();
 
   private:

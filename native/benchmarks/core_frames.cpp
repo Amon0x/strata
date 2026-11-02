@@ -270,11 +270,6 @@ int main(int argc, char** argv) {
                 breakdown(after);
                 // Real time until every preparation the page started has been adopted.
                 Phase worst{std::string("worst ") + name, {}};
-                Phase heaviest_layout{std::string("heaviest layout ") + name, {}};
-                const auto layout_time = [](const Phase& phase) {
-                    const auto found = phase.sections.find("frame/layout");
-                    return found != phase.sections.end() ? found->second : 0.0;
-                };
                 // The UI thread's share: decoding a packet is the render thread's in a real host.
                 const auto ui_time = [](const Phase& phase) {
                     const auto section = [&phase](const char* const path) {
@@ -286,9 +281,6 @@ int main(int argc, char** argv) {
                 const auto frame_after = [&] {
                     Phase sample{worst.name, {driver.frame()}};
                     attribute(host, sample);
-                    if (heaviest_layout.frames.empty() ||
-                        layout_time(sample) > layout_time(heaviest_layout))
-                        heaviest_layout = sample;
                     if (worst.frames.empty() || ui_time(sample) > ui_time(worst))
                         worst = std::move(sample);
                 };
@@ -305,8 +297,6 @@ int main(int argc, char** argv) {
                 breakdown(opened);
                 std::printf("%s frame:\n", worst.name.c_str());
                 breakdown(worst);
-                std::printf("%s frame:\n", heaviest_layout.name.c_str());
-                breakdown(heaviest_layout);
             }
             host.close();
             return 0;

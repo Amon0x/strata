@@ -663,6 +663,10 @@ const std::vector<RenderScroller>& Surface::render_scrollers() const noexcept {
     return render_engine_.scrollers();
 }
 
+const std::vector<RenderWheelRegion>& Surface::render_wheel_regions() const noexcept {
+    return render_engine_.wheel_regions();
+}
+
 bool Surface::defers_packet() {
     return slice_frame(SliceStage::rendered);
 }

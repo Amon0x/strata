@@ -336,6 +336,7 @@ class Surface final {
     void set_frame_slicing(bool enabled) noexcept { frame_slicing_ = enabled; }
     [[nodiscard]] bool adopt_scroll(std::uint64_t identity, Point delta);
     [[nodiscard]] const std::vector<RenderScroller>& render_scrollers() const noexcept;
+    [[nodiscard]] const std::vector<RenderWheelRegion>& render_wheel_regions() const noexcept;
     /**
      * Replays entry motion for the retained tree from the next frame, for hosts that show a hidden
      * surface again. Nothing is rebuilt: state, focus, scroll, and layout are preserved.

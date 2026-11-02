@@ -368,8 +368,11 @@ void scroll_moves_without_the_owner(const std::string_view backend) {
             }
             Scroll(key: "zoomed", vertical: true, horizontal: false,
                    layout: { width: 200, height: 200 }) {
-              ZoomView(key: "view", layout: { width: 180, height: 400 }) {
-                Panel(style: Red, layout: { width: 100, height: 100 })
+              Panel(layout: { kind: "COLUMN", width: { weight: 1 }, height: "content" }) {
+                ZoomView(key: "view", layout: { width: 180, height: 60 }) {
+                  Panel(style: Red, layout: { width: 100, height: 100 })
+                }
+                Panel(style: Blue, layout: { width: { weight: 1 }, height: 400 })
               }
             }
           }
@@ -449,12 +452,95 @@ void scroll_moves_without_the_owner(const std::string_view backend) {
     require(top_pixel() == blue, "an adopted scroll was lost or applied twice");
     require(top_pixel() == blue, "an adopted scroll did not stay");
 
-    // Something under the point takes the wheel itself: the owner has to route it.
-    presentation.wheel(stream, 100.0, 300.0, 0.0, -1.0);
+    // Over the widget that takes the wheel itself, the owner has to route it. Over the rest of the
+    // same scroller the render thread can move it: one widget does not disqualify a whole page.
+    presentation.wheel(stream, 100.0, 240.0, 0.0, -1.0);
     presentation.take_scrolls(scrolls);
     require(scrolls.size() == 1U && !scrolls.front().applied && scrolls.front().notches_y == -1.0 &&
-                scrolls.front().y == 300.0,
+                scrolls.front().y == 240.0,
             "a wheel over a widget that consumes it was not handed back");
+    presentation.wheel(stream, 100.0, 380.0, 0.0, -1.0);
+    presentation.take_scrolls(scrolls);
+    require(scrolls.size() == 1U && scrolls.front().applied && scrolls.front().delta_y > 0.0,
+            "a widget in a scroller kept the wheel from moving the rest of it");
+    require(top_pixel() == blue, "scrolling the second scroller disturbed the first");
+    // The widget moved up with its content by a notch: its region follows it.
+    presentation.wheel(stream, 100.0, 220.0, 0.0, -1.0);
+    presentation.take_scrolls(scrolls);
+    require(scrolls.size() == 1U && !scrolls.front().applied,
+            "a consuming widget's region did not follow its scroller");
+    presentation.wheel(stream, 100.0, 250.0, 0.0, 1.0);
+    presentation.take_scrolls(scrolls);
+    require(scrolls.size() == 1U && scrolls.front().applied && scrolls.front().delta_y < 0.0,
+            "where a consuming widget used to be still took the wheel");
+}
+
+/** A virtual list has built only some rows, so the render thread stops where they stop. */
+void scroll_stops_at_built_rows(const std::string_view backend) {
+    std::string items;
+    for (int index = 0; index < 200; ++index) {
+        items += std::string(index == 0 ? "" : ", ") + "{ key: \"row." + std::to_string(index) +
+                 "\", label: \"Row " + std::to_string(index) + "\" }";
+    }
+    RuntimeOptions options;
+    options.task_execution = TaskExecution::deterministic;
+    Runtime runtime(std::move(options));
+    runtime.configure_application(ApplicationOptions{.id = "presentation.virtual"});
+    require(runtime.activate(SourceActivation{
+        .generation = 1U, .entry_source_id = "virtual.strata",
+        .entry_text = std::string(R"(component Row(item: record, key: key, index: number) {
+          Text(key: key, text: item.label, layout: { width: 160, height: 40 })
+        }
+        overlay Main {
+          root Panel(layout: { kind: "COLUMN", width: 200, height: 200 }) {
+            VirtualList(key: "list", items: [)") + items + R"(], itemTemplate: Row, itemExtent: 40,
+                        layout: { kind: "SCROLL", width: 200, height: 200 })
+          }
+        })",
+    }).activated(), "virtual list application did not activate");
+    SurfaceOptions surface_options;
+    surface_options.id = "presentation.virtual";
+    surface_options.root_role = SurfaceRootRole::overlay;
+    surface_options.root_name = "Main";
+    surface_options.environment.framebuffer_width = 200;
+    surface_options.environment.framebuffer_height = 200;
+    surface_options.environment.logical_width = 200;
+    surface_options.environment.logical_height = 200;
+    Surface surface = runtime.create_surface(surface_options);
+    const auto probe = std::make_shared<Probe>();
+    host::Presentation presentation([probe, backend = std::string(backend)] {
+        return std::make_unique<OffscreenDriver>(probe, backend);
+    }, host::PresentationExecution::caller);
+    presentation.resize({200U, 200U, 200.0, 200.0});
+    const auto stream = presentation.attach("scene");
+    std::int64_t time = 0;
+    std::uint64_t acknowledged = 0U;
+    const auto commit = [&] {
+        auto framed = host::frame_surface(surface.native_handle(), time += 16'000'000);
+        host::PresentationCommit next;
+        next.order.push_back(stream);
+        next.layers.push_back({stream, std::move(framed.encoded), framed.surface.unchanged != 0U,
+                               acknowledged});
+        static_cast<void>(presentation.commit(std::move(next)));
+    };
+    commit();
+    std::vector<host::PresentationScroll> scrolls;
+    // Far more than is built: it moves to the last built row, well short of the 200 rows.
+    presentation.wheel(stream, 100.0, 100.0, 0.0, -100.0);
+    presentation.take_scrolls(scrolls);
+    require(scrolls.size() == 1U && scrolls.front().applied, "a virtual list did not scroll");
+    const double reached = scrolls.front().delta_y;
+    require(reached > 0.0 && reached < 1000.0,
+            "a virtual list scrolled past the rows it had built: " + std::to_string(reached));
+    // There is nothing further to show until the owner builds more.
+    presentation.wheel(stream, 100.0, 100.0, 0.0, -1.0);
+    presentation.take_scrolls(scrolls);
+    require(scrolls.size() == 1U && !scrolls.front().applied,
+            "a virtual list moved past its built rows");
+    // Once the owner adopts the scroll it builds further, and the wheel can go on.
+    presentation.wheel(stream, 100.0, 100.0, 0.0, 0.0);
+    presentation.take_scrolls(scrolls);
+    require(surface.adopt_scroll(1U << 30U, 0.0, 0.0) == false, "an unknown scroller adopted a scroll");
 }
 
 void failed_candidate_keeps_live_programs(const std::string_view backend) {
@@ -605,6 +691,7 @@ int main(const int argc, char** argv) {
         ordered_packets_and_idle_feedback(argc > 1 ? std::string_view(argv[1]) : "reference");
         failed_candidate_keeps_live_programs(argc > 1 ? std::string_view(argv[1]) : "reference");
         scroll_moves_without_the_owner(argc > 1 ? std::string_view(argv[1]) : "reference");
+        scroll_stops_at_built_rows(argc > 1 ? std::string_view(argv[1]) : "reference");
         std::cout << "presentation ownership tests passed\n";
         return 0;
     } catch (const std::exception& error) {

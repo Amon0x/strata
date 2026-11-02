@@ -102,11 +102,14 @@ std::vector<std::size_t> batch_kind_offsets(const std::vector<std::uint8_t>& byt
     const std::uint32_t scroller_count = u32(bytes, offset);
     offset += sizeof(std::uint32_t);
     for (std::uint32_t index = 0U; index < scroller_count; ++index) {
-        // Identity, groups and eligibility; a viewport, offset and limit; what moves with it.
-        offset += 5U * sizeof(std::uint32_t) + 8U * sizeof(double);
+        // Identity, groups and eligibility; viewport, offset, limit and reach; what moves with it.
+        offset += 5U * sizeof(std::uint32_t) + 12U * sizeof(double);
         const std::uint32_t moved = u32(bytes, offset);
         offset += sizeof(std::uint32_t) + static_cast<std::size_t>(moved) * sizeof(std::uint32_t);
     }
+    const std::uint32_t wheel_region_count = u32(bytes, offset);
+    offset += sizeof(std::uint32_t) +
+              static_cast<std::size_t>(wheel_region_count) * (sizeof(std::uint32_t) + 4U * sizeof(double));
     for (std::uint32_t index = 0U; index < resource_count; ++index) {
         offset += sizeof(std::uint32_t);
         const std::uint32_t record_size = u32(bytes, offset);
@@ -829,6 +832,7 @@ std::vector<std::uint8_t> textured_packet(
     packet.u32(geometry ? strata::host::packet_flag_geometry_payload : 0U);
     packet.u32(geometry ? static_cast<std::uint32_t>(quads.size() * 4U * 88U) : 0U);
     packet.u32(geometry ? static_cast<std::uint32_t>(quads.size() * 6U) : 0U);
+    packet.u32(0U);
     packet.u32(0U);
     packet.u32(0U);
     packet.u32(0U);

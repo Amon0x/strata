@@ -390,6 +390,17 @@ struct Presentation::Impl final {
         source.packet = &source.decoder.present_groups(std::move(groups));
     }
 
+    [[nodiscard]] static bool over_wheel_region(const RenderPacket& packet, const double x,
+                                                const double y) noexcept {
+        return std::ranges::any_of(packet.wheel_regions, [&](const PresentationWheelRegion& region) {
+            const PresentationGroup group = group_at(packet.groups, region.group);
+            const double left = group.scale_x * region.x + group.translate_x;
+            const double top = group.scale_y * region.y + group.translate_y;
+            return x >= left && y >= top && x <= left + group.scale_x * region.width &&
+                   y <= top + group.scale_y * region.height;
+        });
+    }
+
     void accept(Wheel& value) {
         Stream& source = stream(value.stream);
         apply_scrolls(source);
@@ -400,7 +411,7 @@ struct Presentation::Impl final {
         answer.notches_x = value.notches_x;
         answer.notches_y = value.notches_y;
         // Unless it applies here the wheel goes back to the owner, which routes it as it would have.
-        if (source.packet != nullptr) {
+        if (source.packet != nullptr && !over_wheel_region(*source.packet, value.x, value.y)) {
             std::vector<const PresentationScroller*> under;
             for (const PresentationScroller& scroller : source.packet->scrollers) {
                 const PresentationGroup parent = group_at(source.packet->groups, scroller.parent_group);
@@ -430,9 +441,9 @@ struct Presentation::Impl final {
                     }
                 }
                 const double delta_x = std::clamp(offset_x - value.notches_x * presentation_wheel_step,
-                                                  0.0, scroller->limit_x) - offset_x;
+                                                  scroller->reach_from_x, scroller->reach_to_x) - offset_x;
                 const double delta_y = std::clamp(offset_y - value.notches_y * presentation_wheel_step,
-                                                  0.0, scroller->limit_y) - offset_y;
+                                                  scroller->reach_from_y, scroller->reach_to_y) - offset_y;
                 if (delta_x == 0.0 && delta_y == 0.0)
                     continue;
                 answer.serial = ++next_scroll;
