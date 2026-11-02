@@ -154,6 +154,10 @@ class HostRenderPacketCache final {
     void set_text_subpixel(font::SubpixelOrder order) noexcept {
         text_subpixel_ = order;
     }
+    /** Whether static upright text draws from the platform's text stack from the next encode on. */
+    void set_text_system_rasterizer(const bool system) noexcept {
+        text_system_rasterizer_ = system;
+    }
     /**
      * Encodes terminal releases for the glyph atlas and every texture the host holds. The encoded
      * packet is retained before either resource set is committed/drained.
@@ -179,6 +183,7 @@ class HostRenderPacketCache final {
 
   private:
     font::SubpixelOrder text_subpixel_ = font::SubpixelOrder::none;
+    bool text_system_rasterizer_ = false;
     RenderSubmissionCache submission_cache_;
     font::GlyphAtlas* shape_atlas_ = nullptr;
     VectorGlyphPool* vector_glyphs_ = nullptr;

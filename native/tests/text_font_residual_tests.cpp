@@ -25,6 +25,7 @@
 #include "font/raster.hpp"
 #include "font/system_fonts.hpp"
 #include "font/vector_glyph.hpp"
+#include <strata/render_packet.hpp>
 #include <strata/vector_text.hpp>
 #include "resource/resource.hpp"
 #include "runtime/expression.hpp"
@@ -1055,6 +1056,20 @@ void test_optional_tables_and_generic_positioning(const std::filesystem::path& r
     const strata::font::OpenTypeFont kern = strata::font::OpenTypeFont::parse(std::move(kern_bytes));
     check(kern.pair_advance_adjustment(kern_left, kern_right) == -123,
           "corrupt later kern subtable erased a valid earlier pair");
+    // A font carrying both tables means the newer: the old table's pairs are not for a script GPOS
+    // kerns, as HarfBuzz has it, or Segoe UI's spacing drifts from every other program's.
+    const std::array<strata::font::GlyphRunInput, 2U> kerned_run{
+        strata::font::GlyphRunInput{kern_left, 0U, 1U},
+        strata::font::GlyphRunInput{kern_right, 1U, 2U},
+    };
+    check(kern.shape_glyph_run(kerned_run, 0U, strata::font::script_tag_of('a'))[0U].position.x_advance == 0,
+          "a legacy kern pair was applied to a script GPOS kerns");
+    check(kern.shape_glyph_run(kerned_run)[0U].position.x_advance == -123,
+          "a run with no script lost its legacy kern pair");
+    check(strata::font::script_tag_of('a') == strata::font::script_tag_of(0x00E9U) &&
+              strata::font::script_tag_of('a') != strata::font::script_tag_of(0x0430U) &&
+              strata::font::script_tag_of(' ') == 0U && strata::font::script_tag_of('7') == 0U,
+          "characters were given the wrong script");
     check(std::ranges::any_of(
               kern.optional_diagnostics(),
               [](const std::string& value) { return value.contains("kern subtable 1"); }
@@ -2223,6 +2238,58 @@ void test_subpixel_raster(const std::filesystem::path& resources) {
 }
 
 /** Cache timing cannot select a different face, and queued queries keep their catalog generation. */
+/** Coverage answers to the ink: light ink's faint edges lift, dark ink's thin, and the ends stay put. */
+void test_text_coverage_follows_the_ink() {
+    using strata::host::text_coverage;
+    for (const float ink : {0.0F, 0.13F, 0.5F, 0.502F, 0.83F, 1.0F}) {
+        check(std::abs(text_coverage(0.0F, ink)) < 1.0e-4F && std::abs(text_coverage(1.0F, ink) - 1.0F) < 1.0e-4F,
+              "no coverage or full coverage did not stay what it was");
+        float previous = 0.0F;
+        for (int step = 1; step <= 20; ++step) {
+            const float next = text_coverage(static_cast<float>(step) / 20.0F, ink);
+            check(next >= previous && std::isfinite(next), "coverage did not rise steadily with its input");
+            previous = next;
+        }
+    }
+    // As read off Chromium's pixels for these inks.
+    check(text_coverage(0.25F, 0.83F) > 0.40F, "light ink's faint edges were not lifted");
+    check(text_coverage(0.25F, 0.135F) < 0.25F, "dark ink's faint edges were not thinned");
+}
+
+/** Where the platform has a text stack it draws the glyph, placed as the atlas expects. */
+void test_system_rasterizer(const std::filesystem::path& resources) {
+    using namespace strata;
+    const font::OpenTypeFont face = font::OpenTypeFont::parse(
+        resource::load_binary_resource(resources, resource::ResourceId::parse("assets/strata/fonts/default.ttf")));
+    font::CoverageRasterConfig system;
+    system.system_rasterizer = true;
+    const font::CoverageRasterConfig portable;
+    const std::uint16_t glyph = face.glyph_id('n');
+    const auto drawn = font::rasterize_subpixel(face, glyph, 13.0, 1.0, font::SubpixelOrder::rgb, {}, system);
+    const auto reference = font::rasterize_subpixel(face, glyph, 13.0, 1.0, font::SubpixelOrder::rgb, {}, portable);
+    check(drawn.has_value() && reference.has_value() && drawn->mode == font::GlyphRasterMode::subpixel &&
+              drawn->bytes.size() == static_cast<std::size_t>(drawn->width) * drawn->height * 4U,
+          "a system-rasterized glyph was not an RGBA subpixel mask");
+    // The same glyph at the same place, whoever drew it: within a pixel at any edge.
+    check(std::abs(drawn->plane_bounds_layout_pixels.left - reference->plane_bounds_layout_pixels.left) <= 1.0 &&
+              std::abs(drawn->plane_bounds_layout_pixels.top - reference->plane_bounds_layout_pixels.top) <= 1.0 &&
+              std::abs(drawn->plane_bounds_layout_pixels.bottom - reference->plane_bounds_layout_pixels.bottom) <= 1.0,
+          "a system-rasterized glyph landed somewhere else");
+    check(std::ranges::any_of(drawn->bytes, [](const std::uint8_t value) { return value != 0U; }),
+          "a system-rasterized glyph drew nothing");
+    const auto gray = font::rasterize_coverage(face, glyph, 13.0, 1.0, {}, system);
+    check(gray.has_value() && gray->mode == font::GlyphRasterMode::coverage &&
+              gray->bytes.size() == static_cast<std::size_t>(gray->width) * gray->height &&
+              std::ranges::any_of(gray->bytes, [](const std::uint8_t value) { return value > 128U; }),
+          "a gray system-rasterized glyph was not a solid one-channel mask");
+    check(!font::rasterize_subpixel(face, face.glyph_id(' '), 13.0, 1.0, font::SubpixelOrder::rgb, {}, system).has_value(),
+          "an empty glyph produced a mask");
+    // A quarter-pixel placement moves the mask, not where the atlas thinks it is.
+    const auto moved = font::rasterize_subpixel(face, glyph, 13.0, 1.0, font::SubpixelOrder::rgb,
+                                                font::SubpixelPhase{1U, 4U}, system);
+    check(moved.has_value() && moved->bytes != drawn->bytes, "a subpixel phase did not change the mask");
+}
+
 void test_system_font_catalog_generations(const std::filesystem::path& resources) {
     using namespace strata;
     const auto root = std::filesystem::temp_directory_path() /
@@ -2611,6 +2678,8 @@ int strata_test_text_font_residual(const int argument_count, const char* const* 
         test_layout_tables_bound_expansion(resources);
         test_layout_runs_fallback_and_soft_wrap(resources);
         test_layout_cache_drops_unused_text(resources);
+        test_text_coverage_follows_the_ink();
+        test_system_rasterizer(resources);
         test_system_font_catalog_generations(resources);
         test_initial_font_preparation(resources);
         test_variable_font_instance(resources);

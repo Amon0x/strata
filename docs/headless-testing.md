@@ -183,7 +183,9 @@ the initialized application and accept operations from the control stream instea
 ```
 
 `surface.textAntialiasing` is `"system"` (gray here, so a capture never depends on the machine),
-`"grayscale"` or `"subpixel"` (per subpixel for an RGB display).
+`"grayscale"` or `"subpixel"` (per subpixel for an RGB display). `surface.textRasterizer` is
+`"portable"` (the default, the same on any machine) or `"system"`, which draws small still text as a
+real window on this machine does; use it to look at text, not for a golden.
 
 Resource and module paths are relative to `--resources`; absolute and root-escaping paths are
 rejected. `surface.images` accepts encoded PNGs and the bounded static SVG subset documented in

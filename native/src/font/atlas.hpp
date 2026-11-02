@@ -91,8 +91,9 @@ struct RasterSlot final {
 
 struct GlyphAtlasConfig final {
     std::uint32_t page_size = 1'024U;
-    std::uint32_t maximum_pages = 8U;
-    std::uint32_t maximum_cached_glyphs = 4'096U;
+    std::uint32_t maximum_pages = 16U;
+    /** Enough that a screen of distinct characters at all four placements fits before the pages do. */
+    std::uint32_t maximum_cached_glyphs = 65'536U;
     /** Bounds full-generation recycling work admitted during one explicit safe preparation phase.
      */
     std::uint32_t maximum_generation_recycles_per_preparation = 1U;
@@ -149,6 +150,8 @@ class GlyphAtlas final {
     void adopt_display_scale(double display_scale);
     /** The subpixel order subpixel glyphs are rasterized for; a change drops the pages. */
     void adopt_subpixel_order(SubpixelOrder order);
+    /** Whether coverage glyphs come from the platform's text stack; a change drops the pages. */
+    void adopt_system_rasterizer(bool system);
     [[nodiscard]] SubpixelOrder subpixel_order() const noexcept;
 
     /**

@@ -256,7 +256,16 @@ decoded into the host's layer table without the copy `SurfacePacketStream::frame
 
 ### 4.5 Rasterization off the frame
 
-**Text is not rasterized.** A glyph with a TrueType outline is flattened once into straight
+**Small text that sits still comes from the system's text stack; everything else is not
+rasterized.** With `STRATA_TEXT_RASTERIZER_SYSTEM` (what a desktop host sets), an upright run at its
+laid-out size up to 28 physical pixels draws masks from `font::rasterize_system_glyph`, through the
+atlas at four horizontal placements as Skia does: DirectWrite on Windows, which runs the font's own
+hinting instructions and ClearType's filter, so at these sizes text matches Chromium's almost pixel
+for pixel. If a frame ever needs more distinct glyphs than the atlas holds, that Surface goes back to
+outlines rather than failing the frame. Coverage then blends through `host::text_coverage`: Skia's
+model of an opposite backdrop, with its contrast and gamma read off Chromium's pixels.
+
+Everything else, on every platform, is not rasterized. A glyph with a TrueType outline is flattened once into straight
 segments in font units, its overlapping contours merged into one boundary and its segments grouped
 into horizontal bands (`font::build_vector_glyph`). The segments reach the GPU in per-Surface
 buffers that only grow (packet resource 5). Every frame the pixel stage measures each pixel's

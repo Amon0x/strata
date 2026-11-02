@@ -158,6 +158,8 @@ struct RenderSubmissionEnvironment final {
     double logical_height = 0.0;
     /** How coverage text is antialiased: per subpixel in this order where it can be, or gray. */
     font::SubpixelOrder text_subpixel = font::SubpixelOrder::none;
+    /** Static upright text draws from the platform's text stack, where there is one. */
+    bool text_system_rasterizer = false;
     [[nodiscard]] friend bool operator==(
         const RenderSubmissionEnvironment&,
         const RenderSubmissionEnvironment&
@@ -229,6 +231,8 @@ private:
     std::vector<resource::TextureResourceDescriptor> texture_descriptors_;
     const font::GlyphAtlas* glyph_atlas_ = nullptr;
     std::uint64_t glyph_atlas_generation_ = 0U;
+    /** The atlas could not hold a frame's system-rasterized text, so it stays on outlines. */
+    bool system_text_overflowed_ = false;
     std::uint64_t shape_atlas_generation_ = 0U;
     const TextEngine* text_engine_ = nullptr;
     std::optional<RenderSubmission> submission_;

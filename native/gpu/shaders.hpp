@@ -204,13 +204,27 @@ float median3(float r, float g, float b) {
 }
 
 /**
- * The alpha a grayscale glyph's coverage contributes in this ink: host::text_coverage. Coverage is
- * raised to a power that falls with the ink's lightness: light ink's faint edges are lifted, dark
- * ink's thinned, fitted to how Chromium draws the same glyphs.
+ * The alpha a glyph's coverage contributes for ink of this brightness: host::text_coverage, Skia's
+ * model of blending against the opposite backdrop, at a contrast and gamma read off how Chromium
+ * draws the same masks.
  */
-float strataTextCoverage(float coverage, float3 ink) {
-    float lightness = dot(ink, float3(0.2126, 0.7152, 0.0722));
-    return pow(saturate(coverage), 1.46 - 0.94 * lightness);
+float strataTextCoverage(float coverage, float ink) {
+    const float gamma = 2.35;
+    float source = saturate(ink);
+    float backdrop = 1.0 - source;
+    float linearSource = pow(source, gamma);
+    float linearBackdrop = pow(backdrop, gamma);
+    float clamped = saturate(coverage);
+    float boosted = saturate(clamped + (1.0 - clamped) * clamped * 1.1 * linearBackdrop);
+    float apart = source - backdrop;
+    if (abs(apart) < 1.0 / 32.0)
+        return boosted;
+    return (pow(lerp(linearBackdrop, linearSource, boosted), 1.0 / gamma) - backdrop) / apart;
+}
+
+/** The brightness gray coverage answers to: host::text_ink_lightness. */
+float strataTextLightness(float3 ink) {
+    return dot(ink, float3(0.2126, 0.7152, 0.0722));
 }
 
 /**
@@ -600,14 +614,14 @@ float4 strataShade(PixelInput input) {
         float inner = strataRoundedEdge(distance + width, footprint, softness);
         color.a *= saturate(outer - inner);
     } else if (mode == 4) {
-        color.a *= strataTextCoverage(strataGlyphTexel(input.uv).r, color.rgb);
+        color.a *= strataTextCoverage(strataGlyphTexel(input.uv).r, strataTextLightness(color.rgb));
     } else if (mode == 12) {
         // Subpixel text: each colour channel's coverage weighted as gray coverage is; alpha
         // carries the strongest, and strataOutput hands the rest to the blend.
         float3 sampled = strataGlyphTexel(input.uv).rgb;
-        strataSubpixelCoverage = float3(strataTextCoverage(sampled.r, color.rgb),
-                                        strataTextCoverage(sampled.g, color.rgb),
-                                        strataTextCoverage(sampled.b, color.rgb));
+        strataSubpixelCoverage = float3(strataTextCoverage(sampled.r, color.r),
+                                        strataTextCoverage(sampled.g, color.g),
+                                        strataTextCoverage(sampled.b, color.b));
         color.a *= max(strataSubpixelCoverage.r,
                        max(strataSubpixelCoverage.g, strataSubpixelCoverage.b));
     } else if (mode == 13 || mode == 14) {
@@ -626,11 +640,11 @@ float4 strataShade(PixelInput input) {
         float4 coverage = vectorTextCoverage((uint)floor(record + 0.5), input.uv, glyphAlongX,
                                              glyphAlongY, subpixel);
         if (subpixel == 0u) {
-            color.a *= strataTextCoverage(coverage.a, color.rgb);
+            color.a *= strataTextCoverage(coverage.a, strataTextLightness(color.rgb));
         } else {
-            strataSubpixelCoverage = float3(strataTextCoverage(coverage.r, color.rgb),
-                                            strataTextCoverage(coverage.g, color.rgb),
-                                            strataTextCoverage(coverage.b, color.rgb));
+            strataSubpixelCoverage = float3(strataTextCoverage(coverage.r, color.r),
+                                            strataTextCoverage(coverage.g, color.g),
+                                            strataTextCoverage(coverage.b, color.b));
             color.a *= max(strataSubpixelCoverage.r,
                            max(strataSubpixelCoverage.g, strataSubpixelCoverage.b));
         }

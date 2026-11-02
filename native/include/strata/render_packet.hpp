@@ -325,20 +325,38 @@ constexpr void tone_color(float& red, float& green, float& blue, const float ton
 }
 
 /**
- * The alpha a grayscale glyph's atlas coverage contributes, given the ink it is drawn in (after
- * tone), channels in [0, 1]. Blending coverage as plain alpha in an encoded framebuffer makes light
- * text on dark come out thin and dark text on light come out heavy, so coverage is raised to a
- * power that falls with the ink's lightness: below 1 for light ink, lifting its faint edges, and
- * above 1 for dark ink, thinning them. The power is fitted to how Chromium (DirectWrite on Windows)
- * draws the same glyphs: about 0.64 for light grey ink and 1.27 for dark grey. Full coverage stays
- * full and none stays none, so stems are not pushed to solid. The unified pixel stage and every CPU
- * backend implement exactly this.
+ * The alpha a glyph's coverage contributes for ink of this brightness in [0, 1]: one colour channel's
+ * for coverage per subpixel, else the ink's lightness (text_ink_lightness). Blending coverage as plain
+ * alpha in an encoded framebuffer makes light text on dark come out thin and dark text on light come
+ * out heavy, so as Skia does, this assumes a backdrop opposite to the ink, boosts coverage by the
+ * contrast, blends the two at the gamma, and answers with the alpha that lands on that result. The
+ * contrast and gamma are read off how Chromium draws the same masks. Full coverage stays full and
+ * none stays none. The unified pixel stage and every CPU backend implement exactly this.
  */
-inline float text_coverage(const float coverage, const float red, const float green,
-                           const float blue) noexcept {
-    const float lightness = 0.2126F * red + 0.7152F * green + 0.0722F * blue;
+inline constexpr float text_coverage_contrast = 1.1F;
+inline constexpr float text_coverage_gamma = 2.35F;
+
+inline float text_coverage(const float coverage, const float ink) noexcept {
+    const float source = ink < 0.0F ? 0.0F : ink > 1.0F ? 1.0F : ink;
+    const float backdrop = 1.0F - source;
+    const float linear_source = std::pow(source, text_coverage_gamma);
+    const float linear_backdrop = std::pow(backdrop, text_coverage_gamma);
     const float clamped = coverage < 0.0F ? 0.0F : coverage > 1.0F ? 1.0F : coverage;
-    return std::pow(clamped, 1.46F - 0.94F * lightness);
+    const float lifted =
+        clamped + (1.0F - clamped) * clamped * text_coverage_contrast * linear_backdrop;
+    const float boosted = lifted > 1.0F ? 1.0F : lifted;
+    // Ink and backdrop nearly alike: the blend below tends to this, and would only divide noise.
+    const float apart = source - backdrop;
+    if (std::abs(apart) < 1.0F / 32.0F)
+        return boosted;
+    const float blended = linear_source * boosted + (1.0F - boosted) * linear_backdrop;
+    return (std::pow(blended, 1.0F / text_coverage_gamma) - backdrop) / apart;
+}
+
+/** The brightness gray coverage answers to. */
+[[nodiscard]] inline float text_ink_lightness(const float red, const float green,
+                                              const float blue) noexcept {
+    return 0.2126F * red + 0.7152F * green + 0.0722F * blue;
 }
 
 /** Region bounds are already presented through `group` for the decoded frame. */

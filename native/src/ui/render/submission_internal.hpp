@@ -170,6 +170,7 @@ struct SubmissionContext final {
     double logical_height = 0.0;
     std::span<const resource::TextureResourceDescriptor> textures;
     font::SubpixelOrder text_subpixel = font::SubpixelOrder::none;
+    bool text_system_rasterizer = false;
 };
 
 struct PreparedTextCacheEntry final {
@@ -265,12 +266,15 @@ struct TextContexts final {
     std::vector<double> vector_scales;
     SubpixelRuns subpixel;
     std::vector<bool> zoomed;
+    /** Runs that draw from the system's masks in the atlas, not from their outlines. */
+    std::vector<bool> system;
     std::vector<TextScope> scopes;
     /** The surface they were worked out for. */
     double logical_width = 0.0;
     double logical_height = 0.0;
     double display_scale = 0.0;
     font::SubpixelOrder order = font::SubpixelOrder::none;
+    bool system_rasterizer = false;
     bool valid = false;
 };
 
@@ -359,6 +363,7 @@ struct PreparationCache final {
     /** Groups presented turned, sheared or scaled (ordered): text in them stays gray. */
     std::vector<std::uint32_t> turned_groups;
     font::SubpixelOrder text_subpixel = font::SubpixelOrder::none;
+    bool text_system_rasterizer = false;
     TextContexts text_contexts;
     std::uint64_t planned_shape_generation = 0U;
     bool plan_current = false;

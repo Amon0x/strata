@@ -275,6 +275,11 @@ rectangle_snapping(const strata_rectangle_snap_policy value) {
     default:
         throw std::invalid_argument("surface text antialiasing is not a STRATA_TEXT_ANTIALIASING_*");
     }
+    // A caller built before the field reads as portable.
+    result.text_system_rasterizer =
+        strata::abi_detail::provides(value, offsetof(strata_surface_environment, text_rasterizer) +
+                                                sizeof(std::uint32_t)) &&
+        value.text_rasterizer == STRATA_TEXT_RASTERIZER_SYSTEM;
     if ((appearance & STRATA_SYSTEM_APPEARANCE_ACCENT) != 0U) {
         result.system_accent =
             strata::runtime::ColorValue{value.system_accent.red, value.system_accent.green,

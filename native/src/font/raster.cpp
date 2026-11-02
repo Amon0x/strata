@@ -23,6 +23,7 @@
 #include FT_MULTIPLE_MASTERS_H
 
 #include "base/process_lifetime.hpp"
+#include "font/system_raster.hpp"
 
 namespace strata::font {
 namespace raster_detail {
@@ -329,6 +330,54 @@ SubpixelPhase SubpixelPhase::quantize(const double physical_position,
 
 namespace {
 
+/** A system rasterizer's mask, padded and placed as the atlas takes a glyph from FreeType. */
+[[nodiscard]] std::optional<GlyphRasterBitmap>
+system_bitmap(const OpenTypeFont& font, SystemGlyphMask mask, const double pixel_size,
+              const double display_scale, const double phase_offset,
+              const CoverageRasterConfig& config, const SubpixelOrder order) {
+    if (mask.width == 0U || mask.height == 0U)
+        return std::nullopt;
+    const std::uint32_t padding = config.padding_pixels;
+    const std::uint32_t width = mask.width + padding * 2U;
+    const std::uint32_t height = mask.height + padding * 2U;
+    if (width > config.maximum_dimension || height > config.maximum_dimension)
+        throw FontError("coverage raster exceeds its configured maximum dimension");
+    const bool subpixel = order != SubpixelOrder::none;
+    const std::size_t texel = subpixel ? 4U : 1U;
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(width) * height * texel, 0U);
+    for (std::uint32_t row = 0U; row < mask.height; ++row) {
+        std::memcpy(bytes.data() + (static_cast<std::size_t>(row + padding) * width + padding) * texel,
+                    mask.bytes.data() + static_cast<std::size_t>(row) * mask.width * texel,
+                    static_cast<std::size_t>(mask.width) * texel);
+    }
+    const double physical_left = static_cast<double>(mask.left) - static_cast<double>(padding);
+    const double physical_top = static_cast<double>(mask.top) + static_cast<double>(padding);
+    const RasterPlaneBounds layout_bounds{
+        (physical_left - phase_offset) / display_scale,
+        (physical_top - static_cast<double>(height)) / display_scale,
+        (physical_left + static_cast<double>(width) - phase_offset) / display_scale,
+        physical_top / display_scale,
+    };
+    const double layout_scale = pixel_size / static_cast<double>(font.units_per_em());
+    return GlyphRasterBitmap{
+        width,
+        height,
+        std::move(bytes),
+        RasterPlaneBounds{
+            layout_bounds.left / layout_scale,
+            layout_bounds.bottom / layout_scale,
+            layout_bounds.right / layout_scale,
+            layout_bounds.top / layout_scale,
+        },
+        layout_bounds,
+        1.0,
+        1.0 / display_scale,
+        layout_scale,
+        layout_scale * display_scale,
+        subpixel ? GlyphRasterMode::subpixel : GlyphRasterMode::coverage,
+    };
+}
+
 /**
  * One glyph's coverage: gray (one byte a pixel) when `order` is none, else per subpixel in that
  * order (four bytes a pixel: red, green, blue and the largest of them).
@@ -351,6 +400,19 @@ rasterize_glyph(const OpenTypeFont& font, const std::uint16_t glyph, const doubl
         throw FontError("coverage raster physical size cannot be represented by FreeType");
     }
 
+    const FontStyleGeometry style =
+        resolve_font_style_geometry(font_style_flags, font.metadata().style_flags);
+    // FreeType widens a synthetically bold outline, and a zoom wants no grid fitting.
+    if (config.system_rasterizer && config.hinting != GlyphHinting::none && !style.bold()) {
+        std::optional<SystemGlyphMask> mask = rasterize_system_glyph(
+            font, glyph, physical_pixel_size, phase_offset,
+            style.italic() ? synthetic_italic_shear : 0.0, order);
+        if (mask.has_value()) {
+            return system_bitmap(font, std::move(*mask), pixel_size, display_scale, phase_offset,
+                                 config, order);
+        }
+    }
+
     std::shared_ptr<RasterContext> retained;
     if (context == nullptr) {
         retained = shared_raster_context();
@@ -360,8 +422,6 @@ rasterize_glyph(const OpenTypeFont& font, const std::uint16_t glyph, const doubl
     FT_Face face = cached_face->get();
     cached_face->select_size(static_cast<FT_F26Dot6>(size_26_6_value));
 
-    const FontStyleGeometry style =
-        resolve_font_style_geometry(font_style_flags, font.metadata().style_flags);
     FT_Matrix matrix{
         1L << 16U,
         style.italic() ? static_cast<FT_Fixed>(std::lround(synthetic_italic_shear * 65'536.0)) : 0L,

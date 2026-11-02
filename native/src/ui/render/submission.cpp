@@ -280,6 +280,7 @@ void update_cached(
         logical_height,
         textures,
         cache.text_subpixel,
+        cache.text_system_rasterizer,
     };
     const RenderSubmissionEnvironment geometry_environment{
         display_scale,

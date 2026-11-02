@@ -761,6 +761,7 @@ const EncodedPacket& HostRenderPacketCache::encode(
                                       logical_width,
                                       logical_height,
                                       text_subpixel_,
+                                      text_system_rasterizer_,
                                   },
                                   textures != nullptr
                                       ? textures->descriptors()

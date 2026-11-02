@@ -60,21 +60,42 @@ const RenderSubmission& RenderSubmissionCache::resolve(
         preparation_cache_->text_subpixel = environment.text_subpixel;
         preparation_cache_->plan_current = false;
     }
+    const bool system_rasterizer = environment.text_system_rasterizer && !system_text_overflowed_;
+    if (preparation_cache_->text_system_rasterizer != system_rasterizer) {
+        preparation_cache_->text_system_rasterizer = system_rasterizer;
+        preparation_cache_->plan_current = false;
+    }
     if (text_engine != nullptr && environment.text_subpixel != font::SubpixelOrder::none)
         glyph_atlas.adopt_subpixel_order(environment.text_subpixel);
-    submission_detail::update_cached(
-        commands,
-        glyph_atlas,
-        text_engine,
-        environment.display_scale,
-        environment.framebuffer_width,
-        environment.framebuffer_height,
-        environment.logical_width,
-        environment.logical_height,
-        textures,
-        *preparation_cache_,
-        *submission_
-    );
+    if (text_engine != nullptr)
+        glyph_atlas.adopt_system_rasterizer(environment.text_system_rasterizer);
+    const auto update = [&] {
+        submission_detail::update_cached(
+            commands,
+            glyph_atlas,
+            text_engine,
+            environment.display_scale,
+            environment.framebuffer_width,
+            environment.framebuffer_height,
+            environment.logical_width,
+            environment.logical_height,
+            textures,
+            *preparation_cache_,
+            *submission_
+        );
+    };
+    try {
+        update();
+    } catch (const font::FontError&) {
+        if (!preparation_cache_->text_system_rasterizer)
+            throw;
+        // More distinct glyphs at once than the atlas holds. Outlines take none of its room, and
+        // text that is slightly less like the system's beats a frame that fails.
+        system_text_overflowed_ = true;
+        preparation_cache_->text_system_rasterizer = false;
+        preparation_cache_->plan_current = false;
+        update();
+    }
     std::vector<std::uint64_t> resources;
     NodeReadinessSnapshot node_reads;
     resources.reserve(preparation_cache_->resource_text.size());

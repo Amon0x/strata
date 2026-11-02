@@ -418,6 +418,11 @@ Scenario load_scenario(const std::filesystem::path& path) {
                 "surface.textAntialiasing must be \"system\", \"grayscale\" or \"subpixel\"");
         }
     }
+    if (const JsonValue* value = optional(surface, "textRasterizer"); value != nullptr) {
+        result.text_rasterizer = text(*value, "surface.textRasterizer");
+        if (result.text_rasterizer != "portable" && result.text_rasterizer != "system")
+            throw std::invalid_argument("surface.textRasterizer must be \"portable\" or \"system\"");
+    }
     if (const JsonValue* value = optional(surface, "clearColor"); value != nullptr) {
         result.clear_color = color(*value);
     }

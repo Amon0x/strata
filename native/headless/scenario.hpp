@@ -118,6 +118,8 @@ struct Scenario final {
      * "subpixel".
      */
     std::string text_antialiasing = "system";
+    /** Who rasterizes still text: "portable" (the same on any machine) or "system". */
+    std::string text_rasterizer = "portable";
     std::array<std::uint8_t, 4U> clear_color{9U, 11U, 15U, 255U};
     /** Writes the Surface's render packet stream to packets.strp for backend replay. */
     bool record_packets = false;

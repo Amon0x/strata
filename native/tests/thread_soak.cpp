@@ -207,7 +207,9 @@ class Window final {
         result.density = STRATA_SURFACE_DENSITY_COMFORTABLE;
         result.pointer_precision = STRATA_POINTER_PRECISION_FINE;
         result.input_capabilities = STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD;
-        result.text_antialiasing = STRATA_TEXT_ANTIALIASING_GRAYSCALE;
+        result.text_antialiasing = STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB;
+        // Raster lanes share the platform's text stack here, as they do in a real window.
+        result.text_rasterizer = STRATA_TEXT_RASTERIZER_SYSTEM;
         return result;
     }
 

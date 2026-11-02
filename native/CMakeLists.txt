@@ -424,6 +424,9 @@ if(STRATA_ENABLE_TRACY)
 endif()
 strata_add_layer(strata_resource DIRECTORIES resource PUBLIC strata_base Strata::svg)
 strata_add_layer(strata_font DIRECTORIES font PUBLIC strata_resource Strata::vector_text PRIVATE freetype)
+if(WIN32)
+    target_link_libraries(strata_font PRIVATE dwrite)
+endif()
 strata_add_layer(
     strata_ui
     DIRECTORIES ui

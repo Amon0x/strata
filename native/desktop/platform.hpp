@@ -68,6 +68,7 @@ struct SystemAppearance final {
                                         (accent.has_value() ? STRATA_SYSTEM_APPEARANCE_ACCENT : 0U);
         environment.system_accent = accent.value_or(strata_color{});
         environment.text_antialiasing = text_antialiasing;
+        environment.text_rasterizer = STRATA_TEXT_RASTERIZER_SYSTEM;
     }
 };
 

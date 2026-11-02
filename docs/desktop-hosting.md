@@ -288,6 +288,11 @@ always antialiases in gray; `"subpixel"` always antialiases per subpixel, in the
 it has one and RGB otherwise. A C++ host sets `ApplicationConfig::text_antialiasing` the same way.
 Headless runs treat `"system"` as gray, so captures do not depend on the machine.
 
+Small text that sits still is rasterized by the platform where it has a text stack: DirectWrite on
+Windows, with each font's own hinting. A desktop host always asks for this
+(`STRATA_TEXT_RASTERIZER_SYSTEM` in the Surface environment); an embedder sets the same field, and
+without it text draws from outlines, the same on every machine.
+
 Candidates are bare file names; a name with a path component is rejected. Faces must be TrueType
 (`glyf`) fonts. A layout that fixes `lineHeight` on its text styles does not move when the face
 changes. Because the result depends on the machine, deterministic test scenarios should leave

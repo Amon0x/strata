@@ -278,6 +278,8 @@ struct ApplicationHost::Impl final {
         result.text_antialiasing = scenario.text_antialiasing == "subpixel"
                                        ? STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB
                                        : STRATA_TEXT_ANTIALIASING_GRAYSCALE;
+        result.text_rasterizer = scenario.text_rasterizer == "system" ? STRATA_TEXT_RASTERIZER_SYSTEM
+                                                                      : STRATA_TEXT_RASTERIZER_PORTABLE;
         return result;
     }
 

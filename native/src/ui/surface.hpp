@@ -77,6 +77,8 @@ struct SurfaceEnvironment final {
     std::optional<runtime::ColorValue> system_accent;
     /** How small text is antialiased: per subpixel in this order, or gray (`none`). */
     font::SubpixelOrder text_subpixel = font::SubpixelOrder::none;
+    /** Small static text draws from the platform's text stack (STRATA_TEXT_RASTERIZER_SYSTEM). */
+    bool text_system_rasterizer = false;
 
     void validate() const;
     [[nodiscard]] LayoutEnvironment layout_environment(std::int64_t frame_time_nanos) const;

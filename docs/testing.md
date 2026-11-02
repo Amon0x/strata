@@ -38,6 +38,13 @@ parser of untrusted input (add `-DSTRATA_ENABLE_ASAN=ON` to catch memory errors 
 Each harness's header comment gives its input format and a typical command line. Run them with
 `-malloc_limit_mb` and `-rss_limit_mb` so an unbounded allocation is a finding.
 
+## Text against Chrome
+
+`python tools/text_compare.py` draws the same lines in nine fonts in Chrome and in Strata on this
+machine, on dark and light, and reports each line's ink and pixel difference. Small text in the desktop's
+system route should stay within about 1% of Chrome's ink and under 0.3 of 255 once aligned; run it
+after changing rasterization, shaping or `host::text_coverage`.
+
 ## Threads
 
 Most tests run deterministically, so they say little about threads. `strata_thread_soak` runs the real

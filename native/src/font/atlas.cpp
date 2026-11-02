@@ -171,6 +171,7 @@ raster_config_identity(const GlyphRasterMode mode, const CoverageRasterConfig& c
             std::bit_cast<std::uint64_t>(coverage.stem_darkening_taper_end_physical_pixel_size),
             std::bit_cast<std::uint64_t>(coverage.transfer_strength),
             mode == GlyphRasterMode::subpixel ? static_cast<std::uint64_t>(order) : 0U,
+            coverage.system_rasterizer ? 1U : 0U,
         };
     } else {
         result = {
@@ -451,6 +452,13 @@ void GlyphAtlas::adopt_subpixel_order(const SubpixelOrder order) {
     if (subpixel_order_ == order)
         return;
     subpixel_order_ = order;
+    invalidate_pages();
+}
+
+void GlyphAtlas::adopt_system_rasterizer(const bool system) {
+    if (config_.coverage.system_rasterizer == system)
+        return;
+    config_.coverage.system_rasterizer = system;
     invalidate_pages();
 }
 

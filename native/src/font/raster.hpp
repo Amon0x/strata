@@ -109,6 +109,11 @@ struct CoverageRasterConfig final {
      * light ink on dark needs far more of it than dark ink on light.
      */
     double transfer_strength = 0.0;
+    /**
+     * Rasterize through the platform's own text stack where there is one (rasterize_system_glyph)
+     * and the glyph is hinted, so text looks as the rest of the system's does.
+     */
+    bool system_rasterizer = false;
 };
 
 struct MsdfRasterConfig final {

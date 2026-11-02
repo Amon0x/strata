@@ -1175,14 +1175,15 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         source.alpha *= outside * falloff;
                     }
                 } else if (mode == 4) {
-                    source.alpha *= host::text_coverage(texture_sample(u, v, !glyph_one_to_one).red,
-                                                        source.red, source.green, source.blue);
+                    source.alpha *= host::text_coverage(
+                        texture_sample(u, v, !glyph_one_to_one).red,
+                        host::text_ink_lightness(source.red, source.green, source.blue));
                 } else if (mode == 12) {
                     const Color sampled = texture_sample(u, v, !glyph_one_to_one);
                     subpixel = {
-                        host::text_coverage(sampled.red, source.red, source.green, source.blue),
-                        host::text_coverage(sampled.green, source.red, source.green, source.blue),
-                        host::text_coverage(sampled.blue, source.red, source.green, source.blue),
+                        host::text_coverage(sampled.red, source.red),
+                        host::text_coverage(sampled.green, source.green),
+                        host::text_coverage(sampled.blue, source.blue),
                     };
                     source.alpha *= std::max({subpixel[0U], subpixel[1U], subpixel[2U]});
                 } else if (mode == 13 || mode == 14) {
@@ -1201,16 +1202,14 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         host::VectorSample{sample_x, sample_y, u, v, du_dx, dv_dx, du_dy, dv_dy},
                         order);
                     if (order == 0U) {
-                        source.alpha *= host::text_coverage(static_cast<float>(measured[3U]),
-                                                            source.red, source.green, source.blue);
+                        source.alpha *= host::text_coverage(
+                            static_cast<float>(measured[3U]),
+                            host::text_ink_lightness(source.red, source.green, source.blue));
                     } else {
                         subpixel = {
-                            host::text_coverage(static_cast<float>(measured[0U]), source.red,
-                                                source.green, source.blue),
-                            host::text_coverage(static_cast<float>(measured[1U]), source.red,
-                                                source.green, source.blue),
-                            host::text_coverage(static_cast<float>(measured[2U]), source.red,
-                                                source.green, source.blue),
+                            host::text_coverage(static_cast<float>(measured[0U]), source.red),
+                            host::text_coverage(static_cast<float>(measured[1U]), source.green),
+                            host::text_coverage(static_cast<float>(measured[2U]), source.blue),
                         };
                         source.alpha *= std::max({subpixel[0U], subpixel[1U], subpixel[2U]});
                     }

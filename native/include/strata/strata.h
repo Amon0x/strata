@@ -872,6 +872,9 @@ typedef struct strata_surface_environment {
      * follows the system (ClearType on Windows) unless the application overrides it; an older
      * caller's layout ends before this field and reads as grayscale. */
     uint32_t text_antialiasing;
+    /* Since version 4: who rasterizes small text, STRATA_TEXT_RASTERIZER_*. A desktop host chooses the
+     * system's; an older caller's layout ends before this field and reads as portable. */
+    uint32_t text_rasterizer;
 } strata_surface_environment;
 
 /* The layout of strata_surface_environment before the system appearance fields. A
@@ -892,6 +895,14 @@ typedef struct strata_surface_environment {
  * cannot work (into a translucent layer, turned or scaled) stays gray. */
 #define STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB UINT32_C(1)
 #define STRATA_TEXT_ANTIALIASING_SUBPIXEL_BGR UINT32_C(2)
+
+/*
+ * Who rasterizes small text that sits still and upright. PORTABLE draws it the same on every machine,
+ * which is what a capture wants. SYSTEM uses the platform's text stack where it has one (DirectWrite
+ * on Windows, with each font's own hinting), so text looks as the rest of the system's does.
+ */
+#define STRATA_TEXT_RASTERIZER_PORTABLE UINT32_C(0)
+#define STRATA_TEXT_RASTERIZER_SYSTEM UINT32_C(1)
 
 typedef struct strata_surface_font_resource {
     /* Logical id referenced by .strata styles, for example strata:fonts/mono. */
