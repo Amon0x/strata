@@ -168,6 +168,11 @@ int main(int argc, char** argv) {
             return 2;
         }
         // Comparing worker counts: the pool's size is fixed when it starts.
+        // Opening only some tabs keeps the caches as cold as a user's first visit to them.
+        std::string only_tabs;
+        if (std::string_view(argv[argc - 1]).starts_with("--only=")) {
+            only_tabs = "," + std::string(argv[--argc] + 7) + ",";
+        }
         if (std::string_view(argv[argc - 1]).starts_with("--workers=")) {
             static_cast<void>(strata_limit_task_workers(
                 static_cast<std::uint32_t>(std::atoi(argv[--argc] + 10))));
@@ -251,16 +256,25 @@ int main(int argc, char** argv) {
                 "FORMS", "MANIPULATE", "ADAPT", "INSPECT", "DATA", "SHELL", "SYSTEM", "MEDIA",
                 "DESKTOP", "NET", "LOTTIE", "CONTENT"};
             std::vector<std::pair<const char*, std::pair<double, double>>> targets;
-            for (const char* const name : tabs)
-                targets.emplace_back(name, tab(name));
+            for (const char* const name : tabs) {
+                if (only_tabs.empty() || only_tabs.contains("," + std::string(name) + ","))
+                    targets.emplace_back(name, tab(name));
+            }
             host.set_capture_frames(false);
             for (const auto& [name, at] : targets) {
                 Phase opened{std::string("first ") + name, {}};
                 Phase after{std::string("after ") + name, {}};
                 const auto clicked = Clock::now();
                 driver.click(at, opened, after, 1);
+                std::printf("frame after click %s:\n", name);
+                breakdown(after);
                 // Real time until every preparation the page started has been adopted.
                 Phase worst{std::string("worst ") + name, {}};
+                Phase heaviest_layout{std::string("heaviest layout ") + name, {}};
+                const auto layout_time = [](const Phase& phase) {
+                    const auto found = phase.sections.find("frame/layout");
+                    return found != phase.sections.end() ? found->second : 0.0;
+                };
                 // The UI thread's share: decoding a packet is the render thread's in a real host.
                 const auto ui_time = [](const Phase& phase) {
                     const auto section = [&phase](const char* const path) {
@@ -272,6 +286,9 @@ int main(int argc, char** argv) {
                 const auto frame_after = [&] {
                     Phase sample{worst.name, {driver.frame()}};
                     attribute(host, sample);
+                    if (heaviest_layout.frames.empty() ||
+                        layout_time(sample) > layout_time(heaviest_layout))
+                        heaviest_layout = sample;
                     if (worst.frames.empty() || ui_time(sample) > ui_time(worst))
                         worst = std::move(sample);
                 };
@@ -288,6 +305,8 @@ int main(int argc, char** argv) {
                 breakdown(opened);
                 std::printf("%s frame:\n", worst.name.c_str());
                 breakdown(worst);
+                std::printf("%s frame:\n", heaviest_layout.name.c_str());
+                breakdown(heaviest_layout);
             }
             host.close();
             return 0;

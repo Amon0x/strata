@@ -809,10 +809,15 @@ The "before" column is whole-frame wall time and includes about 1.5 ms of decodi
 the comparison by that much. Other pages are under 6 ms.
 
 The real threaded window at 180 Hz (`--windowed-timing`, three runs, largest core time in the 1.5 s after
-each click): BLUEPRINT 5.5-6.3, TYPE 6.5-7.3, LAYOUT 7.2-7.8, CONTENT 11.9-12.5 ms. CONTENT has two
-frames over 8 ms in every run: one layout stage measuring 352 nodes at about 12 ms, which a slice cannot
-divide, and a render, raster and encode frame at about 9 ms. The display does not miss a frame for them,
-since the render thread keeps presenting; the page arrives slightly later.
+each click): BLUEPRINT 5.4-6.0, TYPE 7.9-8.7, LAYOUT 7.2-8.4, CONTENT 8.9-9.7 ms. CONTENT's remaining
+frame over 8 ms is one render, raster and encode frame. The display does not miss a frame for it, since
+the render thread keeps presenting; the page arrives slightly later.
+
+CONTENT first measured 11.9-12.5 ms here and looked like an indivisible layout stage. It was not: the
+benchmark's warm caches hid it until `--only=TYPE,LAYOUT,CONTENT` reproduced the cold path, and then
+layout was 4.5 ms of an 11.7 ms frame, with an authored timer in `run_timers` taking the other 7. The cut
+after the build stage had only fired after a rebuild. Parallel shaping, the obvious fix for "slow layout",
+would have missed it: shaping is 2.4 ms there.
 
 The cost is latency: an open takes up to four frames more, and a tab highlight in the same frame waits
 with it, so at 60 Hz a click can take about 66 ms to show. That replaces one long frame.
@@ -821,9 +826,9 @@ with it, so at 60 Hz a click can take about 66 ms to show. That replaces one lon
   budget, the render thread showing the previous commit meanwhile; a boundary (Phase 4) decides
   whether the half-made subtree shows.
 - [x] Measure: the LAYOUT page's first frames under 8 ms of UI-thread time.
-- [ ] Measure: the CONTENT page's first frames under 8 ms. **Not met**: about 12 ms in the real window, in
-  one layout stage. Shaping that page's text on the pool before it arranges is the likely next step,
-  and needs its own measurement, since shaping was too small a share on LAYOUT to justify building it.
+- [ ] Measure: the CONTENT page's first frames under 8 ms. **Close, not met**: 8.9-9.7 ms in the real window,
+  one frame per open. TYPE and LAYOUT also touch 8.4-8.7 ms in some runs.
+- Dropped: shaping runs in parallel on the pool. Too small a share on both LAYOUT and CONTENT.
 
 ## Risks
 

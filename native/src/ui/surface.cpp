@@ -2050,7 +2050,8 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         record_profiler_counters(next);
         input_profile.close();
     }
-    if (next.operations.rebuilds != 0U && slice_frame(SliceStage::built))
+    // The stage also runs authored timers and frame hooks, which can spend the budget themselves.
+    if (slice_frame(SliceStage::built))
         return complete_frame(std::move(next));
 
     // Layout to a fixed point: layout_tree converges virtual realization itself.
