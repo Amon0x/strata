@@ -324,9 +324,31 @@ struct LookupFilter final {
     std::optional<std::uint16_t> mark_filtering_set;
 };
 
+[[nodiscard]] constexpr std::uint32_t make_tag(const char a, const char b, const char c,
+                                               const char d) noexcept {
+    return (static_cast<std::uint32_t>(static_cast<unsigned char>(a)) << 24U) |
+           (static_cast<std::uint32_t>(static_cast<unsigned char>(b)) << 16U) |
+           (static_cast<std::uint32_t>(static_cast<unsigned char>(c)) << 8U) |
+           static_cast<std::uint32_t>(static_cast<unsigned char>(d));
+}
+
+/** The tag older fonts name a shaping-engine script by: deva for dev2. 0 for any other script. */
+[[nodiscard]] constexpr std::uint32_t older_script_tag(const std::uint32_t tag) noexcept {
+    switch (tag) {
+    case make_tag('d', 'e', 'v', '2'): return make_tag('d', 'e', 'v', 'a');
+    case make_tag('b', 'n', 'g', '2'): return make_tag('b', 'e', 'n', 'g');
+    case make_tag('g', 'u', 'r', '2'): return make_tag('g', 'u', 'r', 'u');
+    case make_tag('g', 'j', 'r', '2'): return make_tag('g', 'u', 'j', 'r');
+    case make_tag('t', 'm', 'l', '2'): return make_tag('t', 'a', 'm', 'l');
+    default: return 0U;
+    }
+}
+
 struct PositioningLookup final {
     LookupFilter filter;
     std::vector<PositioningSubtable> subtables;
+    /** The script tags whose language systems select this lookup, sorted. */
+    std::vector<std::uint32_t> scripts;
 };
 
 struct LigatureSubstitutionRule final {
@@ -828,6 +850,10 @@ struct OpenTypeFont::Impl final {
     std::vector<Cmap12Group> cmap12;
     std::optional<Cmap4> cmap4;
     std::vector<PositioningLookup> positioning_lookups;
+    /** Every script GPOS names, sorted. */
+    std::vector<std::uint32_t> positioning_scripts;
+    /** The scripts GPOS gives a `kern` feature, sorted. They take no legacy kern table. */
+    std::vector<std::uint32_t> kerned_scripts;
     /** Every glyph a mark attachment subtable names, sorted: what glyph_is_mark searches. */
     std::vector<std::uint16_t> mark_glyphs;
     std::vector<LigatureSubstitutionLookup> substitution_lookups;
@@ -1072,16 +1098,23 @@ struct OpenTypeFont::Impl final {
     void select_lang_features(
         const Reader& reader,
         const std::size_t offset,
-        std::vector<bool>& selected
+        std::vector<bool>& selected,
+        const std::uint32_t script_tag = 0U,
+        std::vector<std::vector<std::uint32_t>>* const feature_scripts = nullptr
     ) const {
         reader.require(offset, 6U);
+        const auto select = [&](const std::uint16_t feature) {
+            selected[feature] = true;
+            if (feature_scripts != nullptr && feature < feature_scripts->size())
+                (*feature_scripts)[feature].push_back(script_tag);
+        };
         const std::uint16_t required_index = reader.u16(offset + 2U);
-        if (required_index != 0xFFFFU) selected[required_index] = true;
+        if (required_index != 0xFFFFU) select(required_index);
         const std::uint16_t count = reader.u16(offset + 4U);
         reader.require(offset + 6U, static_cast<std::size_t>(count) * 2U);
         layout_budget.charge(1U + static_cast<std::size_t>(count));
         for (std::size_t index = 0U; index < count; ++index) {
-            selected[reader.u16(offset + 6U + index * 2U)] = true;
+            select(reader.u16(offset + 6U + index * 2U));
         }
     }
 
@@ -1093,11 +1126,16 @@ struct OpenTypeFont::Impl final {
     void select_script_features(
         const Reader& reader,
         const std::size_t script,
-        std::vector<bool>& selected
+        std::vector<bool>& selected,
+        const std::uint32_t script_tag = 0U,
+        std::vector<std::vector<std::uint32_t>>* const feature_scripts = nullptr
     ) const {
         reader.require(script, 4U);
         const std::uint16_t default_offset = reader.u16(script);
-        if (default_offset != 0U) select_lang_features(reader, script + default_offset, selected);
+        if (default_offset != 0U) {
+            select_lang_features(reader, script + default_offset, selected, script_tag,
+                                 feature_scripts);
+        }
         const std::uint16_t count = reader.u16(script + 2U);
         reader.require(script + 4U, static_cast<std::size_t>(count) * 6U);
         layout_budget.charge(1U + static_cast<std::size_t>(count));
@@ -1105,7 +1143,8 @@ struct OpenTypeFont::Impl final {
             const std::size_t record = script + 4U + index * 6U;
             const std::string name = reader.tag(record);
             if (name != "dflt" && name != "ENG ") continue;
-            select_lang_features(reader, script + reader.u16(record + 4U), selected);
+            select_lang_features(reader, script + reader.u16(record + 4U), selected, script_tag,
+                                 feature_scripts);
         }
     }
 
@@ -1367,11 +1406,16 @@ struct OpenTypeFont::Impl final {
         const std::uint16_t script_count = reader.u16(scripts);
         reader.require(scripts + 2U, static_cast<std::size_t>(script_count) * 6U);
         layout_budget.charge(script_count);
+        const std::uint16_t declared_features = reader.u16(features);
+        std::vector<std::vector<std::uint32_t>> feature_scripts(declared_features);
         for (std::size_t index = 0U; index < script_count; ++index) {
             const std::size_t record = scripts + 2U + index * 6U;
+            const std::string name = reader.tag(record);
+            const std::uint32_t tag = make_tag(name[0U], name[1U], name[2U], name[3U]);
+            positioning_scripts.push_back(tag);
             select_script_features(
-                reader, scripts + reader.u16(record + 4U), selected_features
-            );
+                reader, scripts + reader.u16(record + 4U), selected_features, tag, &feature_scripts
+);
         }
 
         struct Feature final { std::string tag; std::vector<std::uint16_t> lookups; };
@@ -1395,9 +1439,13 @@ struct OpenTypeFont::Impl final {
             feature_records.push_back(std::move(value));
         }
 
+        std::ranges::sort(positioning_scripts);
+        positioning_scripts.erase(std::ranges::unique(positioning_scripts).begin(),
+                                  positioning_scripts.end());
         const std::uint16_t lookup_count = reader.u16(lookups);
         reader.require(lookups + 2U, static_cast<std::size_t>(lookup_count) * 2U);
         std::vector<bool> active_lookups(lookup_count, false);
+        std::vector<std::vector<std::uint32_t>> lookup_scripts(lookup_count);
         for (std::size_t feature_index = 0U; feature_index < feature_records.size();
              ++feature_index) {
             if (!selected_features[feature_index]) continue;
@@ -1405,10 +1453,21 @@ struct OpenTypeFont::Impl final {
             if (feature.tag != "kern" && feature.tag != "mark" && feature.tag != "mkmk") {
                 continue;
             }
+            if (feature.tag == "kern") {
+                kerned_scripts.insert(kerned_scripts.end(), feature_scripts[feature_index].begin(),
+                                      feature_scripts[feature_index].end());
+            }
             for (const std::uint16_t lookup_index : feature.lookups) {
-                if (lookup_index < lookup_count) active_lookups[lookup_index] = true;
+                if (lookup_index >= lookup_count)
+                    continue;
+                active_lookups[lookup_index] = true;
+                lookup_scripts[lookup_index].insert(lookup_scripts[lookup_index].end(),
+                                                    feature_scripts[feature_index].begin(),
+                                                    feature_scripts[feature_index].end());
             }
         }
+        std::ranges::sort(kerned_scripts);
+        kerned_scripts.erase(std::ranges::unique(kerned_scripts).begin(), kerned_scripts.end());
         for (std::size_t lookup_index = 0U; lookup_index < lookup_count; ++lookup_index) {
             if (!active_lookups[lookup_index]) continue;
             try {
@@ -1417,6 +1476,10 @@ struct OpenTypeFont::Impl final {
                     lookups + reader.u16(lookups + 2U + lookup_index * 2U),
                     static_cast<std::uint16_t>(lookup_index)
                 ); lookup.has_value()) {
+                    std::vector<std::uint32_t>& owners = lookup_scripts[lookup_index];
+                    std::ranges::sort(owners);
+                    owners.erase(std::ranges::unique(owners).begin(), owners.end());
+                    lookup->scripts = std::move(owners);
                     positioning_lookups.push_back(std::move(*lookup));
                 }
             } catch (const std::exception& error) {
@@ -2188,9 +2251,24 @@ struct OpenTypeFont::Impl final {
             : 0.0;
     }
 
+    /**
+     * The script of GPOS a run in `wanted` positions with, as HarfBuzz chooses it: its own, then
+     * the font's default, then Latin. 0 when the font names none of them.
+     */
+    [[nodiscard]] std::uint32_t positioning_script(const std::uint32_t wanted) const noexcept {
+        for (const std::uint32_t candidate :
+             {wanted, older_script_tag(wanted), make_tag('D', 'F', 'L', 'T'), make_tag('d', 'f', 'l', 't'),
+              make_tag('l', 'a', 't', 'n')}) {
+            if (candidate != 0U && std::ranges::binary_search(positioning_scripts, candidate))
+                return candidate;
+        }
+        return 0U;
+    }
+
     [[nodiscard]] std::vector<PositionedRunGlyph> shape_glyph_run(
         const std::span<const GlyphRunInput> source,
-        const std::uint32_t font_style_flags
+        const std::uint32_t font_style_flags,
+        const std::uint32_t script
     ) const {
         std::vector<GlyphRunState> substituted = substitute_glyphs(source);
         std::vector<GlyphPositioningInput> positioning;
@@ -2225,7 +2303,7 @@ struct OpenTypeFont::Impl final {
             }
         }
         const std::vector<GlyphPositionAdjustment> positions = position_glyphs(
-            std::span<const GlyphPositioningInput>(positioning), font_style_flags
+            std::span<const GlyphPositioningInput>(positioning), font_style_flags, script
         );
         std::vector<PositionedRunGlyph> result;
         result.reserve(substituted.size());
@@ -2243,8 +2321,14 @@ struct OpenTypeFont::Impl final {
 
     [[nodiscard]] std::vector<GlyphPositionAdjustment> position_glyphs(
         const std::span<const GlyphPositioningInput> glyph_run,
-        const std::uint32_t font_style_flags
+        const std::uint32_t font_style_flags,
+        const std::uint32_t script = 0U
     ) const {
+        const std::uint32_t positioned_as = script != 0U ? positioning_script(script) : 0U;
+        // A run with a script takes only that script's lookups: others can hold the same pairs.
+        const auto applies = [&](const PositioningLookup& lookup) {
+            return script == 0U || std::ranges::binary_search(lookup.scripts, positioned_as);
+        };
         const FontStyleGeometry style = resolve_font_style_geometry(
             font_style_flags, metadata.style_flags
         );
@@ -2328,7 +2412,7 @@ struct OpenTypeFont::Impl final {
                     return subtable.pair.has_value();
                 }
             );
-            if (!pair_lookups[lookup_index]) continue;
+            if (!pair_lookups[lookup_index] || !applies(lookup)) continue;
             std::vector<PlannedPairAdjustment>& plan = pair_plans[lookup_index];
             plan.reserve(glyph_run.size());
             for (std::size_t left = 0U; left < glyph_run.size(); ++left) {
@@ -2344,10 +2428,14 @@ struct OpenTypeFont::Impl final {
             }
         }
 
-        // Legacy kern contributes to the pen before GPOS positioning and is suppressed only for
-        // adjacent pairs covered by a selected PairPos lookup. Pair applications were planned
-        // above so coverage discovery does not require a duplicate OpenType lookup scan.
-        for (std::size_t index = 1U; index < glyph_run.size(); ++index) {
+        // Legacy kern contributes to the pen before GPOS positioning, and only for a run whose
+        // script GPOS gives no `kern` feature: as in HarfBuzz, a font carrying both means the newer
+        // table, and its older one holds pairs the newer deliberately does not. Without a script,
+        // it is suppressed for adjacent pairs covered by a selected PairPos lookup.
+        const bool gpos_kerns = script == 0U
+                                    ? false
+                                    : std::ranges::binary_search(kerned_scripts, positioned_as);
+        for (std::size_t index = 1U; index < glyph_run.size() && !gpos_kerns; ++index) {
             if (adjacent_pair_positioned[index - 1U]) continue;
             const auto kern = kern_pairs.find(pair_key(
                 glyph_run[index - 1U].glyph_id, glyph_run[index].glyph_id
@@ -2362,6 +2450,7 @@ struct OpenTypeFont::Impl final {
         for (std::size_t lookup_index = 0U;
              lookup_index < positioning_lookups.size(); ++lookup_index) {
             const PositioningLookup& lookup = positioning_lookups[lookup_index];
+            if (!applies(lookup)) continue;
             if (pair_lookups[lookup_index]) {
                 for (const PlannedPairAdjustment& pair : pair_plans[lookup_index]) {
                     add(result[pair.left], pair.adjustment.first);
@@ -2750,9 +2839,59 @@ std::vector<GlyphPositionAdjustment> OpenTypeFont::position_glyphs(
 
 std::vector<PositionedRunGlyph> OpenTypeFont::shape_glyph_run(
     const std::span<const GlyphRunInput> glyphs,
-    const std::uint32_t font_style_flags
+    const std::uint32_t font_style_flags,
+    const std::uint32_t script
 ) const {
-    return implementation_->shape_glyph_run(glyphs, font_style_flags);
+    return implementation_->shape_glyph_run(glyphs, font_style_flags, script);
+}
+
+std::uint32_t script_tag_of(const std::uint32_t c) noexcept {
+    struct Range final {
+        std::uint32_t first;
+        std::uint32_t last;
+        std::uint32_t tag;
+    };
+    static constexpr std::array<Range, 34U> ranges{{
+        {0x0041U, 0x005AU, make_tag('l', 'a', 't', 'n')},
+        {0x0061U, 0x007AU, make_tag('l', 'a', 't', 'n')},
+        {0x00AAU, 0x00AAU, make_tag('l', 'a', 't', 'n')},
+        {0x00BAU, 0x00BAU, make_tag('l', 'a', 't', 'n')},
+        {0x00C0U, 0x00D6U, make_tag('l', 'a', 't', 'n')},
+        {0x00D8U, 0x00F6U, make_tag('l', 'a', 't', 'n')},
+        {0x00F8U, 0x024FU, make_tag('l', 'a', 't', 'n')},
+        {0x0250U, 0x02AFU, make_tag('l', 'a', 't', 'n')},
+        {0x0370U, 0x03FFU, make_tag('g', 'r', 'e', 'k')},
+        {0x0400U, 0x052FU, make_tag('c', 'y', 'r', 'l')},
+        {0x0531U, 0x058FU, make_tag('a', 'r', 'm', 'n')},
+        {0x0590U, 0x05FFU, make_tag('h', 'e', 'b', 'r')},
+        {0x0600U, 0x06FFU, make_tag('a', 'r', 'a', 'b')},
+        {0x0750U, 0x077FU, make_tag('a', 'r', 'a', 'b')},
+        {0x08A0U, 0x08FFU, make_tag('a', 'r', 'a', 'b')},
+        {0x0900U, 0x097FU, make_tag('d', 'e', 'v', '2')},
+        {0x0980U, 0x09FFU, make_tag('b', 'n', 'g', '2')},
+        {0x0A00U, 0x0A7FU, make_tag('g', 'u', 'r', '2')},
+        {0x0A80U, 0x0AFFU, make_tag('g', 'j', 'r', '2')},
+        {0x0B80U, 0x0BFFU, make_tag('t', 'm', 'l', '2')},
+        {0x0E00U, 0x0E7FU, make_tag('t', 'h', 'a', 'i')},
+        {0x10A0U, 0x10FFU, make_tag('g', 'e', 'o', 'r')},
+        {0x1100U, 0x11FFU, make_tag('h', 'a', 'n', 'g')},
+        {0x1E00U, 0x1EFFU, make_tag('l', 'a', 't', 'n')},
+        {0x1F00U, 0x1FFFU, make_tag('g', 'r', 'e', 'k')},
+        {0x3040U, 0x30FFU, make_tag('k', 'a', 'n', 'a')},
+        {0x3400U, 0x9FFFU, make_tag('h', 'a', 'n', 'i')},
+        {0xAC00U, 0xD7AFU, make_tag('h', 'a', 'n', 'g')},
+        {0xF900U, 0xFAFFU, make_tag('h', 'a', 'n', 'i')},
+        {0xFB00U, 0xFB06U, make_tag('l', 'a', 't', 'n')},
+        {0xFB1DU, 0xFB4FU, make_tag('h', 'e', 'b', 'r')},
+        {0xFB50U, 0xFDFFU, make_tag('a', 'r', 'a', 'b')},
+        {0xFE70U, 0xFEFFU, make_tag('a', 'r', 'a', 'b')},
+        {0xFF21U, 0xFF5AU, make_tag('l', 'a', 't', 'n')},
+    }};
+    const auto found = std::ranges::upper_bound(ranges, c, {}, &Range::first);
+    if (found == ranges.begin())
+        return 0U;
+    const Range& range = *std::prev(found);
+    return c <= range.last ? range.tag : 0U;
 }
 
 TextMetrics OpenTypeFont::measure_utf8(

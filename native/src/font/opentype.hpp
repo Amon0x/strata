@@ -132,6 +132,15 @@ struct GlyphPositioningInput final {
     std::uint16_t ligature_component_count = 1U;
 };
 
+/**
+ * The OpenType script tag of a character, or 0 for one that takes the script around it (spaces,
+ * digits, punctuation). Text in a font that names no such script positions as common text.
+ */
+[[nodiscard]] std::uint32_t script_tag_of(std::uint32_t code_point) noexcept;
+/** The tag of text with no script of its own. */
+inline constexpr std::uint32_t common_script_tag = (std::uint32_t{'Z'} << 24U) | (std::uint32_t{'y'} << 16U) |
+                                                   (std::uint32_t{'y'} << 8U) | std::uint32_t{'y'};
+
 /** One source glyph before GSUB, expressed in canonical UTF-16 offsets. */
 struct GlyphRunInput final {
     std::uint16_t glyph_id = 0U;
@@ -286,10 +295,15 @@ public:
         std::span<const GlyphPositioningInput> glyphs,
         std::uint32_t font_style_flags = 0U
     ) const;
-    /** Applies active GSUB ligatures and then GPOS to a live same-face source run. */
+    /**
+     * Applies active GSUB ligatures and then GPOS to a live same-face source run. `script` is the
+     * run's OpenType script tag (script_tag_of): GPOS positions it with the lookups the font names
+     * for that script, as HarfBuzz does; 0 applies those of every script.
+     */
     [[nodiscard]] std::vector<PositionedRunGlyph> shape_glyph_run(
         std::span<const GlyphRunInput> glyphs,
-        std::uint32_t font_style_flags = 0U
+        std::uint32_t font_style_flags = 0U,
+        std::uint32_t script = 0U
     ) const;
     [[nodiscard]] TextMetrics measure_utf8(
         std::string_view text,

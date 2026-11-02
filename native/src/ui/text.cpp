@@ -1565,6 +1565,17 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         return !shaped_units.empty() && !shaped_units.back().newline &&
                shaped_units.back().style_identity == unit.style_identity;
     };
+    // A space, a digit or a comma takes the script around it, so a run is one script throughout.
+    std::vector<std::uint32_t> unit_scripts(units.size(), 0U);
+    for (std::size_t index = 0U; index < units.size(); ++index) {
+        unit_scripts[index] = font::script_tag_of(units[index].code_point);
+        if (unit_scripts[index] == 0U && index != 0U)
+            unit_scripts[index] = unit_scripts[index - 1U];
+    }
+    for (std::size_t index = units.size(); index-- > 1U;) {
+        if (unit_scripts[index - 1U] == 0U)
+            unit_scripts[index - 1U] = unit_scripts[index];
+    }
     for (std::size_t begin = 0U; begin < units.size();) {
         if (units[begin].newline || units[begin].glyph_id == 0U) {
             if (!units[begin].newline && continues_style(units[begin]))
@@ -1576,7 +1587,8 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         std::size_t end = begin + 1U;
         while (end < units.size() && !units[end].newline && units[end].glyph_id != 0U &&
                units[end].font_id == units[begin].font_id &&
-               units[end].style_identity == units[begin].style_identity) {
+               units[end].style_identity == units[begin].style_identity &&
+               unit_scripts[end] == unit_scripts[begin]) {
             ++end;
         }
         std::vector<font::GlyphRunInput> glyphs;
@@ -1590,7 +1602,8 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         }
         const font::OpenTypeFont& face = *units[begin].face;
         const std::vector<font::PositionedRunGlyph> shaped = face.shape_glyph_run(
-            std::span<const font::GlyphRunInput>(glyphs), units[begin].font_style_flags);
+            std::span<const font::GlyphRunInput>(glyphs), units[begin].font_style_flags,
+            unit_scripts[begin] != 0U ? unit_scripts[begin] : font::common_script_tag);
         double y_pen = 0.0;
         const std::span<const Unit> source_run =
             std::span<const Unit>(units).subspan(begin, end - begin);
