@@ -391,8 +391,10 @@ Image-preparation dependency steps:
 - [x] Font loading and system fallback resolution go to the pool: text in a script no loaded font
   covers lays out with the fallback pending, its line metrics from the primary font, and lays out
   again when the font arrives (browsers' font-display: swap).
-- [ ] Measure: TYPE's first frame under 8 ms on the UI thread, its headings visible within three
-  frames; the showcase's first frame under 8 ms.
+- [x] Measure: TYPE's first frame under 8 ms on the UI thread (1.5-4.1 ms, later frames 6.9-8.4 ms);
+  the showcase's first frame under 8 ms (5.5 ms). "Headings visible within three frames" was the wrong
+  goal and is replaced: with `contentHold`, headings appear whole when ready, about 27 ms after the
+  click when settled in the benchmark, rather than in a fixed number of frames.
 
 Remaining latency dependencies:
 
@@ -522,8 +524,11 @@ Live snapshot cutover:
   adopts. Snapshot publication parses its JSON on a worker too and adopts at a frame start.
 - [x] The desktop host opens every overlay this way: pressing F7 starts preparing; the overlay
   shows on the frame after it is ready (or with a spinner after a budget).
-- [ ] Measure: no frame over 8 ms on the frame F7 is pressed or any after it; the overlay visible
-  in under 60 ms.
+- [x] Measure: no frame over 8 ms on the frame F7 is pressed or any after it: 6.44 ms core at most on
+  the real desktop host.
+- [ ] The overlay visible in under 60 ms is **not met**: the first drawn frame is about 80 ms after F7.
+  That time is preparing the Session on a worker, so nothing on screen waits for it. Preparing the
+  overlay ahead of time at startup would meet it, at a startup and memory cost for a debug surface.
 
 ## Phase 4: boundaries that hold content until it is ready
 
@@ -742,27 +747,44 @@ Visible Vulkan dependency:
 
 ## Phase 6: the compositor moves what it can
 
-Requires Phase 1 of `frame-cost.md` to have landed (see "Before this plan").
+Decision, November 2: materials are done; scrolling and animation tracks on the render thread are not
+built. They are not ruled out, and the reasons are below for whoever reopens this.
 
-- [ ] Scrolling: a scroll view's content is a presentation group (Phase 1 of `frame-cost.md`);
-  the packet marks it scrollable with its extent and physics. Wheel, touch and drag on it are
-  answered by the render thread, which updates the offset every frame and reports it back to the
-  UI thread as an event (for virtualization, scroll-linked effects, `strata.scroll`).
-- [ ] Time-driven presentation values: an animation of a group's transform, opacity or tone that
-  depends on nothing but time (keyframes, springs with a known target) is sent as a track in the
-  packet and evaluated by the render thread; the UI thread only hears when it ends.
-- [ ] Materials and art that read time or the pointer already run on the GPU each frame; the
-  render thread feeds them its own clock and pointer, so they keep moving through a UI stall.
-- [ ] Measure: scrolling the 2,000-cell page and the LAYOUT page's reading pane during a 100 ms
-  UI stall keeps every frame under the display interval; input-to-scroll latency is one frame.
+What the display does now. A threaded, vsynced window (`--windowed-timing`) ran F7 and then the first
+opens of TYPE, LAYOUT, CONTENT and BLUEPRINT under an elevated PresentMon trace: 2,424 display intervals,
+median 5.556 ms at 180 Hz, p99 5.602 ms. Three ran late (11.1, 16.6, 11.1 ms), all around F7's startup
+before any tab opened; the tab opens have none. So preparing new content no longer costs a displayed
+frame, which was the goal of this plan. The late three are not yet attributed.
+
+Why not scrolling. The gate is scrolling through a 100 ms UI stall, and two things stand in the way.
+Win32 input arrives through the message pump on the thread that runs the UI (`native/desktop/main.cpp`),
+so the render thread never sees a wheel event during a stall. It needs a separate platform thread
+first, with clipboard, IME, OLE drag and dialogs marshalled across it. Then scrolling needs offsets
+owned on the render thread, with clips, sticky content, scrollbars, virtualization margins and
+`strata.scroll` feedback following them. What remains to justify that is a long stall that is not
+preparation: an authored handler, or one large description. Scrolling costs 0.15 ms on the UI thread, and
+Flutter scrolls on its UI thread too; browsers do not.
+
+Why not tracks. Their main case in the showcase was page transitions stuttering while fonts and glyphs
+adopt. The hold now finishes that work before the transition starts. What they would still improve is
+a running animation during a slice: a sliced open pauses UI-driven motion for up to three frames.
+
+- [x] Materials and art that read time or the pointer already run on the GPU each frame; the
+  render thread feeds them its own clock and pointer, so they keep moving through a UI stall
+  (Phase 5's PresentMon traces, on both backends).
+- [ ] Scrolling on the render thread: not built, see above. A large description still blocks scrolling
+  for as long as it runs, since a stage cannot stop partway.
+- [ ] Time-driven presentation values as packet tracks: not built, see above.
+- [ ] Measure: scrolling during a 100 ms UI stall. **Not met**, and expected not to be: a scroll waits out
+  the stall.
 
 ## Phase 7: parallel and sliced preparation
 
-Decision, November 2: slicing comes first, and it met the gate alone, so parallel shaping was not
-built. Attribution showed shaping is a small share (LAYOUT: 2.98 ms text preparation of about 20 ms),
-and pool width did not help either: first opens settle alike with 3 and 7 workers, and 15 workers
-cost the UI thread 2-3 ms per open. The pool now uses half the logical cores, with
-`strata_limit_task_workers` for embedders.
+Decision, November 2: slicing comes first, and it brought every page but CONTENT under the gate, so
+parallel shaping was not built. Attribution showed shaping is a small share (LAYOUT: 2.98 ms text
+preparation of about 20 ms), and pool width did not help either: first opens settle alike with 3 and 7
+workers, and 15 workers cost the UI thread 2-3 ms per open. The pool now uses half the logical cores,
+with `strata_limit_task_workers` for embedders.
 
 `Surface::slice_frame` stops a frame at a stage boundary (built, laid out, rendered), leaving its
 dirty marks for the next frame, while a first frame or held content prepares (after 1.5 ms) and in any
@@ -784,8 +806,13 @@ worst of the open and every frame until 30 after settling, three runs each, show
 | CONTENT | 13.9-17.1 | 7.9-9.4 |
 
 The "before" column is whole-frame wall time and includes about 1.5 ms of decoding, so it overstates
-the comparison by that much. Other pages are under 6 ms. TYPE, LAYOUT and CONTENT still touch 8-9 ms in
-some runs: the gate is met in most runs, not all of them.
+the comparison by that much. Other pages are under 6 ms.
+
+The real threaded window at 180 Hz (`--windowed-timing`, three runs, largest core time in the 1.5 s after
+each click): BLUEPRINT 5.5-6.3, TYPE 6.5-7.3, LAYOUT 7.2-7.8, CONTENT 11.9-12.5 ms. CONTENT has two
+frames over 8 ms in every run: one layout stage measuring 352 nodes at about 12 ms, which a slice cannot
+divide, and a render, raster and encode frame at about 9 ms. The display does not miss a frame for them,
+since the render thread keeps presenting; the page arrives slightly later.
 
 The cost is latency: an open takes up to four frames more, and a tab highlight in the same frame waits
 with it, so at 60 Hz a click can take about 66 ms to show. That replaces one long frame.
@@ -793,10 +820,10 @@ with it, so at 60 Hz a click can take about 66 ms to show. That replaces one lon
 - [x] Describing and laying out a large new subtree is split across UI-thread turns with a
   budget, the render thread showing the previous commit meanwhile; a boundary (Phase 4) decides
   whether the half-made subtree shows.
-- [x] Measure: the LAYOUT and CONTENT pages' first frames under 8 ms of UI-thread time each (in most
-  runs, see above).
-- Dropped: shaping runs in parallel on the pool. Measured as too small a share, and slicing met the
-  gate without it.
+- [x] Measure: the LAYOUT page's first frames under 8 ms of UI-thread time.
+- [ ] Measure: the CONTENT page's first frames under 8 ms. **Not met**: about 12 ms in the real window, in
+  one layout stage. Shaping that page's text on the pool before it arranges is the likely next step,
+  and needs its own measurement, since shaping was too small a share on LAYOUT to justify building it.
 
 ## Risks
 

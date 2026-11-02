@@ -2354,6 +2354,10 @@ std::string Host::performance_frame_json() {
     return layer->surface().frame_json();
 }
 
+bool Host::ready_for_frame() noexcept {
+    return impl_->renderer->ready_for_frame();
+}
+
 bool Host::has_pending_preparation() const noexcept {
     for (auto* const layer : impl_->layers()) {
         if (impl_->shown(*layer) && (layer->setup.has_value() || layer->preparation.has_value()))

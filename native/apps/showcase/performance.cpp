@@ -664,6 +664,11 @@ struct PerformanceRunner::Impl final {
             invalidate("The Windows message loop was interrupted during measurement.");
             throw std::runtime_error("performance benchmark message loop was interrupted");
         }
+        // Windowed timing: a turn waiting on the render thread is not a frame to report.
+        if (!host.ready_for_frame()) {
+            std::this_thread::yield();
+            return;
+        }
         const Clock::time_point frame_started = Clock::now();
         const std::int64_t started_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
             frame_started - startup.started_at).count() - input_nanos;

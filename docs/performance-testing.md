@@ -180,7 +180,8 @@ frames; a fixed uncapped frame count can finish before the worker runs.
 `settle` takes nonnegative milliseconds and frames, unmeasured, until that much wall time has passed
 and all shown Sessions have been adopted. Zero waits only for initial preparation, not perpetual
 animation work. Pending Sessions have a five-second allowance beyond the requested duration.
-Uncapped frame counts do not establish transition completion or display cadence. Startup scenarios
+`--windowed-timing` runs a scenario as a real window does, presenting on the render thread at the
+display's rate, so a PresentMon trace can observe display cadence during it. Uncapped frame counts do not establish transition completion or display cadence. Startup scenarios
 that intentionally include a blank pending frame set `validity.requireDraws` to false; ordinary
 draw-requiring workloads retain that check. Pointer targets use the
 same joined semantic/inspection selector model as the headless browser: coordinates, `key`, `path`,

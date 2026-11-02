@@ -139,6 +139,8 @@ public:
     [[nodiscard]] std::string performance_frame_json();
     /** Whether a shown layer still awaits its initial Session, not later animation work. */
     [[nodiscard]] bool has_pending_preparation() const noexcept;
+    /** False while the last commit waits for the render thread. */
+    [[nodiscard]] bool ready_for_frame() noexcept;
     [[nodiscard]] bool smoke_ready() const noexcept;
     [[nodiscard]] std::uint64_t smoke_fingerprint() const;
     [[nodiscard]] bool smoke_identity_bound() const;

@@ -489,6 +489,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         bool profile_showcase = false;
         bool multi_window = false;
         bool uncapped = false;
+        bool windowed_timing = false;
         bool watch = false;
         bool show_frame_time = false;
         std::filesystem::path performance_scenario_path;
@@ -525,6 +526,8 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                 show_frame_time = true;
             else if (argument == L"--resources")
                 resources = require_value(index, "--resources");
+            else if (argument == L"--windowed-timing")
+                windowed_timing = true;
             else if (argument == L"--performance")
                 performance_scenario_path = require_value(index, "--performance");
             else if (argument == L"--output")
@@ -581,7 +584,9 @@ int wmain(const int argument_count, wchar_t** const arguments) {
             multi_window = true;
         if (profile_showcase || performance || application_mode)
             multi_window = false;
-        if (performance)
+        // Uncapped measures the engine's own cost; windowed timing presents as a real window does,
+        // on the render thread at the display's rate, for a display trace to observe.
+        if (performance && !windowed_timing)
             uncapped = true;
         const bool headless = smoke || profile_showcase;
         const auto presentation_execution = uncapped || headless
