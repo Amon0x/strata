@@ -15,7 +15,7 @@
 namespace strata::ui {
 
 /** Packet format the encoder writes. The C ABI pins it to STRATA_RENDER_PACKET_VERSION_CURRENT. */
-inline constexpr std::uint32_t render_packet_version = 25U;
+inline constexpr std::uint32_t render_packet_version = 26U;
 
 /** The resource record that appends to a Surface's vector glyph buffers (see VectorGlyphPool). */
 inline constexpr std::uint32_t packet_resource_vector_glyphs = 5U;
@@ -163,6 +163,7 @@ class HostRenderPacketCache final {
                              std::span<const std::string> textures);
     /** The atlas shape coverage masks pack into, beside the glyph atlas; it must outlive this. */
     void set_shape_atlas(font::GlyphAtlas* atlas) noexcept;
+    void set_scrollers(const std::vector<RenderScroller>& scrollers) { scroller_input_ = scrollers; }
     /**
      * Where text drawn from its outlines keeps its glyphs; it must outlive this. Their buffers
      * reach the host in this cache's packets, and its terminal packet releases them.
@@ -182,6 +183,9 @@ class HostRenderPacketCache final {
     bool has_geometry_ = false;
     // World-composed presentation groups of the latest frame; every packet carries them.
     std::vector<RenderGroup> groups_;
+    /** The latest frame's scrollers and, for each, the groups moving with it. */
+    std::vector<RenderScroller> scroller_input_;
+    std::vector<std::vector<std::uint32_t>> scroller_moved_;
     HostRenderPacketTelemetry telemetry_;
     std::size_t skipped_draws_ = 0U;
     // A failed packet encode must be retried even if the retained UI becomes settled meanwhile.

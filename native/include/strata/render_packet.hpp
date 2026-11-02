@@ -272,6 +272,27 @@ struct PresentationGroup final {
 };
 
 /**
+ * A scroll view whose content is a presentation group. `viewport` is in the space of `parent_group`
+ * (zero is layout space), and `moved` lists the groups that follow it, itself included. A wheel over
+ * an ineligible scroller waits for the UI thread.
+ */
+struct PresentationScroller final {
+    std::uint64_t identity = 0U;
+    std::uint32_t group = 0U;
+    std::uint32_t parent_group = 0U;
+    bool eligible = false;
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    double offset_x = 0.0;
+    double offset_y = 0.0;
+    double limit_x = 0.0;
+    double limit_y = 0.0;
+    std::vector<std::uint32_t> moved;
+};
+
+/**
  * A group's tone applied to one straight-alpha colour, channels in [0, 1]. Light, unsaturated
  * colours are ink: their lightness is mirrored toward dark ink in proportion to `tone`. Saturated
  * colours and dark colours are left as authored, so accents keep their hue and dark ink stays dark.
@@ -510,6 +531,8 @@ struct RenderPacket final {
      * bounds are reported in geometry_dirty_regions.
      */
     std::vector<PresentationGroup> groups;
+    /** What a render thread may scroll while the UI thread is busy. */
+    std::vector<PresentationScroller> scrollers;
 };
 
 /** Texel dimensions of each live texture, by texture id. */
@@ -535,10 +558,17 @@ class RenderPacketDecoder final {
     void acknowledge_resources() noexcept;
     /** After a successful draw, also retires transient geometry uploads for repeated presentation. */
     void acknowledge_draw() noexcept;
+    /**
+     * Shows the retained packet through another group table: the commit's values with a scroll the
+     * render thread applied. The next packet's table replaces it.
+     */
+    [[nodiscard]] const RenderPacket& present_groups(std::vector<PresentationGroup> groups);
     void reset() noexcept;
 
   private:
     std::optional<RenderPacket> retained_;
+    /** What the retained packet marked dirty has been drawn, so a new table starts clean. */
+    bool regions_drawn_ = false;
     /** The previous complete packet's buffers, reused by the next complete payload. */
     std::optional<RenderPacket> spare_;
     /** Group-local copies of grouped blur/effect batches, re-presented when the table changes. */

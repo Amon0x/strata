@@ -814,6 +814,19 @@ struct RenderGenerationToken final {
 [[nodiscard]] data::JsonValue render_command_json(const RenderCommand& command);
 [[nodiscard]] data::JsonValue render_commands_json(const RenderCommandBuffer& commands);
 
+/** A scroll view's content group, for moving it while the UI thread is busy. */
+struct RenderScroller final {
+    std::uint64_t identity = 0U;
+    std::uint32_t group = 0U;
+    /** The group its viewport is placed in; zero is layout space. */
+    std::uint32_t parent_group = 0U;
+    Rect viewport;
+    Point offset;
+    Point limit;
+    /** Only its table entry depends on the offset, and nothing under it takes the wheel itself. */
+    bool eligible = false;
+};
+
 /** Retained fragment planner producing one backend-independent command stream per surface frame. */
 class RenderEngine final {
   public:
@@ -831,6 +844,8 @@ class RenderEngine final {
     /** Captures retained widget fragments for a drag preview before the next frame mutates them. */
     [[nodiscard]] std::vector<RenderCommand> snapshot_subtree(
         const RetainedNode& node, const LayoutResult& layout) const;
+    /** What the render thread may scroll, as of the last render. */
+    [[nodiscard]] const std::vector<RenderScroller>& scrollers() const noexcept;
     void clear();
 
   private:

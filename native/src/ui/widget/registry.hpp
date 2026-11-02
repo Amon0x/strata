@@ -355,6 +355,10 @@ class WidgetRegistry final {
     [[nodiscard]] std::vector<std::string_view> frame_watch_types() const;
     /** Types with a text edit mode, sorted; input preparation walks them every frame. */
     [[nodiscard]] std::span<const std::string_view> text_editable_types() const noexcept;
+    /** Widgets whose generic input hook may take a wheel event before any scroller does. */
+    [[nodiscard]] std::span<const std::string_view> wheel_consumer_types() const noexcept {
+        return wheel_consumer_types_;
+    }
     /** Types whose nodes declare commands. */
     [[nodiscard]] std::span<const std::string_view> command_declaration_types() const noexcept;
     /** Types with an authored presentation property the input router keeps current. */
@@ -416,6 +420,7 @@ class WidgetRegistry final {
     std::vector<std::string_view> async_owner_types_;
     std::vector<std::string_view> synchronized_types_;
     std::vector<std::string_view> text_editable_types_;
+    std::vector<std::string_view> wheel_consumer_types_;
     std::uint64_t revision_ = 0U;
 };
 

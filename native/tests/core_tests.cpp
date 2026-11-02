@@ -19,6 +19,7 @@
 #include "base/identity.hpp"
 #include "base/pending.hpp"
 #include "base/status.hpp"
+#include "base/busy_poll.hpp"
 #include "base/task_pool.hpp"
 #include "base/utf8.hpp"
 #include "core/diagnostics.hpp"
@@ -339,6 +340,35 @@ void test_pool_size_follows_request_and_cores() {
     check(!TaskPool::limit_shared_workers(1U), "a started pool accepted a new limit");
 }
 
+void test_busy_poll_waits_for_a_long_frame_and_nests() {
+    using namespace strata::base;
+    int calls = 0;
+    const auto count = [](void* const user_data) { ++*static_cast<int*>(user_data); };
+    const auto spin = [](const std::chrono::milliseconds duration) {
+        const auto until = std::chrono::steady_clock::now() + duration;
+        while (std::chrono::steady_clock::now() < until)
+            BusyPoll::tick();
+    };
+    spin(std::chrono::milliseconds(2));
+    check(calls == 0, "a busy poll ran with nothing installed");
+    {
+        const BusyPoll poll(count, &calls);
+        spin(std::chrono::milliseconds(2));
+        check(calls == 0, "a busy poll ran during an ordinary frame");
+        spin(std::chrono::milliseconds(10));
+        check(calls >= 3, "a busy poll did not run during a long frame");
+        const int before = calls;
+        {
+            const BusyPoll none(nullptr, nullptr);
+            spin(std::chrono::milliseconds(6));
+        }
+        check(calls > before, "a scope with no hook hid the one it nests in");
+    }
+    const int final_calls = calls;
+    spin(std::chrono::milliseconds(6));
+    check(calls == final_calls, "a busy poll outlived its scope");
+}
+
 void test_blocking_batches_do_not_wait_for_unclaimed_helpers() {
     using namespace strata::base;
     TaskPool pool(1U);
@@ -502,6 +532,7 @@ int strata_test_core() {
         test_task_inline_and_late_cancellation();
         test_task_owner_close_does_not_wait_for_preparation();
         test_pool_size_follows_request_and_cores();
+        test_busy_poll_waits_for_a_long_frame_and_nests();
         test_blocking_batches_do_not_wait_for_unclaimed_helpers();
         test_pending_resources_publish_on_owner();
         test_pending_owner_transfer();

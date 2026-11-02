@@ -1,3 +1,4 @@
+#include "base/busy_poll.hpp"
 #include "ui/render/submission_internal.hpp"
 
 #include <algorithm>
@@ -786,6 +787,7 @@ bool retained_text(const std::optional<PreparedTextCacheEntry>& retained,
             scope.materials -= scope.materials != 0U ? 1U : 0U;
         } else if (const auto* text = std::get_if<TextRunRenderCommand>(&source)) {
             const bool grouped = scope.group_depth != 0U;
+            base::BusyPoll::tick();
             // Grouped text moves on the GPU; its screen position is unknown here, so never cull
             // it.
             out.visible[index] =

@@ -250,6 +250,7 @@ class InputPresentation : protected InputPresentationState {
     using TextLayoutResolver = WidgetTextLayoutResolver;
 
     [[nodiscard]] std::optional<std::string_view> focused_key() const noexcept;
+    [[nodiscard]] bool modal_active() const { return active_modal() != nullptr; }
     [[nodiscard]] bool focus_contained() const noexcept;
     [[nodiscard]] bool focused(std::uint64_t identity) const noexcept;
     [[nodiscard]] std::optional<std::uint64_t> focused_identity() const noexcept;

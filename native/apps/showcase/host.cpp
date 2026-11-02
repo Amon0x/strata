@@ -28,6 +28,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
+#include <windowsx.h>
 
 #include <strata/contracts/debug_overlay.hpp>
 #include <strata/contracts/demo_surface.hpp>
@@ -39,6 +40,7 @@
 
 #include <strata/render_packet.hpp>
 
+#include "desktop/window_input.hpp"
 #include "durable_writer.hpp"
 #include "frame_clock.hpp"
 #include "host/session.hpp"
@@ -239,6 +241,9 @@ struct Host::Impl final {
         std::uint64_t submitted_frame = 0U;
         std::int64_t submit_nanos = 0;
         bool drew = false;
+        std::uint64_t scroll_serial = 0U;
+        std::uint64_t scroll_ack = 0U;
+        bool scroll_awaits_packet = false;
         std::uint64_t prepared_environment = 0U;
         bool profiler_capture = false;
 
@@ -705,6 +710,8 @@ struct Host::Impl final {
         options.application_id = result.id;
         options.stable_identity_seed = 0x5354524154414445ULL;
         options.frame_slicing = true;
+        if (presentation_execution == host::PresentationExecution::threaded)
+            options.busy_poll = [this] { pass_wheel_to_renderer(); };
         options.frame_wake = [target = window] {
             if (!PostMessageW(target, WM_NULL, 0U, 0))
                 throw std::runtime_error("could not wake the showcase window");
@@ -1742,6 +1749,26 @@ struct Host::Impl final {
                 layer->programs.reset();
             }
         }
+        renderer->take_scrolls(scrolls);
+        for (const host::PresentationScroll& scroll : scrolls) {
+            for (Layer* const layer : layers()) {
+                if (!layer->live() || layer->render_stream != scroll.stream)
+                    continue;
+                if (!scroll.applied) {
+                    strata_input_event event{};
+                    event.kind = STRATA_INPUT_SCROLL;
+                    event.x = scroll.x;
+                    event.y = scroll.y;
+                    event.delta_x = scroll.notches_x;
+                    event.delta_y = scroll.notches_y;
+                    enqueue(event);
+                    continue;
+                }
+                layer->scroll_serial = scroll.serial;
+                if (layer->surface().adopt_scroll(scroll.identity, scroll.delta_x, scroll.delta_y))
+                    layer->scroll_awaits_packet = true;
+            }
+        }
         renderer->take_frames(rendered);
         for (host::PresentationFrame& frame : rendered) {
             last_frame_presented = last_frame_presented || frame.presented;
@@ -1785,6 +1812,18 @@ struct Host::Impl final {
             : effect_gallery_enabled && effect_gallery.live() ? &effect_gallery
             : showcase_enabled && showcase.live() ? &showcase
             : nullptr;
+    }
+
+    /** The UI is busy: the render thread can still move what it was last given. */
+    void pass_wheel_to_renderer() noexcept {
+        Layer* const target = interactive_layer();
+        win32::pass_wheel_messages(window, [this, target](const double x, const double y,
+                                                         const double dx, const double dy) {
+            if (target != nullptr) {
+                renderer->wheel(target->render_stream, x / display_scale, y / display_scale, dx,
+                                dy);
+            }
+        });
     }
 
     void files(const std::uint32_t kind, const double x, const double y, const std::string& paths) {
@@ -1968,13 +2007,19 @@ struct Host::Impl final {
         bool idle = true;
         for (Layer* const layer : layers()) {
             if (!shown(*layer) || !layer->live()) continue;
+            const std::uint64_t adopted_serial = layer->scroll_serial;
             framed_layers.push_back(frame_session(*layer));
             FramedLayer& framed = framed_layers.back();
             const strata_surface_frame_info& info = framed.framed.surface;
             idle = idle && info.idle != 0U;
             commit.order.push_back(layer->render_stream);
-            commit.layers.push_back(
-                {layer->render_stream, std::move(framed.framed.encoded), info.unchanged != 0U});
+            // Adopted scrolls stop being added over the packet once a packet carries them.
+            if (!layer->scroll_awaits_packet || info.unchanged == 0U) {
+                layer->scroll_awaits_packet = false;
+                layer->scroll_ack = adopted_serial;
+            }
+            commit.layers.push_back({layer->render_stream, std::move(framed.framed.encoded),
+                                     info.unchanged != 0U, layer->scroll_ack});
             if (layer == interactive) sample_framing(framed, sample);
         }
         commit.animate = !idle;
@@ -2105,6 +2150,7 @@ struct Host::Impl final {
     std::int64_t showcase_hidden_at = 0;
     std::uint64_t environment_generation = 1U;
     std::uint64_t rendered_frames = 0U;
+    std::vector<host::PresentationScroll> scrolls;
     std::uint64_t settings_save_count = 0U;
     strata::host::Revision settings_revision;
     std::optional<SmokeIdentity> captured_smoke_identity;

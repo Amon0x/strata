@@ -1,3 +1,4 @@
+#include "base/busy_poll.hpp"
 #include "ui/layout.hpp"
 
 #include <algorithm>
@@ -120,6 +121,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
                                                     const LayoutEnvironment& environment,
                                                     LayoutOperationCounters& operations,
                                                     const bool force) {
+    base::BusyPoll::tick();
     constraints.validate();
     const auto cached = measurement_cache_.find(node.identity());
     const DirtySet& dirty = node.dirty();

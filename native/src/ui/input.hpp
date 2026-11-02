@@ -324,6 +324,8 @@ class InputRouter final : public InputPresentation {
     void publish_lottie_scenes(lottie::SceneCache& scenes) noexcept {
         lottie_scenes_ = &scenes;
     }
+    /** A scroll the render thread already showed; true when the offset moved. */
+    [[nodiscard]] bool adopt_scroll(std::uint64_t identity, Point delta, InputOperationResult& result);
     /** Schedules one widget-owned frame callback; the callback must explicitly request another. */
     [[nodiscard]] bool request_widget_frame(
         const RetainedNode& node, std::optional<WidgetFrameCost> cost = std::nullopt);

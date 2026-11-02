@@ -342,6 +342,8 @@ struct LayoutRecord final {
     Size content_size;
     Point requested_scroll_offset;
     Point scroll_offset;
+    /** Moving this offset changes nothing layout decides, so a group's table entry can follow it. */
+    bool scroll_moves_only_groups = false;
     std::optional<VisibleRange> visible_range;
     /** Key lookup for the complete virtual domain without a copied all-item key snapshot. */
     std::shared_ptr<const runtime::KeyedSequence> virtual_items;

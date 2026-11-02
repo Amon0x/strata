@@ -1,0 +1,151 @@
+// Scrolling while the UI thread is busy: a timer stalls it for a while, every 1.5 seconds. The list
+// is an ordinary scroll view, so the wheel keeps moving it during the stall (see frame-threads.md).
+
+fn stall() {
+  var i = 0
+  while i < 1000000 {
+    i += 1
+  }
+}
+
+style Row {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 40;
+  padding: 8;
+}
+
+overlay ScrollStall {
+  state stalls = 0;
+  root Panel(
+    layout: { kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 }, gap: 8, padding: 12 },
+    timers: [{ id: "stall", every: 1500ms, action: () => { stall(); stalls = stalls + 1 } }]
+  ) {
+    Text(key: "stalls", text: format("Stalls so far: {0}", stalls))
+    Scroll(key: "list", vertical: true, horizontal: false,
+           layout: { width: { weight: 1 }, height: { weight: 1 } }) {
+      Panel(layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 4 }) {
+        Panel(style: Row) { Text(text: "Row 0") }
+        Panel(style: Row) { Text(text: "Row 1") }
+        Panel(style: Row) { Text(text: "Row 2") }
+        Panel(style: Row) { Text(text: "Row 3") }
+        Panel(style: Row) { Text(text: "Row 4") }
+        Panel(style: Row) { Text(text: "Row 5") }
+        Panel(style: Row) { Text(text: "Row 6") }
+        Panel(style: Row) { Text(text: "Row 7") }
+        Panel(style: Row) { Text(text: "Row 8") }
+        Panel(style: Row) { Text(text: "Row 9") }
+        Panel(style: Row) { Text(text: "Row 10") }
+        Panel(style: Row) { Text(text: "Row 11") }
+        Panel(style: Row) { Text(text: "Row 12") }
+        Panel(style: Row) { Text(text: "Row 13") }
+        Panel(style: Row) { Text(text: "Row 14") }
+        Panel(style: Row) { Text(text: "Row 15") }
+        Panel(style: Row) { Text(text: "Row 16") }
+        Panel(style: Row) { Text(text: "Row 17") }
+        Panel(style: Row) { Text(text: "Row 18") }
+        Panel(style: Row) { Text(text: "Row 19") }
+        Panel(style: Row) { Text(text: "Row 20") }
+        Panel(style: Row) { Text(text: "Row 21") }
+        Panel(style: Row) { Text(text: "Row 22") }
+        Panel(style: Row) { Text(text: "Row 23") }
+        Panel(style: Row) { Text(text: "Row 24") }
+        Panel(style: Row) { Text(text: "Row 25") }
+        Panel(style: Row) { Text(text: "Row 26") }
+        Panel(style: Row) { Text(text: "Row 27") }
+        Panel(style: Row) { Text(text: "Row 28") }
+        Panel(style: Row) { Text(text: "Row 29") }
+        Panel(style: Row) { Text(text: "Row 30") }
+        Panel(style: Row) { Text(text: "Row 31") }
+        Panel(style: Row) { Text(text: "Row 32") }
+        Panel(style: Row) { Text(text: "Row 33") }
+        Panel(style: Row) { Text(text: "Row 34") }
+        Panel(style: Row) { Text(text: "Row 35") }
+        Panel(style: Row) { Text(text: "Row 36") }
+        Panel(style: Row) { Text(text: "Row 37") }
+        Panel(style: Row) { Text(text: "Row 38") }
+        Panel(style: Row) { Text(text: "Row 39") }
+        Panel(style: Row) { Text(text: "Row 40") }
+        Panel(style: Row) { Text(text: "Row 41") }
+        Panel(style: Row) { Text(text: "Row 42") }
+        Panel(style: Row) { Text(text: "Row 43") }
+        Panel(style: Row) { Text(text: "Row 44") }
+        Panel(style: Row) { Text(text: "Row 45") }
+        Panel(style: Row) { Text(text: "Row 46") }
+        Panel(style: Row) { Text(text: "Row 47") }
+        Panel(style: Row) { Text(text: "Row 48") }
+        Panel(style: Row) { Text(text: "Row 49") }
+        Panel(style: Row) { Text(text: "Row 50") }
+        Panel(style: Row) { Text(text: "Row 51") }
+        Panel(style: Row) { Text(text: "Row 52") }
+        Panel(style: Row) { Text(text: "Row 53") }
+        Panel(style: Row) { Text(text: "Row 54") }
+        Panel(style: Row) { Text(text: "Row 55") }
+        Panel(style: Row) { Text(text: "Row 56") }
+        Panel(style: Row) { Text(text: "Row 57") }
+        Panel(style: Row) { Text(text: "Row 58") }
+        Panel(style: Row) { Text(text: "Row 59") }
+        Panel(style: Row) { Text(text: "Row 60") }
+        Panel(style: Row) { Text(text: "Row 61") }
+        Panel(style: Row) { Text(text: "Row 62") }
+        Panel(style: Row) { Text(text: "Row 63") }
+        Panel(style: Row) { Text(text: "Row 64") }
+        Panel(style: Row) { Text(text: "Row 65") }
+        Panel(style: Row) { Text(text: "Row 66") }
+        Panel(style: Row) { Text(text: "Row 67") }
+        Panel(style: Row) { Text(text: "Row 68") }
+        Panel(style: Row) { Text(text: "Row 69") }
+        Panel(style: Row) { Text(text: "Row 70") }
+        Panel(style: Row) { Text(text: "Row 71") }
+        Panel(style: Row) { Text(text: "Row 72") }
+        Panel(style: Row) { Text(text: "Row 73") }
+        Panel(style: Row) { Text(text: "Row 74") }
+        Panel(style: Row) { Text(text: "Row 75") }
+        Panel(style: Row) { Text(text: "Row 76") }
+        Panel(style: Row) { Text(text: "Row 77") }
+        Panel(style: Row) { Text(text: "Row 78") }
+        Panel(style: Row) { Text(text: "Row 79") }
+        Panel(style: Row) { Text(text: "Row 80") }
+        Panel(style: Row) { Text(text: "Row 81") }
+        Panel(style: Row) { Text(text: "Row 82") }
+        Panel(style: Row) { Text(text: "Row 83") }
+        Panel(style: Row) { Text(text: "Row 84") }
+        Panel(style: Row) { Text(text: "Row 85") }
+        Panel(style: Row) { Text(text: "Row 86") }
+        Panel(style: Row) { Text(text: "Row 87") }
+        Panel(style: Row) { Text(text: "Row 88") }
+        Panel(style: Row) { Text(text: "Row 89") }
+        Panel(style: Row) { Text(text: "Row 90") }
+        Panel(style: Row) { Text(text: "Row 91") }
+        Panel(style: Row) { Text(text: "Row 92") }
+        Panel(style: Row) { Text(text: "Row 93") }
+        Panel(style: Row) { Text(text: "Row 94") }
+        Panel(style: Row) { Text(text: "Row 95") }
+        Panel(style: Row) { Text(text: "Row 96") }
+        Panel(style: Row) { Text(text: "Row 97") }
+        Panel(style: Row) { Text(text: "Row 98") }
+        Panel(style: Row) { Text(text: "Row 99") }
+        Panel(style: Row) { Text(text: "Row 100") }
+        Panel(style: Row) { Text(text: "Row 101") }
+        Panel(style: Row) { Text(text: "Row 102") }
+        Panel(style: Row) { Text(text: "Row 103") }
+        Panel(style: Row) { Text(text: "Row 104") }
+        Panel(style: Row) { Text(text: "Row 105") }
+        Panel(style: Row) { Text(text: "Row 106") }
+        Panel(style: Row) { Text(text: "Row 107") }
+        Panel(style: Row) { Text(text: "Row 108") }
+        Panel(style: Row) { Text(text: "Row 109") }
+        Panel(style: Row) { Text(text: "Row 110") }
+        Panel(style: Row) { Text(text: "Row 111") }
+        Panel(style: Row) { Text(text: "Row 112") }
+        Panel(style: Row) { Text(text: "Row 113") }
+        Panel(style: Row) { Text(text: "Row 114") }
+        Panel(style: Row) { Text(text: "Row 115") }
+        Panel(style: Row) { Text(text: "Row 116") }
+        Panel(style: Row) { Text(text: "Row 117") }
+        Panel(style: Row) { Text(text: "Row 118") }
+        Panel(style: Row) { Text(text: "Row 119") }
+      }
+    }
+  }
+}

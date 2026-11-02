@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "launch": {
+    "kind": "generic",
+    "resourceRoot": "../../..",
+    "title": "Scroll during a stall"
+  },
+  "application": {
+    "id": "strata.scroll_stall",
+    "module": "assets/strata/samples/scroll_stall.strata",
+    "root": "ScrollStall"
+  },
+  "surface": {
+    "id": "strata.scroll_stall",
+    "width": 900,
+    "height": 700,
+    "scale": 1,
+    "fonts": [
+      {
+        "id": "strata:fonts/default",
+        "resource": "assets/strata/fonts/default.ttf"
+      },
+      {
+        "id": "strata:fonts/default-medium",
+        "resource": "assets/strata/fonts/medium.ttf"
+      },
+      {
+        "id": "strata:fonts/mono",
+        "resource": "assets/strata/fonts/mono.ttf"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "capture": "radial"
+    }
+  ]
+}

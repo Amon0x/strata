@@ -1761,6 +1761,18 @@ class Surface final {
         require(strata_surface_cancel_interactions(value_), "surface interaction cancellation");
     }
 
+    void set_busy_poll(const strata_busy_poll_fn poll, void* const user_data) {
+        require(strata_surface_set_busy_poll(value_, poll, user_data), "surface busy poll");
+    }
+
+    [[nodiscard]] bool adopt_scroll(const std::uint64_t identity, const double delta_x,
+                                    const double delta_y) {
+        std::uint32_t changed = 0U;
+        require(strata_surface_adopt_scroll(value_, identity, delta_x, delta_y, &changed),
+                "surface scroll adoption");
+        return changed != 0U;
+    }
+
     void set_frame_slicing(const bool enabled) {
         require(strata_surface_set_frame_slicing(value_, enabled ? 1U : 0U), "surface frame slicing");
     }

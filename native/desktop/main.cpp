@@ -262,6 +262,8 @@ struct WindowApplication final {
 
 LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM word,
                                   const LPARAM long_value) {
+    if (strata::desktop::win32::passing_wheel())
+        return DefWindowProcW(window, message, word, long_value);
     if (message == WM_NCCREATE) {
         const auto* const create = reinterpret_cast<const CREATESTRUCTW*>(long_value);
         SetWindowLongPtrW(window, GWLP_USERDATA,

@@ -69,6 +69,7 @@ const EncodedPacket& SurfacePackets::encode(Surface& surface, const SurfaceFrame
         } refine{surface, cache_};
         const SurfaceEnvironment& environment = surface.environment();
         cache_.set_text_subpixel(environment.text_subpixel);
+        cache_.set_scrollers(surface.render_scrollers());
         static_cast<void>(cache_.encode(surface.render_commands(), frame.frame_index, &textures_,
                                         glyph_atlas_, surface.text_engine(), environment.scale,
                                         environment.framebuffer_width,

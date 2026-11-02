@@ -231,6 +231,27 @@ bool InputRouter::route_scrollbar_pointer(
     return true;
 }
 
+bool InputRouter::adopt_scroll(const std::uint64_t identity, const Point delta,
+                               InputOperationResult& result) {
+    const RetainedNode* const node = tree_ != nullptr ? tree_->find_identity(identity) : nullptr;
+    const LayoutRecord* const layout =
+        node != nullptr && layout_ != nullptr ? layout_->find(identity) : nullptr;
+    if (layout == nullptr)
+        return false;
+    // Several may arrive before the next layout: each builds on the last one written.
+    Point offset = layout->scroll_offset;
+    if (const runtime::Value* const written = node->retained_value("strata.scroll.offset");
+        written != nullptr) {
+        const runtime::Value* const x = written->field("x");
+        const runtime::Value* const y = written->field("y");
+        if (x != nullptr && x->number() != nullptr)
+            offset.x = *x->number();
+        if (y != nullptr && y->number() != nullptr)
+            offset.y = *y->number();
+    }
+    return set_scroll_offset(*node, Point{offset.x + delta.x, offset.y + delta.y}, result);
+}
+
 InputOperationResult InputRouter::scroll(const ScrollInputEvent event) {
     InputOperationResult result;
     result.injected_events = 1U;

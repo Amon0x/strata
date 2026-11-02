@@ -289,6 +289,7 @@ enum class Geometry { complete, patch, retained };
     for (const double value : {1.0, 1.0, scene.group_translate, scene.group_translate, 1.0, 0.0,
                                0.0, 0.0, 0.0, 0.0, 1.0})
         packet.number(value);
+    packet.integer(0U);
     if (upload_image) {
         Writer image;
         image.text("image");

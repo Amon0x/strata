@@ -347,6 +347,116 @@ void ordered_packets_and_idle_feedback(const std::string_view backend) {
     require(probe->destroyed_thread == probe->factory_thread && presentation.present_count() == 0U,
             "target destruction changed owners or an offscreen target claimed a Present");
 }
+/** The render thread moves content when the owner cannot, then gives the scroll back to it. */
+void scroll_moves_without_the_owner(const std::string_view backend) {
+    RuntimeOptions options;
+    options.task_execution = TaskExecution::deterministic;
+    Runtime runtime(std::move(options));
+    runtime.configure_application(ApplicationOptions{.id = "presentation.scroll"});
+    require(runtime.activate(SourceActivation{
+        .generation = 1U, .entry_source_id = "scroll.strata",
+        .entry_text = R"(style Red { background: #FF0000; border: null; radius: 0; }
+        style Blue { background: #0000FF; border: null; radius: 0; }
+        overlay Main {
+          root Panel(layout: { kind: "COLUMN", width: 200, height: 400 }) {
+            Scroll(key: "plain", vertical: true, horizontal: false,
+                   layout: { width: 200, height: 200 }) {
+              Panel(layout: { kind: "COLUMN", width: { weight: 1 }, height: "content" }) {
+                Panel(style: Red, layout: { width: { weight: 1 }, height: 200 })
+                Panel(style: Blue, layout: { width: { weight: 1 }, height: 200 })
+              }
+            }
+            Scroll(key: "zoomed", vertical: true, horizontal: false,
+                   layout: { width: 200, height: 200 }) {
+              ZoomView(key: "view", layout: { width: 180, height: 400 }) {
+                Panel(style: Red, layout: { width: 100, height: 100 })
+              }
+            }
+          }
+        })",
+    }).activated(), "scroll application did not activate");
+    SurfaceOptions surface_options;
+    surface_options.id = "presentation.scroll";
+    surface_options.root_role = SurfaceRootRole::overlay;
+    surface_options.root_name = "Main";
+    surface_options.environment.framebuffer_width = 200;
+    surface_options.environment.framebuffer_height = 400;
+    surface_options.environment.logical_width = 200;
+    surface_options.environment.logical_height = 400;
+    Surface surface = runtime.create_surface(surface_options);
+    const auto probe = std::make_shared<Probe>();
+    host::Presentation presentation([probe, backend = std::string(backend)] {
+        return std::make_unique<OffscreenDriver>(probe, backend);
+    }, host::PresentationExecution::caller);
+    presentation.resize({200U, 400U, 200.0, 400.0});
+    const auto stream = presentation.attach("scene");
+    std::int64_t time = 0;
+    std::uint64_t acknowledged = 0U;
+    // The pixel near the top of the plain scroller, framed and drawn with the owner's latest state.
+    const auto top_pixel = [&]() -> std::array<std::uint8_t, 3U> {
+        const auto request = presentation.capture_next_frame();
+        auto framed = host::frame_surface(surface.native_handle(), time += 16'000'000);
+        host::PresentationCommit commit;
+        commit.order.push_back(stream);
+        commit.layers.push_back({stream, std::move(framed.encoded), framed.surface.unchanged != 0U,
+                                 acknowledged});
+        static_cast<void>(presentation.commit(std::move(commit)));
+        std::vector<host::PresentationFrame> frames;
+        presentation.take_frames(frames);
+        for (const auto& frame : frames) {
+            if (std::ranges::find(frame.capture_requests, request) != frame.capture_requests.end()) {
+                const std::size_t at = (std::size_t{100U} * 200U + 100U) * 4U;
+                return {frame.capture->rgba[at], frame.capture->rgba[at + 1U],
+                        frame.capture->rgba[at + 2U]};
+            }
+        }
+        throw std::runtime_error("the requested scroll capture was not presented");
+    };
+    const std::array<std::uint8_t, 3U> red{255U, 0U, 0U};
+    const std::array<std::uint8_t, 3U> blue{0U, 0U, 255U};
+    require(top_pixel() == red, "the scroll scene did not start at its first panel");
+
+    // Eight notches pass the first panel, up to the limit. The owner has adopted nothing yet.
+    std::vector<host::PresentationScroll> scrolls;
+    presentation.wheel(stream, 100.0, 100.0, 0.0, -8.0);
+    presentation.take_scrolls(scrolls);
+    require(scrolls.size() == 1U && scrolls.front().applied && scrolls.front().delta_y > 0.0 &&
+                scrolls.front().identity != 0U,
+            "the render thread did not scroll an eligible scroller");
+    require(top_pixel() == blue, "an applied scroll did not move the drawn content");
+    require(top_pixel() == blue, "an applied scroll was lost by a later commit");
+
+    // At its limit a wheel goes back to the owner, whose routing knows what else could take it.
+    presentation.wheel(stream, 100.0, 100.0, 0.0, -8.0);
+    presentation.take_scrolls(scrolls);
+    require(scrolls.size() == 1U && !scrolls.front().applied,
+            "a scroller at its limit did not hand back another wheel");
+
+    // Adopting it moves the owner's offset, and the render thread stops adding it: not twice.
+    const std::uint64_t serial = 1U;
+    require(surface.adopt_scroll(1U << 30U, 0.0, 0.0) == false, "an unknown scroller adopted a scroll");
+    presentation.wheel(stream, 100.0, 100.0, 0.0, 8.0);
+    presentation.take_scrolls(scrolls);
+    require(scrolls.size() == 1U && scrolls.front().applied && scrolls.front().delta_y < 0.0,
+            "the render thread did not scroll back");
+    require(top_pixel() == red, "scrolling back did not move the drawn content");
+    presentation.wheel(stream, 100.0, 100.0, 0.0, -8.0);
+    presentation.take_scrolls(scrolls);
+    const auto identity = scrolls.front().identity;
+    require(surface.adopt_scroll(identity, 0.0, scrolls.front().delta_y), "the owner did not adopt an applied scroll");
+    acknowledged = scrolls.front().serial;
+    require(acknowledged > serial, "scroll serials did not advance");
+    require(top_pixel() == blue, "an adopted scroll was lost or applied twice");
+    require(top_pixel() == blue, "an adopted scroll did not stay");
+
+    // Something under the point takes the wheel itself: the owner has to route it.
+    presentation.wheel(stream, 100.0, 300.0, 0.0, -1.0);
+    presentation.take_scrolls(scrolls);
+    require(scrolls.size() == 1U && !scrolls.front().applied && scrolls.front().notches_y == -1.0 &&
+                scrolls.front().y == 300.0,
+            "a wheel over a widget that consumes it was not handed back");
+}
+
 void failed_candidate_keeps_live_programs(const std::string_view backend) {
     if (backend == "reference")
         return;
@@ -494,6 +604,7 @@ int main(const int argc, char** argv) {
     try {
         ordered_packets_and_idle_feedback(argc > 1 ? std::string_view(argv[1]) : "reference");
         failed_candidate_keeps_live_programs(argc > 1 ? std::string_view(argv[1]) : "reference");
+        scroll_moves_without_the_owner(argc > 1 ? std::string_view(argv[1]) : "reference");
         std::cout << "presentation ownership tests passed\n";
         return 0;
     } catch (const std::exception& error) {

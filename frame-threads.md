@@ -747,8 +747,8 @@ Visible Vulkan dependency:
 
 ## Phase 6: the compositor moves what it can
 
-Decision, November 2: materials are done; scrolling and animation tracks on the render thread are not
-built. They are not ruled out, and the reasons are below for whoever reopens this.
+Decision, November 2: materials and scrolling are done; animation tracks on the render thread are not
+built. Scrolling does not use the platform thread this plan assumed.
 
 What the display does now. A threaded, vsynced window (`--windowed-timing`) ran F7 and then the first
 opens of TYPE, LAYOUT, CONTENT and BLUEPRINT under an elevated PresentMon trace: 2,424 display intervals,
@@ -756,14 +756,42 @@ median 5.556 ms at 180 Hz, p99 5.602 ms. Three ran late (11.1, 16.6, 11.1 ms), a
 before any tab opened; the tab opens have none. So preparing new content no longer costs a displayed
 frame, which was the goal of this plan. The late three are not yet attributed.
 
-Why not scrolling. The gate is scrolling through a 100 ms UI stall, and two things stand in the way.
-Win32 input arrives through the message pump on the thread that runs the UI (`native/desktop/main.cpp`),
-so the render thread never sees a wheel event during a stall. It needs a separate platform thread
-first, with clipboard, IME, OLE drag and dialogs marshalled across it. Then scrolling needs offsets
-owned on the render thread, with clips, sticky content, scrollbars, virtualization margins and
-`strata.scroll` feedback following them. What remains to justify that is a long stall that is not
-preparation: an authored handler, or one large description. Scrolling costs 0.15 ms on the UI thread, and
-Flutter scrolls on its UI thread too; browsers do not.
+Why scrolling was worth building. A full rebuild of the 2,000-cell page costs about 90 ms (description
+14, layout 27, render 25, encode 19), and slicing can only split that between stages, so one stage still
+blocks for up to 27 ms. An authored handler has no bound at all.
+
+Why not a platform thread. Win32 input arrives through the message pump on the thread that runs the UI,
+so the render thread cannot receive a wheel during a stall. Moving the window to its own thread was sized
+at 1,200-2,050 lines plus tests before anything scrolls. It would also move embedders' handlers off the
+main thread and put IME and OLE drag and drop across threads, which cannot be verified without a person
+at the keyboard. The render thread does not need to receive input, only to apply it:
+
+- `base::BusyPoll`: long loops (description, measure, arrange, render, submission planning, script steps)
+  tick it. Once a frame has run 4 ms, the host's hook runs about every millisecond.
+- `win32::pass_wheel_messages` takes wheel messages from the queue and posts them to `Presentation::wheel`.
+  `PeekMessage` runs the window procedure for any sent message, even when filtered by queue. So a pending
+  sent message ends polling for that stall, and the window procedure sends to `DefWindowProc` whatever
+  slips in between the check and the peek. An earlier version re-entered the window procedure mid-frame.
+- Packet v26 carries a table of scrollers: viewport, offset, limit, eligibility, and the groups moving with
+  each. The render thread targets the innermost with room and adds the delta over the commit's group table.
+- The owner adopts each applied scroll on its next frame (`strata_surface_adopt_scroll`), and a commit
+  whose packet includes it acknowledges its serial, so it is not applied twice. A wheel it did not apply
+  goes back to the owner, which routes it as ordinary input. Normal scrolling is untouched.
+
+The gate, on D3D11: `samples/scroll_stall.strata` stalls in a script every 1.5 s, and wheels were posted
+during five stalls under PresentMon: 2,007 display intervals, median 5.556 ms, p99 5.596 ms, with the only
+late ones at startup. Photos during a stall show the list moved 96 px while its "Stalls so far" text stays
+frozen, and the same position afterwards when the UI has adopted it. A control with polling suppressed
+during a confirmed stall shows no movement. `strata.presentation` covers the same behaviour with real
+pixels on each backend, including Vulkan, whose window host has no hook yet.
+
+What it does not do:
+- A stall in native host code is not covered: nothing polls there.
+- Only wheels, on Win32 hosts. A touch drag still waits for the UI thread, and the SDL preview has no hook.
+- These scrollers wait for the UI: virtual lists, and anything with sticky, pinned, portal or windowed
+  content, or a text field or a widget with its own input hook inside. So does everything under a modal.
+- During the stall, scrollbars stay where they were, `strata.scroll` and authored parallax wait, and
+  hover does not update. A wheel over an open popup can move the content underneath it.
 
 Why not tracks. Their main case in the showcase was page transitions stuttering while fonts and glyphs
 adopt. The hold now finishes that work before the transition starts. What they would still improve is
@@ -772,11 +800,12 @@ a running animation during a slice: a sliced open pauses UI-driven motion for up
 - [x] Materials and art that read time or the pointer already run on the GPU each frame; the
   render thread feeds them its own clock and pointer, so they keep moving through a UI stall
   (Phase 5's PresentMon traces, on both backends).
-- [ ] Scrolling on the render thread: not built, see above. A large description still blocks scrolling
-  for as long as it runs, since a stage cannot stop partway.
+- [x] Scrolling: the wheel moves eligible content on the render thread during a UI stall, within the limits
+  above, and the owner adopts the result.
 - [ ] Time-driven presentation values as packet tracks: not built, see above.
-- [ ] Measure: scrolling during a 100 ms UI stall. **Not met**, and expected not to be: a scroll waits out
-  the stall.
+- [x] Measure: scrolling through a UI stall keeps every frame on the display's interval (a 250 ms script
+  stall, on D3D11). The 2,000-cell page and the LAYOUT reading pane were not traced by name, and input
+  latency during a stall was not measured.
 
 ## Phase 7: parallel and sliced preparation
 

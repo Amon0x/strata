@@ -224,6 +224,16 @@ whenever a frame has spent 5 ms. It is off by default, so a host that frames onc
 result gets a whole frame. A threaded host asks `Presentation::ready_for_frame` before framing,
 which paces the UI to the display and coalesces input while a commit waits for the render thread.
 
+A window can keep the wheel working while its UI thread is busy. `strata_surface_set_busy_poll`
+installs a hook the engine calls about every millisecond once a frame has run for a few, including
+inside scripts. The hook must not enter the runtime. It takes wheel messages from the queue and
+passes them to `Presentation::wheel`. `Presentation::take_scrolls` then says what became of each: an
+applied scroll is already showing and goes to `strata_surface_adopt_scroll`, then
+`PresentationLayerCommit::scroll_ack` once a packet includes it; any other wheel is replayed as
+ordinary input. On Win32, `PeekMessage` runs the window procedure for sent messages even when
+filtered by queue, so the hook must not peek while one is pending and the window procedure must not
+enter the runtime during the hook. See `native/desktop/window_input.hpp`.
+
 ## Minimal C setup
 
 Initialize structures to zero, set `struct_size`, and require only capabilities the host uses:

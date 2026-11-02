@@ -82,9 +82,12 @@ struct Presentation::Impl final {
     struct Commit { std::uint64_t sequence; PresentationCommit value; };
     struct Retire { PresentationStream stream; EncodedRenderPacket terminal; Receipt receipt; };
     struct Capture { std::uint64_t request; };
+    struct Wheel { PresentationStream stream; double x; double y; double notches_x; double notches_y; };
     struct PendingCapture { std::uint64_t request; std::uint64_t minimum_sequence; };
     using Message = std::variant<Attach, Programs, Resize, Pointer, Transparent,
-                                 Commit, Retire, Capture>;
+                                 Commit, Retire, Capture, Wheel>;
+    /** A scroll shown ahead of the owner, until a commit says its packet includes it. */
+    struct AppliedScroll { std::uint64_t serial; std::uint64_t identity; double x; double y; };
 
     struct Stream final {
         Stream(std::string name, std::string prefix)
@@ -97,6 +100,10 @@ struct Presentation::Impl final {
         bool resources_pending = false;
         std::uint64_t sequence = 0U;
         std::int64_t accepted_nanos = 0;
+        /** The last commit's table, which applied scrolls are added over. */
+        std::vector<PresentationGroup> committed_groups;
+        std::vector<AppliedScroll> applied_scrolls;
+        bool scrolls_changed = false;
     };
 
     Impl(Factory create, const PresentationExecution mode, Wake notify)
@@ -310,6 +317,11 @@ struct Presentation::Impl final {
             if (!packet.resources.empty())
                 driver->consume_resources(packet);
             target.decoder.acknowledge_resources();
+            target.committed_groups = packet.groups;
+            std::erase_if(target.applied_scrolls, [&layer](const AppliedScroll& scroll) {
+                return scroll.serial <= layer.scroll_ack;
+            });
+            target.scrolls_changed = !target.applied_scrolls.empty();
             counts.submit_nanoseconds = now() - started;
             target.packet = &packet;
             target.pending = counts;
@@ -343,7 +355,110 @@ struct Presentation::Impl final {
         captures.push_back({value.request, sequence + 1U});
     }
 
+    /** Whether a transform only moves and scales, which scrolling can add a translation to. */
+    [[nodiscard]] static bool plain(const PresentationGroup& group) noexcept {
+        return group.shear_x == 0.0 && group.shear_y == 0.0 && group.project_x == 0.0 &&
+               group.project_y == 0.0 && group.project_w == 1.0;
+    }
+
+    [[nodiscard]] static PresentationGroup group_at(const std::vector<PresentationGroup>& groups,
+                                                    const std::uint32_t index) noexcept {
+        return index < groups.size() ? groups[index] : PresentationGroup{};
+    }
+
+    /** Shows the applied scrolls: each moves its groups by the offset through its own transform. */
+    void apply_scrolls(Stream& source) {
+        if (!source.scrolls_changed || source.packet == nullptr)
+            return;
+        source.scrolls_changed = false;
+        std::vector<PresentationGroup> groups = source.committed_groups;
+        for (const AppliedScroll& scroll : source.applied_scrolls) {
+            const auto scroller = std::ranges::find(source.packet->scrollers, scroll.identity,
+                                                    &PresentationScroller::identity);
+            if (scroller == source.packet->scrollers.end())
+                continue;
+            const PresentationGroup transform = group_at(source.committed_groups, scroller->group);
+            const double moved_x = -transform.scale_x * scroll.x;
+            const double moved_y = -transform.scale_y * scroll.y;
+            for (const std::uint32_t index : scroller->moved) {
+                if (index < groups.size()) {
+                    groups[index].translate_x += moved_x;
+                    groups[index].translate_y += moved_y;
+                }
+            }
+        }
+        source.packet = &source.decoder.present_groups(std::move(groups));
+    }
+
+    void accept(Wheel& value) {
+        Stream& source = stream(value.stream);
+        apply_scrolls(source);
+        PresentationScroll answer;
+        answer.stream = value.stream;
+        answer.x = value.x;
+        answer.y = value.y;
+        answer.notches_x = value.notches_x;
+        answer.notches_y = value.notches_y;
+        // Unless it applies here the wheel goes back to the owner, which routes it as it would have.
+        if (source.packet != nullptr) {
+            std::vector<const PresentationScroller*> under;
+            for (const PresentationScroller& scroller : source.packet->scrollers) {
+                const PresentationGroup parent = group_at(source.packet->groups, scroller.parent_group);
+                const double left = parent.scale_x * scroller.x + parent.translate_x;
+                const double top = parent.scale_y * scroller.y + parent.translate_y;
+                if (value.x >= left && value.y >= top &&
+                    value.x <= left + parent.scale_x * scroller.width &&
+                    value.y <= top + parent.scale_y * scroller.height) {
+                    under.push_back(&scroller);
+                }
+            }
+            // Fewer groups move with an inner scroller than with any scroller containing it.
+            std::ranges::sort(under, {}, [](const PresentationScroller* const scroller) {
+                return scroller->moved.size();
+            });
+            for (const PresentationScroller* const scroller : under) {
+                if (!scroller->eligible || !plain(group_at(source.packet->groups, scroller->group)) ||
+                    !plain(group_at(source.packet->groups, scroller->parent_group))) {
+                    break;
+                }
+                double offset_x = scroller->offset_x;
+                double offset_y = scroller->offset_y;
+                for (const AppliedScroll& scroll : source.applied_scrolls) {
+                    if (scroll.identity == scroller->identity) {
+                        offset_x += scroll.x;
+                        offset_y += scroll.y;
+                    }
+                }
+                const double delta_x = std::clamp(offset_x - value.notches_x * presentation_wheel_step,
+                                                  0.0, scroller->limit_x) - offset_x;
+                const double delta_y = std::clamp(offset_y - value.notches_y * presentation_wheel_step,
+                                                  0.0, scroller->limit_y) - offset_y;
+                if (delta_x == 0.0 && delta_y == 0.0)
+                    continue;
+                answer.serial = ++next_scroll;
+                answer.applied = true;
+                answer.identity = scroller->identity;
+                answer.delta_x = delta_x;
+                answer.delta_y = delta_y;
+                source.applied_scrolls.push_back({answer.serial, scroller->identity, delta_x, delta_y});
+                source.scrolls_changed = true;
+                dirty = true;
+                apply_scrolls(source);
+                break;
+            }
+        }
+        {
+            std::scoped_lock lock(mutex);
+            scrolls.push_back(answer);
+        }
+        notify_feedback();
+    }
+
     void draw_frame() {
+        for (auto& [id, source] : streams) {
+            static_cast<void>(id);
+            apply_scrolls(source);
+        }
         const std::int64_t frame_started = now();
         if (!driver->begin_frame()) {
             redraw = true;
@@ -500,6 +615,7 @@ struct Presentation::Impl final {
     std::condition_variable changed;
     std::deque<Message> messages;
     std::vector<PresentationFrame> frames;
+    std::vector<PresentationScroll> scrolls;
     PresentationInfo information;
     std::exception_ptr failure;
     bool closing = false;
@@ -521,6 +637,7 @@ struct Presentation::Impl final {
     std::optional<std::array<double, 2U>> pointer;
     bool transparent = false;
     std::uint64_t sequence = 0U;
+    std::uint64_t next_scroll = 0U;
     bool dirty = false;
     bool live = false;
     bool redraw = false;
@@ -554,6 +671,15 @@ void Presentation::set_pointer(const std::optional<std::array<double, 2U>> posit
 }
 void Presentation::set_transparent(const bool transparent) {
     impl_->post<Impl::Transparent>(transparent);
+}
+void Presentation::wheel(const PresentationStream stream, const double x, const double y,
+                         const double notches_x, const double notches_y) {
+    impl_->post<Impl::Wheel>(stream, x, y, notches_x, notches_y);
+}
+void Presentation::take_scrolls(std::vector<PresentationScroll>& output) {
+    output.clear();
+    std::scoped_lock lock(impl_->mutex);
+    output.swap(impl_->scrolls);
 }
 bool Presentation::ready_for_frame() noexcept {
     if (impl_->execution != PresentationExecution::threaded)

@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/busy_poll.hpp"
 #include "base/process_lifetime.hpp"
 #include "runtime/expression.hpp"
 
@@ -239,6 +240,7 @@ class ScriptMachine final {
 
     void count_step() {
         std::uint64_t& steps = handler_ != nullptr ? handler_->steps : steps_;
+        base::BusyPoll::tick();
         if (++steps > script_step_budget) {
             // Not catchable: a runaway loop ends the handler.
             steps = 0U;

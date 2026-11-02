@@ -486,6 +486,8 @@ constexpr std::uint32_t geometry_patch_flag = 2U;
 [[nodiscard]] Bytes
 encode_packet(Bytes storage, const RenderSubmission& submission, const std::uint64_t frame_index,
               const std::uint64_t geometry_epoch, const std::span<const RenderGroup> groups,
+              const std::span<const RenderScroller> scrollers,
+              const std::span<const std::vector<std::uint32_t>> scroller_moved,
               const std::span<const TextureUpload> texture_uploads,
               const std::span<const font::AtlasOperation> resources,
               const bool include_geometry = true, const bool patch_geometry = false,
@@ -493,7 +495,8 @@ encode_packet(Bytes storage, const RenderSubmission& submission, const std::uint
               const VectorGlyphAppend* const vector_append = nullptr) {
     const bool appends_vectors = vector_glyphs != nullptr && vector_append != nullptr &&
                                  !vector_append->empty();
-    std::size_t reserve = 60U + groups.size() * (4U + 11U * 8U);
+    std::size_t reserve = 64U + groups.size() * (4U + 11U * 8U) +
+                          scrollers.size() * (20U + 8U * 8U + 4U);
     if (include_geometry && !patch_geometry) {
         reserve += submission.vertex_bytes.size() +
                    submission.indices.size() * sizeof(std::uint32_t) +
@@ -553,6 +556,26 @@ encode_packet(Bytes storage, const RenderSubmission& submission, const std::uint
         output.number(group.project_x);
         output.number(group.project_y);
         output.number(group.project_w);
+    }
+    output.integer(checked_count(scrollers.size(), "render scroller count"));
+    for (std::size_t at = 0U; at < scrollers.size(); ++at) {
+        const RenderScroller& scroller = scrollers[at];
+        output.integer(static_cast<std::uint32_t>(scroller.identity));
+        output.integer(static_cast<std::uint32_t>(scroller.identity >> 32U));
+        output.integer(scroller.group);
+        output.integer(scroller.parent_group);
+        output.integer(std::uint32_t{scroller.eligible ? 1U : 0U});
+        output.number(scroller.viewport.x);
+        output.number(scroller.viewport.y);
+        output.number(scroller.viewport.width);
+        output.number(scroller.viewport.height);
+        output.number(scroller.offset.x);
+        output.number(scroller.offset.y);
+        output.number(scroller.limit.x);
+        output.number(scroller.limit.y);
+        output.integer(checked_count(scroller_moved[at].size(), "render scroller group count"));
+        for (const std::uint32_t moved : scroller_moved[at])
+            output.integer(moved);
     }
     // Resource operations preserve atlas order, and every release precedes the texture creations
     // that may reuse a Surface-scoped host id.
@@ -627,6 +650,25 @@ const EncodedPacket& HostRenderPacketCache::encode(
     // whose scale is moving keeps the density it was rasterized at, resampled by the GPU, so a
     // zoom or pinch changes only the group's transform; it steps to the nearest quarter octave
     // only once the scale has moved an octave from it, where resampling would show.
+    // Each scroller carries what moves with it, since the table sent is composed and has no parents.
+    scroller_moved_.resize(scroller_input_.size());
+    for (std::size_t at = 0U; at < scroller_input_.size(); ++at) {
+        std::vector<std::uint32_t>& moved = scroller_moved_[at];
+        moved.clear();
+        for (const RenderGroup& group : commands.groups()) {
+            std::uint32_t current = group.index;
+            for (std::size_t depth = 0U; current != 0U && depth <= maximum_render_groups; ++depth) {
+                if (current == scroller_input_[at].group) {
+                    moved.push_back(group.index);
+                    break;
+                }
+                const auto parent = std::ranges::lower_bound(commands.groups(), current, {},
+                                                             &RenderGroup::index);
+                current = parent != commands.groups().end() && parent->index == current
+                              ? parent->parent : 0U;
+            }
+        }
+    }
     {
         std::vector<RenderGroup> composed;
         static_cast<void>(compose_groups(commands.groups(), composed));
@@ -801,7 +843,7 @@ const EncodedPacket& HostRenderPacketCache::encode(
     const auto serialization_started = std::chrono::steady_clock::now();
     EncodedPacket next = EncodedPacket::recycle(std::move(spare_packet_));
     next.writable_bytes() = encode_packet(
-        std::move(next.writable_bytes()), submission, frame_index, encoded_geometry_epoch, groups_,
+        std::move(next.writable_bytes()), submission, frame_index, encoded_geometry_epoch, groups_, scroller_input_, scroller_moved_,
         texture_uploads, resources, geometry_changed, patch_geometry, vector_glyphs_, &vector_append);
     telemetry_.serialization_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - serialization_started).count();
@@ -849,7 +891,7 @@ bool HostRenderPacketCache::reuse(const std::uint64_t frame_index) {
     retained_submission.skipped_draws = skipped_draws_;
     EncodedPacket next = EncodedPacket::recycle(std::move(spare_packet_));
     next.writable_bytes() = encode_packet(std::move(next.writable_bytes()), retained_submission,
-                                         frame_index, geometry_epoch_, groups_, {}, {}, false);
+                                         frame_index, geometry_epoch_, groups_, scroller_input_, scroller_moved_, {}, {}, false);
     spare_packet_ = std::move(current_packet_);
     current_packet_ = std::move(next);
     telemetry_.geometry_reused = true;
@@ -881,7 +923,7 @@ const EncodedPacket& HostRenderPacketCache::prepare_resource_release(
     const std::uint64_t next_geometry_epoch = geometry_epoch_ + 1U;
     EncodedPacket next = EncodedPacket::recycle(std::move(spare_packet_));
     next.writable_bytes() = encode_packet(std::move(next.writable_bytes()), empty_submission,
-                                         frame_index, next_geometry_epoch, {}, {}, operations);
+                                         frame_index, next_geometry_epoch, {}, {}, {}, {}, operations);
 
     // Owning-reference moves and the remaining resource transitions cannot allocate.
     spare_packet_ = {};

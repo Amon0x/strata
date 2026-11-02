@@ -270,6 +270,7 @@ WidgetRegistry::WidgetRegistry(WidgetRegistry&& other) noexcept
       async_owner_types_(std::move(other.async_owner_types_)),
       synchronized_types_(std::move(other.synchronized_types_)),
       text_editable_types_(std::move(other.text_editable_types_)),
+      wheel_consumer_types_(std::move(other.wheel_consumer_types_)),
       revision_(next_registry_revision()) {
     other.revision_ = next_registry_revision();
 }
@@ -287,6 +288,7 @@ WidgetRegistry& WidgetRegistry::operator=(WidgetRegistry&& other) noexcept {
         async_owner_types_ = std::move(other.async_owner_types_);
         synchronized_types_ = std::move(other.synchronized_types_);
         text_editable_types_ = std::move(other.text_editable_types_);
+        wheel_consumer_types_ = std::move(other.wheel_consumer_types_);
         revision_ = next_registry_revision();
         other.revision_ = next_registry_revision();
     }
@@ -305,7 +307,10 @@ void WidgetRegistry::refresh_trait_types() {
     async_owner_types_.clear();
     synchronized_types_.clear();
     text_editable_types_.clear();
+    wheel_consumer_types_.clear();
     for (const auto& [type, lifecycle] : lifecycles_) {
+        if (lifecycle.input.event)
+            wheel_consumer_types_.push_back(type);
         if (lifecycle.command.declaration)
             command_declaration_types_.push_back(type);
         if (!lifecycle.describe.authored_presentation_property.empty())

@@ -2118,7 +2118,9 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_PACKET_VERSION_24 UINT32_C(24)
 /* Version 25 gives each clip its presentation group, independent of the clipped draw's group. */
 #define STRATA_RENDER_PACKET_VERSION_25 UINT32_C(25)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_25
+/* Version 26: the scrollers a render thread may move while the UI thread is busy. */
+#define STRATA_RENDER_PACKET_VERSION_26 UINT32_C(26)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_26
 /*
  * The deepest balanced content-effect nesting a packet may have. It guards the decoder against a
  * malformed or hostile stream, not what a renderer can draw: the planner, the decoder and the
@@ -2579,6 +2581,22 @@ STRATA_API strata_result strata_surface_enqueue_input(
  * it prepares is not on screen yet. For hosts that frame continuously (a window); off by default,
  * so a host that frames once and reads the result gets a whole frame. Needs asynchronous tasks.
  */
+/*
+ * Installs a hook the engine calls about every millisecond while a frame has been running for more
+ * than a few, including inside scripts. It runs on the framing thread and must not enter the
+ * runtime; a window uses it to pass wheel messages to its render thread. Null removes it.
+ */
+typedef void (*strata_busy_poll_fn)(void* user_data);
+STRATA_API strata_result strata_surface_set_busy_poll(strata_surface* surface,
+                                                      strata_busy_poll_fn poll,
+                                                      void* user_data) STRATA_NOEXCEPT;
+/*
+ * Adopts a scroll the render thread already applied while this thread was busy, by the scroller's
+ * identity in the packet: the offset moves by the delta, clamped, as a wheel would have moved it.
+ */
+STRATA_API strata_result strata_surface_adopt_scroll(strata_surface* surface, uint64_t identity,
+                                                     double delta_x, double delta_y,
+                                                     uint32_t* out_changed) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_surface_set_frame_slicing(strata_surface* surface,
                                                           uint32_t enabled) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_surface_cancel_interactions(strata_surface* surface)

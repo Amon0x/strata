@@ -1,3 +1,4 @@
+#include "base/busy_poll.hpp"
 #include "ui/description.hpp"
 
 #include <algorithm>
@@ -1419,6 +1420,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
 
 std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_widget_call(const runtime::CallId id,
                                                                              const Scope& scope) {
+    base::BusyPoll::tick();
     const runtime::ProgramCall& call = program().call(id);
     DescriptionNode::Properties properties;
     // Room for the arguments and the few properties description adds ($layout, defaults).

@@ -236,6 +236,8 @@ struct strata_application_state_snapshot final {
 };
 
 struct strata_surface final {
+    strata_busy_poll_fn busy_poll = nullptr;
+    void* busy_poll_data = nullptr;
     strata_surface(
         const strata::base::HostAllocator host_allocator,
         strata_runtime* const host_runtime,

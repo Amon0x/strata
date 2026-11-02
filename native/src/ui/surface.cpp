@@ -650,6 +650,19 @@ bool Surface::slice_frame(const SliceStage stage) {
     return true;
 }
 
+bool Surface::adopt_scroll(const std::uint64_t identity, const Point delta) {
+    InputOperationResult result;
+    const bool changed = input_.adopt_scroll(identity, delta, result);
+    append_input(pending_lifecycle_input_, std::move(result));
+    if (changed)
+        invalidate_frame();
+    return changed;
+}
+
+const std::vector<RenderScroller>& Surface::render_scrollers() const noexcept {
+    return render_engine_.scrollers();
+}
+
 bool Surface::defers_packet() {
     return slice_frame(SliceStage::rendered);
 }

@@ -108,6 +108,28 @@ struct PresentationLayerCommit final {
     EncodedRenderPacket packet;
     /** The producer's unchanged observation suppresses redraw, never ordered consumption. */
     bool unchanged = false;
+    /** This packet includes every scroll up to this serial, so they stop being added over it. */
+    std::uint64_t scroll_ack = 0U;
+};
+
+/** The pixels one wheel notch scrolls, matching the input router's step. */
+inline constexpr double presentation_wheel_step = 32.0;
+
+/**
+ * What became of a wheel posted while the owner was busy. `applied` scrolls are already showing and
+ * the owner adopts them; any other wheel it replays as ordinary input at (x, y).
+ */
+struct PresentationScroll final {
+    PresentationStream stream = 0U;
+    std::uint64_t serial = 0U;
+    bool applied = false;
+    std::uint64_t identity = 0U;
+    double delta_x = 0.0;
+    double delta_y = 0.0;
+    double x = 0.0;
+    double y = 0.0;
+    double notches_x = 0.0;
+    double notches_y = 0.0;
 };
 
 /** One atomic visible layer order, after every supplied packet's resources have been consumed. */
@@ -183,6 +205,13 @@ class Presentation final {
      * which then wakes it. Input coalesces meanwhile, so the UI runs at the display's rate at most.
      */
     [[nodiscard]] bool ready_for_frame() noexcept;
+    /**
+     * Scrolls under (x, y), in the stream's logical space, while the owner cannot: thread-safe, and
+     * answered through take_scrolls. Moves the innermost scroller with room, as a wheel would, and
+     * hands back any wheel it did not apply, such as one over a scroller that is not eligible.
+     */
+    void wheel(PresentationStream stream, double x, double y, double notches_x, double notches_y);
+    void take_scrolls(std::vector<PresentationScroll>& output);
     /** Admission moves the commit only after queue storage exists. */
     [[nodiscard]] std::uint64_t commit(PresentationCommit&& commit);
     [[nodiscard]] PresentationReceipt retire(PresentationStream stream,

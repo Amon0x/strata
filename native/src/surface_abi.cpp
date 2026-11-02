@@ -20,6 +20,7 @@
 #include "abi_extension.hpp"
 #include "abi_internal.hpp"
 #include "abi_support.hpp"
+#include "base/busy_poll.hpp"
 #include "base/utf8.hpp"
 #include "core/diagnostics.hpp"
 #include "data/json.hpp"
@@ -830,6 +831,38 @@ strata_surface_enqueue_input(strata_surface* const surface, const strata_input_e
     });
 }
 
+strata_result strata_surface_set_busy_poll(strata_surface* const surface,
+                                           const strata_busy_poll_fn poll,
+                                           void* const user_data) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
+    if (surface == nullptr)
+        return invalid_argument();
+    surface->busy_poll = poll;
+    surface->busy_poll_data = user_data;
+    return strata::abi_detail::result(STRATA_STATUS_OK);
+}
+
+strata_result strata_surface_adopt_scroll(strata_surface* const surface, const uint64_t identity,
+                                          const double delta_x, const double delta_y,
+                                          uint32_t* const out_changed) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
+    if (surface == nullptr || !std::isfinite(delta_x) || !std::isfinite(delta_y))
+        return invalid_argument();
+    if (surface->packets.release_prepared())
+        return terminal_surface_failure(*surface);
+    return surface_call(surface, AbiCall{"Scroll adoption"}, [&] {
+        const bool changed =
+            surface->core.adopt_scroll(identity, strata::ui::Point{delta_x, delta_y});
+        if (out_changed != nullptr)
+            *out_changed = changed ? 1U : 0U;
+        return strata::abi_detail::result(STRATA_STATUS_OK);
+    });
+}
+
 strata_result strata_surface_set_frame_slicing(strata_surface* const surface,
                                                const uint32_t enabled) noexcept {
     const EntryGuard entry(surface, Reentry::rejected);
@@ -959,6 +992,7 @@ strata_result strata_surface_frame(strata_surface* const surface,
     }
     *out_info = {};
     out_info->struct_size = sizeof(strata_surface_frame_info);
+    const strata::base::BusyPoll busy_poll(surface->busy_poll, surface->busy_poll_data);
     return surface_call(surface, AbiCall{"Surface framing", "STRATA.SURFACE.INVALID_FRAME"}, [&] {
         const strata::ui::SurfaceFrame frame = surface->core.frame(frame_time_nanoseconds);
         const strata::ui::EncodedPacket& packet =

@@ -50,6 +50,42 @@ struct WindowInputState final {
     return LoadCursor(nullptr, name);
 }
 
+/** Whether this thread is inside pass_wheel_messages: its frame is still running. */
+[[nodiscard]] inline bool& passing_wheel() noexcept {
+    static thread_local bool passing = false;
+    return passing;
+}
+
+/**
+ * For a busy-poll hook: takes wheel messages from the queue and hands them to `pass` as client
+ * coordinates and notches. PeekMessage runs the window procedure for any sent message, even when
+ * filtered by queue, and that must not happen in the middle of a frame. So a pending sent message
+ * ends polling until the frame is over (its sender waits, as for any busy window), and the window
+ * procedure leaves to DefWindowProc whatever slips in between the check and the peek.
+ */
+template <typename Pass>
+void pass_wheel_messages(const HWND window, Pass&& pass) noexcept {
+    passing_wheel() = true;
+    for (const UINT message : {UINT{WM_MOUSEWHEEL}, UINT{WM_MOUSEHWHEEL}}) {
+        MSG wheel{};
+        while (HIWORD(GetQueueStatus(QS_SENDMESSAGE)) == 0U &&
+               PeekMessageW(&wheel, window, message, message, PM_REMOVE)) {
+            POINT point{GET_X_LPARAM(wheel.lParam), GET_Y_LPARAM(wheel.lParam)};
+            ScreenToClient(window, &point);
+            const double notches = static_cast<double>(GET_WHEEL_DELTA_WPARAM(wheel.wParam)) /
+                                   static_cast<double>(WHEEL_DELTA);
+            try {
+                pass(static_cast<double>(point.x), static_cast<double>(point.y),
+                     message == WM_MOUSEHWHEEL ? notches : 0.0,
+                     message == WM_MOUSEWHEEL ? notches : 0.0);
+            } catch (...) {
+                // The presentation's own failure surfaces on the next frame.
+            }
+        }
+    }
+    passing_wheel() = false;
+}
+
 /**
  * Translates one window message into Strata input on `sink`, which offers pointer, scroll, key,
  * text, ime_preedit and cancel_interactions, and optionally pointer_cursor (nullopt when no

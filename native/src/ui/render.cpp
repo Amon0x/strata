@@ -1,3 +1,4 @@
+#include "base/busy_poll.hpp"
 #include "ui/render.hpp"
 
 #include <algorithm>
@@ -1394,6 +1395,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             ++counters.commands_emitted;
         }
         const std::size_t composition_prefix_end = output.size();
+        base::BusyPoll::tick();
         std::uint32_t scroll_group = 0U;
         MotionTransform scroll_transform;
         if (record->kind == LayoutKind::scroll) {
@@ -1410,6 +1412,23 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                                 placed.translate_y, child_descendant_opacity, -1.0,
                                 placed.shear_x, placed.shear_y, placed.project_x,
                                 placed.project_y, placed.project_w});
+                const LayoutStyle& scroll_style = LayoutEngine::node_style(node);
+                implementation_->scrollers.insert_or_assign(
+                    node.identity(),
+                    RenderScroller{
+                        node.identity(), scroll_group, group != 0U ? group : inherited_group,
+                        layout_clip(record->viewport.value_or(record->content_bounds),
+                                    effective_transform),
+                        record->scroll_offset,
+                        Point{scroll_style.scroll_horizontal
+                                  ? std::max(0.0, record->content_size.width -
+                                                      record->content_bounds.width)
+                                  : 0.0,
+                              scroll_style.scroll_vertical
+                                  ? std::max(0.0, record->content_size.height -
+                                                      record->content_bounds.height)
+                                  : 0.0},
+                        record->scroll_moves_only_groups});
             }
         }
         const Impl::ChildContext child_context{
@@ -1750,6 +1769,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     }
     // Cache the presentation table with its commands; cache hits must retain tone and motion.
     implementation_->publish_groups(output, tree.structure_generation());
+    implementation_->publish_scrollers(tree, input, widgets);
     implementation_->retain_base(tree, layout, input, generations, output);
     implementation_->retained_composed_commands.clear();
     implementation_->retained_overlay_commands.clear();
@@ -1795,6 +1815,8 @@ void RenderEngine::Impl::publish_groups(RenderCommandBuffer& output,
         for (auto entry = source->begin(); entry != source->end();) {
             if (collect && !referenced[entry->second.index]) {
                 free_group_indices.push_back(entry->second.index);
+                if (source == &scroll_groups)
+                    scrollers.erase(entry->first);
                 entry = source->erase(entry);
                 continue;
             }
@@ -1808,10 +1830,48 @@ void RenderEngine::Impl::publish_groups(RenderCommandBuffer& output,
     published_group_structure = structure_generation;
 }
 
+void RenderEngine::Impl::publish_scrollers(const RetainedTree& tree, const InputPresentation& input,
+                                           const WidgetRegistry& widgets) {
+    published_scrollers.clear();
+    if (scrollers.empty())
+        return;
+    if (wheel_blocked_structure != tree.structure_generation()) {
+        wheel_blocked_structure = tree.structure_generation();
+        wheel_blocked.clear();
+        for (const std::span<const std::string_view> types :
+             {widgets.wheel_consumer_types(), widgets.text_editable_types()}) {
+            for (const RetainedNode* consumer : tree.nodes_of_types(types)) {
+                for (const RetainedNode* node = consumer; node != nullptr; node = node->parent())
+                    wheel_blocked.insert(node->identity());
+            }
+        }
+    }
+    const bool modal = input.modal_active();
+    published_scrollers.reserve(scrollers.size());
+    for (const auto& [identity, scroller] : scrollers) {
+        // A viewport layout left unbounded has nothing a wheel could be over.
+        if (!std::isfinite(scroller.viewport.x) || !std::isfinite(scroller.viewport.y) ||
+            !std::isfinite(scroller.viewport.width) || !std::isfinite(scroller.viewport.height) ||
+            !std::isfinite(scroller.offset.x) || !std::isfinite(scroller.offset.y) ||
+            !std::isfinite(scroller.limit.x) || !std::isfinite(scroller.limit.y))
+            continue;
+        RenderScroller& published = published_scrollers.emplace_back(scroller);
+        published.eligible = scroller.eligible && !modal && !wheel_blocked.contains(identity);
+    }
+    std::ranges::sort(published_scrollers, {}, &RenderScroller::group);
+}
+
+const std::vector<RenderScroller>& RenderEngine::scrollers() const noexcept {
+    return implementation_->published_scrollers;
+}
+
 void RenderEngine::clear() {
     implementation_->presented.clear();
     implementation_->groups.clear();
     implementation_->scroll_groups.clear();
+    implementation_->scrollers.clear();
+    implementation_->published_scrollers.clear();
+    implementation_->wheel_blocked_structure.reset();
     implementation_->free_group_indices.clear();
     implementation_->next_group_index = 1U;
     implementation_->group_membership_dirty = true;

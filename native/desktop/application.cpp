@@ -97,7 +97,8 @@ struct ApplicationHost::Impl final {
               [this](const std::string_view id) { return services.path(id).wstring(); }),
           renderer(create_presentation(window, options.vsync,
                                        options.asynchronous_shader_compilation,
-                                       options.presentation)) {
+                                       options.presentation)),
+          presentation_execution(options.presentation) {
         try {
             initialize();
         } catch (...) {
@@ -204,6 +205,8 @@ struct ApplicationHost::Impl final {
         options.application_id = config.application_id;
         options.stable_identity_seed = 0x5354524154414150ULL;
         options.frame_slicing = true;
+        if (presentation_execution == host::PresentationExecution::threaded)
+            options.busy_poll = [this] { pass_wheel_to_renderer(); };
         options.frame_wake = [target = window] {
             if (!PostMessageW(target, WM_NULL, 0U, 0))
                 throw std::runtime_error("could not wake the desktop window");
@@ -425,6 +428,24 @@ struct ApplicationHost::Impl final {
             programs->get();
             programs.reset();
         }
+        renderer->take_scrolls(scrolls);
+        for (const host::PresentationScroll& scroll : scrolls) {
+            if (closing || session == nullptr || scroll.stream != render_stream)
+                continue;
+            if (!scroll.applied) {
+                strata_input_event event{};
+                event.kind = STRATA_INPUT_SCROLL;
+                event.x = scroll.x;
+                event.y = scroll.y;
+                event.delta_x = scroll.notches_x;
+                event.delta_y = scroll.notches_y;
+                enqueue(event);
+                continue;
+            }
+            scroll_serial = scroll.serial;
+            if (session->surface().adopt_scroll(scroll.identity, scroll.delta_x, scroll.delta_y))
+                scroll_awaits_packet = true;
+        }
         renderer->take_frames(rendered);
         for (host::PresentationFrame& frame : rendered) {
             last_frame_presented = last_frame_presented || frame.presented;
@@ -472,16 +493,30 @@ struct ApplicationHost::Impl final {
         answer_platform_requests();
         flush_pointer_move();
         frame_time = now();
+        const std::uint64_t adopted_serial = scroll_serial;
         host::SurfacePacketCommit framed = session->frame(frame_time);
         last_frame_idle = framed.surface.idle != 0U;
         host::PresentationCommit commit;
         commit.animate = !last_frame_idle;
+        // Adopted scrolls stop being added over the packet once a packet carries them.
+        if (!scroll_awaits_packet || framed.surface.unchanged == 0U) {
+            scroll_awaits_packet = false;
+            scroll_ack = adopted_serial;
+        }
         commit.layers.push_back(
-            {render_stream, std::move(framed.encoded), framed.surface.unchanged != 0U});
+            {render_stream, std::move(framed.encoded), framed.surface.unchanged != 0U, scroll_ack});
         commit.order.push_back(render_stream);
         static_cast<void>(renderer->commit(std::move(commit)));
         adopt_rendering();
         clock.end_frame();
+    }
+
+    /** The UI is busy: the render thread can still move what it was last given. */
+    void pass_wheel_to_renderer() noexcept {
+        win32::pass_wheel_messages(window, [this](const double x, const double y, const double dx,
+                                                 const double dy) {
+            renderer->wheel(render_stream, x / scale, y / scale, dx, dy);
+        });
     }
 
     [[nodiscard]] bool close() {
@@ -531,10 +566,15 @@ struct ApplicationHost::Impl final {
     HostServices services;
     PlatformServices platform;
     std::unique_ptr<host::Presentation, PresentationDeleter> renderer;
+    host::PresentationExecution presentation_execution;
     host::PresentationStream render_stream = 0U;
     std::optional<host::PresentationReceipt> programs;
     std::optional<host::PresentationReceipt> release;
     std::vector<host::PresentationFrame> rendered;
+    std::vector<host::PresentationScroll> scrolls;
+    std::uint64_t scroll_serial = 0U;
+    std::uint64_t scroll_ack = 0U;
+    bool scroll_awaits_packet = false;
     std::unique_ptr<host::Bindings> pending_bindings;
     std::optional<host::SessionPrepareOptions> setup;
     std::optional<host::SessionPreparation> preparation;

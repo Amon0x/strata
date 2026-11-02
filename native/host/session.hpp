@@ -59,6 +59,8 @@ struct SessionOptions final {
     std::function<void()> frame_wake;
     /** For a host framing continuously: a frame may finish in the next (Surface::set_frame_slicing). */
     bool frame_slicing = false;
+    /** Runs about every millisecond while a frame is long, without entering the runtime. */
+    std::function<void()> busy_poll;
 };
 
 /**

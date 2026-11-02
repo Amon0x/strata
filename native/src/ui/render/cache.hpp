@@ -234,6 +234,11 @@ struct RenderEngine::Impl final {
     std::unordered_map<std::uint64_t, RenderGroup> groups;
     /** Scroll content has a separate group so the viewport and its chrome remain stationary. */
     std::unordered_map<std::uint64_t, RenderGroup> scroll_groups;
+    std::unordered_map<std::uint64_t, RenderScroller> scrollers;
+    std::vector<RenderScroller> published_scrollers;
+    /** Scrollers with something under them that takes the wheel itself, as of a tree structure. */
+    std::unordered_set<std::uint64_t> wheel_blocked;
+    std::optional<std::uint64_t> wheel_blocked_structure;
     std::vector<std::uint32_t> free_group_indices;
     std::uint32_t next_group_index = 1U;
     bool group_membership_dirty = true;
@@ -244,6 +249,8 @@ struct RenderEngine::Impl final {
     std::uint32_t acquire_group(std::uint64_t identity, bool scroll_content = false);
     /** Drops groups no longer referenced by the frame and attaches the table to its commands. */
     void publish_groups(RenderCommandBuffer& output, std::uint64_t structure_generation);
+    void publish_scrollers(const RetainedTree& tree, const InputPresentation& input,
+                           const WidgetRegistry& widgets);
     std::uint64_t fragment_tree_generation = 0U;
     /** The portals outside portals, in tree order, as of a structure and layout generation. */
     std::vector<const RetainedNode*> portals;

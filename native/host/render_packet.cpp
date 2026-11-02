@@ -577,6 +577,47 @@ void append_texture_regions(const RenderPacket& packet,
     }
 }
 
+[[nodiscard]] std::vector<PresentationScroller> presentation_scrollers(Reader& input) {
+    const std::uint32_t count = input.count();
+    std::vector<PresentationScroller> result;
+    result.reserve(input.plausible(count, 8U));
+    for (std::uint32_t record = 0U; record < count; ++record) {
+        PresentationScroller scroller;
+        const std::uint64_t low = input.u32();
+        const std::uint64_t high = input.u32();
+        scroller.identity = low | (high << 32U);
+        scroller.group = input.u32();
+        scroller.parent_group = input.u32();
+        scroller.eligible = input.u32() != 0U;
+        scroller.x = input.number();
+        scroller.y = input.number();
+        scroller.width = input.number();
+        scroller.height = input.number();
+        scroller.offset_x = input.number();
+        scroller.offset_y = input.number();
+        scroller.limit_x = input.number();
+        scroller.limit_y = input.number();
+        if (scroller.group == 0U || scroller.group > maximum_presentation_group ||
+            scroller.parent_group > maximum_presentation_group ||
+            !std::isfinite(scroller.x) || !std::isfinite(scroller.y) ||
+            !std::isfinite(scroller.width) || !std::isfinite(scroller.height) ||
+            !std::isfinite(scroller.offset_x) || !std::isfinite(scroller.offset_y) ||
+            !std::isfinite(scroller.limit_x) || !std::isfinite(scroller.limit_y)) {
+            throw std::invalid_argument("render scroller record is invalid");
+        }
+        const std::uint32_t moved = input.count();
+        scroller.moved.reserve(input.plausible(moved, 4U));
+        for (std::uint32_t at = 0U; at < moved; ++at) {
+            const std::uint32_t index = input.u32();
+            if (index == 0U || index > maximum_presentation_group)
+                throw std::invalid_argument("render scroller moves an invalid group");
+            scroller.moved.push_back(index);
+        }
+        result.push_back(std::move(scroller));
+    }
+    return result;
+}
+
 [[nodiscard]] std::vector<PresentationGroup> presentation_groups(Reader& input) {
     const std::uint32_t count = input.count();
     if (count > maximum_presentation_group) {
@@ -930,6 +971,8 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         throw std::invalid_argument("render packet geometry counts are invalid");
     }
     std::vector<PresentationGroup> groups = presentation_groups(input);
+    std::vector<PresentationScroller> scrollers = presentation_scrollers(input);
+    regions_drawn_ = false;
 
     std::vector<ResourceOperation> resources;
     resources.reserve(input.plausible(resource_count, 8U));
@@ -955,6 +998,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             append_group_regions(retained_->groups, groups, group_extents_, group_regions);
         TextureSizes sizes = texture_sizes_;
         const TextureChanges changed_textures = texture_changes(resources, sizes);
+        retained_->scrollers = std::move(scrollers);
         retained_->frame_index = frame_index;
         retained_->planned_draw_count = planned_draw_count;
         retained_->skipped_draw_count = skipped_draw_count;
@@ -1254,6 +1298,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
                                result.geometry_dirty_regions);
     }
     result.groups = std::move(groups);
+    result.scrollers = std::move(scrollers);
     if (!has_geometry_patches && retained_.has_value())
         spare_ = std::move(*retained_);
     retained_ = std::move(result);
@@ -1313,6 +1358,27 @@ void RenderPacketDecoder::acknowledge_draw() noexcept {
     retained_->full_geometry_payload = false;
     retained_->vertex_patches.clear();
     retained_->index_patches.clear();
+    regions_drawn_ = true;
+}
+
+const RenderPacket& RenderPacketDecoder::present_groups(std::vector<PresentationGroup> groups) {
+    if (!retained_.has_value())
+        throw std::logic_error("presenting a group table requires a retained packet");
+    if (groups == retained_->groups)
+        return *retained_;
+    if (std::exchange(regions_drawn_, false)) {
+        retained_->geometry_dirty_all = false;
+        retained_->geometry_dirty_regions.clear();
+    }
+    if (!retained_->geometry_dirty_all) {
+        append_group_regions(retained_->groups, groups, group_extents_,
+                             retained_->geometry_dirty_regions);
+    }
+    for (const auto& [position, local] : grouped_batches_)
+        present(local, groups, retained_->batches[position]);
+    retained_->groups = std::move(groups);
+    assign_sample_revisions(*retained_);
+    return *retained_;
 }
 
 void RenderPacketDecoder::reset() noexcept {

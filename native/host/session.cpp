@@ -443,6 +443,11 @@ void Session::create_surface(const SessionSurface& surface) {
     config.image_count = images.size();
     impl_->surface.emplace(runtime().create_surface(config));
     impl_->surface->set_frame_slicing(impl_->options.frame_slicing);
+    if (impl_->options.busy_poll) {
+        impl_->surface->set_busy_poll(
+            [](void* const poll) { (*static_cast<std::function<void()>*>(poll))(); },
+            &impl_->options.busy_poll);
+    }
 }
 
 bool Session::has_surface() const noexcept {
