@@ -137,13 +137,15 @@ DescriptionBuilder::describe_body(ComponentInstance& instance,
     recording.expression_reads.keep_only_reads_of(outer);
     frames_.push_back(&recording);
     std::shared_ptr<const DescriptionNode> root;
-    try {
+    {
+        // Not a catch and rethrow: on Windows each of those stays on the stack until the exception
+        // ends, so one per nesting level overflows the stack it is unwinding.
+        struct PopFrame final {
+            std::vector<Frame*>& frames;
+            ~PopFrame() { frames.pop_back(); }
+        } pop{frames_};
         root = std::forward<Body>(body)();
-    } catch (...) {
-        frames_.pop_back();
-        throw;
     }
-    frames_.pop_back();
     install_frame(instance, recording);
     return root;
 }

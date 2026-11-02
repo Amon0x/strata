@@ -92,7 +92,7 @@ class ApplicationHost final {
     /** Preparation work the runtime has not adopted yet. */
     [[nodiscard]] std::uint64_t pending_tasks() const;
     void settle(std::int64_t time_nanoseconds,
-                std::chrono::milliseconds timeout = std::chrono::seconds(5));
+                std::chrono::milliseconds timeout = std::chrono::seconds(60));
     void enqueue(std::span<const strata_input_event> events);
     /** Returns the admission receipt; discarding it does not cancel publication. */
     HostPublication publish(const SnapshotConfig& snapshot);

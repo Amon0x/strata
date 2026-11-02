@@ -149,8 +149,12 @@ class Session final {
     [[nodiscard]] strata::Surface& surface();
     /** Adopts a new environment generation; false when the Surface rejected it. */
     [[nodiscard]] bool adopt_environment(const strata_surface_environment& environment);
-    /** Enqueues a batch atomically; throws unless every event was accepted. */
-    void enqueue(std::span<const strata_input_event> events);
+    /**
+     * Enqueues a batch atomically. False when the bounded input queue is full and refused it: the
+     * input is lost and a diagnostic says so, since an application too busy to read its input is
+     * not a failed one. Any other refusal throws.
+     */
+    bool enqueue(std::span<const strata_input_event> events);
 
     /** Synchronizes bindings and publishes an owned packet; decoding belongs to the consumer. */
     [[nodiscard]] SurfacePacketCommit frame(std::int64_t time_nanoseconds);

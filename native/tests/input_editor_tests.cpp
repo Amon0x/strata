@@ -87,8 +87,13 @@ void test_long_text_navigation_is_not_quadratic() {
     }
     const auto elapsed = std::chrono::steady_clock::now() - started;
     check(editor.snapshot().caret == word.size() - 6'000U, "grapheme movement lost its place");
+    // Sanitizers slow this past any limit that would still catch the quadratic walk.
+#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
+    static_cast<void>(elapsed);
+#else
     check(elapsed < std::chrono::seconds(2),
           "editor navigation re-segments its text per operation");
+#endif
 }
 
 void test_word_selection_undo_and_redo() {

@@ -38,6 +38,25 @@ parser of untrusted input (add `-DSTRATA_ENABLE_ASAN=ON` to catch memory errors 
 Each harness's header comment gives its input format and a typical command line. Run them with
 `-malloc_limit_mb` and `-rss_limit_mb` so an unbounded allocation is a finding.
 
+## Threads
+
+Most tests run deterministically, so they say little about threads. `strata_thread_soak` runs the real
+showcase on real threads and keeps switching tabs, scrolling from the render thread, resizing, reloading
+and closing at random until its deadline. It passes when nothing threw and nothing hung; CTest gives it
+5 seconds. Run it for longer under a sanitizer after changing anything that crosses a thread:
+
+```sh
+cmake -S . -B build/tsan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRATA_ENABLE_TSAN=ON -DSTRATA_WARNINGS_AS_ERRORS=OFF
+TSAN_OPTIONS="report_bugs=0 exitcode=0" setarch x86_64 -R cmake --build build/tsan
+cd build/tsan && TSAN_OPTIONS=allocator_may_return_null=1 setarch x86_64 -R ctest
+cd native && setarch x86_64 -R ./strata_thread_soak <resources> <repo>/native/tests/fixtures/headless/showcase.json --seconds=120 --windows=3
+```
+
+The build runs its own tools, so `report_bugs=0` keeps it going; `setarch -R` is there because
+ThreadSanitizer cannot start under WSL's address randomization. On Windows, use an
+`-DSTRATA_ENABLE_ASAN=ON` build and add `--backend=d3d11` to put real GPU resources on the render thread.
+`--workers=1` shows a task waiting on another, and `--seed=N` varies what it does.
+
 ## Deterministic headless application tests
 
 `strata_headless` runs a complete application through the public C ABI with a controlled clock,

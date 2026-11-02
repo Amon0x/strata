@@ -18,6 +18,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -117,13 +118,24 @@ struct SystemFontCatalog final {
 
         explicit State(std::vector<std::filesystem::path> roots) : directories(std::move(roots)) {}
 
+        /**
+         * A file's name in UTF-8. Some names have no spelling in it (a lone surrogate on Windows),
+         * and one unreadable file name must not cost the application every system font.
+         */
+        [[nodiscard]] static std::optional<std::string> name_of(const std::filesystem::path& path) {
+            try {
+                const std::u8string name = path.filename().u8string();
+                return std::string(name.begin(), name.end());
+            } catch (const std::system_error&) {
+                return std::nullopt;
+            }
+        }
+
         [[nodiscard]] std::shared_ptr<const Files> files() {
             {
                 const std::scoped_lock lock(mutex);
                 if (file_index != nullptr)
                     return file_index;
-                if (enumeration_error != nullptr)
-                    std::rethrow_exception(enumeration_error);
             }
             auto result = std::make_shared<Files>();
             std::vector<std::filesystem::path> roots = directories;
@@ -145,8 +157,11 @@ struct SystemFontCatalog final {
                 for (auto entry = std::filesystem::recursive_directory_iterator(directory, error);
                      !error && entry != std::filesystem::recursive_directory_iterator();
                      entry.increment(error)) {
-                    const std::string extension = lower(entry->path().extension().string());
-                    if (extension == ".ttf" || extension == ".ttc")
+                    const std::optional<std::string> name = name_of(entry->path());
+                    if (!name.has_value())
+                        continue;
+                    const std::string lowered = lower(*name);
+                    if (lowered.ends_with(".ttf") || lowered.ends_with(".ttc"))
                         result->ordered.push_back(entry->path());
                 }
                 error.clear();
@@ -154,7 +169,7 @@ struct SystemFontCatalog final {
             std::ranges::sort(result->ordered);
             result->ordered.erase(std::ranges::unique(result->ordered).begin(), result->ordered.end());
             for (std::size_t index = 0U; index < result->ordered.size(); ++index)
-                result->names.emplace(lower(result->ordered[index].filename().string()), index);
+                result->names.emplace(lower(*name_of(result->ordered[index])), index);
             const std::scoped_lock lock(mutex);
             if (file_index == nullptr)
                 file_index = std::move(result);
@@ -170,7 +185,7 @@ struct SystemFontCatalog final {
         }
 
         [[nodiscard]] static std::string id_of(const std::filesystem::path& path) {
-            return "system:" + lower(path.filename().string());
+            return "system:" + lower(*name_of(path));
         }
 
         /** A mapped face retains its mapping independently of this catalog. */
@@ -200,7 +215,10 @@ struct SystemFontCatalog final {
             const std::uintmax_t size = std::filesystem::file_size(path, error);
             if (error || size == 0U || size > 64U * 1024U * 1024U)
                 return std::nullopt;
-            return OpenTypeFont::parse(base::read_file(path));
+            auto bytes = base::read_file(path);
+            if (!bytes.has_value())
+                return std::nullopt;
+            return OpenTypeFont::parse(std::move(*bytes));
 #endif
         }
 
@@ -393,7 +411,6 @@ struct SystemFontCatalog final {
         std::map<FamilyKey, std::optional<SystemFont>> families;
         std::set<std::uint32_t> missing;
         bool enumerating = false;
-        std::exception_ptr enumeration_error;
     };
 
     explicit SystemFontCatalog(std::vector<std::filesystem::path> directories = {})
@@ -406,9 +423,6 @@ struct SystemFontCatalog final {
             const std::scoped_lock lock(state->mutex);
             if (state->file_index != nullptr || state->enumerating)
                 return;
-            const auto error = state->enumeration_error;
-            if (error != nullptr)
-                std::rethrow_exception(error);
             state->enumerating = true;
         }
         try {
@@ -419,10 +433,11 @@ struct SystemFontCatalog final {
                         return;
                     static_cast<void>(retained->files());
                 },
-                [retained = state](const base::TaskOutcome& outcome) {
+                // This only looks ahead. A failure, such as running out of memory, is not kept:
+                // whoever next needs the fonts tries again and hears about it then.
+                [retained = state](const base::TaskOutcome&) {
                     const std::scoped_lock lock(retained->mutex);
                     retained->enumerating = false;
-                    retained->enumeration_error = outcome.error;
                 }));
         } catch (...) {
             const std::scoped_lock lock(state->mutex);

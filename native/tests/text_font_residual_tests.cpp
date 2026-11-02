@@ -2247,6 +2247,10 @@ void test_system_font_catalog_generations(const std::filesystem::path& resources
                                root / "first" / "arial.ttf");
     std::filesystem::copy_file(resources / "assets/strata/fonts/default.ttf",
                                root / "first" / "seguisym.ttf");
+#ifdef _WIN32
+    // A name with no spelling in UTF-8 costs that one file, not every system font in the process.
+    std::ofstream(root / "first" / std::filesystem::path(L"badØ00name.ttf")).put('x');
+#endif
     font::set_system_font_directories({root / "first"});
     auto first = font::system_font_catalog();
     const auto earlier = font::system_font_named(first, "ARIAL.TTF");

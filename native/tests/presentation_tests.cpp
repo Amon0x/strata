@@ -419,8 +419,14 @@ void scroll_moves_without_the_owner(const std::string_view backend) {
     const std::array<std::uint8_t, 3U> blue{0U, 0U, 255U};
     require(top_pixel() == red, "the scroll scene did not start at its first panel");
 
-    // Eight notches pass the first panel, up to the limit. The owner has adopted nothing yet.
+    // Wheels come from any thread, so one can pass its stream's retirement: not a failure.
     std::vector<host::PresentationScroll> scrolls;
+    presentation.wheel(stream + 1000U, 100.0, 100.0, 0.0, -8.0);
+    presentation.take_scrolls(scrolls);
+    require(scrolls.empty(), "a wheel for a retired stream was answered");
+    presentation.rethrow_failure();
+
+    // Eight notches pass the first panel, up to the limit. The owner has adopted nothing yet.
     presentation.wheel(stream, 100.0, 100.0, 0.0, -8.0);
     presentation.take_scrolls(scrolls);
     require(scrolls.size() == 1U && scrolls.front().applied && scrolls.front().delta_y > 0.0 &&

@@ -33,6 +33,7 @@ option(STRATA_BUILD_PREVIEW "Build the SDL interactive application preview" OFF)
 option(STRATA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(STRATA_ENABLE_ASAN "Enable AddressSanitizer where supported" OFF)
 option(STRATA_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer where supported" OFF)
+option(STRATA_ENABLE_TSAN "Enable ThreadSanitizer where supported" OFF)
 option(STRATA_ENABLE_STATIC_ANALYSIS "Enable compiler static analysis" OFF)
 option(
     STRATA_BUILD_FUZZERS
@@ -117,6 +118,11 @@ function(strata_target_defaults target)
     get_target_property(strata_target_type ${target} TYPE)
     if(WIN32 AND strata_target_type STREQUAL "EXECUTABLE")
         target_sources(${target} PRIVATE ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/windows/utf8.manifest)
+        # Interface walks recurse as deep as the tree, and Windows' 1 MiB default holds about 60
+        # nested components. Linux and macOS give 8 MiB; only touched pages cost memory.
+        if(MSVC)
+            target_link_options(${target} PRIVATE /STACK:8388608)
+        endif()
     endif()
     set_target_properties(
         ${target}
@@ -168,6 +174,9 @@ function(strata_target_defaults target)
         if(STRATA_ENABLE_UBSAN)
             message(FATAL_ERROR "MSVC does not provide the UBSan configuration required by Strata")
         endif()
+        if(STRATA_ENABLE_TSAN)
+            message(FATAL_ERROR "MSVC does not provide ThreadSanitizer; build on Linux")
+        endif()
         if(STRATA_BUILD_FUZZERS)
             target_compile_options(
                 ${target}
@@ -197,6 +206,10 @@ function(strata_target_defaults target)
         if(STRATA_ENABLE_UBSAN)
             target_compile_options(${target} PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
             target_link_options(${target} PRIVATE -fsanitize=undefined)
+        endif()
+        if(STRATA_ENABLE_TSAN)
+            target_compile_options(${target} PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
+            target_link_options(${target} PRIVATE -fsanitize=thread)
         endif()
         if(STRATA_BUILD_FUZZERS)
             target_compile_options(${target} PRIVATE -fsanitize=fuzzer-no-link)
@@ -1371,6 +1384,8 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     if(WIN32)
         # The PNG decoder is checked against WIC, which D3D11 decoded with before the core did.
         target_link_libraries(strata_core_tests PRIVATE windowscodecs ole32)
+        # ui_tests.cpp passes the section limit once ASan instruments it.
+        target_compile_options(strata_core_tests PRIVATE /bigobj)
     endif()
     strata_target_defaults(strata_core_tests)
     add_test(
@@ -1422,6 +1437,21 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         target_link_libraries(strata_presentation_tests PRIVATE strata_headless_host)
         strata_target_defaults(strata_presentation_tests)
         add_test(NAME strata.presentation COMMAND strata_presentation_tests)
+
+        add_executable(strata_thread_soak tests/thread_soak.cpp)
+        target_link_libraries(strata_thread_soak PRIVATE strata_headless_host)
+        target_include_directories(strata_thread_soak PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
+        strata_target_defaults(strata_thread_soak)
+        add_dependencies(strata_thread_soak strata_demo_extension)
+        if(MSVC AND STRATA_ENABLE_ASAN)
+            # ASan's frames are many times larger; its threads take this size from the executable.
+            target_link_options(strata_thread_soak PRIVATE /STACK:33554432)
+        endif()
+        add_test(
+            NAME strata.thread_soak
+            COMMAND strata_thread_soak "${STRATA_RESOURCE_ROOT}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/showcase.json" --seconds=5
+        )
         if(WIN32)
             add_test(NAME strata.presentation.d3d11 COMMAND strata_presentation_tests d3d11)
             set_tests_properties(strata.presentation.d3d11 PROPERTIES LABELS "gpu;d3d11")

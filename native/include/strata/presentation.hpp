@@ -208,7 +208,9 @@ class Presentation final {
     /**
      * Scrolls under (x, y), in the stream's logical space, while the owner cannot: thread-safe, and
      * answered through take_scrolls. Moves the innermost scroller with room, as a wheel would, and
-     * hands back any wheel it did not apply, such as one over a scroller that is not eligible.
+     * hands back any wheel it did not apply, such as one over a scroller that is not eligible. A
+     * wheel for a stream no longer attached, or after the presentation failed or stopped, is
+     * dropped: the owner's own calls report those.
      */
     void wheel(PresentationStream stream, double x, double y, double notches_x, double notches_y);
     void take_scrolls(std::vector<PresentationScroll>& output);

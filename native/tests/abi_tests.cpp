@@ -2250,6 +2250,10 @@ void reserve_impossible_subtargets(void* const user_data,
 
 /** Allocation failure inside an extension call reports out-of-memory, not a bad argument. */
 void test_extension_allocation_failure_status(const std::filesystem::path& resource_root) {
+    // Sanitizers abort on a request this size instead of failing it.
+#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
+    static_cast<void>(resource_root);
+#else
     SubtargetCapture capture;
     FragmentFixture fixture(resource_root, &present_nothing, &capture,
                             &reserve_impossible_subtargets);
@@ -2263,6 +2267,7 @@ void test_extension_allocation_failure_status(const std::filesystem::path& resou
     check(capture.reserve_status == STRATA_STATUS_OUT_OF_MEMORY,
           "allocation failure inside an extension call reported status " +
               std::to_string(capture.reserve_status) + " instead of out-of-memory");
+#endif
 }
 
 /**

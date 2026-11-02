@@ -34,6 +34,11 @@ change and perform it after the outer call returns, as `strata::host::Bindings::
 for host snapshots. The exact list is in the Threading comment at the top of `strata.h`. No C++
 exception crosses the ABI: exports are `noexcept`, and callbacks must not throw.
 
+Layout, rendering and description recurse as deep as the interface nests, about 16 KiB a level. Run
+a Surface on a thread with an 8 MiB stack, which Strata's own hosts give their executables with
+`/STACK:8388608` on Windows, where the default is 1 MiB. On any stack, a tree too deep for it fails
+the frame with a diagnostic rather than overflowing.
+
 ### Preparation and frame wakes
 
 ABI v8 adds `STRATA_CAPABILITY_TASK_EXECUTION`, `strata_runtime_config::task_execution` and

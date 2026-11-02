@@ -4898,6 +4898,8 @@ overlay Cut {
     check(presses() == "0", "a press in a diamond clip's corner still hit what fills it");
     press(ui::Point{100.0, 100.0});
     check(presses() == "1", "a press inside a diamond clip did not hit what fills it: " + presses());
+    // Declared before the application it now belongs to, so it has to go first by hand.
+    surface.reset();
 }
 
 void test_chart_inspects_selects_and_hides_series(const std::filesystem::path& resources) {

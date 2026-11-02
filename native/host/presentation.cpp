@@ -402,7 +402,11 @@ struct Presentation::Impl final {
     }
 
     void accept(Wheel& value) {
-        Stream& source = stream(value.stream);
+        // Wheels come from any thread, so one can pass its stream's retirement. What it scrolled is gone.
+        const auto found = streams.find(value.stream);
+        if (found == streams.end())
+            return;
+        Stream& source = found->second;
         apply_scrolls(source);
         PresentationScroll answer;
         answer.stream = value.stream;
@@ -685,7 +689,18 @@ void Presentation::set_transparent(const bool transparent) {
 }
 void Presentation::wheel(const PresentationStream stream, const double x, const double y,
                          const double notches_x, const double notches_y) {
-    impl_->post<Impl::Wheel>(stream, x, y, notches_x, notches_y);
+    if (impl_->execution != PresentationExecution::threaded) {
+        impl_->post<Impl::Wheel>(stream, x, y, notches_x, notches_y);
+        return;
+    }
+    {
+        std::scoped_lock lock(impl_->mutex);
+        // This can be a poll inside a frame, with nothing to catch: the owner's own calls report a failure.
+        if (impl_->closing)
+            return;
+        impl_->messages.emplace_back(std::in_place_type<Impl::Wheel>, stream, x, y, notches_x, notches_y);
+    }
+    impl_->changed.notify_one();
 }
 void Presentation::take_scrolls(std::vector<PresentationScroll>& output) {
     output.clear();

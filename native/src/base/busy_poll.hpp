@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cstdint>
 
+#include "base/stack_guard.hpp"
+
 namespace strata::base {
 
 /**
@@ -24,8 +26,12 @@ class BusyPoll final {
     BusyPoll(const BusyPoll&) = delete;
     BusyPoll& operator=(const BusyPoll&) = delete;
 
-    /** Cheap enough for a per-node loop: looks at the clock only every 64th call. */
-    static void tick() noexcept {
+    /**
+     * Cheap enough for a per-node loop: looks at the clock only every 64th call. These loops are the
+     * recursive walks too, so a tree too deep for the stack throws here instead of overflowing it.
+     */
+    static void tick() {
+        check_stack();
         BusyPoll* const poll = active();
         if (poll != nullptr && (++poll->ticks_ & 63U) == 0U)
             poll->check();

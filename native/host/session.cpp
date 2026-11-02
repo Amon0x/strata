@@ -467,14 +467,17 @@ bool Session::adopt_environment(const strata_surface_environment& environment) {
     return adopted != 0U;
 }
 
-void Session::enqueue(const std::span<const strata_input_event> events) {
+bool Session::enqueue(const std::span<const strata_input_event> events) {
     strata_surface_input_batch_info info{};
     info.struct_size = sizeof(info);
-    strata::require_ok(strata_surface_enqueue_input(impl_->live_surface().native_handle(),
-                                                    events.data(), events.size(), &info),
-                       "Session input enqueue");
+    const strata_result result = strata_surface_enqueue_input(impl_->live_surface().native_handle(),
+                                                              events.data(), events.size(), &info);
+    if (result.status == STRATA_STATUS_INPUT_QUEUE_FULL)
+        return false;
+    strata::require_ok(result, "Session input enqueue");
     if (info.accepted_event_count != events.size())
         throw std::runtime_error("the Surface input queue accepted only part of a batch");
+    return true;
 }
 
 SurfacePacketCommit Session::frame(const std::int64_t time_nanoseconds) {
