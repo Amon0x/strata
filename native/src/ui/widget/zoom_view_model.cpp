@@ -483,6 +483,7 @@ void register_zoom_view_widget(WidgetRegistry& registry) {
     lifecycle.describe = WidgetDescribePhase{&zoom_defaults, nullptr, {}, "ZoomView", true};
     lifecycle.input.pointer = &zoom_view_pointer;
     lifecycle.input.event = &zoom_view_event;
+    lifecycle.input.takes_wheel = true;
     lifecycle.input.key = &zoom_view_key;
     lifecycle.input.focusable = true;
     lifecycle.input.action_property = "onViewChange";

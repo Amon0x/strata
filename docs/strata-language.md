@@ -1682,7 +1682,7 @@ children should use stable host-provided keys. Multi-branch `when` requires exac
 
 Large or variable-height results use a keyed `Repeater` whose body contains exactly one `for`.
 Unlike an eager loop, the repeater accepts a bounded collection with thousands of items and builds
-only the visible range plus overscan. Every record must expose a stable `key` or `id`.
+only the visible range plus `overscan` rows (4 by default). Every record must expose a stable `key` or `id`.
 
 ## Expressions and bindings
 

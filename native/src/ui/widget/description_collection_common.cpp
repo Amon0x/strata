@@ -202,6 +202,9 @@ void virtual_list_expand(WidgetDescriptionScope& scope) {
     const std::string item_template = scope.string("itemTemplate");
     std::vector<runtime::Value> items = source->list()->values;
     const std::size_t item_count = items.size();
+    // Enough built past the viewport for a few wheel notches while the UI thread is busy: each row
+    // costs about 0.017 ms of a scrolling frame.
+    scope.set_layout("virtualOverscan", runtime::Value(scope.number("overscan", 4.0)));
     scope.set_layout("virtualItemCount", runtime::Value(static_cast<double>(item_count)));
     scope.set_generated_children(
         item_count,
@@ -247,7 +250,7 @@ void repeater_expand(WidgetDescriptionScope& scope) {
         ))
     );
     scope.set_layout("virtualItemExtent", runtime::Value(scope.number("estimatedItemExtent", 24.0)));
-    scope.set_layout("virtualOverscan", runtime::Value(scope.number("overscan", 1.0)));
+    scope.set_layout("virtualOverscan", runtime::Value(scope.number("overscan", 4.0)));
 }
 
 } // namespace

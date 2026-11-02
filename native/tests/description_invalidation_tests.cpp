@@ -740,6 +740,17 @@ overlay Main {
           "held or outgoing scrollers were offered to the render thread");
 }
 
+/** A widget with an input hook that ignores the wheel must not keep it from scrolling the page. */
+void test_only_wheel_consumers_are_listed() {
+    const ui::WidgetRegistry widgets;
+    const auto types = widgets.wheel_consumer_types();
+    check(std::ranges::contains(types, std::string_view("ZoomView")),
+          "a widget that zooms under the wheel was not listed as taking it");
+    check(widgets.find("RangeSlider") != nullptr && widgets.find("RangeSlider")->input.event &&
+              !std::ranges::contains(types, std::string_view("RangeSlider")),
+          "a widget with an input hook that ignores the wheel was listed as taking it");
+}
+
 /** Inline preparation has nothing to wait for, so deterministic frames never hold. */
 void test_content_hold_needs_asynchronous_preparation() {
     runtime::ApplicationContext application("content-hold", runtime::ApplicationBundle::create());
@@ -1229,6 +1240,7 @@ int strata_test_description_invalidation() {
         test_content_hold_keeps_outgoing_until_incoming_is_ready();
         test_content_hold_needs_asynchronous_preparation();
         test_held_scrollers_take_no_wheel();
+        test_only_wheel_consumers_are_listed();
         test_readiness_reaches_cached_widgets_and_each_surface();
         test_preparation_reaches_cached_paint_without_redescribing();
         test_runtime_image_metadata_reaches_cached_fit();

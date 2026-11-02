@@ -1795,7 +1795,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     }
     // Cache the presentation table with its commands; cache hits must retain tone and motion.
     implementation_->publish_groups(output, tree.structure_generation());
-    implementation_->publish_scrollers(tree, layout, input, widgets);
+    implementation_->publish_scrollers(tree, layout, input, widgets, behaviors);
     implementation_->retain_base(tree, layout, input, generations, output);
     implementation_->retained_composed_commands.clear();
     implementation_->retained_overlay_commands.clear();
@@ -1858,7 +1858,8 @@ void RenderEngine::Impl::publish_groups(RenderCommandBuffer& output,
 
 void RenderEngine::Impl::publish_scrollers(const RetainedTree& tree, const LayoutResult& layout,
                                            const InputPresentation& input,
-                                           const WidgetRegistry& widgets) {
+                                           const WidgetRegistry& widgets,
+                                           const BehaviorRegistry& behaviors) {
     published_scrollers.clear();
     published_wheel_regions.clear();
     if (scrollers.empty())
@@ -1887,6 +1888,20 @@ void RenderEngine::Impl::publish_scrollers(const RetainedTree& tree, const Layou
         wheel_editors.clear();
         for (const RetainedNode* const consumer : tree.nodes_of_types(widgets.wheel_consumer_types()))
             wheel_consumers.push_back(consumer->identity());
+        if (behaviors.any_takes_wheel() && tree.root() != nullptr) {
+            const auto visit = [&](const auto& self, const RetainedNode& node) -> void {
+                for (const DescriptionBehavior& attachment : node.description().behaviors) {
+                    const BehaviorLifecycle* const behavior = behaviors.find(attachment.id);
+                    if (attachment.enabled && behavior != nullptr && behavior->input.takes_wheel) {
+                        wheel_consumers.push_back(node.identity());
+                        break;
+                    }
+                }
+                for (const auto& child : node.children())
+                    self(self, *child);
+            };
+            visit(visit, *tree.root());
+        }
         // Plain text is selectable too, but only a live editor scrolls under the wheel.
         for (const RetainedNode* const editable : tree.nodes_of_types(widgets.text_editable_types()))
             wheel_editors.push_back(editable->identity());

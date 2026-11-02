@@ -639,6 +639,7 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
         if (const auto scroll = widget_scrolls.find(type); scroll != widget_scrolls.end()) {
             const strata_widget_scroll_extension scroll_descriptor = scroll->second;
             if (scroll_descriptor.scroll != nullptr) {
+                lifecycle.input.takes_wheel = true;
                 lifecycle.input.event = [scroll_descriptor,
                                          fields](strata::ui::WidgetInputScope& scope) {
                     const strata::ui::ScrollInputEvent* input = scope.scroll();
@@ -802,6 +803,7 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
         if (const auto input = behavior_inputs.find(id); input != behavior_inputs.end()) {
             const strata_behavior_input_extension input_descriptor = input->second;
             if (input_descriptor.scroll != nullptr) {
+                lifecycle.input.takes_wheel = true;
                 lifecycle.input.event = [input_descriptor](strata::ui::BehaviorInputScope& scope) {
                     const strata::ui::InputDispatchContext* const dispatch = scope.dispatch();
                     const strata::ui::ScrollInputEvent* const input =
@@ -867,6 +869,7 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
                            STRATA_EXTENSION_INPUT_CONSUMED;
                 };
                 const strata::ui::BehaviorInputHook scroll_hook = lifecycle.input.event;
+                lifecycle.input.takes_wheel = true;
                 lifecycle.input.event = [scroll_hook,
                                          focus_hook](strata::ui::BehaviorInputScope& scope) {
                     if (scroll_hook != nullptr && scroll_hook(scope))

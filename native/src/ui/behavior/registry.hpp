@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <functional>
 #include <map>
 #include <string>
@@ -27,6 +28,8 @@ using BehaviorOverlayHook = std::function<void(
 struct BehaviorInputPhase final {
     /** Generic capture/target/bubble hook sharing the widget dispatch context. */
     BehaviorInputHook event = nullptr;
+    /** `event` may consume a wheel, so a wheel over its node has to reach it on the UI thread. */
+    bool takes_wheel = false;
     BehaviorInputHook pointer = nullptr;
     BehaviorInputHook key = nullptr;
     BehaviorInputHook advance = nullptr;
@@ -54,6 +57,12 @@ public:
     BehaviorRegistry();
 
     [[nodiscard]] const BehaviorLifecycle* find(std::string_view id) const noexcept;
+    /** Only extensions can take the wheel in a behavior, so most surfaces never look for one. */
+    [[nodiscard]] bool any_takes_wheel() const noexcept {
+        return std::ranges::any_of(lifecycles_, [](const auto& entry) {
+            return entry.second.input.takes_wheel;
+        });
+    }
     void register_lifecycle(BehaviorLifecycle lifecycle);
     void register_input_phase(std::string id, BehaviorInputPhase phase);
     void register_present_phase(std::string id, BehaviorPresentPhase phase);

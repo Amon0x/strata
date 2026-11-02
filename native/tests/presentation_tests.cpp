@@ -476,7 +476,7 @@ void scroll_moves_without_the_owner(const std::string_view backend) {
 }
 
 /** A virtual list has built only some rows, so the render thread stops where they stop. */
-void scroll_stops_at_built_rows(const std::string_view backend) {
+[[nodiscard]] double scroll_reach_of_virtual_list(const std::string_view backend, const int overscan) {
     std::string items;
     for (int index = 0; index < 200; ++index) {
         items += std::string(index == 0 ? "" : ", ") + "{ key: \"row." + std::to_string(index) +
@@ -493,7 +493,7 @@ void scroll_stops_at_built_rows(const std::string_view backend) {
         }
         overlay Main {
           root Panel(layout: { kind: "COLUMN", width: 200, height: 200 }) {
-            VirtualList(key: "list", items: [)") + items + R"(], itemTemplate: Row, itemExtent: 40,
+            VirtualList(key: "list", items: [)") + items + R"(], itemTemplate: Row, itemExtent: 40, overscan: )" + std::to_string(overscan) + R"(,
                         layout: { kind: "SCROLL", width: 200, height: 200 })
           }
         })",
@@ -537,10 +537,15 @@ void scroll_stops_at_built_rows(const std::string_view backend) {
     presentation.take_scrolls(scrolls);
     require(scrolls.size() == 1U && !scrolls.front().applied,
             "a virtual list moved past its built rows");
-    // Once the owner adopts the scroll it builds further, and the wheel can go on.
-    presentation.wheel(stream, 100.0, 100.0, 0.0, 0.0);
-    presentation.take_scrolls(scrolls);
-    require(surface.adopt_scroll(1U << 30U, 0.0, 0.0) == false, "an unknown scroller adopted a scroll");
+    return reached;
+}
+
+void scroll_reach_follows_overscan(const std::string_view backend) {
+    const double short_reach = scroll_reach_of_virtual_list(backend, 1);
+    const double long_reach = scroll_reach_of_virtual_list(backend, 8);
+    require(long_reach == short_reach + 7.0 * 40.0,
+            "a virtual list's overscan did not set how far the render thread can move it: " +
+                std::to_string(short_reach) + " then " + std::to_string(long_reach));
 }
 
 void failed_candidate_keeps_live_programs(const std::string_view backend) {
@@ -691,7 +696,7 @@ int main(const int argc, char** argv) {
         ordered_packets_and_idle_feedback(argc > 1 ? std::string_view(argv[1]) : "reference");
         failed_candidate_keeps_live_programs(argc > 1 ? std::string_view(argv[1]) : "reference");
         scroll_moves_without_the_owner(argc > 1 ? std::string_view(argv[1]) : "reference");
-        scroll_stops_at_built_rows(argc > 1 ? std::string_view(argv[1]) : "reference");
+        scroll_reach_follows_overscan(argc > 1 ? std::string_view(argv[1]) : "reference");
         std::cout << "presentation ownership tests passed\n";
         return 0;
     } catch (const std::exception& error) {

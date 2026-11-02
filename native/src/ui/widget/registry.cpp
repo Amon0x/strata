@@ -309,7 +309,7 @@ void WidgetRegistry::refresh_trait_types() {
     text_editable_types_.clear();
     wheel_consumer_types_.clear();
     for (const auto& [type, lifecycle] : lifecycles_) {
-        if (lifecycle.input.event)
+        if (lifecycle.input.takes_wheel)
             wheel_consumer_types_.push_back(type);
         if (lifecycle.command.declaration)
             command_declaration_types_.push_back(type);

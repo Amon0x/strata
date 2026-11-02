@@ -526,9 +526,10 @@ Live snapshot cutover:
   shows on the frame after it is ready (or with a spinner after a budget).
 - [x] Measure: no frame over 8 ms on the frame F7 is pressed or any after it: 6.44 ms core at most on
   the real desktop host.
-- [ ] The overlay visible in under 60 ms is **not met**: the first drawn frame is about 80 ms after F7.
-  That time is preparing the Session on a worker, so nothing on screen waits for it. Preparing the
-  overlay ahead of time at startup would meet it, at a startup and memory cost for a debug surface.
+- [ ] The overlay visible in under 60 ms is **not met**: the first drawn frame is about 76 ms after F7.
+  Of that, 46 ms prepares the Session on a worker (session 7, snapshots 13, activation 20, surface 4) and
+  the rest is the first frame's stages, so nothing on screen waits for it. Preparing the overlay ahead of
+  time at startup would meet it, at a startup and memory cost for a debug surface.
 
 ## Phase 4: boundaries that hold content until it is ready
 
@@ -752,9 +753,14 @@ built. Scrolling does not use the platform thread this plan assumed.
 
 What the display does now. A threaded, vsynced window (`--windowed-timing`) ran F7 and then the first
 opens of TYPE, LAYOUT, CONTENT and BLUEPRINT under an elevated PresentMon trace: 2,424 display intervals,
-median 5.556 ms at 180 Hz, p99 5.602 ms. Three ran late (11.1, 16.6, 11.1 ms), all around F7's startup
-before any tab opened; the tab opens have none. So preparing new content no longer costs a displayed
-frame, which was the goal of this plan. The late three are not yet attributed.
+median 5.556 ms at 180 Hz, p99 5.602 ms. Three ran late (11.1, 16.6, 11.1 ms), before any tab opened; the
+tab opens have none. So preparing new content no longer costs a displayed frame, the goal of this plan.
+
+Those three are not F7's. Render-thread work around F7 is 2-3 ms and draw plus present never passed 7.5 ms
+in three logged runs, and the same late frames appear about 850 ms after the first present in traces that
+never press F7. They follow the window starting up, most likely in the OS compositor; that part is
+inferred. First-open resource uploads cost 8-11.5 ms on the render thread, without a late frame in the
+traces so far. A slower machine or a heavier page could change that, and they are the place to look.
 
 Why scrolling was worth building. A full rebuild of the 2,000-cell page costs about 90 ms (description
 14, layout 27, render 25, encode 19), and slicing can only split that between stages, so one stage still
@@ -784,8 +790,13 @@ was disqualified, and counting showed that left **no eligible scroller on any of
 Plain `Text` even counted, since `text_edit_mode` also covers static selection. The packet now carries where
 those widgets are, so only a wheel over one goes back to the UI, and only a live editor counts as one.
 Every showcase page now has eligible scrollers; two on CONTENT are not, and those were not investigated.
-A virtual list can move as far as its built rows reach. With the default overscan of one row that is short:
-about 50 px in the test's 200 px list, after which the wheel waits for the UI.
+A virtual list can move as far as its built rows reach. Each row of overscan costs about 0.017 ms of a
+scrolling frame (2,000 rows: 0.65 ms at 1, 0.72 at 4, 0.80 at 8, 0.93 at 16, 1.20 at 32), so the default
+went from 1 to 4, about three wheel notches on a 24 px list. `VirtualList` had also been ignoring its
+documented `overscan` argument; only `Repeater` read it.
+
+CONTENT's two remaining scrollers contain sticky gutters and a windowed code view, so they really do depend
+on the offset.
 
 The gate, on D3D11, stalling about 250 ms in a script every 1.5 s with wheels posted during the stalls:
 
@@ -794,6 +805,10 @@ The gate, on D3D11, stalling about 250 ms in a script every 1.5 s with wheels po
 | `samples/scroll_stall.strata` | 2,007 | 5.556 ms | 5.596 ms | 0 |
 | 2,000 rows of buttons | 2,114 | 5.556 ms | 5.595 ms | 1 (11.1 ms) |
 | Showcase, LAYOUT page | 1,973 | 5.556 ms | see below | 1 (11.1 ms) |
+
+Wheels were injected with `PostMessage` for those traces. `SendInput`, through the real input queue, gives
+the same result on the sample: rows move while its counter is frozen, and hold when it ticks. A hand on a
+physical wheel has still not been tried.
 
 The LAYOUT trace's p99 is 116.7 ms only because it includes 2.9 s of the host idling before F7, where
 presenting slowly is correct; after that it has the one late interval above.
@@ -808,10 +823,11 @@ What it does not do:
 - A stall in native host code is not covered: nothing polls there.
 - Only wheels, on Win32 hosts. A touch drag still waits for the UI thread, and the SDL preview has no hook.
 - These scrollers wait for the UI: anything with sticky, pinned, portal or windowed content, and lists past
-  their built rows. So does a wheel over a live editor or a widget with a generic input hook (a range slider
-  counts, though it ignores the wheel), and everything under a modal.
+  their built rows. So does a wheel over a live editor, a `ZoomView` or an extension's input hook, and
+  everything under a modal.
 - During the stall, scrollbars stay where they were, `strata.scroll` and authored parallax wait, and
-  hover does not update. LAYOUT's hero art visibly moves at content speed during a stall, then snaps back to
+  hover does not update. The thumb is baked into the scroller's cached foreground, so moving it needs a new
+  group kind through every widget render scope; a lag of at most one stall did not justify that. LAYOUT's hero art visibly moves at content speed during a stall, then snaps back to
   its half-speed position when the UI returns. A wheel over an open popup can move the content under it.
 - A wheel region uses the widget's layout bounds, so a static transform on the way down shifts where it
   applies. The worst case is a wheel handed back or a widget that misses one wheel during a stall.

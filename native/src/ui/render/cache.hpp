@@ -252,7 +252,8 @@ struct RenderEngine::Impl final {
     /** Drops groups no longer referenced by the frame and attaches the table to its commands. */
     void publish_groups(RenderCommandBuffer& output, std::uint64_t structure_generation);
     void publish_scrollers(const RetainedTree& tree, const LayoutResult& layout,
-                           const InputPresentation& input, const WidgetRegistry& widgets);
+                           const InputPresentation& input, const WidgetRegistry& widgets,
+                           const BehaviorRegistry& behaviors);
     std::uint64_t fragment_tree_generation = 0U;
     /** The portals outside portals, in tree order, as of a structure and layout generation. */
     std::vector<const RetainedNode*> portals;

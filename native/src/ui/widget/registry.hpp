@@ -145,6 +145,8 @@ struct WidgetDescribePhase final {
 struct WidgetInputPhase final {
     /** Generic capture/target/bubble hook run before built-in widget/control policy. */
     WidgetInputHook event = nullptr;
+    /** `event` may consume a wheel, so a wheel over this widget has to reach it on the UI thread. */
+    bool takes_wheel = false;
     /** Full pointer lifecycle hook for gestures that cannot be expressed as click activation. */
     WidgetInputHook pointer = nullptr;
     /** Active-pointer time hook; visited only while this widget owns a pressed pointer. */
@@ -355,7 +357,7 @@ class WidgetRegistry final {
     [[nodiscard]] std::vector<std::string_view> frame_watch_types() const;
     /** Types with a text edit mode, sorted; input preparation walks them every frame. */
     [[nodiscard]] std::span<const std::string_view> text_editable_types() const noexcept;
-    /** Widgets whose generic input hook may take a wheel event before any scroller does. */
+    /** Widgets that may take a wheel event before any scroller does. */
     [[nodiscard]] std::span<const std::string_view> wheel_consumer_types() const noexcept {
         return wheel_consumer_types_;
     }
