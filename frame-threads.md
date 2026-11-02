@@ -951,6 +951,29 @@ So tab opens hold their frame rate down to 4 threads, and 2 starts to show. This
 core or GPU: a machine with those is still unmeasured, and first-open uploads (8-11.5 ms on the render
 thread here) are the first place to look.
 
+The window stays on the copy swap chain (`DXGI_SWAP_EFFECT_DISCARD`, "Composed: Copy with GPU GDI"), after
+trying the flip model on the first-opens trace at 180 Hz:
+
+| Swap chain | Present to display, median | Late frames |
+| --- | --- | --- |
+| Copy (today) | 15.8 ms | 6, around 430, 860 and 6,000 ms |
+| Copy, one frame queued | 15.8 ms | 6 |
+| Flip | 22.0 ms | 1, at 117 ms |
+| Flip, one frame queued | 10.8 ms | 2-4, one of 44 ms at 115 ms |
+
+So it buys about one display interval, which click-to-page photos at 180 Hz cannot see. It should be worth
+more at 60 Hz (about 16 ms, inferred, not measured). The late frames near 860 ms that Phase 6 traces to window
+startup go away on flip, trading them for one at 115 ms as the window enters independent flip, so they belong
+to how the copy mode starts.
+
+It was left out because flip on an HWND ignores alpha: the area a frame leaves transparent shows Acrylic at
+(74, 73, 73) on copy and black on flip, so Mica, Acrylic and Tabbed would break. Window opacity works on both.
+Backdrops would need a DirectComposition swap chain (`CreateSwapChainForComposition`, as Windows Terminal
+does), and either every window takes that path, which gives up independent flip, or a window starts on flip
+and changes path when an application asks for a backdrop. Worth doing if input latency at 60 Hz becomes the
+priority. Uncapped flip also needs `DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING`, or Present blocks for about 2.8 ms and
+skews every benchmark.
+
 Still open: the Vulkan preview under ThreadSanitizer (the WSL image has no SDL or Vulkan headers); a physical
 wheel; single stages of up to 27 ms on a 2,000-cell rebuild, during which hover and clicks wait.
 

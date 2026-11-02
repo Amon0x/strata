@@ -16,7 +16,7 @@
   },
   "setup": [
     {"key": "f7"},
-    {"frames": 3}
+    {"settle": 0}
   ],
   "phases": [
     {
@@ -24,6 +24,19 @@
       "warmupFrames": 120,
       "iterations": 1,
       "steps": [{"frames": 360}]
+    },
+    {
+      "name": "ordinary-interactions",
+      "warmupFrames": 20,
+      "iterations": 30,
+      "steps": [
+        {"click": {"key": "repro.section.editor"}},
+        {"frames": 2},
+        {"click": {"key": "repro.section"}},
+        {"frames": 3},
+        {"click": {"key": "repro.section"}},
+        {"frames": 3}
+      ]
     },
     {
       "name": "tab-switching",
@@ -49,19 +62,6 @@
         {"frames": 2},
         {"scroll": {"key": "targets.page.scroll.extend", "deltaY": 4}},
         {"frames": 2}
-      ]
-    },
-    {
-      "name": "ordinary-interactions",
-      "warmupFrames": 20,
-      "iterations": 30,
-      "steps": [
-        {"click": {"key": "repro.section.editor"}},
-        {"frames": 2},
-        {"click": {"key": "repro.section"}},
-        {"frames": 3},
-        {"click": {"key": "repro.section"}},
-        {"frames": 3}
       ]
     }
   ]

@@ -16,6 +16,7 @@
   },
   "setup": [
     {"key": "f7"},
+    {"settle": 0},
     {"frames": 3},
     {"click": {"role": "tab", "name": "BLUEPRINT"}},
     {"settle": 500}
