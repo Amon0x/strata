@@ -5,6 +5,7 @@
 #include <functional>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <strata/strata.h>
 #include <string>
 #include <string_view>
@@ -75,6 +76,8 @@ struct RenderLayerTelemetry final {
      * copy only the region they sample, and nothing on a frame that reuses their retained output.
      */
     std::uint64_t copied_pixels = 0;
+    /** A drawn material/effect or retained art job can change without another UI packet. */
+    bool live = false;
 };
 struct PresentedFrame final {
     strata_surface_frame_info surface{};
@@ -101,6 +104,8 @@ class Renderer final {
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
     void declare_material(std::string_view id, std::string_view hlsl_source);
+    /** Removes one consumer namespace; unused pipelines retire after their last in-flight reader. */
+    void release_programs(std::string_view prefix);
     void declare_effect_pass(std::string_view effect_id, std::uint32_t index, std::uint32_t kind,
                              double radius, std::uint32_t downsample,
                              std::uint32_t radius_parameter, std::uint32_t downsample_parameter,

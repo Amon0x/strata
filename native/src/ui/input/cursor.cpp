@@ -58,11 +58,13 @@ std::optional<PointerCursor> pointer_cursor_from_name(const std::string_view nam
     return std::nullopt;
 }
 
-PointerCursor InputRouter::cursor() const {
-    for (const auto& [pointer, session] : drag_sessions_) {
-        static_cast<void>(pointer);
-        if (session.active)
-            return PointerCursor::grabbing;
+PointerCursor InputPresentation::cursor() const {
+    if (input_owner_ != nullptr) {
+        for (const auto& [pointer, session] : input_owner_->drag_sessions_) {
+            static_cast<void>(pointer);
+            if (session.active)
+                return PointerCursor::grabbing;
+        }
     }
     if (tree_ == nullptr || !hover_target_.has_value())
         return PointerCursor::standard;
@@ -78,7 +80,7 @@ PointerCursor InputRouter::cursor() const {
             hovered_subtarget_kind_ == WidgetSubtargetKind::link) {
             return PointerCursor::pointer;
         }
-        if (editors_.contains(node->identity()) || static_text_selectable(*node))
+        if (edited_text(node->identity()) != nullptr || static_text_selectable(*node))
             return PointerCursor::text;
         if (behavior(*node, "strata.drag-source") != nullptr)
             return PointerCursor::grab;

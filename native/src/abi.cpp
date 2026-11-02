@@ -112,6 +112,19 @@ strata_result strata_runtime_create(
             "Reserved ABI fields must be zero."
         );
     }
+    if (config->task_execution != STRATA_TASK_EXECUTION_ASYNCHRONOUS &&
+        config->task_execution != STRATA_TASK_EXECUTION_DETERMINISTIC) {
+        return strata::abi_detail::emit_without_runtime(
+            sink, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_TASK_EXECUTION",
+            "Runtime task execution must be asynchronous or deterministic.");
+    }
+    if ((config->frame_wake.struct_size != 0U || config->frame_wake.user_data != nullptr ||
+         config->frame_wake.wake != nullptr) &&
+        (!has_struct(&config->frame_wake) || config->frame_wake.wake == nullptr)) {
+        return strata::abi_detail::emit_without_runtime(
+            sink, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_FRAME_WAKE",
+            "A frame wake adapter must provide its complete structure and callback.");
+    }
     if ((config->required_capabilities & ~capabilities) != 0U) {
         return strata::abi_detail::emit_without_runtime(
             sink,
@@ -171,7 +184,9 @@ strata_result strata_runtime_create(
             *allocator,
             config->clock,
             sink,
-            config->stable_identity_seed
+            config->stable_identity_seed,
+            config->task_execution,
+            config->frame_wake
         );
         return strata::abi_detail::result(STRATA_STATUS_OK);
     } catch (...) {
@@ -200,6 +215,34 @@ strata_result strata_runtime_release(strata_runtime* const runtime) noexcept {
     const strata::base::HostAllocator allocator = runtime->core.allocator();
     std::destroy_at(runtime);
     allocator.deallocate(runtime, sizeof(strata_runtime), alignof(strata_runtime));
+    return strata::abi_detail::result(STRATA_STATUS_OK);
+}
+
+strata_result strata_runtime_request_frame(strata_runtime* const runtime) noexcept {
+    if (runtime == nullptr)
+        return invalid_argument();
+    runtime->core.tasks().request_frame();
+    return strata::abi_detail::result(STRATA_STATUS_OK);
+}
+
+strata_result strata_runtime_get_task_info(
+    const strata_runtime* const runtime,
+    strata_runtime_task_info* const out_info
+) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
+    if (runtime == nullptr || out_info == nullptr || !has_struct(out_info))
+        return invalid_argument();
+    const auto& tasks = runtime->core.tasks();
+    static_cast<void>(write_struct(out_info, strata_runtime_task_info{
+        sizeof(strata_runtime_task_info),
+        static_cast<std::uint64_t>(tasks.pending()),
+        tasks.wake_generation(),
+        tasks.has_completions() ? 1U : 0U,
+        tasks.execution() == strata::base::TaskExecution::deterministic
+            ? STRATA_TASK_EXECUTION_DETERMINISTIC : STRATA_TASK_EXECUTION_ASYNCHRONOUS,
+    }));
     return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 

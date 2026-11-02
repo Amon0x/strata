@@ -11,6 +11,7 @@
 
 #include "font/raster.hpp"
 #include "ui/layout.hpp"
+#include "ui/readiness.hpp"
 #include "ui/render.hpp"
 #include "resource/image.hpp"
 
@@ -211,6 +212,11 @@ public:
     void set_group_raster_scales(std::vector<GroupRasterScale> scales);
     /** The last plan left text at an earlier raster scale: a later frame must plan again. */
     [[nodiscard]] bool raster_deferred() const noexcept;
+    /** Adopted preparation changed a cached draw, even if its source command stayed identical. */
+    [[nodiscard]] bool resources_changed() const noexcept;
+    [[nodiscard]] const std::shared_ptr<const NodeReadinessSnapshot>& readiness() const noexcept {
+        return readiness_;
+    }
     /** Groups presented turned, sheared or scaled (ordered); a change replans. */
     void set_turned_groups(std::vector<std::uint32_t> groups);
     void clear() noexcept;
@@ -227,6 +233,7 @@ private:
     const TextEngine* text_engine_ = nullptr;
     std::optional<RenderSubmission> submission_;
     std::unique_ptr<submission_detail::PreparationCache> preparation_cache_;
+    std::shared_ptr<const NodeReadinessSnapshot> readiness_;
     std::size_t hits_ = 0U;
     std::size_t misses_ = 0U;
 };

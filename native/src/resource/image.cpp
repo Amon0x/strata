@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -21,6 +22,31 @@ namespace {
            static_cast<std::uint32_t>(bytes[offset + 2U]) << 8U |
            static_cast<std::uint32_t>(bytes[offset + 3U]);
 }
+
+/** JPEG has one independently decoded frame, but participates in the same owned cursor API. */
+class JpegDecoder final : public codec::FrameDecoder {
+  public:
+    explicit JpegDecoder(const std::span<const std::uint8_t> bytes)
+        : bytes_(bytes), dimensions_(codec::inspect_jpeg(bytes)) {}
+
+    [[nodiscard]] ImageDimensions dimensions() const noexcept override { return dimensions_; }
+    [[nodiscard]] std::uint32_t loop_count() const noexcept override { return 1U; }
+    [[nodiscard]] bool next(codec::FrameSink& sink) override {
+        if (ended_)
+            return false;
+        sink.reserve_next();
+        DecodedImage image = codec::decode_jpeg(bytes_);
+        sink.push(std::move(image.frames.front().rgba), 0U);
+        ended_ = true;
+        return true;
+    }
+    void rewind() override { ended_ = false; }
+
+  private:
+    std::span<const std::uint8_t> bytes_;
+    ImageDimensions dimensions_;
+    bool ended_ = false;
+};
 
 } // namespace
 
@@ -120,6 +146,14 @@ DecodedImage FrameSink::finish(const std::uint32_t loop_count) {
     return std::move(image_);
 }
 
+DecodedImage decode_frames(FrameDecoder& decoder, const std::uint32_t frame_limit,
+                           const char* const format, const ImageFrameConsumer* const consumer) {
+    FrameSink sink(decoder.dimensions(), frame_limit, format, consumer);
+    while (sink.wants_more() && decoder.next(sink)) {
+    }
+    return sink.finish(decoder.loop_count());
+}
+
 void blend_over(std::uint8_t* const destination, const std::uint8_t* const source) noexcept {
     const std::uint32_t source_alpha = source[3U];
     if (source_alpha == 255U) {
@@ -173,20 +207,6 @@ std::optional<ImageFormat> sniff_image_format(const std::span<const std::uint8_t
     return std::nullopt;
 }
 
-ImageEncoding image_encoding(const ImageFormat format) noexcept {
-    switch (format) {
-    case ImageFormat::jpeg:
-        return ImageEncoding::jpeg;
-    case ImageFormat::gif:
-        return ImageEncoding::gif;
-    case ImageFormat::webp:
-        return ImageEncoding::webp;
-    case ImageFormat::png:
-        break;
-    }
-    return ImageEncoding::png;
-}
-
 ImageInfo inspect_image(const std::span<const std::uint8_t> bytes) {
     const std::optional<ImageFormat> format = sniff_image_format(bytes);
     if (!format.has_value())
@@ -207,6 +227,73 @@ ImageInfo inspect_image(const std::span<const std::uint8_t> bytes) {
         break;
     }
     return ImageInfo{*format, dimensions};
+}
+
+ImageDecoder::ImageDecoder(std::vector<std::uint8_t> bytes) : bytes_(std::move(bytes)) {
+    const auto format = sniff_image_format(bytes_);
+    if (!format.has_value())
+        throw std::invalid_argument("image is not a PNG, JPEG, GIF or WebP");
+    switch (*format) {
+    case ImageFormat::png:
+        decoder_ = codec::open_png(bytes_);
+        break;
+    case ImageFormat::jpeg:
+        decoder_ = std::make_unique<JpegDecoder>(bytes_);
+        break;
+    case ImageFormat::gif:
+        decoder_ = codec::open_gif(bytes_);
+        break;
+    case ImageFormat::webp:
+        decoder_ = codec::open_webp(bytes_);
+        break;
+    }
+}
+
+ImageDecoder::~ImageDecoder() = default;
+ImageDecoder::ImageDecoder(ImageDecoder&&) noexcept = default;
+ImageDecoder& ImageDecoder::operator=(ImageDecoder&& other) noexcept {
+    if (this != &other) {
+        // Destroy a borrowing cursor before replacing its encoded storage.
+        decoder_.reset();
+        bytes_ = std::move(other.bytes_);
+        decoder_ = std::move(other.decoder_);
+        frames_ = other.frames_;
+        ended_ = other.ended_;
+    }
+    return *this;
+}
+
+ImageDimensions ImageDecoder::dimensions() const noexcept {
+    return decoder_->dimensions();
+}
+
+std::optional<ImageFrame> ImageDecoder::next() {
+    if (ended_)
+        return std::nullopt;
+    std::optional<ImageFrame> result;
+    const ImageFrameConsumer consume = [&result](auto& rgba, const std::uint32_t delay_ms) {
+        result.emplace(ImageFrame{std::move(rgba), delay_ms});
+        return false;
+    };
+    codec::FrameSink sink(dimensions(), 1U, "image", &consume);
+    if (decoder_->next(sink)) {
+        ++frames_;
+        return result;
+    }
+    ended_ = true;
+    if (frames_ == 0U)
+        throw std::invalid_argument("image decode: the image has no frames");
+    return std::nullopt;
+}
+
+std::uint32_t ImageDecoder::loop_count() const noexcept {
+    return ended_ && frames_ == 1U ? 1U : decoder_->loop_count();
+}
+
+void ImageDecoder::rewind() {
+    decoder_->rewind();
+    frames_ = 0U;
+    ended_ = false;
 }
 
 DecodedImage decode_image(const std::span<const std::uint8_t> bytes,

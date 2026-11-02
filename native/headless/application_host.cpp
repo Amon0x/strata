@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -10,6 +11,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -291,6 +293,16 @@ struct ApplicationHost::Impl final {
         host::SessionOptions session_options;
         session_options.application_id = scenario.application_id;
         session_options.stable_identity_seed = 0x484541444C455353ULL;
+        session_options.task_execution = options.task_execution.value_or(scenario.task_execution);
+        session_options.frame_wake = [this] {
+            {
+                const std::scoped_lock lock(wake_mutex);
+                ++wake_generation;
+            }
+            wake_ready.notify_all();
+            if (options.frame_wake)
+                options.frame_wake();
+        };
         session_options.schemas =
             scenario.schemas.empty() ? std::string{} : resource_text(scenario.schemas);
         session_options.extension_packages = scenario.packages;
@@ -407,21 +419,28 @@ struct ApplicationHost::Impl final {
         renderer->set_clear_color(scenario.clear_color);
     }
 
-    void publish(const SnapshotConfig& snapshot) {
+    HostPublication publish(const SnapshotConfig& snapshot) {
         const std::string values = data::encode_canonical_json(snapshot.values);
+        strata_host_publication* publication = nullptr;
         const strata_host_snapshot_config config{
             sizeof(strata_host_snapshot_config),
             strata::view(snapshot.id),
             next_snapshot_generation++,
             strata::view(values),
+            session->has_surface() ? STRATA_HOST_SNAPSHOT_EXECUTION_RUNTIME
+                                   : STRATA_HOST_SNAPSHOT_EXECUTION_INLINE,
+            0U,
+            &publication,
         };
-        strata::require_ok(
-            strata_runtime_publish_host_snapshot(session->runtime().native_handle(), &config),
-            "headless host snapshot publication");
+        const auto result =
+            strata_runtime_publish_host_snapshot(session->runtime().native_handle(), &config);
+        HostPublication receipt(publication);
+        strata::require_ok(result, "headless host snapshot publication");
+        return receipt;
     }
 
     void frame(const std::int64_t time_nanoseconds) {
-        const host::SurfacePacketFrame framed = session->frame(time_nanoseconds);
+        const host::SurfacePacketCommit framed = session->frame(time_nanoseconds);
         const strata_surface_frame_info& info = framed.surface;
         if (options.packet_observer) {
             options.packet_observer(RecordedPacket{
@@ -430,10 +449,10 @@ struct ApplicationHost::Impl final {
                 static_cast<std::uint32_t>(std::llround(logical_height * display_scale)),
                 logical_width,
                 logical_height,
-                std::vector<std::uint8_t>(framed.bytes.begin(), framed.bytes.end()),
+                framed.encoded,
             });
         }
-        renderer->render(*framed.packet, time_nanoseconds);
+        renderer->render(decoder.decode(framed.encoded.bytes()), time_nanoseconds);
         frame_available = true;
         const std::vector<strata_backdrop_sample> backdrop = renderer->take_backdrop_samples();
         if (!backdrop.empty())
@@ -454,6 +473,35 @@ struct ApplicationHost::Impl final {
             info.render_command_count,
             info.render_packet_size,
         });
+    }
+
+    void settle(const std::int64_t time_nanoseconds, const std::chrono::milliseconds timeout) {
+        if (timeout <= std::chrono::milliseconds::zero())
+            throw std::invalid_argument("settle requires a positive timeout");
+        if (!session.has_value() || !session->has_surface())
+            throw std::logic_error("settle requires a live Surface");
+        const auto started = std::chrono::steady_clock::now();
+        if (timeout > std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::time_point::max() - started))
+            throw std::invalid_argument("settle timeout exceeds the steady clock range");
+        const auto deadline = started + timeout;
+        for (;;) {
+            std::uint64_t observed;
+            {
+                const std::scoped_lock lock(wake_mutex);
+                observed = wake_generation;
+            }
+            frame(time_nanoseconds);
+            if (session->runtime().task_info().pending_tasks == 0U)
+                return;
+            if (std::chrono::steady_clock::now() >= deadline)
+                throw std::runtime_error("engine preparation did not settle before its deadline");
+            std::unique_lock lock(wake_mutex);
+            if (!wake_ready.wait_until(lock, deadline, [this, observed] {
+                    return wake_generation != observed;
+                }))
+                throw std::runtime_error("engine preparation did not settle before its deadline");
+        }
     }
 
     void enqueue(const std::span<const strata_input_event> events) {
@@ -477,7 +525,9 @@ struct ApplicationHost::Impl final {
         if (!session.has_value() || !session->has_surface())
             return;
         session->close_surface(
-            [this](const host::RenderPacket& packet) { renderer->consume_resources(packet); });
+            [this](const EncodedRenderPacket& packet) {
+                renderer->consume_resources(decoder.decode(packet.bytes()));
+            });
         // Action registrations belong to the runtime, which closes after them.
         registrations.clear();
         session->close({});
@@ -487,7 +537,12 @@ struct ApplicationHost::Impl final {
     const Scenario& scenario;
     host::ResourceRoot resource_files;
     ApplicationHostOptions options;
+    /** These fields outlive Session, whose release quiesces the callback that signals them. */
+    std::mutex wake_mutex;
+    std::condition_variable wake_ready;
+    std::uint64_t wake_generation = 0U;
     std::unique_ptr<CaptureRenderer> renderer;
+    host::RenderPacketDecoder decoder;
     std::optional<host::Session> session;
     std::vector<Registration> registrations;
     std::vector<CapturedDiagnostic> diagnostics;
@@ -543,12 +598,17 @@ void ApplicationHost::frame(const std::int64_t time_nanoseconds) {
     impl_->frame(time_nanoseconds);
 }
 
+void ApplicationHost::settle(const std::int64_t time_nanoseconds,
+                              const std::chrono::milliseconds timeout) {
+    impl_->settle(time_nanoseconds, timeout);
+}
+
 void ApplicationHost::enqueue(const std::span<const strata_input_event> events) {
     impl_->enqueue(events);
 }
 
-void ApplicationHost::publish(const SnapshotConfig& snapshot) {
-    impl_->publish(snapshot);
+HostPublication ApplicationHost::publish(const SnapshotConfig& snapshot) {
+    return impl_->publish(snapshot);
 }
 
 void ApplicationHost::resize(const double width, const double height, const double scale,

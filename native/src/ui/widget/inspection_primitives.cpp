@@ -1,10 +1,10 @@
 #include "ui/widget/inspection.hpp"
 
 #include <algorithm>
-
-#include "ui/surface.hpp"
 #include <string>
 #include <utility>
+
+#include "ui/input/presentation.hpp"
 
 namespace strata::ui {
 namespace {
@@ -22,9 +22,9 @@ void section(WidgetInspectionScope& scope) {
                                            ? found->second.value()
                                            : nullptr;
         if (marker == nullptr || marker->boolean() == nullptr || !*marker->boolean()) continue;
-        if (const LayoutRecord* header = scope.surface().layout().find(child->identity());
+        if (const LayoutRecord* header = scope.layout_result().find(child->identity());
             header != nullptr) {
-            scope.hit_bounds(scope.surface().input().relative_bounds(
+            scope.hit_bounds(scope.input().relative_bounds(
                 *child, scope.node(), header->bounds));
             return;
         }
@@ -43,7 +43,7 @@ void menu(WidgetInspectionScope& scope) {
     // subtargets, so folding their detached extent into the owner made key-based automation click
     // somewhere other than a custom trigger and obscured its measured hit geometry.
     const std::vector<WidgetSubtarget> targets =
-        scope.surface().input().subtargets(scope.node().identity());
+        scope.input().subtargets(scope.node().identity());
     const auto control = std::ranges::find(
         targets,
         std::string_view("$control"),

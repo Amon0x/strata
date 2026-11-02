@@ -1,14 +1,16 @@
 #include "resource/lottie.hpp"
 
-#include "data/json.hpp"
-#include "resource/image.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <exception>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <utility>
+
+#include "data/json.hpp"
+#include "resource/image.hpp"
 
 namespace strata::resource::lottie {
 namespace {
@@ -1223,87 +1225,219 @@ Animation parse(const std::string_view json) {
 } // namespace strata::resource::lottie
 
 namespace strata::resource {
+namespace {
 
-LottieLibrary::LottieLibrary(Loader loader) : loader_(std::move(loader)) {}
+/** Exclusive mutable preparation, transferred between workers and the serialized resource owner. */
+struct LottiePreparation final {
+    struct ImageInput final {
+        std::string resource;
+        std::vector<std::uint8_t> bytes;
+    };
+    std::unique_ptr<lottie::Animation> animation;
+    std::vector<ImageInput> inputs;
+    std::vector<std::shared_ptr<RuntimeImage>> images;
+};
 
-std::shared_ptr<const lottie::Animation> LottieLibrary::find(const std::string_view id) const {
-    const std::scoped_lock lock(mutex_);
-    if (const auto found = entries_.find(id); found != entries_.end())
-        return found->second.animation;
-    Entry entry;
-    if (id.empty() || !loader_) {
-        entry.error = "no Lottie source";
-    } else {
+[[nodiscard]] std::unique_ptr<LottiePreparation>
+discover_lottie(const std::string_view id, const std::span<const std::uint8_t> bytes) {
+    auto result = std::make_unique<LottiePreparation>();
+    result->animation = std::make_unique<lottie::Animation>(lottie::parse(
+        std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size())));
+    result->inputs.resize(result->animation->images.size());
+    const std::size_t slash = id.rfind('/');
+    const std::string_view folder =
+        slash == std::string_view::npos ? std::string_view{} : id.substr(0U, slash + 1U);
+    for (std::size_t index = 0U; index < result->inputs.size(); ++index) {
+        const auto& image = result->animation->images[index];
+        auto& input = result->inputs[index];
         try {
-            const std::vector<std::uint8_t> bytes = loader_(id);
-            lottie::Animation parsed = lottie::parse(
-                std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
-            load_images(id, parsed);
-            entry.animation = std::make_shared<const lottie::Animation>(std::move(parsed));
-        } catch (const std::exception& error) {
-            entry.error = std::string(id) + ": " + error.what();
+            if (image.embedded) {
+                if (auto decoded = lottie::data_uri_bytes(image.file); decoded.has_value())
+                    input.bytes = std::move(*decoded);
+            } else {
+                std::string_view directory = image.directory;
+                const std::size_t first = directory.find_first_not_of('/');
+                directory.remove_prefix(first == std::string_view::npos ? directory.size() : first);
+                input.resource = folder;
+                input.resource += directory;
+                if (!directory.empty() && !directory.ends_with('/'))
+                    input.resource += '/';
+                input.resource += image.file;
+            }
+        } catch (const std::exception&) {
+            // Invalid embedded data leaves its layer blank, not the entire composition.
         }
     }
-    std::shared_ptr<const lottie::Animation> animation = entry.animation;
-    entries_.emplace(std::string(id), std::move(entry));
-    return animation;
+    return result;
 }
 
-void LottieLibrary::load_images(const std::string_view id, lottie::Animation& animation) const {
-    // Files are named relative to the animation's own folder.
-    const std::size_t slash = id.rfind('/');
-    const std::string folder =
-        slash == std::string_view::npos ? std::string{} : std::string(id.substr(0U, slash + 1U));
-    for (lottie::ImageAsset& image : animation.images) {
+void decode_lottie_images(const std::string_view id, LottiePreparation& preparation,
+                          const base::TaskCancellation& cancellation) {
+    preparation.images.reserve(preparation.inputs.size());
+    for (std::size_t index = 0U; index < preparation.inputs.size(); ++index) {
+        if (cancellation.cancelled())
+            return;
+        auto& image = preparation.animation->images[index];
+        const auto& encoded = preparation.inputs[index].bytes;
+        if (encoded.empty())
+            continue;
         try {
-            std::vector<std::uint8_t> encoded;
-            if (image.embedded) {
-                std::optional<std::vector<std::uint8_t>> bytes = lottie::data_uri_bytes(image.file);
-                if (!bytes.has_value())
-                    continue;
-                encoded = std::move(*bytes);
-            } else {
-                std::string directory = image.directory;
-                while (directory.starts_with('/'))
-                    directory.erase(0U, 1U);
-                if (!directory.empty() && !directory.ends_with('/'))
-                    directory += '/';
-                encoded = loader_(folder + directory + image.file);
-            }
             const ImageInfo info = inspect_image(encoded);
-            std::vector<std::uint8_t> pixels = decode_image_rgba8(encoded, info.dimensions);
             auto decoded = std::make_shared<RuntimeImage>();
             decoded->id = "lottie:" + std::string(id) + "#" + image.id;
             decoded->dimensions = info.dimensions;
-            decoded->pixels = std::move(pixels);
-            decoded->revision = image_generation_.load() + 1U;
+            decoded->pixels = decode_image_rgba8(encoded, info.dimensions);
             image.texture = decoded->id;
             if (!(image.width > 0.0) || !(image.height > 0.0)) {
                 image.width = info.dimensions.width;
                 image.height = info.dimensions.height;
             }
-            images_.push_back(std::move(decoded));
-            image_generation_.fetch_add(1U);
+            preparation.images.push_back(std::move(decoded));
         } catch (const std::exception&) {
-            // An image that cannot be read draws nothing; the rest of the animation plays.
             image.texture.clear();
         }
     }
 }
 
+[[nodiscard]] std::string lottie_error(const std::string_view id,
+                                      const std::exception_ptr& error) {
+    try {
+        std::rethrow_exception(error);
+    } catch (const std::exception& failure) {
+        return std::string(id) + ": " + failure.what();
+    } catch (...) {
+        return std::string(id) + ": Lottie preparation failed";
+    }
+}
+
+} // namespace
+
+/** Owner-only resource state; completion callbacks hold weak references, workers hold no reference. */
+struct LottieLibrary::State final {
+    struct Entry final {
+        ~Entry() { pending.cancel(); }
+        base::Pending<void> pending;
+        std::unique_ptr<LottiePreparation> discovered;
+        std::shared_ptr<const lottie::Animation> animation;
+        std::string error;
+    };
+
+    State(base::TaskOwner& owner, Loader read) : tasks(owner), loader(std::move(read)) {}
+
+    void publish(Entry& entry, LottiePreparation& preparation) {
+        std::shared_ptr<const lottie::Animation> animation(std::move(preparation.animation));
+        images.reserve(images.size() + preparation.images.size());
+        for (auto& image : preparation.images) {
+            image->revision = ++generation;
+            images.push_back(std::move(image));
+        }
+        entry.animation = std::move(animation);
+    }
+
+    base::TaskOwner& tasks;
+    Loader loader;
+    std::map<std::string, std::shared_ptr<Entry>, std::less<>> entries;
+    std::vector<std::shared_ptr<const RuntimeImage>> images;
+    std::uint64_t generation = 0U;
+};
+
+LottieLibrary::LottieLibrary(base::TaskOwner& tasks, Loader loader)
+    : state_(std::make_shared<State>(tasks, std::move(loader))) {}
+
+base::ResourceResult<std::shared_ptr<const lottie::Animation>>
+LottieLibrary::find(const std::string_view id) const {
+    auto found = state_->entries.find(id);
+    if (found == state_->entries.end())
+        found = state_->entries.emplace(std::string(id), std::make_shared<State::Entry>()).first;
+    const auto& entry = found->second;
+    const std::weak_ptr<State> weak_state = state_;
+    const std::weak_ptr<State::Entry> weak_entry = entry;
+    if (entry->pending.id() == 0U) {
+        std::vector<std::uint8_t> bytes;
+        try {
+            if (id.empty() || !state_->loader)
+                throw std::invalid_argument("no Lottie source");
+            bytes = state_->loader(id);
+        } catch (...) {
+            const auto error = std::current_exception();
+            entry->error = lottie_error(id, error);
+            entry->pending =
+                base::Pending<void>::failed(state_->tasks, base::TaskKind::lottie,
+                                             std::string(id), error);
+            state_->tasks.report_failure(base::TaskKind::lottie, error);
+        }
+        if (entry->pending.id() == 0U) {
+            auto prepared = std::make_shared<std::unique_ptr<LottiePreparation>>();
+            entry->pending = base::Pending<void>::start(
+                state_->tasks, base::TaskKind::lottie, base::TaskPriority::frame_critical,
+                std::string(id),
+                [prepared, source = std::string(id), bytes = std::move(bytes)](
+                    const base::TaskCancellation&) {
+                    *prepared = discover_lottie(source, bytes);
+                },
+                [weak_state, weak_entry, prepared, source = std::string(id)](
+                    const base::TaskOutcome& outcome) {
+                    const auto state = weak_state.lock();
+                    const auto target = weak_entry.lock();
+                    if (state == nullptr || target == nullptr)
+                        return;
+                    if (outcome.error != nullptr)
+                        target->error = lottie_error(source, outcome.error);
+                    else if ((*prepared)->inputs.empty())
+                        state->publish(*target, **prepared);
+                    else
+                        target->discovered = std::move(*prepared);
+                });
+        }
+    }
+    if (entry->discovered != nullptr) {
+        auto prepared =
+            std::make_shared<std::unique_ptr<LottiePreparation>>(std::move(entry->discovered));
+        for (auto& input : (*prepared)->inputs) {
+            if (input.resource.empty())
+                continue;
+            try {
+                input.bytes = state_->loader(input.resource);
+            } catch (const std::exception&) {
+                // External asset failure has the same blank-layer contract as invalid embedded data.
+            }
+        }
+        entry->pending = base::Pending<void>::start(
+            state_->tasks, base::TaskKind::lottie, base::TaskPriority::frame_critical,
+            std::string(id),
+            [prepared, source = std::string(id)](const base::TaskCancellation& cancellation) {
+                decode_lottie_images(source, **prepared, cancellation);
+            },
+            [weak_state, weak_entry, prepared, source = std::string(id)](
+                const base::TaskOutcome& outcome) {
+                const auto state = weak_state.lock();
+                const auto target = weak_entry.lock();
+                if (state == nullptr || target == nullptr)
+                    return;
+                if (outcome.error != nullptr)
+                    target->error = lottie_error(source, outcome.error);
+                else
+                    state->publish(*target, **prepared);
+            });
+    }
+    base::ResourceResult<std::shared_ptr<const lottie::Animation>> result;
+    result.readiness = entry->pending.readiness();
+    if (entry->animation != nullptr)
+        result.value = entry->animation;
+    return result;
+}
+
 std::vector<std::shared_ptr<const RuntimeImage>> LottieLibrary::images() const {
-    const std::scoped_lock lock(mutex_);
-    return images_;
+    return state_->images;
 }
 
 std::uint64_t LottieLibrary::image_generation() const noexcept {
-    return image_generation_.load();
+    return state_->generation;
 }
 
 std::string LottieLibrary::error(const std::string_view id) const {
-    const std::scoped_lock lock(mutex_);
-    const auto found = entries_.find(id);
-    return found != entries_.end() ? found->second.error : std::string{};
+    const auto found = state_->entries.find(id);
+    return found != state_->entries.end() ? found->second->error : std::string{};
 }
 
 } // namespace strata::resource

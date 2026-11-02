@@ -521,7 +521,8 @@ TextLayout::TextLayout(std::shared_ptr<const TextLayoutData> storage) noexcept
     : storage_(std::move(storage)), shaped(storage_->shaped),
       glyph_font_ids(storage_->glyph_font_ids), glyph_pixel_sizes(storage_->glyph_pixel_sizes),
       resolved_runs(storage_->resolved_runs), lines(storage_->lines),
-      wrap_width(storage_->wrap_width), clipped(storage_->clipped), truncated(storage_->truncated) {
+      wrap_width(storage_->wrap_width), clipped(storage_->clipped), truncated(storage_->truncated),
+      readiness(storage_->readiness) {
 }
 
 TextLayout::TextLayout() : TextLayout(std::make_shared<const TextLayoutData>()) {}
@@ -579,6 +580,176 @@ bool text_layout_projection_equal(const runtime::Value* current,
     return true;
 }
 
+/** Node-owned measurement identity prevents two trees' local ids from sharing a wrap constraint. */
+struct TextMeasurement final {
+    std::weak_ptr<const TextEngine::FontRegistry> fonts;
+    std::optional<std::uint64_t> scale;
+    std::string text;
+    std::optional<double> wrap_width;
+    std::shared_ptr<const TextLayoutData> prepared;
+};
+
+/** Owner-only request caches; worker factories capture font/catalog handles, never this engine. */
+struct TextEngine::FontPreparations final {
+    explicit FontPreparations(base::TaskOwner* tasks) : owner(tasks) {}
+
+    [[nodiscard]] base::TaskOwner& tasks() {
+        if (owner == nullptr)
+            owner = &owned.emplace(base::TaskExecution::deterministic);
+        return *owner;
+    }
+
+    ~FontPreparations() {
+        initial.cancel();
+        const auto cancel = [](const auto& requests) {
+            for (const auto& [key, request] : requests) {
+                static_cast<void>(key);
+                request.cancel();
+            }
+        };
+        cancel(named);
+        cancel(fallback);
+        cancel(instances);
+    }
+
+    std::optional<base::TaskOwner> owned;
+    base::TaskOwner* owner = nullptr;
+    base::Pending<std::shared_ptr<const FontRegistry>> initial;
+    std::map<std::string, base::Pending<std::optional<font::SystemFont>>, std::less<>> named;
+    std::map<std::uint32_t, base::Pending<std::optional<font::SystemFont>>> fallback;
+    std::map<std::string, base::Pending<font::OpenTypeFont>, std::less<>> instances;
+    std::vector<std::weak_ptr<const PreparationReads>> readers;
+};
+
+void TextEngine::observe_layout(const RetainedNode& node, const TextLayout& layout) const {
+    node.observe_preparations(layout.readiness);
+    if (layout.readiness.empty())
+        return;
+    auto& readers = preparations().readers;
+    auto owner = node.preparation_owner();
+    if (std::ranges::none_of(readers, [&owner](const auto& existing) {
+            return !existing.owner_before(owner) && !owner.owner_before(existing);
+        }))
+        readers.push_back(std::move(owner));
+}
+
+void TextEngine::retain_preparations(const PreparationReads* const retiring) const noexcept {
+    if (font_preparations_ == nullptr)
+        return;
+    auto& requests = *font_preparations_;
+    std::erase_if(requests.readers, [retiring](const auto& reader) {
+        const auto owner = reader.lock();
+        return owner == nullptr || owner.get() == retiring;
+    });
+    const auto unused = [&requests](const auto& request) {
+        return std::ranges::none_of(requests.readers, [&request](const auto& reader) {
+            const auto owner = reader.lock();
+            return owner != nullptr && owner->references(request.readiness());
+        });
+    };
+    const auto remove = [&unused](auto& entries, const auto& discard_ready) {
+        for (auto entry = entries.begin(); entry != entries.end();) {
+            const auto* ready = entry->second.get();
+            if ((ready == nullptr || discard_ready(*ready)) && unused(entry->second)) {
+                entry->second.cancel();
+                entry = entries.erase(entry);
+            } else {
+                ++entry;
+            }
+        }
+    };
+    // Terminal misses and completed fallback selections remain cached. Unused prepared instances
+    // must not enter the permanent face registry merely because their worker finished.
+    remove(requests.named, [](const auto& ready) { return ready.has_value(); });
+    remove(requests.fallback, [](const auto&) { return false; });
+    remove(requests.instances, [](const auto&) { return true; });
+}
+
+TextEngine::FontPreparations& TextEngine::preparations() const {
+    if (font_preparations_ == nullptr)
+        font_preparations_ = std::make_unique<FontPreparations>(tasks_);
+    return *font_preparations_;
+}
+
+TextEngine::PreparedFont TextEngine::prepare_named_font(const std::string& id) const {
+    constexpr std::string_view prefix = "system:";
+    if (!id.starts_with(prefix))
+        return {};
+    {
+        const std::scoped_lock lock(system_fonts_mutex_);
+        if (const auto found = system_fonts_.find(id); found != system_fonts_.end())
+            return {&*found, {}};
+    }
+    FontPreparations& requests = preparations();
+    auto found = requests.named.find(id);
+    if (found == requests.named.end()) {
+        auto pending = base::Pending<std::optional<font::SystemFont>>::start(
+            requests.tasks(), base::TaskKind::font, base::TaskPriority::frame_critical, id,
+            [catalog = font_catalog_, file = id.substr(prefix.size())](
+                const base::TaskCancellation&) { return font::system_font_named(catalog, file); });
+        found = requests.named.emplace(id, std::move(pending)).first;
+    }
+    const auto* ready = found->second.get();
+    if (ready == nullptr)
+        return {{}, found->second.readiness()};
+    if (!ready->has_value())
+        return {};
+    const std::scoped_lock lock(system_fonts_mutex_);
+    const FontCandidate* result = &*system_fonts_.try_emplace(id, ready->value().face).first;
+    requests.named.erase(found);
+    return {result, {}};
+}
+
+TextEngine::PreparedFont TextEngine::prepare_fallback_font(const std::uint32_t code_point) const {
+    FontPreparations& requests = preparations();
+    auto found = requests.fallback.find(code_point);
+    if (found == requests.fallback.end()) {
+        auto pending = base::Pending<std::optional<font::SystemFont>>::start(
+            requests.tasks(), base::TaskKind::font, base::TaskPriority::frame_critical,
+            "system:U+" + hexadecimal(code_point),
+            [catalog = font_catalog_, code_point](const base::TaskCancellation&) {
+                return font::system_font_for(catalog, code_point);
+            });
+        found = requests.fallback.emplace(code_point, std::move(pending)).first;
+    }
+    const auto* ready = found->second.get();
+    if (ready == nullptr)
+        return {{}, found->second.readiness()};
+    if (!ready->has_value())
+        return {};
+    const font::SystemFont& selected = ready->value();
+    const std::scoped_lock lock(system_fonts_mutex_);
+    return {&*system_fonts_.try_emplace(selected.id, selected.face).first, {}};
+}
+
+TextEngine::PreparedFont TextEngine::prepare_font_instance(
+    const FontCandidate& candidate, std::string id,
+    std::vector<std::pair<std::string, double>> settings) const {
+    {
+        const std::scoped_lock lock(system_fonts_mutex_);
+        if (const auto found = system_fonts_.find(id); found != system_fonts_.end())
+            return {&*found, {}};
+    }
+    FontPreparations& requests = preparations();
+    auto found = requests.instances.find(id);
+    if (found == requests.instances.end()) {
+        auto pending = base::Pending<font::OpenTypeFont>::start(
+            requests.tasks(), base::TaskKind::font, base::TaskPriority::frame_critical, id,
+            [face = candidate.second, settings = std::move(settings)](
+                const base::TaskCancellation&) { return face.instance(settings); });
+        found = requests.instances.emplace(id, std::move(pending)).first;
+    }
+    const auto* ready = found->second.get();
+    if (ready == nullptr)
+        return {{}, found->second.readiness()};
+    const std::scoped_lock lock(system_fonts_mutex_);
+    const FontCandidate* result = &*system_fonts_.try_emplace(std::move(id), *ready).first;
+    requests.instances.erase(found);
+    return {result, {}};
+}
+
+TextEngine::~TextEngine() = default;
+
 TextEngine::TextEngine(font::OpenTypeFont control_font)
     : TextEngine(FontRegistry{
           {"strata:fonts/default-medium", control_font},
@@ -591,14 +762,66 @@ TextEngine::TextEngine(font::OpenTypeFont control_font, font::OpenTypeFont regul
           {"strata:fonts/default", std::move(regular_font)},
       }) {}
 
-TextEngine::TextEngine(FontRegistry fonts) : fonts_(std::move(fonts)) {
-    font::prepare_system_fonts();
-    if (!fonts_.contains("strata:fonts/default-medium") ||
-        !fonts_.contains("strata:fonts/default")) {
+TextEngine::TextEngine(FontRegistry fonts, base::TaskOwner* const tasks)
+    : fonts_(std::make_shared<const FontRegistry>(std::move(fonts))),
+      font_catalog_(font::system_font_catalog()), tasks_(tasks) {
+    font::prepare_system_fonts(font_catalog_);
+    if (!fonts_->contains("strata:fonts/default-medium") ||
+        !fonts_->contains("strata:fonts/default")) {
         throw std::invalid_argument(
             "text font registry requires strata:fonts/default-medium and strata:fonts/default");
     }
-    for (const auto& [font_id_value, face] : fonts_) {
+    record_font_diagnostics();
+}
+
+TextEngine::TextEngine(FontSources sources, base::TaskOwner& tasks)
+    : font_catalog_(font::system_font_catalog()), tasks_(&tasks) {
+    if (!sources.contains("strata:fonts/default-medium") ||
+        !sources.contains("strata:fonts/default")) {
+        throw std::invalid_argument(
+            "text font registry requires strata:fonts/default-medium and strata:fonts/default");
+    }
+    const auto parse = [](FontSources owned, const base::TaskCancellation& cancellation)
+        -> std::shared_ptr<const FontRegistry> {
+        FontRegistry parsed;
+        while (!owned.empty()) {
+            if (cancellation.cancelled())
+                return {};
+            auto entry = owned.extract(owned.begin());
+            parsed.emplace(std::move(entry.key()),
+                           font::OpenTypeFont::parse(std::move(entry.mapped())));
+        }
+        return std::make_shared<const FontRegistry>(std::move(parsed));
+    };
+    if (tasks.execution() == base::TaskExecution::deterministic) {
+        // Preserve synchronous validation errors for deterministic hosts.
+        fonts_ = parse(std::move(sources), {});
+        record_font_diagnostics();
+    } else {
+        // Even the pending registry has a unique identity for node-owned measurement metadata.
+        fonts_ = std::make_shared<const FontRegistry>();
+        preparations().initial = base::Pending<std::shared_ptr<const FontRegistry>>::start(
+            tasks, base::TaskKind::font, base::TaskPriority::frame_critical, "bound-fonts",
+            [parse, owned = std::move(sources)](const base::TaskCancellation& cancellation) mutable {
+                return parse(std::move(owned), cancellation);
+            });
+    }
+    font::prepare_system_fonts(font_catalog_);
+}
+
+void TextEngine::adopt_fonts() const {
+    if (font_preparations_ == nullptr)
+        return;
+    const auto* ready = font_preparations_->initial.get();
+    if (ready == nullptr)
+        return;
+    fonts_ = *ready;
+    font_preparations_->initial = {};
+    record_font_diagnostics();
+}
+
+void TextEngine::record_font_diagnostics() const {
+    for (const auto& [font_id_value, face] : *fonts_) {
         for (const std::string& detail : face.optional_diagnostics()) {
             diagnostics_.push_back(runtime::RuntimeDiagnostic{
                 "STRATA.TEXT.FONT_OPTIONAL_TABLE_IGNORED",
@@ -671,26 +894,34 @@ Size TextEngine::measure(const RetainedNode& node, const Constraints& constraint
         selected = request_key(node, *text_value->string(), bounded_width);
         layout_value = &cached_layout(selected, true);
     }
-    measured_requests_.insert_or_assign(node.identity(), selected);
+    auto& measured = node.text_measurement_cache();
+    if (measured == nullptr || measured->fonts.lock() != fonts_ ||
+        measured->scale != scale_context_generation_ ||
+        measured->prepared != layout_value->storage_) {
+        measured = std::make_shared<const TextMeasurement>(TextMeasurement{
+            fonts_, scale_context_generation_, std::move(selected.text), selected.wrap_width,
+            layout_value->storage_,
+        });
+    }
+    observe_layout(node, *layout_value);
 
     const font::TextMetrics& metrics = layout_value->shaped.metrics;
     return Size{metrics.width, metrics.height};
 }
 
-const font::OpenTypeFont& TextEngine::control_font() const noexcept {
-    return fonts_.find("strata:fonts/default-medium")->second;
-}
-
-const font::OpenTypeFont& TextEngine::font(const std::string_view id) const noexcept {
-    const auto found = fonts_.find(id);
-    if (found != fonts_.end())
-        return found->second;
+TextEngine::FontResult TextEngine::font(const std::string_view id) const {
+    adopt_fonts();
+    if (fonts_->empty())
+        return {{}, font_preparations_->initial.readiness()};
+    const auto found = fonts_->find(id);
+    if (found != fonts_->end())
+        return {&found->second, {}};
     {
         const std::scoped_lock lock(system_fonts_mutex_);
         if (const auto system = system_fonts_.find(id); system != system_fonts_.end())
-            return system->second;
+            return {&system->second, {}};
     }
-    return fonts_.find("strata:fonts/default")->second;
+    return {&fonts_->find("strata:fonts/default")->second, {}};
 }
 
 std::string TextEngine::requested_font_id(const RetainedNode& node) const {
@@ -698,8 +929,9 @@ std::string TextEngine::requested_font_id(const RetainedNode& node) const {
 }
 
 std::string TextEngine::font_id(const RetainedNode& node) const {
+    adopt_fonts();
     const std::string requested = requested_font_id(node);
-    return fonts_.contains(requested) ? requested : "strata:fonts/default";
+    return fonts_->contains(requested) ? requested : "strata:fonts/default";
 }
 
 double TextEngine::pixel_size(const RetainedNode& node) const noexcept {
@@ -735,28 +967,28 @@ double TextEngine::letter_spacing(const RetainedNode& node) const noexcept {
 }
 
 font::ShapedText TextEngine::shape(const RetainedNode& node, const std::string_view text) const {
-    CacheKey key = request_key(node, text, std::nullopt);
-    if (const auto measured = measured_requests_.find(node.identity());
-        measured != measured_requests_.end() && measured->second.text == text &&
-        !key.wrap_width.has_value()) {
-        key.wrap_width = measured->second.wrap_width;
-    }
-    return cached_layout(std::move(key), true).shaped;
+    return layout(node, text).shaped;
 }
 
 TextLayout TextEngine::layout(const RetainedNode& node, const std::string_view text) const {
     CacheKey key = request_key(node, text, std::nullopt);
-    if (const auto measured = measured_requests_.find(node.identity());
-        measured != measured_requests_.end() && measured->second.text == text &&
-        !key.wrap_width.has_value()) {
-        key.wrap_width = measured->second.wrap_width;
+    if (const auto& measured = node.text_measurement_cache();
+        measured != nullptr && measured->fonts.lock() == fonts_ &&
+        measured->scale == scale_context_generation_ && measured->text == text &&
+        !key.wrap_width.has_value() &&
+        std::ranges::all_of(measured->prepared->readiness, &base::ReadinessRead::current)) {
+        key.wrap_width = measured->wrap_width;
     }
-    return cached_layout(std::move(key), true);
+    const TextLayout& result = cached_layout(std::move(key), true);
+    observe_layout(node, result);
+    return result;
 }
 
 TextLayout TextEngine::layout(const RetainedNode& node, const std::string_view text,
                               const TextLayoutOptions& options) const {
-    return cached_layout(request_key(node, text, std::nullopt, &options), true);
+    const TextLayout& result = cached_layout(request_key(node, text, std::nullopt, &options), true);
+    observe_layout(node, result);
+    return result;
 }
 
 void TextEngine::adopt_scale_context(const std::uint64_t scale_context) const {
@@ -764,7 +996,6 @@ void TextEngine::adopt_scale_context(const std::uint64_t scale_context) const {
         return;
     if (scale_context_generation_.has_value()) {
         cache_.clear();
-        measured_requests_.clear();
     }
     scale_context_generation_ = scale_context;
 }
@@ -883,6 +1114,7 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
 }
 
 const TextLayout& TextEngine::cached_layout(CacheKey key, const bool count_request) const {
+    adopt_fonts();
     if (count_request)
         ++operation_counters_.requests;
     const auto lookup_started = std::chrono::steady_clock::now();
@@ -891,7 +1123,8 @@ const TextLayout& TextEngine::cached_layout(CacheKey key, const bool count_reque
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                        std::chrono::steady_clock::now() - lookup_started)
                                        .count());
-    if (found != cache_.end()) {
+    if (found != cache_.end() &&
+        std::ranges::all_of(found->second.layout.readiness, &base::ReadinessRead::current)) {
         const auto restore_started = std::chrono::steady_clock::now();
         if (count_request)
             ++operation_counters_.cache_hits;
@@ -903,7 +1136,10 @@ const TextLayout& TextEngine::cached_layout(CacheKey key, const bool count_reque
                                            .count());
         return restored;
     }
-    if (!fonts_.contains(key.font_id) && !key.font_id.starts_with("system:")) {
+    if (found != cache_.end())
+        cache_.erase(found);
+    if (!fonts_->empty() && !fonts_->contains(key.font_id) &&
+        !key.font_id.starts_with("system:")) {
         record_missing_font(key.font_id);
     }
     const auto shaping_started = std::chrono::steady_clock::now();
@@ -928,8 +1164,17 @@ const TextLayout& TextEngine::cached_layout(CacheKey key, const bool count_reque
 
 TextLayout TextEngine::build_layout(const CacheKey& key) const {
     const auto font_resolution_started = std::chrono::steady_clock::now();
-    using FontCandidate = FontRegistry::value_type;
     using FontOrder = std::vector<const FontCandidate*>;
+    std::vector<base::ReadinessRead> readiness;
+    const auto observe = [&readiness](const base::Readiness& resource) {
+        if (resource.id() != 0U &&
+            std::ranges::find(readiness, resource, &base::ReadinessRead::resource) ==
+                readiness.end()) {
+            readiness.push_back(base::ReadinessRead{resource, resource.status()});
+        }
+    };
+    if (fonts_->empty())
+        observe(font_preparations_->initial.readiness());
     struct Unit final {
         std::uint32_t code_point = 0U;
         std::size_t start = 0U;
@@ -958,6 +1203,7 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         bool interactive = false;
         bool whitespace = false;
         bool newline = false;
+        bool unresolved = false;
     };
     struct DraftLine final {
         std::vector<std::size_t> units;
@@ -991,25 +1237,8 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         return result;
     };
 
-    // A font id the application did not bind: an OS font by file name ("system:bahnschrift.ttf").
-    const auto system_named = [this](const std::string& id) -> const FontCandidate* {
-        constexpr std::string_view prefix = "system:";
-        if (!id.starts_with(prefix))
-            return nullptr;
-        {
-            const std::scoped_lock lock(system_fonts_mutex_);
-            if (const auto found = system_fonts_.find(id); found != system_fonts_.end())
-                return &*found;
-        }
-        const std::optional<font::SystemFont> system =
-            font::system_font_named(std::string_view(id).substr(prefix.size()));
-        if (!system.has_value())
-            return nullptr;
-        const std::scoped_lock lock(system_fonts_mutex_);
-        return &*system_fonts_.try_emplace(id, system->face).first;
-    };
     // A variable face at the axes asked for, and at the weight on `wght` unless they name it.
-    const auto vary = [this](const FontCandidate* candidate, const std::string& variation,
+    const auto vary = [this, &observe](const FontCandidate* candidate, const std::string& variation,
                              const std::uint32_t flags,
                              const std::uint16_t weight) -> const FontCandidate* {
         const font::OpenTypeFont& face = candidate->second;
@@ -1026,26 +1255,31 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         }
         if (settings.empty())
             return candidate;
-        const std::string id = candidate->first + "@" + variation_text(settings);
-        const std::scoped_lock lock(system_fonts_mutex_);
-        if (const auto found = system_fonts_.find(id); found != system_fonts_.end())
-            return &*found;
-        return &*system_fonts_.try_emplace(id, face.instance(settings)).first;
+        std::string id = candidate->first + "@" + variation_text(settings);
+        const PreparedFont instance =
+            prepare_font_instance(*candidate, std::move(id), std::move(settings));
+        observe(instance.readiness);
+        return instance.value.value_or(candidate);
     };
-    const auto faces_in_order = [this, &system_named](const std::string& requested,
+    const auto faces_in_order = [this, &observe](const std::string& requested,
                                                       const std::vector<std::string>& authored,
                                                       const std::uint32_t requested_style_flags,
                                                       const std::uint16_t requested_weight) {
         FontOrder base;
-        const auto append = [&base, &system_named, this](const std::string& id) {
-            const auto found = fonts_.find(id);
-            if (found == fonts_.end()) {
-                if (const FontCandidate* system = system_named(id)) {
-                    if (std::ranges::find(base, system) == base.end())
-                        base.push_back(system);
+        if (fonts_->empty())
+            return base;
+        const auto append = [&base, &observe, this](const std::string& id) {
+            const auto found = fonts_->find(id);
+            if (found == fonts_->end()) {
+                const PreparedFont system = prepare_named_font(id);
+                observe(system.readiness);
+                if (system.value.has_value()) {
+                    if (std::ranges::find(base, *system.value) == base.end())
+                        base.push_back(*system.value);
                     return;
                 }
-                record_missing_font(id);
+                if (system.status() == strata::base::PendingStatus::ready)
+                    record_missing_font(id);
                 return;
             }
             if (std::ranges::find(base, &*found) == base.end())
@@ -1054,10 +1288,10 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         append(requested);
         // Every bound face of the requested font's family can serve a weight or style the
         // requested face lacks, without the author listing them as fallbacks.
-        if (const auto found = fonts_.find(requested); found != fonts_.end()) {
+        if (const auto found = fonts_->find(requested); found != fonts_->end()) {
             const font::FontMetadata& family = found->second.metadata();
             if (!family.family.empty()) {
-                for (const auto& face : fonts_) {
+                for (const auto& face : *fonts_) {
                     if (face.second.metadata().family == family.family)
                         append(face.first);
                 }
@@ -1231,14 +1465,13 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
                 break;
             }
             // No font the text names has it (an emoji, Arabic, Han): the system's, if any does.
-            if (unit.glyph_id == 0U && !unit.whitespace && code_point >= 0x20U) {
-                if (const std::optional<font::SystemFont> system =
-                        font::system_font_for(code_point);
-                    system.has_value()) {
-                    const std::scoped_lock lock(system_fonts_mutex_);
-                    const auto [entry, inserted] =
-                        system_fonts_.try_emplace(system->id, system->face);
-                    static_cast<void>(inserted);
+            if (!fonts_->empty() && unit.glyph_id == 0U && !unit.whitespace &&
+                code_point >= 0x20U) {
+                const PreparedFont system = prepare_fallback_font(code_point);
+                observe(system.readiness);
+                unit.unresolved = system.status() != base::PendingStatus::ready;
+                if (system.value.has_value()) {
+                    const FontCandidate* entry = *system.value;
                     unit.font_id = &entry->first;
                     unit.face = &entry->second;
                     unit.glyph_id = entry->second.glyph_id(code_point);
@@ -1246,6 +1479,8 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
             }
         }
         if (unit.face == nullptr) {
+            unit.unresolved = true;
+            unit.natural_height = unit.pixel_size;
             units.push_back(std::move(unit));
             continue;
         }
@@ -1726,7 +1961,8 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
                 line_index,
             });
             if (unit.glyph_id == 0U) {
-                result.shaped.missing_code_points.push_back(unit.code_point);
+                if (!unit.unresolved)
+                    result.shaped.missing_code_points.push_back(unit.code_point);
             } else {
                 ++result.shaped.metrics.glyph_count;
                 if (!unit.whitespace) {
@@ -1796,7 +2032,8 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
                 true,
             });
             if (unit.glyph_id == 0U) {
-                result.shaped.missing_code_points.push_back(unit.code_point);
+                if (!unit.unresolved)
+                    result.shaped.missing_code_points.push_back(unit.code_point);
             } else {
                 ++result.shaped.metrics.glyph_count;
             }
@@ -1831,6 +2068,7 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                        std::chrono::steady_clock::now() - line_assembly_started)
                                        .count());
+    result.readiness = std::move(readiness);
     return TextLayout(std::make_shared<const TextLayoutData>(std::move(result)));
 }
 
@@ -1887,6 +2125,7 @@ void TextEngine::record_missing_glyphs(const std::string_view font_id_value,
 }
 
 std::vector<runtime::RuntimeDiagnostic> TextEngine::take_diagnostics() const {
+    adopt_fonts();
     std::vector<runtime::RuntimeDiagnostic> result;
     result.swap(diagnostics_);
     return result;

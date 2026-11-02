@@ -241,6 +241,18 @@ const runtime::Value* WidgetDescriptionScope::retained(const std::string_view na
     return value;
 }
 
+base::PendingStatus WidgetDescriptionScope::observe(const base::Readiness& resource) {
+    const base::PendingStatus status = resource.status();
+    for (base::ReadinessRead& read : description_.readiness) {
+        if (read.resource == resource) {
+            read = base::ReadinessRead{resource, status};
+            return status;
+        }
+    }
+    description_.readiness.push_back(base::ReadinessRead{resource, status});
+    return status;
+}
+
 double WidgetDescriptionScope::number(const std::string_view name, const double fallback) const noexcept {
     const runtime::Value* value = property(name);
     return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())

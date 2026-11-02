@@ -61,8 +61,9 @@ void write_packet_stream(const std::filesystem::path& path,
         put(output, frame.framebuffer_height);
         put(output, std::bit_cast<std::uint64_t>(frame.logical_width));
         put(output, std::bit_cast<std::uint64_t>(frame.logical_height));
-        put(output, static_cast<std::uint32_t>(frame.bytes.size()));
-        output.insert(output.end(), frame.bytes.begin(), frame.bytes.end());
+        const auto bytes = frame.bytes();
+        put(output, static_cast<std::uint32_t>(bytes.size()));
+        output.insert(output.end(), bytes.begin(), bytes.end());
     }
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     file.write(reinterpret_cast<const char*>(output.data()),
@@ -90,7 +91,7 @@ std::vector<RecordedPacket> read_packet_stream(const std::filesystem::path& path
         frame.framebuffer_height = static_cast<std::uint32_t>(input.integer(4U));
         frame.logical_width = std::bit_cast<double>(input.integer(8U));
         frame.logical_height = std::bit_cast<double>(input.integer(8U));
-        frame.bytes = input.raw(static_cast<std::size_t>(input.integer(4U)));
+        frame.payload = input.raw(static_cast<std::size_t>(input.integer(4U)));
         frames.push_back(std::move(frame));
     }
     if (!input.done())

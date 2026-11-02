@@ -10,18 +10,20 @@
 
 namespace strata::ui {
 
-class Surface;
+class InputPresentation;
 
 /** Mutable inspection projection passed to one widget lifecycle inspection hook. */
 class WidgetInspectionScope final {
 public:
     WidgetInspectionScope(
-        const Surface& surface,
         const RetainedNode& node,
-        const LayoutRecord& layout
+        const LayoutRecord& layout,
+        const LayoutResult& layout_result,
+        const InputPresentation& input
     );
 
-    [[nodiscard]] const Surface& surface() const noexcept;
+    [[nodiscard]] const LayoutResult& layout_result() const noexcept;
+    [[nodiscard]] const InputPresentation& input() const noexcept;
     [[nodiscard]] const RetainedNode& node() const noexcept;
     [[nodiscard]] const LayoutRecord& layout() const noexcept;
     [[nodiscard]] const runtime::Value* property(std::string_view name) const noexcept;
@@ -46,9 +48,10 @@ public:
     [[nodiscard]] bool has_derived_collection() const noexcept;
 
 private:
-    const Surface& surface_;
     const RetainedNode& node_;
     const LayoutRecord& layout_;
+    const LayoutResult& layout_result_;
+    const InputPresentation& input_;
     Rect hit_bounds_;
     data::JsonValue collection_;
     data::JsonValue derived_collection_;
@@ -59,9 +62,10 @@ void register_collection_widget_inspection(WidgetRegistry& registry);
 
 /** Canonical widget-owned hit geometry shared by input routing and inspection output. */
 [[nodiscard]] Rect widget_hit_bounds(
-    const Surface& surface,
     const RetainedNode& node,
-    const LayoutRecord& layout
+    const LayoutRecord& layout,
+    const LayoutResult& layout_result,
+    const InputPresentation& input
 );
 
 } // namespace strata::ui

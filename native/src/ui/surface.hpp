@@ -12,6 +12,7 @@
 #include <string_view>
 #include <vector>
 
+#include "base/task_pool.hpp"
 #include "font/raster.hpp"
 #include "resource/svg_image.hpp"
 #include "runtime/application.hpp"
@@ -23,8 +24,10 @@
 #include "ui/description.hpp"
 #include "ui/input.hpp"
 #include "ui/layout.hpp"
+#include "ui/lottie/scene.hpp"
 #include "ui/motion.hpp"
 #include "ui/notification.hpp"
+#include "ui/readiness.hpp"
 #include "ui/render.hpp"
 #include "ui/render/material_registry.hpp"
 #include "ui/semantics.hpp"
@@ -303,6 +306,12 @@ class Surface final {
     [[nodiscard]] const SurfaceEnvironment& environment() const noexcept;
     [[nodiscard]] runtime::Profiler& profiler() noexcept;
     [[nodiscard]] const runtime::Profiler& profiler() const noexcept;
+    /** Extends this frame's task accounting through packet preparation without consuming totals. */
+    void record_task_statistics();
+    /** Packet preparation reports dependencies after framing, without changing the retained tree. */
+    void set_preparation_readiness(const std::shared_ptr<const NodeReadinessSnapshot>& reads);
+    [[nodiscard]] std::span<const NodeReadinessRead>
+    preparation_readiness(std::uint64_t node_identity) const noexcept;
     [[nodiscard]] std::string_view viewport_class() const noexcept;
     [[nodiscard]] bool adopt_environment(SurfaceEnvironment environment);
     /** Adopts only framebuffer/logical scale fields and advances their generation domain. */
@@ -431,6 +440,8 @@ class Surface final {
     std::string id_;
     runtime::Profiler profiler_;
     runtime::ApplicationContext& application_;
+    base::TaskStatistics task_statistics_;
+    base::TaskStatistics frame_task_baseline_;
     runtime::LayerRole root_role_;
     std::string root_name_;
     SurfaceEnvironment environment_;
@@ -447,11 +458,13 @@ class Surface final {
     ThemeCatalog themes_;
     ThemeMaterializationCache theme_materialization_cache_;
     std::shared_ptr<const DescriptionNode> raw_description_;
+    std::shared_ptr<const NodeReadinessSnapshot> preparation_readiness_;
     RetainedTree tree_;
     /** shows_image's answers for the tree generation they were found in. */
     mutable std::map<std::string, std::pair<std::uint64_t, bool>, std::less<>> shown_images_;
     std::shared_ptr<const TextEngine> text_engine_;
     std::shared_ptr<const resource::SvgImageRegistry> svg_images_;
+    lottie::SceneCache lottie_scenes_;
     MotionRuntime motion_;
     LayoutEngine layout_engine_;
     StatusFeedbackService status_feedback_;
@@ -464,6 +477,8 @@ class Surface final {
     RenderCommandBuffer render_commands_;
     std::uint64_t observed_application_generation_ = 0U;
     std::optional<std::string> observed_active_screen_;
+    /** Each Surface observes runtime wakes independently, even when another drained the mailbox. */
+    std::uint64_t observed_wake_generation_ = 0U;
     std::map<std::string, std::string, std::less<>> focus_by_screen_;
     std::map<std::string, runtime::StateScopeSet, std::less<>> state_scopes_by_layer_;
     std::uint64_t layer_scopes_generation_ = 0U;

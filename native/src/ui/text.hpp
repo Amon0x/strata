@@ -13,7 +13,9 @@
 #include <string_view>
 #include <vector>
 
+#include "base/pending.hpp"
 #include "font/opentype.hpp"
+#include "font/system_fonts.hpp"
 #include "resource/resource.hpp"
 #include "runtime/diagnostic.hpp"
 #include "runtime/value.hpp"
@@ -86,6 +88,7 @@ struct TextLayoutData final {
     std::optional<double> wrap_width;
     bool clipped = false;
     bool truncated = false;
+    std::vector<base::ReadinessRead> readiness{};
 };
 
 /**
@@ -107,6 +110,7 @@ class TextLayout final {
     const std::optional<double>& wrap_width;
     const bool& clipped;
     const bool& truncated;
+    const std::vector<base::ReadinessRead>& readiness;
 
     TextLayout();
     TextLayout(const TextLayout& other) noexcept;
@@ -142,10 +146,15 @@ struct TextLayoutOptions final {
 class TextEngine final {
   public:
     using FontRegistry = std::map<std::string, font::OpenTypeFont, std::less<>>;
+    using FontSources = std::map<std::string, resource::ResourceBytes, std::less<>>;
+    using FontResult = base::ResourceResult<const font::OpenTypeFont*>;
 
     explicit TextEngine(font::OpenTypeFont control_font);
     TextEngine(font::OpenTypeFont control_font, font::OpenTypeFont regular_font);
-    explicit TextEngine(FontRegistry fonts);
+    explicit TextEngine(FontRegistry fonts, base::TaskOwner* tasks = nullptr);
+    /** Owns source bytes and publishes the complete bound registry, never a partial default pair. */
+    TextEngine(FontSources sources, base::TaskOwner& tasks);
+    ~TextEngine();
 
     [[nodiscard]] static std::shared_ptr<const TextEngine>
     load_control_font(const std::filesystem::path& root, const resource::ResourceId& resource);
@@ -154,8 +163,7 @@ class TextEngine final {
 
     [[nodiscard]] Size measure(const RetainedNode& node, const Constraints& constraints) const;
 
-    [[nodiscard]] const font::OpenTypeFont& control_font() const noexcept;
-    [[nodiscard]] const font::OpenTypeFont& font(std::string_view id) const noexcept;
+    [[nodiscard]] FontResult font(std::string_view id) const;
     [[nodiscard]] std::string font_id(const RetainedNode& node) const;
     [[nodiscard]] double pixel_size(const RetainedNode& node) const noexcept;
     [[nodiscard]] std::uint32_t font_style_flags(const RetainedNode& node) const noexcept;
@@ -178,6 +186,8 @@ class TextEngine final {
      * laid-out values already handed out own their storage and are unaffected.
      */
     void begin_frame() const noexcept;
+    /** Cancels unused preparation across all consuming trees, excluding an optional retiring tree. */
+    void retain_preparations(const PreparationReads* retiring = nullptr) const noexcept;
     [[nodiscard]] TextOperationCounters operation_counters() const noexcept;
     [[nodiscard]] std::size_t cached_layout_count() const noexcept;
     /** Layouts kept regardless of use, and how long an unused one survives beyond them. */
@@ -187,6 +197,19 @@ class TextEngine final {
     void clear_diagnostics() const noexcept;
 
   private:
+    friend struct TextMeasurement;
+    struct FontPreparations;
+    using FontCandidate = FontRegistry::value_type;
+    using PreparedFont = base::ResourceResult<const FontCandidate*>;
+    [[nodiscard]] FontPreparations& preparations() const;
+    void adopt_fonts() const;
+    void record_font_diagnostics() const;
+    void observe_layout(const RetainedNode& node, const TextLayout& layout) const;
+    [[nodiscard]] PreparedFont prepare_named_font(const std::string& id) const;
+    [[nodiscard]] PreparedFont prepare_fallback_font(std::uint32_t code_point) const;
+    [[nodiscard]] PreparedFont prepare_font_instance(
+        const FontCandidate& candidate, std::string id,
+        std::vector<std::pair<std::string, double>> settings) const;
     struct StyleRun final {
         std::size_t start = 0U;
         std::size_t end = 0U;
@@ -239,7 +262,10 @@ class TextEngine final {
     void record_missing_glyphs(std::string_view font_id, const font::ShapedText& shaped) const;
     void record_missing_font(std::string_view font_id) const;
 
-    FontRegistry fonts_;
+    mutable std::shared_ptr<const FontRegistry> fonts_;
+    std::shared_ptr<font::SystemFontCatalog> font_catalog_;
+    base::TaskOwner* tasks_ = nullptr;
+    mutable std::unique_ptr<FontPreparations> font_preparations_;
     /** System fonts text fell back to (font::system_font_for), kept for as long as the engine. */
     mutable FontRegistry system_fonts_;
     mutable std::mutex system_fonts_mutex_;
@@ -249,7 +275,6 @@ class TextEngine final {
     };
     mutable std::map<CacheKey, CachedLayout> cache_;
     mutable std::uint64_t frame_ = 0U;
-    mutable std::map<std::uint64_t, CacheKey> measured_requests_;
     mutable std::set<std::string, std::less<>> missing_fonts_;
     mutable std::set<std::string, std::less<>> missing_glyph_groups_;
     mutable std::vector<runtime::RuntimeDiagnostic> diagnostics_;

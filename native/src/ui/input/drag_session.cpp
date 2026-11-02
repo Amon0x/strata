@@ -12,6 +12,7 @@
 #include "runtime/value.hpp"
 #include "ui/input/detail.hpp"
 #include "ui/motion.hpp"
+#include "ui/readiness.hpp"
 #include "ui/reorder.hpp"
 #include "ui/widget/input.hpp"
 
@@ -41,7 +42,7 @@ namespace {
 
 } // namespace
 
-std::vector<std::string> InputRouter::drag_operations(const runtime::Value* value,
+std::vector<std::string> InputPresentation::drag_operations(const runtime::Value* value,
                                                       std::vector<std::string> fallback) {
     if (value == nullptr || value->list() == nullptr)
         return fallback;
@@ -58,8 +59,9 @@ std::vector<std::string> InputRouter::drag_operations(const runtime::Value* valu
     return parsed.empty() ? std::move(fallback) : std::move(parsed);
 }
 
-InputRouter::DragTarget InputRouter::resolve_drag_target(const DragSession& session,
-                                                         const Point position) const {
+InputPresentation::DragTarget InputPresentation::resolve_drag_target(
+    const std::string_view payload_type, const std::span<const std::string> allowed_operations,
+    const Point position) const {
     if (tree_ == nullptr || layout_ == nullptr)
         return {};
     RetainedNode* node = widget_native_input_owner(hit_test(position));
@@ -74,16 +76,16 @@ InputRouter::DragTarget InputRouter::resolve_drag_target(const DragSession& sess
                 const runtime::Value* accepted = attachment->options.field("acceptedTypes");
                 const bool accepts_type =
                     accepted != nullptr && accepted->list() != nullptr &&
-                    std::ranges::any_of(accepted->list()->values, [&session](
+                    std::ranges::any_of(accepted->list()->values, [payload_type](
                                                                       const runtime::Value& value) {
-                        return value.string() != nullptr && *value.string() == session.payload_type;
+                        return value.string() != nullptr && *value.string() == payload_type;
                     });
                 if (accepts_type) {
                     const std::vector<std::string> target_operations = drag_operations(
                         attachment->options.field("allowedOperations"), {"move", "copy", "link"});
                     const auto selected =
-                        std::ranges::find_first_of(session.allowed_operations, target_operations);
-                    if (selected != session.allowed_operations.end()) {
+                        std::ranges::find_first_of(allowed_operations, target_operations);
+                    if (selected != allowed_operations.end()) {
                         std::string placement = "on";
                         const runtime::Value* placement_mode =
                             attachment->options.field("placementMode");
@@ -121,8 +123,8 @@ InputRouter::DragTarget InputRouter::resolve_drag_target(const DragSession& sess
                 attachment != nullptr) {
                 const runtime::Value* accepted = attachment->options.field("payloadType");
                 if (accepted != nullptr && accepted->string() != nullptr &&
-                    *accepted->string() == session.payload_type &&
-                    std::ranges::contains(session.allowed_operations, std::string("move"))) {
+                    *accepted->string() == payload_type &&
+                    std::ranges::contains(allowed_operations, std::string("move"))) {
                     return DragTarget{node, attachment, "move", "on"};
                 }
             }
@@ -258,7 +260,8 @@ void InputRouter::synchronize_drag_target(DragSession& session, const Point posi
                                           const bool emit_move, InputOperationResult& result) {
     if (!session.active || tree_ == nullptr)
         return;
-    const DragTarget next = resolve_drag_target(session, position);
+    const DragTarget next =
+        resolve_drag_target(session.payload_type, session.allowed_operations, position);
     const DragTarget previous = retained_drag_target(session);
     const bool identity_changed =
         next.node != previous.node || next.operation != previous.operation;
@@ -333,14 +336,16 @@ void InputRouter::advance_widget_frames(InputOperationResult& result) {
         const WidgetLifecycle* const lifecycle =
             node != nullptr ? widgets_.find(node->description().type) : nullptr;
         if (node == nullptr || node->lifecycle() != RetainedLifecycle::attached ||
-            layout_ == nullptr || layout_->find(identity) == nullptr || !node_participates(*node) ||
+            (current->second.cost != WidgetFrameCost::resource &&
+             (layout_ == nullptr || layout_->find(identity) == nullptr)) ||
+            !node_participates(*node) ||
             lifecycle == nullptr || lifecycle->frame.advance == nullptr) {
             widget_frame_times_.erase(identity);
             requested_widget_frames_.erase(current);
             continue;
         }
         const auto requested_at = widget_frame_times_.find(identity);
-        if (requested_at != widget_frame_times_.end() &&
+        if (!current->second.allow_same_time && requested_at != widget_frame_times_.end() &&
             requested_at->second == frame_time_nanos_) {
             continue;
         }
@@ -351,11 +356,14 @@ void InputRouter::advance_widget_frames(InputOperationResult& result) {
         widget_frame_times_.insert_or_assign(identity, frame_time_nanos_);
         const WidgetFrameCost cost = current->second.cost;
         current->second.pending = false;
+        current->second.allow_same_time = false;
         WidgetInputScope scope(*this, *node, result, {}, {});
         advancing_widget_frame_identity_ = identity;
         try {
+            PreparationReadScope reads(*node, PreparationUse::frame, cost);
             lifecycle->frame.advance(scope,
                                      WidgetFrameInfo{frame_time_nanos_, delta, reduced_motion_});
+            reads.commit();
         } catch (...) {
             advancing_widget_frame_identity_.reset();
             widget_frame_times_.erase(identity);
@@ -363,10 +371,12 @@ void InputRouter::advance_widget_frames(InputOperationResult& result) {
             throw;
         }
         advancing_widget_frame_identity_.reset();
-        static_cast<void>(tree_->mark(identity, cost == WidgetFrameCost::layout ? DirtyReason::layout
-                                                : cost == WidgetFrameCost::presentation
-                                                    ? DirtyReason::animation
-                                                    : DirtyReason::paint));
+        if (cost != WidgetFrameCost::resource) {
+            static_cast<void>(tree_->mark(identity, cost == WidgetFrameCost::layout ? DirtyReason::layout
+                                                    : cost == WidgetFrameCost::presentation
+                                                        ? DirtyReason::animation
+                                                        : DirtyReason::paint));
+        }
         if (reduced_motion_)
             current->second.pending = false;
         if (!current->second.pending) {

@@ -1,5 +1,7 @@
 #include "renderer_internal.hpp"
 
+#include "gpu/frame_inputs.hpp"
+
 namespace strata::vulkan {
 
 void Renderer::Impl::validate_target(const RenderTarget& output, const FrameOptions& options) {
@@ -33,13 +35,13 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
     try {
         resources(packet);
         run_live_art();
+        telemetry.live = !live_art.empty();
         // The packet names materials and effects by index; resolve each table once.
         layer_materials.clear();
         layer_materials.reserve(packet.materials.size());
         for (const std::string& material : packet.materials) {
             const auto found = materials.find(material);
-            layer_materials.push_back(found != materials.end() ? std::string_view(found->second)
-                                                               : std::string_view("builtin"));
+            layer_materials.push_back(found != materials.end() ? &found->second : nullptr);
         }
         layer_effects.clear();
         layer_effects.reserve(packet.effects.size());
@@ -164,9 +166,12 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                     if (auto it = textures.find(*batch->texture); it != textures.end())
                         texture = it->second.get();
                 }
-                const std::string_view program = batch->material < layer_materials.size()
-                                                     ? layer_materials[batch->material]
-                                                     : std::string_view("builtin");
+                const Material* material = batch->material < layer_materials.size()
+                                               ? layer_materials[batch->material] : nullptr;
+                const std::string_view program = material != nullptr
+                                                    ? std::string_view(material->program) : "builtin";
+                telemetry.live = telemetry.live ||
+                    (batch->index_count != 0U && material != nullptr && material->live);
                 // The core already adapted the blend and clip coverage to the rounded clips.
                 draw(target, program, batch->blend, constants,
                      clip_constants(batch->rounded_clips, batch->clip_coverage), *texture, *texture,
@@ -185,6 +190,8 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                      blur_batch->downsample, blur_batch->rounded_clips);
                 touch();
             } else if (const auto* effect_batch = std::get_if<host::EffectBatch>(&submission)) {
+                telemetry.live = telemetry.live || std::ranges::any_of(
+                    passes(*effect_batch), [](const auto& pass) { return pass.second.live; });
                 if (effect_batch->kind == host::EffectBatchKind::content_begin) {
                     if (stack.size() >= host::maximum_content_effect_depth)
                         throw std::length_error("content effect stack overflow");
@@ -287,16 +294,27 @@ Renderer::Renderer(Device device) {
 Renderer::~Renderer() = default;
 Renderer::Renderer(Renderer&&) noexcept = default;
 Renderer& Renderer::operator=(Renderer&&) noexcept = default;
+void Renderer::release_programs(const std::string_view prefix) {
+    for (auto it = impl_->materials.lower_bound(prefix);
+         it != impl_->materials.end() && it->first.starts_with(prefix);)
+        it = impl_->materials.erase(it);
+    for (auto it = impl_->effects.lower_bound(prefix);
+         it != impl_->effects.end() && it->first.starts_with(prefix);)
+        it = impl_->effects.erase(it);
+    impl_->prune_programs();
+}
+
 void Renderer::declare_material(std::string_view id, std::string_view source) {
     if (id.empty() || source.empty())
         throw std::invalid_argument("Vulkan material id and source must not be empty");
     const std::string program = "material:" + std::string(source);
-    impl_->add_program(
+    const std::string_view retained = impl_->add_program(
         program, std::string(gpu::shaders::pixel_common) + std::string(gpu::rounded_clip_hlsl) +
                      std::string(gpu::shaders::material_prelude) + std::string(source) +
                      std::string(gpu::shaders::pixel_output) +
                      std::string(gpu::shaders::material_entry));
-    impl_->materials[std::string(id)] = program;
+    impl_->materials.insert_or_assign(std::string(id),
+                                      Impl::Material{retained, gpu::uses_frame_inputs(source)});
     impl_->prune_programs();
     impl_->drop_effects();
 }
@@ -308,18 +326,19 @@ void Renderer::declare_effect_pass(std::string_view id, std::uint32_t index, std
         (radius_parameter != UINT32_MAX && radius_parameter >= 16) ||
         (downsample_parameter != UINT32_MAX && downsample_parameter >= 16))
         throw std::invalid_argument("invalid Vulkan effect declaration");
-    std::string program;
+    std::string_view program;
     if (kind == 1) {
         if (source.empty())
             throw std::invalid_argument("Vulkan shader effect requires source");
-        program = "effect:" + std::string(source);
-        impl_->add_program(program, std::string(gpu::effect_prelude) + std::string(source) +
-                                        std::string(gpu::effect_entry));
+        program = impl_->add_program("effect:" + std::string(source),
+                                     std::string(gpu::effect_prelude) + std::string(source) +
+                                         std::string(gpu::effect_entry));
     }
     impl_->drop_effects();
     impl_->effects[std::string(id)].insert_or_assign(
         index,
-        Impl::Pass{kind, radius, downsample, radius_parameter, downsample_parameter, program});
+        Impl::Pass{kind, radius, downsample, radius_parameter, downsample_parameter, program,
+                   gpu::uses_frame_inputs(source)});
     impl_->prune_programs();
 }
 void Renderer::validate_target(const RenderTarget& target, const FrameOptions& options) const {

@@ -1,13 +1,20 @@
 #include "ui/surface.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <iterator>
 #include <limits>
+#include <map>
+#include <memory>
+#include <optional>
 #include <ranges>
+#include <set>
 #include <span>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -439,13 +446,16 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
                  std::string host_service_owner,
                  std::shared_ptr<const resource::SvgImageRegistry> svg_images)
     : id_(std::move(id)), profiler_(runtime::ProfilerScope::surface, id_),
-      application_(application), root_role_(root_role), root_name_(std::move(root_name)),
+      application_(application), task_statistics_(application_.tasks().statistics()),
+      frame_task_baseline_(task_statistics_), root_role_(root_role),
+      root_name_(std::move(root_name)),
       environment_(std::move(environment)),
       adopted_environment_generation_(environment_.generation),
       viewport_class_(resolved_viewport_class(environment_)),
       behaviors_(std::move(behavior_registry)), widgets_(std::move(widget_registry)),
       descriptions_(application_, widgets_), themes_(std::move(initial_theme)),
       text_engine_(std::move(text_engine)), svg_images_(std::move(svg_images)),
+      lottie_scenes_(application_.tasks()),
       layout_engine_(text_engine_ != nullptr
                          ? LayoutEngine::IntrinsicMeasure(
                                [engine = text_engine_](const RetainedNode& node,
@@ -467,9 +477,7 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
                   invalidate_frame();
               }
           },
-          [this](const RetainedNode& node, const LayoutRecord& layout) {
-              return widget_hit_bounds(*this, node, layout);
-          },
+          widget_hit_bounds,
           [this](const RetainedNode& node, const LayoutRecord& layout, const std::string_view text,
                  const Point position) -> std::optional<std::size_t> {
               if (text_engine_ == nullptr)
@@ -493,8 +501,8 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
                   text_layout, Point{position.x - origin.x, position.y - origin.y});
               return utf8_byte_for_utf16_offset(text, utf16);
           },
-          [this](const RetainedNode& node, const std::string_view text) {
-              return text_engine_ != nullptr ? text_engine_->shape(node, text).metrics.width : 0.0;
+          [engine = text_engine_](const RetainedNode& node, const std::string_view text) {
+              return engine != nullptr ? engine->shape(node, text).metrics.width : 0.0;
           },
           [this](const RetainedNode& node, const LayoutRecord& layout,
                  const TextEditorSnapshot& editor) -> std::optional<runtime::HostServiceRect> {
@@ -527,10 +535,9 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
               return render_engine_.snapshot_subtree(node, layout_engine_.result());
           }, {},
           host_services,
-          [this](const RetainedNode& node, const std::string_view value,
+          [engine = text_engine_](const RetainedNode& node, const std::string_view value,
                  const TextLayoutOptions& options) {
-              return text_engine_ != nullptr ? text_engine_->layout(node, value, options)
-                                             : TextLayout{};
+              return engine != nullptr ? engine->layout(node, value, options) : TextLayout{};
           },
           [this](const std::string_view key) {
               if (!advancing_scroll_animation_) {
@@ -552,6 +559,7 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
     if (root_name_.empty())
         throw std::invalid_argument("surface root name must not be empty");
     environment_.validate();
+    input_.publish_images(svg_images_.get());
     tree_.configure_persistence(
         [this](const std::string_view type) {
             const WidgetLifecycle* lifecycle = widgets_.find(type);
@@ -588,6 +596,8 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
 }
 
 Surface::~Surface() {
+    if (text_engine_ != nullptr)
+        text_engine_->retain_preparations(tree_.preparation_reads().get());
     static_cast<void>(application_.async().retain_owners(id_ + ":", {}));
     application_.undo().clear(id_);
 }
@@ -607,6 +617,21 @@ runtime::Profiler& Surface::profiler() noexcept {
 const runtime::Profiler& Surface::profiler() const noexcept {
     return profiler_;
 }
+
+void Surface::set_preparation_readiness(const std::shared_ptr<const NodeReadinessSnapshot>& reads) {
+    if (preparation_readiness_ != reads)
+        preparation_readiness_ = reads;
+}
+
+std::span<const NodeReadinessRead>
+Surface::preparation_readiness(const std::uint64_t node_identity) const noexcept {
+    if (preparation_readiness_ == nullptr)
+        return {};
+    const auto reads = std::ranges::equal_range(
+        *preparation_readiness_, node_identity, {}, &NodeReadinessRead::node_identity);
+    return std::span(reads.begin(), reads.end());
+}
+
 std::string_view Surface::viewport_class() const noexcept {
     return viewport_class_;
 }
@@ -1136,7 +1161,8 @@ std::shared_ptr<const DescriptionNode> Surface::describe(DescriptionBuildResult&
 
 bool Surface::rebuild_tree(SurfaceFrame& frame, std::optional<std::string_view>& restore_focus) {
     if (!description_invalidated_ && tree_.root() != nullptr &&
-        application_.dirty_generation() == observed_application_generation_) {
+        application_.dirty_generation() == observed_application_generation_ &&
+        !descriptions_.readiness_changed()) {
         return false;
     }
     auto profile = profiler_.section("description");
@@ -1532,6 +1558,7 @@ FrameDirtyModel Surface::observe_dirty(const std::int64_t frame_time_nanos, cons
         // it is, the description built from it is current for the rest of the frame.
         .description = description_invalidated_ ||
                        application_.dirty_generation() != observed_application_generation_ ||
+                       descriptions_.readiness_changed() ||
                        (descriptions_.reads_frame_time() &&
                         published_frame_time_ != frame_time_nanos),
         .retained = tree_.dirty_count() != 0U,
@@ -1719,12 +1746,23 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     }
     pending_lazy_materializations_.clear();
     frame_started_nanos_ = frame_time_nanos;
+    frame_task_baseline_ = task_statistics_;
     auto profiler_frame = profiler_.frame(last_frame_.frame_index + 1U);
     status_feedback_.advance_frame(frame_time_nanos);
     notifications_.advance_frame(frame_time_nanos);
     input_.publish_frame_time(frame_time_nanos);
     input_.publish_reduced_motion(environment_.reduced_motion);
+    static_cast<void>(application_.tasks().drain());
+    application_.adopt_host_snapshots();
+    if (svg_images_ != nullptr)
+        svg_images_->sync_metadata();
+    tree_.preparation_reads()->invalidate(tree_, &input_);
     application_.async().advance(frame_time_nanos);
+    const std::uint64_t wake_generation = application_.tasks().wake_generation();
+    if (wake_generation != observed_wake_generation_) {
+        observed_wake_generation_ = wake_generation;
+        frame_invalidated_ = true;
+    }
     // Expressions on their way (`animate`) read the frame's time: they are described again
     // with it, and only they.
     descriptions_.set_frame_time(frame_time_nanos);
@@ -1815,7 +1853,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         frame_phases_.push_back(FramePhase::post_layout);
         tree_.consume_layout_dirty();
         input_.publish_motion(motion_);
-        input_.publish_images(svg_images_.get());
+        input_.publish_lottie_scenes(lottie_scenes_);
         input_.publish_layout(layout_engine_.result());
         const auto input_started = std::chrono::steady_clock::now();
         const std::size_t dirty_before = tree_.dirty_count();
@@ -1863,7 +1901,6 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     }
     advance_scroll_animations(frame_time_nanos);
     settle_scroll_snaps(frame_time_nanos);
-    motion_.set_images(svg_images_.get());
     motion_.bind(application_.active_unit());
     {
         frame_phases_.push_back(FramePhase::build);
@@ -2017,7 +2054,10 @@ SurfaceFrame Surface::complete_frame(SurfaceFrame next) {
     }
     next.diagnostics = application_.services().diagnostics_snapshot();
     record_profiler_counters(next);
+    record_task_statistics();
     input_.settle_pointer_geometry();
+    if (text_engine_ != nullptr)
+        text_engine_->retain_preparations();
     tree_.clear_dirty();
     frame_invalidated_ = false;
     const std::size_t publication_count =
@@ -2043,6 +2083,52 @@ SurfaceFrame Surface::complete_frame(SurfaceFrame next) {
     }
     last_frame_ = std::move(next);
     return last_frame_;
+}
+
+void Surface::record_task_statistics() {
+    task_statistics_ = application_.tasks().statistics();
+    base::TaskKindStatistics total;
+    std::array<std::uint64_t, static_cast<std::size_t>(base::TaskKind::count)> work{};
+    for (std::size_t index = 0U; index < task_statistics_.kinds.size(); ++index) {
+        const base::TaskKindStatistics& current = task_statistics_.kinds[index];
+        const base::TaskKindStatistics& before = frame_task_baseline_.kinds[index];
+        total.submitted += current.submitted - before.submitted;
+        total.completed += current.completed - before.completed;
+        total.adopted += current.adopted - before.adopted;
+        total.cancelled += current.cancelled - before.cancelled;
+        total.failed += current.failed - before.failed;
+        total.queue_nanoseconds += current.queue_nanoseconds - before.queue_nanoseconds;
+        total.work_nanoseconds += current.work_nanoseconds - before.work_nanoseconds;
+        total.latency_nanoseconds += current.latency_nanoseconds - before.latency_nanoseconds;
+        work[index] = current.work_nanoseconds - before.work_nanoseconds;
+    }
+    using runtime::ProfilerCounter;
+    using base::TaskKind;
+    profiler_.record_counters({
+        {ProfilerCounter::tasks_queued, task_statistics_.queued},
+        {ProfilerCounter::tasks_running, task_statistics_.running},
+        {ProfilerCounter::tasks_pending, task_statistics_.pending},
+        {ProfilerCounter::tasks_submitted, total.submitted},
+        {ProfilerCounter::tasks_completed, total.completed},
+        {ProfilerCounter::tasks_adopted, total.adopted},
+        {ProfilerCounter::tasks_cancelled, total.cancelled},
+        {ProfilerCounter::tasks_failed, total.failed},
+        {ProfilerCounter::tasks_queue_nanos, total.queue_nanoseconds},
+        {ProfilerCounter::tasks_work_nanos, total.work_nanoseconds},
+        {ProfilerCounter::tasks_latency_nanos, total.latency_nanoseconds},
+        {ProfilerCounter::tasks_glyph_raster_nanos,
+         work[static_cast<std::size_t>(TaskKind::glyph_raster)]},
+        {ProfilerCounter::tasks_vector_glyph_nanos,
+         work[static_cast<std::size_t>(TaskKind::vector_glyph)]},
+        {ProfilerCounter::tasks_image_nanos, work[static_cast<std::size_t>(TaskKind::image)]},
+        {ProfilerCounter::tasks_font_nanos, work[static_cast<std::size_t>(TaskKind::font)]},
+        {ProfilerCounter::tasks_shaping_nanos, work[static_cast<std::size_t>(TaskKind::shaping)]},
+        {ProfilerCounter::tasks_module_nanos, work[static_cast<std::size_t>(TaskKind::module)]},
+        {ProfilerCounter::tasks_snapshot_nanos, work[static_cast<std::size_t>(TaskKind::snapshot)]},
+        {ProfilerCounter::tasks_geometry_nanos, work[static_cast<std::size_t>(TaskKind::geometry)]},
+        {ProfilerCounter::tasks_lottie_nanos, work[static_cast<std::size_t>(TaskKind::lottie)]},
+        {ProfilerCounter::tasks_other_nanos, work[static_cast<std::size_t>(TaskKind::other)]},
+    });
 }
 
 void Surface::record_profiler_counters(const SurfaceFrame& frame) {

@@ -1363,7 +1363,8 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
             std::ranges::all_of(last.children, [this](const ChildRef& child) {
                 const ComponentInstance* held = find_instance(child.id);
                 return held != nullptr && !held->dirty && held->emitted == child.seen;
-            });
+            }) &&
+            std::ranges::all_of(last.readiness, &base::ReadinessRead::current);
         if (current) {
             // What the call read, and the instances it holds, are the body's again.
             runtime::DependencyRecorder& reads = expression_reads();
@@ -1373,6 +1374,8 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
                 static_cast<void>(path);
                 reads.host(read);
             }
+            body->reads.readiness.insert(body->reads.readiness.end(),
+                                         last.readiness.begin(), last.readiness.end());
             for (const ChildRef& child : last.children) {
                 ComponentInstance& held = *find_instance(child.id);
                 held.last_used_epoch = epoch_;
@@ -1392,6 +1395,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
     const std::size_t children = body->children.size();
     const std::size_t diagnostics = diagnostics_.size();
     const std::size_t reports = transaction_ != nullptr ? transaction_->reports.size() : 0U;
+    const std::size_t readiness = body->reads.readiness.size();
     std::shared_ptr<const DescriptionNode> node;
     {
         const RecordingScope recording(recording_, &reads);
@@ -1404,7 +1408,10 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
                         std::move(reads.host_reads()),
                         std::vector<ChildRef>(body->children.begin() +
                                                   static_cast<std::ptrdiff_t>(children),
-                                              body->children.end())};
+                                              body->children.end()),
+                        std::vector<base::ReadinessRead>(
+                            body->reads.readiness.begin() + static_cast<std::ptrdiff_t>(readiness),
+                            body->reads.readiness.end())};
         instance.widget_calls.insert_or_assign(std::move(slot), std::move(made));
     }
     return node;
@@ -1547,6 +1554,10 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_widget_call(con
                 observe_retained_value(retained_query, name, value);
             }},
         layout_defaults);
+    if (Frame* const current = frame(); current != nullptr) {
+        current->reads.readiness.insert(current->reads.readiness.end(),
+                                        expansion.readiness.begin(), expansion.readiness.end());
+    }
     std::shared_ptr<const DescriptionChildren> generated_children =
         std::move(expansion.generated_children);
     WidgetGeneratedVirtualization generated_virtualization;
@@ -1678,7 +1689,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_widget_call(con
             ? std::move(generated_children)
             : std::shared_ptr<const DescriptionChildren>(
                   std::make_shared<const EagerDescriptionChildren>(std::move(child_nodes))),
-        std::move(behaviors));
+        std::move(behaviors), std::move(expansion.readiness));
     if (generated_virtualization.sequence != nullptr ||
         generated_virtualization.item_members != nullptr ||
         generated_virtualization.item_extents != nullptr || repeater_children.sequence != nullptr) {

@@ -10,7 +10,7 @@ Strata ships two desktop entry points:
   launches the prebuilt executable named by a custom-host manifest. With no manifest, the executable
   opens Strata's bundled showcase.
 
-Both paths use the same public C ABI, packet-v16 decoder, D3D11 renderer, resource loader,
+Both paths use the same public C ABI, packet-v25 decoder, D3D11 renderer, resource loader,
 clipboard/IMM32 adapters, source-import resolver, complete window-message translator, and ordered
 GPU-resource release barrier.
 
@@ -18,13 +18,43 @@ GPU-resource release barrier.
 installed as `Strata::host_session`), the portable application session the headless host and the
 SDL preview also run on. A Session owns the runtime with its caller clock and diagnostics, installs
 the host's adapters, configures the application and its extension packages, activates source while
-resolving imports through the host's reader, creates the Surface, frames it into decoded packets,
-records host-frame telemetry (with the backend's own texture, blur and submit measurements when it
-has them), and performs the release barrier; the host keeps its window, input translation and
-renderer. The showcase that `strata_desktop.exe` opens without a manifest lives in
+resolving imports through the host's reader, creates the Surface, and publishes owned encoded
+packets. It does not own a decoder or a GPU. The host routes frame-correlated rendering feedback
+to the Surface and acknowledges terminal consumption before releasing it. The showcase that
+`strata_desktop.exe` opens without a manifest lives in
 `native/apps/showcase`, and its `strata.control-deck.v1` package in `native/packages/control_deck`.
 It composites eight applications into one window, each on its own Session drawing into its own
 renderer layer.
+
+Sessions use asynchronous engine preparation. Their frame-wake callback posts `WM_NULL` to the
+window, waking an idle message loop without entering the runtime from a worker. The callback is
+quiesced during runtime teardown; the window must outlive its Sessions.
+
+Both desktop hosts use `Session::prepare` for initial activation. The worker owns resource access,
+captured initial snapshot values, schema/module activation, durable-state reads and Surface
+creation. The owner adopts the complete Session and installs clipboard, IME, platform effects,
+live durable writes and action dispatch. Diagnostics collected during preparation are delivered on
+adoption. Closing while pending cancels adoption without waiting for the worker.
+
+Interactive desktop applications default to `host::PresentationExecution::threaded`. One
+presentation owner per window creates, uses and destroys its D3D11 device and swap chain. It
+consumes ordered declarations, packets, viewport changes and terminal releases without calling a
+runtime. Each attached stream has its own decoder and unique lifetime identity. Skipping an
+intermediate visual frame never skips its resource operations; retained redraws do not repeat them.
+Time-driven materials and effects, and retained GPU art, use the presentation owner's clock,
+independently of UI framing. A pending visible shader keeps framing until its compilation can be
+adopted, including static shaders. Rate-limited effects retain their future refresh while composing
+cached output; removing an effect or releasing an art job removes that source of liveness.
+`Presentation::declare_programs(stream, programs)` scopes authored material/effect IDs to that
+stream. Streams sharing the same authored names cannot replace one another's programs, including
+staged scenes whose declaration batch fails partway through. Terminal retirement releases the
+stream's declarations as well as its geometry; the built-in unified material remains reserved.
+
+Set `ApplicationOptions::presentation` to `host::PresentationExecution::caller` for an explicitly
+caller-driven host. Both modes use the same owned transport/decoder path. The runner selects
+caller mode for uncapped performance, smoke and showcase-profile runs. The ordinary Win32 message
+loop still belongs to the runtime owner: independent GPU presentation alone does not make input
+dispatch independent of a stalled window thread.
 
 ## Build and install the SDK from source
 
@@ -83,7 +113,7 @@ Installed targets are:
 | `Strata::d3d11` | D3D11 Surface presenter and packet renderer for host-owned devices, contexts, and targets. |
 | `Strata::win32` | Input translation for a host-owned Win32 window procedure. |
 | `Strata::extensions` | Authoring support linked into independently loaded extension libraries. |
-| `Strata::render_host` | Public stateful packet-v16 decoder used by custom render backends. |
+| `Strata::render_host` | Stateful packet-v25 decoder and owned caller/threaded presentation transport. |
 
 Applications that already own a graphics loop should use `Strata::d3d11` instead of
 `Strata::desktop`; it neither creates nor presents a swap chain. See
@@ -137,6 +167,13 @@ host.publish(
 host.activate();
 ```
 
+`activate()` submits preparation; it does not make `runtime()` immediately available.
+`active()` becomes true when a subsequent `frame()` adopts the Session. Bindings are available
+before activation, during preparation and afterward. `publish()` retains explicit snapshots in
+call order while preparation is pending. Resizes during preparation are applied on adoption.
+Until then the window may show only its background; a pending showcase overlay does not take
+input away from an already visible ready layer. `runtime()` throws before adoption or after close.
+
 Forward messages through the complete Win32 integration rather than translating individual events
 in every application:
 
@@ -155,14 +192,30 @@ and candidate windows at the logical editor caret using the current Surface scal
 
 Low-level `resize`, `pointer`, `scroll`, `key`, `text`, and `ime_preedit` methods remain available to
 applications with an existing platform translation layer. The message loop calls `host.frame()`.
-The host synchronizes revision-watched bindings, frames the Surface, decodes packet v16, submits
-D3D11 work, and presents. Fonts and images are immutable session resources; editing them requires
-rebuilding the owning artifact and recreating the desktop application. `close()` is optional during
-ordinary scope destruction; calling it explicitly reports release errors. Either path consumes and
-acknowledges the terminal resource packet before releasing the Surface.
+The owner adopts rendering feedback, synchronizes revision-watched bindings, frames the Surface
+and posts its owned packet. In threaded mode, decoding, GPU submission and Present happen
+elsewhere; `frame()` returning does not mean that packet has been drawn. `has_frame()` becomes
+true after an actual application draw is adopted. `presented()` describes feedback adopted by the
+last call, and `present_count()` counts successful GPU-owner Present returns, not UI turns or
+physical scan-out. Fonts and images are immutable session resources; editing them requires
+rebuilding the owning artifact and recreating the desktop application.
+
+On `WM_CLOSE`, mark the window as closing and stop forwarding new input; do not destroy its HWND.
+Continue dispatching messages and call `host.close()` until it returns true. It cancels pending
+Session adoption, queues each terminal packet once, waits nonblockingly for its consumption
+receipt, acknowledges Surface release, and stops the GPU owner. Only then destroy the window.
+The destructor provides an emergency barrier that pumps sent Win32 messages during GPU teardown;
+normal shutdown should use the nonblocking protocol so the ordinary message loop remains active.
+
+Node captures are sealed to the presentation request that will supply their pixels; requests
+arriving later cannot consume an earlier capture. Closing a Session cancels both unsubmitted and
+in-flight captures. Reopening the same textual application id does not inherit old capture or
+dialog replies. Preserve the complete `WindowRequest` when answering deferred window operations:
+its retained client-lifetime token prevents a late reply from reaching a replacement Session.
 
 At application configuration the host enumerates material declarations and ordered effect-pass
-declarations for the `hlsl` backend, resolves their resource ids, and compiles them once. Effect
+declarations for the `hlsl` backend and reads their sources during Session preparation. Owned
+declaration batches are consumed on the presentation owner. Effect
 workspace targets are retained at framebuffer size. Isolated content nests without a depth limit:
 the innermost few open layers take framebuffer-sized targets in turn, deeper nesting parks the
 outer ones in targets sized to their read bounds, and targets unused for a while are released.

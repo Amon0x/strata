@@ -16,10 +16,13 @@
 #include <string_view>
 #include <vector>
 
+#include "base/pending.hpp"
+#include "base/process_lifetime.hpp"
 #include "runtime/expression.hpp"
 #include "runtime/sequence.hpp"
 #include "runtime/value.hpp"
 #include "ui/collection/virtualization.hpp"
+#include "ui/readiness.hpp"
 
 namespace strata::ui {
 
@@ -172,8 +175,8 @@ class PropertyMap final {
 
   private:
     [[nodiscard]] const Entries& entries() const noexcept {
-        static const Entries none;
-        return entries_ != nullptr ? *entries_ : none;
+        static const base::ProcessLifetime<Entries> none;
+        return entries_ != nullptr ? *entries_ : none.get();
     }
     /** The entries to change: this map's own, copied first when another map shares them. */
     [[nodiscard]] Entries& owned();
@@ -229,12 +232,15 @@ struct DescriptionNode final {
      * a changed descendant): what depends on the node alone, such as its resolved theme
      * properties, is still that node's. */
     std::weak_ptr<const DescriptionNode> children_replaced_from{};
+    /** The resource states this node was described from, not their subsequently adopted states. */
+    std::vector<base::ReadinessRead> readiness{};
 
     static std::shared_ptr<const DescriptionNode>
     create(std::string type, std::optional<std::string> key = std::nullopt,
            std::string source_path = {}, std::string state_scope = {}, Properties properties = {},
            std::shared_ptr<const DescriptionChildren> children = {},
-           std::vector<DescriptionBehavior> behaviors = {});
+           std::vector<DescriptionBehavior> behaviors = {},
+           std::vector<base::ReadinessRead> readiness = {});
 };
 
 /**
@@ -327,6 +333,8 @@ class RetainedDescriptionSnapshot final {
 
 struct PresentationStatics;
 struct NodeVisualCache;
+struct TextMeasurement;
+struct LottieFrameState;
 
 class RetainedNode final {
   public:
@@ -383,7 +391,8 @@ class RetainedNode final {
     [[nodiscard]] bool set_retained_value(std::string_view name, runtime::Value value);
     [[nodiscard]] std::span<const std::byte> retained_bytes(std::string_view name) const noexcept;
     [[nodiscard]] bool set_retained_bytes(std::string name, std::span<const std::byte> value);
-    void add_cleanup(Cleanup cleanup);
+    /** Owner-only teardown, also for logically const caches prepared during paint. */
+    void add_cleanup(Cleanup cleanup) const;
     /**
      * What render and input read from the description alone (its presentation transform inputs,
      * its resolved widget chrome), built on first use and dropped whenever the description is.
@@ -391,22 +400,37 @@ class RetainedNode final {
     [[nodiscard]] std::shared_ptr<const PresentationStatics>&
     presentation_statics_cache() const noexcept;
     [[nodiscard]] std::shared_ptr<const NodeVisualCache>& visual_cache() const noexcept;
+    /** The owning text service's last measurement; scoped to this node rather than a tree-local id. */
+    [[nodiscard]] std::shared_ptr<const TextMeasurement>& text_measurement_cache() const noexcept;
+    /** Owner-only playback preparation; worker requests retain immutable scenes, never this node. */
+    [[nodiscard]] std::shared_ptr<LottieFrameState>& lottie_frame_cache() const noexcept;
+    /** Records a resource in the current cached operation, or in transient input geometry. */
+    void observe_preparation(const base::Readiness& resource) const;
+    void observe_preparations(std::span<const base::ReadinessRead> resources) const;
+    [[nodiscard]] NodeReadinessSnapshot preparation_readiness() const;
+    [[nodiscard]] std::weak_ptr<const PreparationReads> preparation_owner() const noexcept;
 
   private:
     friend class RetainedTree;
     friend class LayoutEngine;
+    friend class PreparationReadScope;
     RetainedNode(std::uint64_t identity, std::shared_ptr<const DescriptionNode> description,
-                 RetainedNode* parent, std::size_t source_index, std::string structural_path);
+                 RetainedNode* parent, std::size_t source_index, std::string structural_path,
+                 PreparationReads& preparation_reads);
     void mark_dirty(DirtyReason reason);
     void refresh_subtree_metadata() noexcept;
 
     std::uint64_t identity_;
     std::shared_ptr<const DescriptionNode> description_;
+    /** The owning, nonmovable tree outlives every attached and held-detached node. */
+    PreparationReads* preparation_reads_;
     /** What layout parsed from the description, kept while reconcile finds everything layout
      * reads from it (properties and virtual metadata) unchanged. */
     mutable std::shared_ptr<const ParsedLayout> parsed_layout_;
     mutable std::shared_ptr<const PresentationStatics> presentation_statics_;
     mutable std::shared_ptr<const NodeVisualCache> visual_cache_;
+    mutable std::shared_ptr<const TextMeasurement> text_measurement_;
+    mutable std::shared_ptr<LottieFrameState> lottie_frame_;
     RetainedNode* parent_;
     std::vector<std::unique_ptr<RetainedNode>> children_;
     std::size_t source_index_;
@@ -424,7 +448,7 @@ class RetainedNode final {
     std::array<std::uint64_t, 11U> dirty_generations_{};
     std::map<std::string, runtime::Value, std::less<>> retained_values_;
     std::map<std::string, std::vector<std::byte>, std::less<>> retained_bytes_;
-    std::vector<Cleanup> cleanups_;
+    mutable std::vector<Cleanup> cleanups_;
     std::optional<MaterializationRange> realized_range_;
     std::optional<std::size_t> realized_kept_row_;
     std::shared_ptr<const DescriptionChildren> realization_provider_;
@@ -469,6 +493,9 @@ class RetainedTree final {
 
     explicit RetainedTree(std::uint64_t identity_seed = 0U);
     ~RetainedTree();
+    [[nodiscard]] const std::shared_ptr<PreparationReads>& preparation_reads() const noexcept {
+        return preparation_reads_;
+    }
     void configure_persistence(PersistenceFields fields, PersistenceReader reader,
                                PersistenceWriter writer);
 
@@ -590,6 +617,7 @@ class RetainedTree final {
                                 const runtime::Value& value);
     [[nodiscard]] bool field_persisted(std::string_view type, std::string_view name) const;
 
+    std::shared_ptr<PreparationReads> preparation_reads_;
     std::unique_ptr<RetainedNode> root_;
     std::array<std::uint64_t, 11U> dirty_generations_{};
     std::uint64_t generation_ = 0U;

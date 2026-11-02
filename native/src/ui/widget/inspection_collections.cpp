@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "ui/surface.hpp"
+#include "ui/input/presentation.hpp"
 
 namespace strata::ui {
 namespace {
@@ -153,7 +153,7 @@ void table(WidgetInspectionScope& scope) {
     const Rect& bounds = scope.layout().bounds;
     std::vector<JsonValue> regions{
         object({
-            {"bounds", rectangle(scope.surface().input().presented_bounds(scope.node(), Rect{
+            {"bounds", rectangle(scope.input().presented_bounds(scope.node(), Rect{
                 bounds.x,
                 bounds.y,
                 bounds.width,
@@ -174,7 +174,7 @@ void table(WidgetInspectionScope& scope) {
     }
     if (pinned_width > 0.0) {
         regions.push_back(object({
-            {"bounds", rectangle(scope.surface().input().presented_bounds(
+            {"bounds", rectangle(scope.input().presented_bounds(
                 scope.node(), Rect{bounds.x, bounds.y, pinned_width, bounds.height}))},
             {"name", JsonValue("pinned-leading")},
         }));

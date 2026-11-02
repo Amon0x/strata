@@ -35,6 +35,7 @@ class NullRenderer final : public CaptureRenderer {
     }
     void set_clear_color(std::array<std::uint8_t, 4U>) noexcept override {}
     void declare_material(std::string_view, std::string_view) override {}
+    void release_programs(std::string_view) override {}
     void declare_effect_pass(std::string_view, std::uint32_t, std::uint32_t, double,
                              std::uint32_t, std::uint32_t, std::uint32_t,
                              std::string_view) override {}

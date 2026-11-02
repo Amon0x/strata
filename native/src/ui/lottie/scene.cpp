@@ -1,23 +1,25 @@
 #include "ui/lottie/scene.hpp"
 
-#include "font/system_fonts.hpp"
-#include "ui/lottie/geometry.hpp"
-#include "ui/render/path_geometry.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <numbers>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
+
+#include "font/system_fonts.hpp"
+#include "ui/lottie/geometry.hpp"
+#include "ui/render/path_geometry.hpp"
 
 namespace strata::ui::lottie {
 namespace {
@@ -1076,42 +1078,24 @@ void append_identity_levels(std::vector<double>& values) {
     return {weight, italic};
 }
 
-/** A font found for a text layer, or that the system's font names are still being read. */
-struct ResolvedFont final {
-    std::optional<font::SystemFont> face;
-    bool pending = false;
-};
-
 /**
- * The system font a composition font names, found once per process and kept: by its name, else
- * its family and style, else the platform's interface font. Finding one by name needs every
- * font's names, read on a worker the first time: until then it is pending, and the layer's text
- * waits for it (as a page's text waits for a web font) rather than the frame.
+ * The system font a composition font names, cached by its catalog generation: by its name, else
+ * its family and style, else the platform's interface font. Scene preparation resolves missing
+ * indexes on its worker; it must not publish a ready scene whose text is still waiting for fonts.
  */
-[[nodiscard]] ResolvedFont resolve_font(const model::Font* const font) {
-    static std::mutex mutex;
-    static std::map<std::string, std::optional<font::SystemFont>, std::less<>> cache;
-    const std::string key =
-        font != nullptr ? font->name + "|" + font->family + "|" + font->style : std::string("|");
-    const std::scoped_lock lock(mutex);
-    if (const auto found = cache.find(key); found != cache.end())
-        return ResolvedFont{found->second, false};
-    if (font != nullptr && !font::system_font_names_ready()) {
-        font::prepare_system_font_names();
-        return ResolvedFont{std::nullopt, true};
-    }
+[[nodiscard]] std::optional<font::SystemFont> resolve_font(
+    const model::Font* const font, const std::shared_ptr<font::SystemFontCatalog>& catalog) {
     std::optional<font::SystemFont> result;
     if (font != nullptr) {
         const auto [weight, italic] = font_style(font->style);
-        result = font::system_font_family(font->name, font->family, weight, italic);
+        result = font::system_font_family(catalog, font->name, font->family, weight, italic);
     }
     for (const std::string_view fallback : {"segoeui.ttf", "arial.ttf", "DejaVuSans.ttf"}) {
         if (result.has_value())
             break;
-        result = font::system_font_named(fallback);
+        result = font::system_font_named(catalog, fallback);
     }
-    cache.emplace(key, result);
-    return ResolvedFont{result, false};
+    return result;
 }
 
 /** The code points of UTF-8 text; malformed bytes stand for themselves. */
@@ -1176,7 +1160,7 @@ struct ResolvedFont final {
 
 /** One laid-out letter of a text layer. */
 struct Letter final {
-    CubicPath path;
+    std::shared_ptr<const CubicPath> path;
     double x = 0.0;
     double y = 0.0;
     double advance = 0.0;
@@ -1268,10 +1252,305 @@ struct Letter final {
     return result * selector.amount.scalar(time) / 100.0;
 }
 
+/** Prepares document text once; time-dependent selectors only project these retained letters. */
+class TextPreparer final {
+  public:
+    TextPreparer(const model::Animation& animation,
+                 std::shared_ptr<font::SystemFontCatalog> catalog)
+        : animation_(animation), catalog_(std::move(catalog)) {}
+
+    [[nodiscard]] std::vector<Letter> prepare(const model::TextDocument& text_document) const {
+        std::vector<Letter> result;
+        const model::TextDocument* document = &text_document;
+        if (document->text.empty())
+            return result;
+        const model::Font* font = nullptr;
+        for (const model::Font& entry : animation_.fonts) {
+            if (entry.name == document->font)
+                font = &entry;
+        }
+        const double size = document->size;
+        std::optional<font::SystemFont> face;
+        double font_scale = size / 1000.0;
+        bool resolved = false;
+        const auto find_face = [&] {
+            if (resolved)
+                return;
+            face = resolve_font(font, catalog_);
+            if (face.has_value() && face->face.units_per_em() > 0U)
+                font_scale = size / static_cast<double>(face->face.units_per_em());
+            resolved = true;
+        };
+        std::string content = document->text;
+        if (document->caps != 0) {
+            for (char& c : content)
+                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+        const double tracking = document->tracking / 1000.0 * size;
+
+        // Letters with their advances, line by line.
+        std::vector<Letter> letters;
+        std::vector<double> line_widths(1U, 0.0);
+        std::size_t line = 0U;
+        std::size_t word = 0U;
+        double x = 0.0;
+        std::uint16_t previous = 0U;
+        bool previous_space = true;
+        const double box_width = document->box_size.has_value() ? document->box_size->x : 0.0;
+        std::size_t line_start = 0U;
+        const auto break_line = [&] {
+            line_widths.back() = std::max(0.0, x - tracking);
+            line_widths.push_back(0.0);
+            ++line;
+            x = 0.0;
+            previous = 0U;
+            line_start = letters.size();
+        };
+        for (const std::uint32_t code_point : code_points(content)) {
+            if (code_point == '\r' || code_point == '\n' || code_point == 0x03U) {
+                break_line();
+                previous_space = true;
+                continue;
+            }
+            Letter letter;
+            letter.space = code_point == ' ' || code_point == '\t';
+            if (!letter.space && previous_space && !letters.empty())
+                ++word;
+            previous_space = letter.space;
+            std::string character;
+            {
+                const std::uint32_t single = code_point;
+                if (single < 0x80U) {
+                    character.push_back(static_cast<char>(single));
+                } else if (single < 0x800U) {
+                    character.push_back(static_cast<char>(0xC0U | (single >> 6U)));
+                    character.push_back(static_cast<char>(0x80U | (single & 0x3FU)));
+                } else if (single < 0x10000U) {
+                    character.push_back(static_cast<char>(0xE0U | (single >> 12U)));
+                    character.push_back(static_cast<char>(0x80U | ((single >> 6U) & 0x3FU)));
+                    character.push_back(static_cast<char>(0x80U | (single & 0x3FU)));
+                } else {
+                    character.push_back(static_cast<char>(0xF0U | (single >> 18U)));
+                    character.push_back(static_cast<char>(0x80U | ((single >> 12U) & 0x3FU)));
+                    character.push_back(static_cast<char>(0x80U | ((single >> 6U) & 0x3FU)));
+                    character.push_back(static_cast<char>(0x80U | (single & 0x3FU)));
+                }
+            }
+            if (const model::GlyphShape* exported = exported_glyph(character, font);
+                exported != nullptr) {
+                letter.advance = exported->width * size / 100.0;
+                letter.path = exported_path(*exported, size / 100.0);
+                previous = 0U;
+            } else if (find_face(); face.has_value()) {
+                const font::OpenTypeFont* source = &face->face;
+                std::optional<font::SystemFont> fallback;
+                std::uint16_t glyph = source->glyph_id(code_point);
+                if (glyph == 0U && !letter.space) {
+                    fallback = font::system_font_for(catalog_, code_point);
+                    if (fallback.has_value()) {
+                        source = &fallback->face;
+                        glyph = source->glyph_id(code_point);
+                    }
+                }
+                const double scale =
+                    source->units_per_em() > 0U ? size / source->units_per_em() : font_scale;
+                if (source == &face->face && previous != 0U)
+                    x += source->pair_advance_adjustment(previous, glyph) * scale;
+                letter.advance = source->horizontal_advance(glyph) * scale;
+                letter.path = prepared_path(*source, glyph, scale);
+                previous = source == &face->face ? glyph : std::uint16_t{0U};
+            } else {
+                letter.advance = size * 0.5;
+            }
+            // Paragraph text wraps at the box's width, a word at a time.
+            if (box_width > 0.0 && !letter.space && x + letter.advance > box_width &&
+                letters.size() > line_start) {
+                std::size_t cut = letters.size();
+                while (cut > line_start && !letters[cut - 1U].space)
+                    --cut;
+                if (cut > line_start) {
+                    // Move the word started after the last space onto a new line.
+                    std::vector<Letter> moved(
+                        std::make_move_iterator(letters.begin() + static_cast<std::ptrdiff_t>(cut)),
+                        std::make_move_iterator(letters.end()));
+                    letters.resize(cut);
+                    double kept = 0.0;
+                    for (std::size_t index = line_start; index < cut; ++index) {
+                        if (!letters[index].space)
+                            kept = letters[index].x + letters[index].advance;
+                    }
+                    x = kept + tracking;
+                    break_line();
+                    for (Letter& entry : moved) {
+                        entry.x = x;
+                        entry.line = line;
+                        x += entry.advance + tracking;
+                        letters.push_back(std::move(entry));
+                    }
+                } else {
+                    break_line();
+                }
+            }
+            letter.x = x;
+            letter.line = line;
+            letter.word = word;
+            x += letter.advance + tracking;
+            letters.push_back(std::move(letter));
+        }
+        line_widths.back() = std::max(0.0, x - tracking);
+        if (letters.empty())
+            return result;
+        std::size_t counted = 0U;
+        for (std::size_t index = 0U; index < letters.size(); ++index) {
+            letters[index].index = index;
+            letters[index].index_without_spaces = counted;
+            if (!letters[index].space)
+                ++counted;
+        }
+
+        // Lines placed by justification, from the origin (point text) or in the box.
+        if (font == nullptr || font->ascent <= 0.0)
+            find_face();
+        const double ascent = font != nullptr && font->ascent > 0.0 ? font->ascent / 100.0 * size
+                              : face.has_value() ? face->face.ascender() * font_scale
+                                                 : size * 0.75;
+        for (Letter& letter : letters) {
+            const double width = line_widths[letter.line];
+            double shift = 0.0;
+            const int justify = document->justify;
+            if (document->box_size.has_value()) {
+                const double room = document->box_size->x - width;
+                shift = justify == 1 || justify == 4   ? room
+                        : justify == 2 || justify == 5 ? room * 0.5
+                                                       : 0.0;
+                shift += document->box_position.x;
+            } else {
+                shift = justify == 1 || justify == 4   ? -width
+                        : justify == 2 || justify == 5 ? -width * 0.5
+                                                       : 0.0;
+            }
+            letter.x += shift;
+            letter.y = static_cast<double>(letter.line) * document->line_height -
+                       document->baseline_shift +
+                       (document->box_size.has_value() ? document->box_position.y + ascent : 0.0);
+        }
+        return letters;
+    }
+
+  private:
+    /** The composition's exported outline of `character` in `font`, if it has one. */
+    [[nodiscard]] const model::GlyphShape* exported_glyph(const std::string& character,
+                                                          const model::Font* const font) const {
+        for (const model::GlyphShape& glyph : animation_.glyphs) {
+            if (glyph.character == character &&
+                (font == nullptr || (glyph.family == font->family && glyph.style == font->style)))
+                return &glyph;
+        }
+        return nullptr;
+    }
+
+    /** An exported glyph's outline, its paths only, `scale` units per its own. */
+    [[nodiscard]] std::shared_ptr<const CubicPath>
+    exported_path(const model::GlyphShape& glyph, const double scale) const {
+        auto& cached = exported_paths_[{&glyph, scale}];
+        if (cached != nullptr)
+            return cached;
+        ShapeState state;
+        state.frame = 0.0;
+        const std::vector<std::size_t> paths =
+            evaluate_group(glyph.shapes, Affine{}, 1.0, state, 0U);
+        CubicPath result;
+        for (const std::size_t index : paths) {
+            CubicPath path = state.entries[index].path;
+            transform(path, Affine::scale(scale, scale) * state.entries[index].to_layer);
+            for (Contour& contour : path) {
+                contour.closed = true;
+                result.push_back(std::move(contour));
+            }
+        }
+        cached = std::make_shared<const CubicPath>(std::move(result));
+        return cached;
+    }
+
+    [[nodiscard]] std::shared_ptr<const CubicPath>
+    prepared_path(const font::OpenTypeFont& face, const std::uint16_t glyph,
+                   const double scale) const {
+        auto& cached = font_paths_[{face.cache_identity(), glyph, scale}];
+        if (cached == nullptr)
+            cached = std::make_shared<const CubicPath>(glyph_path(face, glyph, scale));
+        return cached;
+    }
+
+    const model::Animation& animation_;
+    std::shared_ptr<font::SystemFontCatalog> catalog_;
+    mutable std::map<std::pair<const model::GlyphShape*, double>,
+                      std::shared_ptr<const CubicPath>> exported_paths_;
+    mutable std::map<std::tuple<std::shared_ptr<const void>, std::uint16_t, double>,
+                      std::shared_ptr<const CubicPath>> font_paths_;
+};
+
+/** Parent-first transform evaluation, with the same deterministic cycle cut as document playback. */
+struct TransformStep final {
+    std::size_t layer;
+    std::optional<std::size_t> parent;
+};
+
+[[nodiscard]] std::vector<TransformStep>
+prepare_transforms(const std::vector<model::Layer>& layers) {
+    std::map<std::int64_t, std::size_t> by_index;
+    for (std::size_t index = 0U; index < layers.size(); ++index) {
+        if (layers[index].index.has_value())
+            by_index.emplace(*layers[index].index, index);
+    }
+    std::vector<std::optional<std::size_t>> parents(layers.size());
+    for (std::size_t index = 0U; index < layers.size(); ++index) {
+        if (!layers[index].parent.has_value())
+            continue;
+        if (const auto found = by_index.find(*layers[index].parent); found != by_index.end())
+            parents[index] = found->second;
+    }
+    std::vector<TransformStep> result;
+    result.reserve(layers.size());
+    std::vector<std::uint8_t> visited(layers.size(), 0U);
+    std::vector<std::size_t> chain;
+    for (std::size_t index = 0U; index < layers.size(); ++index) {
+        if (visited[index] == 2U)
+            continue;
+        chain.clear();
+        std::optional<std::size_t> current = index;
+        while (current.has_value() && visited[*current] == 0U) {
+            visited[*current] = 1U;
+            chain.push_back(*current);
+            current = parents[*current];
+        }
+        if (current.has_value() && visited[*current] == 1U)
+            current.reset();
+        for (std::size_t remaining = chain.size(); remaining-- > 0U;) {
+            const std::size_t layer = chain[remaining];
+            result.push_back(TransformStep{layer, current});
+            visited[layer] = 2U;
+            current = layer;
+        }
+    }
+    return result;
+}
+
+} // namespace
+
+/** Published once; document-owned keys and shared outlines remain valid for every projected frame. */
+struct SceneData final {
+    std::shared_ptr<const resource::lottie::Animation> animation;
+    std::shared_ptr<font::SystemFontCatalog> catalog;
+    std::map<const resource::lottie::Composition*, std::vector<TransformStep>> transforms;
+    std::map<const resource::lottie::TextDocument*, std::vector<Letter>> texts;
+};
+
+namespace {
+
 class Renderer final {
   public:
-    Renderer(const model::Animation& animation, const double layer_tolerance, Sink& sink)
-        : animation_(animation), layer_tolerance_(layer_tolerance), sink_(sink) {}
+    Renderer(const SceneData& scene, const double layer_tolerance, Sink& sink)
+        : scene_(scene), animation_(*scene.animation), layer_tolerance_(layer_tolerance), sink_(sink) {}
 
     void composition(const model::Composition& composition, const double frame,
                      const Affine& to_widget, const Constraints& inherited,
@@ -1279,7 +1558,7 @@ class Renderer final {
         if (depth > maximum_depth)
             return;
         const std::vector<model::Layer>& layers = composition.layers;
-        const std::vector<Affine> worlds = world_matrices(layers, frame);
+        const std::vector<Affine> worlds = world_matrices(composition, frame);
         // Bottom (last listed) to top.
         for (std::size_t position = layers.size(); position-- > 0U;) {
             const model::Layer& layer = layers[position];
@@ -1308,40 +1587,13 @@ class Renderer final {
     }
 
     /** Each layer's transform into its composition, through its parents. */
-    [[nodiscard]] std::vector<Affine> world_matrices(const std::vector<model::Layer>& layers,
+    [[nodiscard]] std::vector<Affine> world_matrices(const model::Composition& composition,
                                                      const double frame) const {
-        std::map<std::int64_t, std::size_t> by_index;
-        for (std::size_t position = 0U; position < layers.size(); ++position) {
-            if (layers[position].index.has_value())
-                by_index.emplace(*layers[position].index, position);
-        }
-        std::vector<std::optional<Affine>> resolved(layers.size());
+        const auto& layers = composition.layers;
         std::vector<Affine> result(layers.size());
-        for (std::size_t position = 0U; position < layers.size(); ++position) {
-            // Walk up to the first resolved ancestor (a parent chain is bounded by the layers).
-            std::vector<std::size_t> chain;
-            std::optional<std::size_t> current = position;
-            while (current.has_value() && !resolved[*current].has_value() &&
-                   chain.size() <= layers.size()) {
-                chain.push_back(*current);
-                const model::Layer& layer = layers[*current];
-                current.reset();
-                if (layer.parent.has_value()) {
-                    if (const auto found = by_index.find(*layer.parent); found != by_index.end())
-                        current = found->second;
-                }
-                if (current.has_value() && std::ranges::find(chain, *current) != chain.end()) {
-                    current.reset();
-                }
-            }
-            Affine base = current.has_value() && resolved[*current].has_value()
-                              ? *resolved[*current]
-                              : Affine{};
-            for (std::size_t index = chain.size(); index-- > 0U;) {
-                base = base * local_matrix(layers[chain[index]], frame);
-                resolved[chain[index]] = base;
-            }
-            result[position] = resolved[position].value_or(Affine{});
+        for (const TransformStep& step : scene_.transforms.at(&composition)) {
+            const Affine base = step.parent.has_value() ? result[*step.parent] : Affine{};
+            result[step.layer] = base * local_matrix(layers[step.layer], frame);
         }
         return result;
     }
@@ -1747,36 +1999,6 @@ class Renderer final {
         return result;
     }
 
-    /** The composition's exported outline of `character` in `font`, if it has one. */
-    [[nodiscard]] const model::GlyphShape* exported_glyph(const std::string& character,
-                                                          const model::Font* const font) const {
-        for (const model::GlyphShape& glyph : animation_.glyphs) {
-            if (glyph.character == character &&
-                (font == nullptr || (glyph.family == font->family && glyph.style == font->style)))
-                return &glyph;
-        }
-        return nullptr;
-    }
-
-    /** An exported glyph's outline, its paths only, `scale` units per its own. */
-    [[nodiscard]] CubicPath exported_path(const model::GlyphShape& glyph,
-                                          const double scale) const {
-        ShapeState state;
-        state.frame = 0.0;
-        const std::vector<std::size_t> paths =
-            evaluate_group(glyph.shapes, Affine{}, 1.0, state, 0U);
-        CubicPath result;
-        for (const std::size_t index : paths) {
-            CubicPath path = state.entries[index].path;
-            transform(path, Affine::scale(scale, scale) * state.entries[index].to_layer);
-            for (Contour& contour : path) {
-                contour.closed = true;
-                result.push_back(std::move(contour));
-            }
-        }
-        return result;
-    }
-
     /**
      * A text layer's letters as fills and strokes: its document at `time` laid out line by line
      * (point text from its origin, paragraph text wrapped in its box), each letter moved, turned,
@@ -1788,183 +2010,13 @@ class Renderer final {
         const model::TextDocument* document = layer.text.document(time);
         if (document == nullptr || document->text.empty())
             return result;
-        const model::Font* font = nullptr;
-        for (const model::Font& entry : animation_.fonts) {
-            if (entry.name == document->font)
-                font = &entry;
-        }
-        const double size = document->size;
-        // The system's font is looked up only for letters the file exports no outline of; while
-        // its names are still being read the layer draws nothing.
-        std::optional<font::SystemFont> face;
-        double font_scale = size / 1000.0;
-        bool resolved = false;
-        const auto find_face = [&]() -> bool {
-            if (resolved)
-                return true;
-            ResolvedFont found = resolve_font(font);
-            if (found.pending)
-                return false;
-            face = std::move(found.face);
-            if (face.has_value() && face->face.units_per_em() > 0U)
-                font_scale = size / static_cast<double>(face->face.units_per_em());
-            resolved = true;
-            return true;
-        };
-        std::string content = document->text;
-        if (document->caps != 0) {
-            for (char& c : content)
-                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        }
-        const double tracking = document->tracking / 1000.0 * size;
-
-        // Letters with their advances, line by line.
-        std::vector<Letter> letters;
-        std::vector<double> line_widths(1U, 0.0);
-        std::size_t line = 0U;
-        std::size_t word = 0U;
-        double x = 0.0;
-        std::uint16_t previous = 0U;
-        bool previous_space = true;
-        const double box_width = document->box_size.has_value() ? document->box_size->x : 0.0;
-        std::size_t line_start = 0U;
-        const auto break_line = [&] {
-            line_widths.back() = std::max(0.0, x - tracking);
-            line_widths.push_back(0.0);
-            ++line;
-            x = 0.0;
-            previous = 0U;
-            line_start = letters.size();
-        };
-        for (const std::uint32_t code_point : code_points(content)) {
-            if (code_point == '\r' || code_point == '\n' || code_point == 0x03U) {
-                break_line();
-                previous_space = true;
-                continue;
-            }
-            Letter letter;
-            letter.space = code_point == ' ' || code_point == '\t';
-            if (!letter.space && previous_space && !letters.empty())
-                ++word;
-            previous_space = letter.space;
-            std::string character;
-            {
-                const std::uint32_t single = code_point;
-                if (single < 0x80U) {
-                    character.push_back(static_cast<char>(single));
-                } else if (single < 0x800U) {
-                    character.push_back(static_cast<char>(0xC0U | (single >> 6U)));
-                    character.push_back(static_cast<char>(0x80U | (single & 0x3FU)));
-                } else if (single < 0x10000U) {
-                    character.push_back(static_cast<char>(0xE0U | (single >> 12U)));
-                    character.push_back(static_cast<char>(0x80U | ((single >> 6U) & 0x3FU)));
-                    character.push_back(static_cast<char>(0x80U | (single & 0x3FU)));
-                } else {
-                    character.push_back(static_cast<char>(0xF0U | (single >> 18U)));
-                    character.push_back(static_cast<char>(0x80U | ((single >> 12U) & 0x3FU)));
-                    character.push_back(static_cast<char>(0x80U | ((single >> 6U) & 0x3FU)));
-                    character.push_back(static_cast<char>(0x80U | (single & 0x3FU)));
-                }
-            }
-            if (const model::GlyphShape* exported = exported_glyph(character, font);
-                exported != nullptr) {
-                letter.advance = exported->width * size / 100.0;
-                letter.path = exported_path(*exported, size / 100.0);
-                previous = 0U;
-            } else if (!find_face()) {
-                return result;
-            } else if (face.has_value()) {
-                const font::OpenTypeFont* source = &face->face;
-                std::optional<font::SystemFont> fallback;
-                std::uint16_t glyph = source->glyph_id(code_point);
-                if (glyph == 0U && !letter.space) {
-                    fallback = font::system_font_for(code_point);
-                    if (fallback.has_value()) {
-                        source = &fallback->face;
-                        glyph = source->glyph_id(code_point);
-                    }
-                }
-                const double scale =
-                    source->units_per_em() > 0U ? size / source->units_per_em() : font_scale;
-                if (source == &face->face && previous != 0U)
-                    x += source->pair_advance_adjustment(previous, glyph) * scale;
-                letter.advance = source->horizontal_advance(glyph) * scale;
-                letter.path = glyph_path(*source, glyph, scale);
-                previous = source == &face->face ? glyph : std::uint16_t{0U};
-            } else {
-                letter.advance = size * 0.5;
-            }
-            // Paragraph text wraps at the box's width, a word at a time.
-            if (box_width > 0.0 && !letter.space && x + letter.advance > box_width &&
-                letters.size() > line_start) {
-                std::size_t cut = letters.size();
-                while (cut > line_start && !letters[cut - 1U].space)
-                    --cut;
-                if (cut > line_start) {
-                    // Move the word started after the last space onto a new line.
-                    std::vector<Letter> moved(letters.begin() + static_cast<std::ptrdiff_t>(cut),
-                                              letters.end());
-                    letters.resize(cut);
-                    double kept = 0.0;
-                    for (std::size_t index = line_start; index < cut; ++index) {
-                        if (!letters[index].space)
-                            kept = letters[index].x + letters[index].advance;
-                    }
-                    x = kept + tracking;
-                    break_line();
-                    for (Letter& entry : moved) {
-                        entry.x = x;
-                        entry.line = line;
-                        x += entry.advance + tracking;
-                        letters.push_back(std::move(entry));
-                    }
-                } else {
-                    break_line();
-                }
-            }
-            letter.x = x;
-            letter.line = line;
-            letter.word = word;
-            x += letter.advance + tracking;
-            letters.push_back(std::move(letter));
-        }
-        line_widths.back() = std::max(0.0, x - tracking);
+        const auto& letters = scene_.texts.at(document);
         if (letters.empty())
             return result;
-        std::size_t counted = 0U;
-        for (std::size_t index = 0U; index < letters.size(); ++index) {
-            letters[index].index = index;
-            letters[index].index_without_spaces = counted;
-            if (!letters[index].space)
-                ++counted;
-        }
+        const std::size_t counted = letters.back().index_without_spaces +
+                                    (letters.back().space ? 0U : 1U);
+        const double size = document->size;
 
-        // Lines placed by justification, from the origin (point text) or in the box.
-        if ((font == nullptr || font->ascent <= 0.0) && !find_face())
-            return result;
-        const double ascent = font != nullptr && font->ascent > 0.0 ? font->ascent / 100.0 * size
-                              : face.has_value() ? face->face.ascender() * font_scale
-                                                 : size * 0.75;
-        for (Letter& letter : letters) {
-            const double width = line_widths[letter.line];
-            double shift = 0.0;
-            const int justify = document->justify;
-            if (document->box_size.has_value()) {
-                const double room = document->box_size->x - width;
-                shift = justify == 1 || justify == 4   ? room
-                        : justify == 2 || justify == 5 ? room * 0.5
-                                                       : 0.0;
-                shift += document->box_position.x;
-            } else {
-                shift = justify == 1 || justify == 4   ? -width
-                        : justify == 2 || justify == 5 ? -width * 0.5
-                                                       : 0.0;
-            }
-            letter.x += shift;
-            letter.y = static_cast<double>(letter.line) * document->line_height -
-                       document->baseline_shift +
-                       (document->box_size.has_value() ? document->box_position.y + ascent : 0.0);
-        }
 
         const std::array<double, 3> no_color{0.0, 0.0, 0.0};
         const model::Vec2 alignment = layer.text.alignment.point(time);
@@ -1995,7 +2047,7 @@ class Renderer final {
         };
         double tracking_shift = 0.0;
         std::size_t tracking_line = 0U;
-        for (Letter& letter : letters) {
+        for (const Letter& letter : letters) {
             if (letter.line != tracking_line) {
                 tracking_line = letter.line;
                 tracking_shift = 0.0;
@@ -2053,23 +2105,23 @@ class Renderer final {
                 if (animator.tracking.has_value())
                     extra_tracking += animator.tracking->scalar(time) / 1000.0 * size * amount;
             }
-            letter.x += tracking_shift;
+            const double x = letter.x + tracking_shift;
             tracking_shift += extra_tracking;
-            if (letter.space || letter.path.empty() || alpha <= 0.0)
+            if (letter.space || letter.path == nullptr || letter.path->empty() || alpha <= 0.0)
                 continue;
             // A letter turns and scales about its anchor: the middle of its advance on the
             // baseline, moved by the grouping alignment (percent of its advance and size).
-            const Point pivot{letter.x + letter.advance * 0.5 +
+            const Point pivot{x + letter.advance * 0.5 +
                                   alignment.x / 100.0 * letter.advance,
                               letter.y + alignment.y / 100.0 * size};
             const Affine placement =
                 Affine::translate(pivot.x + position.x, pivot.y + position.y) *
                 Affine::rotate(rotation) * Affine::scale(scale.x, scale.y) *
-                Affine::translate(letter.x - pivot.x - anchor.x, letter.y - pivot.y - anchor.y);
+                Affine::translate(x - pivot.x - anchor.x, letter.y - pivot.y - anchor.y);
             const auto paint = [&](const std::array<double, 3>& color, const bool as_stroke) {
                 Drawable drawable;
                 drawable.to_widget = world * placement;
-                drawable.path = letter.path;
+                drawable.path = *letter.path;
                 drawable.color = RenderColor{channel(color[0]), channel(color[1]),
                                              channel(color[2]), channel(alpha)};
                 drawable.stroke = as_stroke;
@@ -2127,6 +2179,7 @@ class Renderer final {
             sink_.pop_clip();
     }
 
+    const SceneData& scene_;
     const model::Animation& animation_;
     double layer_tolerance_ = flatness;
     Sink& sink_;
@@ -2134,8 +2187,30 @@ class Renderer final {
 
 } // namespace
 
-void append_frame(std::vector<RenderCommand>& output, const resource::lottie::Animation& animation,
-                  const double frame, const Rect viewport, const Rect clip) {
+Scene::Scene(std::shared_ptr<const resource::lottie::Animation> animation,
+             std::shared_ptr<font::SystemFontCatalog> catalog) {
+    if (animation == nullptr || catalog == nullptr)
+        throw std::invalid_argument("Lottie scene preparation requires a document and font catalog");
+    auto data = std::make_shared<SceneData>();
+    data->animation = std::move(animation);
+    data->catalog = std::move(catalog);
+    TextPreparer text(*data->animation, data->catalog);
+    const auto prepare = [&](const model::Composition& composition) {
+        data->transforms.emplace(&composition, prepare_transforms(composition.layers));
+        for (const model::Layer& layer : composition.layers) {
+            for (const auto& keyframe : layer.text.documents)
+                data->texts.emplace(&keyframe.document, text.prepare(keyframe.document));
+        }
+    };
+    prepare(data->animation->root);
+    for (const auto& composition : data->animation->precomps)
+        prepare(composition);
+    data_ = std::move(data);
+}
+
+void Scene::append_frame(std::vector<RenderCommand>& output, const double frame,
+                          const Rect viewport, const Rect clip) const {
+    const auto& animation = *data_->animation;
     if (!(viewport.width > 0.0) || !(viewport.height > 0.0) || !(animation.width > 0.0) ||
         !(animation.height > 0.0)) {
         return;
@@ -2150,7 +2225,7 @@ void append_frame(std::vector<RenderCommand>& output, const resource::lottie::An
                               ? std::ceil(animation.filter_reach * to_widget.mean_scale()) + 2.0
                               : 0.0;
     Sink sink(output, clip, margin);
-    Renderer renderer(animation, flatness, sink);
+    Renderer renderer(*data_, flatness, sink);
     // An animation that blends, or whose effects reach past what they draw, is drawn as one
     // layer the widget's box cuts: its layers blend with each other and not with the page.
     if (animation.layered) {
@@ -2162,6 +2237,26 @@ void append_frame(std::vector<RenderCommand>& output, const resource::lottie::An
     sink.push_clip(clip);
     renderer.composition(animation.root, frame, to_widget, {}, 0U);
     sink.pop_clip();
+}
+
+SceneCache::~SceneCache() {
+    for (const auto& [key, pending] : entries_) {
+        static_cast<void>(key);
+        pending.cancel();
+    }
+}
+
+base::Pending<Scene>
+SceneCache::find(const std::shared_ptr<const resource::lottie::Animation>& animation) {
+    Key key{animation, font::system_font_catalog()};
+    if (const auto found = entries_.find(key); found != entries_.end())
+        return found->second;
+    auto pending = base::Pending<Scene>::start(
+        tasks_, base::TaskKind::lottie, base::TaskPriority::frame_critical, "Lottie scene",
+        [animation, catalog = key.second](const base::TaskCancellation&) {
+            return Scene(animation, catalog);
+        });
+    return entries_.emplace(std::move(key), std::move(pending)).first->second;
 }
 
 } // namespace strata::ui::lottie

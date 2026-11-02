@@ -15,13 +15,16 @@ cmake --build --preset linux-x64 --parallel
 build/cmake/linux-x64/native/strata_preview
 ```
 
-The preview defaults to a 60 FPS limit. Disable the frame delay and SDL renderer VSync with:
+Vulkan presentation follows the display's FIFO/vsync cadence on an independent GPU owner.
+The CPU reference path retains its 60 FPS limit. Select explicit uncapped, caller-thread
+presentation with:
 
 ```sh
 build/cmake/linux-x64/native/strata_preview --uncapped
 ```
 
-Actual throughput still depends on rendering, GPU readback, and the window compositor.
+Actual throughput still depends on rendering and the window compositor. Vulkan reads back pixels
+only for requested captures, not for ordinary presentation.
 
 The Linux preset enables `STRATA_BUILD_PREVIEW`. With no arguments the preview opens
 `assets/strata/samples/primitives.strata-app.json`, including buttons, editors, checkboxes,
@@ -56,6 +59,11 @@ the manifest. Automatic `--watch` preview is currently specific to the Windows d
 Generic domain actions are recorded to stdout as `STRATA ACTION ...`; custom native host executables
 should be launched directly.
 
+Vulkan prepares a replacement Session while the current scene remains live. Shader declarations
+belong to the candidate's own presentation stream, so even a partially failed shader batch cannot
+change the current scene. Promotion switches the visible packet and native IME ownership; retired
+Sessions finish ordered resource release without stopping the successor's text input.
+
 ## Testing and captures
 
 ```sh
@@ -64,7 +72,8 @@ build/cmake/linux-x64/native/strata_preview --smoke --screenshot /tmp/primitives
 SDL_VIDEODRIVER=dummy build/cmake/linux-x64/native/strata_preview --smoke --backend reference
 ```
 
-`--smoke` creates a hidden window, presents one frame, and exits. `--screenshot file.png` saves the
+`--smoke` creates a hidden window, waits for an actual application draw/Present, and exits.
+It uses deterministic preparation and caller-thread presentation. `--screenshot file.png` saves the
 first frame; omit `--smoke` to continue interacting. CTest runs display-independent smoke and input
 tests, covering scaled input, key repeat/release, UTF-8 IME selection ranges, actions, slider bounds,
 dropdown keyboard selection, text editing, clipboard paste, disabled rendering, and resizing.
@@ -80,18 +89,22 @@ For a build without SDL/window support, configure with `-DSTRATA_BUILD_PREVIEW=O
 
 ## Ownership and scope
 
-`native/preview` owns only SDL presentation, event translation, and native clipboard/IME adapters.
-It reuses `headless::ApplicationHost`, generic manifest parsing, resource loading, extensions, and
-ordered Surface release. The application host accepts optional native services; deterministic
-in-memory services remain the default for replay tests. Live preview skips per-frame inspection JSON
-and drains observation history, so leaving a window open does not accumulate frame traces.
+`native/preview` owns SDL event translation and native clipboard/IME adapters. Vulkan uses
+`host::Session::prepare` and `host::Presentation`: the main thread owns Sessions and SDL video
+calls, including surface creation; the GPU owner owns the Vulkan instance, device, swap chain and
+ordered packet consumption. The SDL window remains alive through GPU shutdown. Zero-size or
+outdated targets defer drawing without discarding pending commits or captures.
 
-This is an interactive testing host. Vulkan renders into the existing offscreen target, and SDL
-presents the captured RGBA frame through a streaming texture, capped at 60 Hz by default (or uncapped
-with `--uncapped`). GPU readback and upload
-make it unsuitable for production performance measurements. A production Linux embedding can use
-[Strata::vulkan](vulkan-hosting.md) with its own swapchain to avoid those transfers. CPU reference
-rendering has the same material/effect limitations as headless reference captures.
+The CPU reference path reuses `headless::ApplicationHost`, including its deterministic in-memory
+replay services. The Vulkan interactive path installs native clipboard/IME and declared action
+bindings; it does not pretend to implement platform effects or asynchronous host requests through
+recording-only success callbacks. Applications needing those services need a custom host.
+Neither path retains ordinary per-frame inspection history.
+
+This is an interactive testing host. Time-driven Vulkan shaders keep drawing during a runtime-owner
+stall, but SDL input still shares the main thread with the runtime. GPU independence is not
+independent input handling. CPU reference rendering retains its streaming-texture presentation and
+the same material/effect limitations as headless reference captures.
 
 `cmake --install build/cmake/linux-x64` installs `bin/strata_preview` and the gallery under
 `share/assets/strata/samples`. The installed executable locates the adjacent resource tree, and

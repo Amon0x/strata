@@ -11,6 +11,7 @@
 #include <string>
 #include <utility>
 
+#include "base/process_lifetime.hpp"
 #include "data/json.hpp"
 #include "runtime/expression.hpp"
 #include "ui/code_highlight.hpp"
@@ -209,8 +210,8 @@ struct ExpansionCache final {
 };
 
 [[nodiscard]] ExpansionCache& expansion_cache() {
-    static ExpansionCache cache;
-    return cache;
+    static base::ProcessLifetime<ExpansionCache> cache;
+    return cache.get();
 }
 
 /** Everything an expansion depends on, spelled out: equal identities expand identically. */

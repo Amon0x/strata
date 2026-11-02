@@ -335,8 +335,9 @@ InjectedActionResult InputRouter::dispatch_action(
 
 struct InputRouter::ScriptHost final : runtime::ScriptEffects {
     ScriptHost(InputRouter& router, runtime::ActionEvent event, const std::uint64_t node,
-               InputOperationResult& result)
-        : router(router), event(std::move(event)), node_identity(node), result(result) {}
+               InputOperationResult& result, const RetainedNode* immediate_source = nullptr)
+        : router(router), event(std::move(event)), node_identity(node), result(result),
+          immediate_source(immediate_source) {}
 
     [[nodiscard]] const runtime::Value* state(const runtime::LexicalStateBinding& binding) override {
         return router.application_.state().find(binding.address);
@@ -407,6 +408,7 @@ struct InputRouter::ScriptHost final : runtime::ScriptEffects {
     runtime::ActionEvent event;
     std::uint64_t node_identity;
     InputOperationResult& result;
+    const RetainedNode* immediate_source;
     /** The platform request the run waits on. */
     std::optional<std::uint64_t> request;
 };
@@ -415,7 +417,7 @@ runtime::ActionDispatchOutcome InputRouter::execute_script(const runtime::Action
                                                            const runtime::ActionValue& handler,
                                                            const RetainedNode& node,
                                                            InputOperationResult& result) {
-    ScriptHost host(*this, event, node.identity(), result);
+    ScriptHost host(*this, event, node.identity(), result, &node);
     runtime::ExpressionRuntime scripts(application_.host(),
                                        application_.bundle()->action_registry());
     runtime::ScriptOutcome outcome = scripts.run_script(handler.script, {event.value}, host);

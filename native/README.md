@@ -8,23 +8,27 @@ rather than exposing implementation classes.
 
 ## ABI and ownership
 
-- ABI v7 uses opaque runtime, snapshot, registration, and Surface handles with paired release
-  functions and exposes immutable host resources, modality-aware focus presentation, durable-state,
+- ABI v9 uses opaque runtime, snapshot, registration, Surface, and encoded-packet handles with paired
+  release functions and exposes immutable host resources, modality-aware focus presentation, durable-state,
   and typed asynchronous host-data contracts. Built-in language declarations are native, and typed
-  visual effect programs are enumerable by render backends. Releasing `NULL` is harmless; v7 is the
-  minimum negotiable host
-  contract.
+  visual effect programs are enumerable by render backends. Releasing `NULL` is harmless; v9 is the
+  minimum negotiable host contract.
 - All public structures start with `struct_size`; reserved fields are zeroed. Required capabilities
   are negotiated before construction and fail explicitly when unsupported.
 - Public text is length-delimited UTF-8. Callback strings/bytes are borrowed only for the callback.
   No STL type, C++ exception, or internal allocator pointer crosses the boundary.
 - The caller owns a signed 64-bit monotonic nanosecond clock. Runtime mutations are owner-thread
   serialized. Immutable snapshots keep their documented lifetime independently of the runtime.
+- Engine preparation uses one shared task pool and runtime-owned adoption queues. ABI v8 adds
+  asynchronous/deterministic execution, coalesced frame-wake callbacks and task-state queries.
+  Workers never mutate Surface state. Wake callbacks only signal the event loop; runtime release
+  quiesces them. See [embedding](../docs/embedding.md#preparation-and-frame-wakes).
 - Allocator callbacks are a complete allocate/deallocate pair and remain valid until every derived
   handle is released. Telemetry covers allocator-routed ABI handles and the production compile
   arena. It intentionally does not label ordinary internal STL storage as routed memory.
 - Runtime host snapshots, action/effect handlers, resources, clipboard/IME, durability, async
-  requests, diagnostics, identities, state, input, text/atlas state, and caches are instance-local.
+  requests, diagnostics, identities, state, input, and text/atlas state are instance-local.
+  Shared font parsing, outline and bitmap caches synchronize their mutable internals.
   Optional clipboard/IME/effect adapters are installed independently. Durable and async adapters
   are installed once because loaded state and in-flight ownership depend on their identity. Editor
   clipboard fallback and cross-Surface IME ownership are runtime-shared. IME cursor rectangles are
@@ -43,31 +47,39 @@ rather than exposing implementation classes.
 
 ## Surface and packet lifetime
 
-`strata_surface_frame` updates a Surface and prepares packet v14. A bytes sink borrows the packet only
-for its callback. Resource create/upload/release operations are one-shot; settled frames use compact
+`strata_surface_frame` updates a Surface and publishes an immutable packet-v25 stream item.
+`strata_surface_acquire_render_packet` acquires an owning reference without copying; its bytes survive
+later frames and Surface/runtime destruction. Retain/release are thread-safe and independent of
+runtime admission. The library must stay loaded until references are released.
+Resource create/upload/release operations are one-shot; settled frames use compact
 packets that reference the latest full geometry epoch. Consume every framed packet in order with one
 stateful decoder per Surface/backend stream. Reading canonical frame JSON is optional and lazily
 materialized.
 
 The resource adapter is an immutable Runtime dependency. Install it once before loading modules or
 creating Surfaces; replacement and removal are rejected. Fonts, raster images (PNG, JPEG, GIF and
-WebP), and SVG documents are materialized when a Surface is created and remain fixed for that
-Surface's lifetime. Source
-resource paths remain private to the adapter. Packets use collision-free process/runtime/Surface
+WebP), and SVG documents retain immutable inputs for the Surface's lifetime; usable fonts and pixels
+prepare through the runtime's task mode. Source resource paths remain private to the adapter.
+Packets use collision-free process/runtime/Surface
 host resource identities. Editing resource files or changing extension packages therefore requires
 rebuilding the owning artifact and recreating the application session.
 
 Surface destruction is an ordered host-consumption barrier for every Surface-owned static texture
 and glyph atlas. Call
-`strata_surface_prepare_release_packet`, synchronously consume that resource-only packet while the
-host texture owner is alive, call `strata_surface_acknowledge_release_packet`, and only then call
-`strata_surface_release`. Preparation is idempotent and terminal, but is not proof of consumption;
+`strata_surface_prepare_release_packet`, consume the owned resource-only packet in stream order while
+the host texture owner is alive, call `strata_surface_acknowledge_release_packet` after consumption,
+and only then call `strata_surface_release`. Preparation is idempotent and terminal, but is not proof of consumption;
 out-of-order release is refused and leaves the handle recoverable. Runtime release likewise refuses
 live Surfaces. `strata_surface_abandon` is an explicit delivery-impossible fallback that may leave
 host GPU resources alive. The normal C++ path uses explicit `Surface::close()` or `abandon()`; a
 live Surface reaching its destructor automatically uses that abandon path and emits
 `STRATA.SURFACE.RELEASE_ABANDONED`; explicit packet consumption and `Surface::close()` remain the
 normal leak-free path.
+
+The C++ facade returns `EncodedRenderPacket` from ordinary and terminal packet acquisition.
+`host::SurfacePacketFrame::encoded` owns the wire bytes; its decoded `packet` pointer is borrowed
+until the stream advances. Recording and threaded consumers retain encoded handles, not aliases of
+the decoder's mutable geometry. Retaining bytes does not retain superseded GPU resources.
 
 ## Platform builds
 
@@ -90,7 +102,7 @@ warnings, and installed-package acceptance. ASan uses a separate build with
 `strata_preview` provides the Linux interactive testing window; see
 [Linux preview](../docs/linux-preview.md) for SDL dependencies and usage.
 
-`strata_headless` is the non-windowed application host. It drives the same C ABI and packet-v14
+`strata_headless` is the non-windowed application host. It drives the same C ABI and packet-v25
 boundary as other hosts, but supplies a deterministic clock, scripted input/services, and canonical
 frame capture. On Windows it can use offscreen D3D11/WARP through the desktop host's shared
 production texture, blur, and HLSL material pipeline. Linux supports both the CPU reference backend and Vulkan GPU captures with authored HLSL.

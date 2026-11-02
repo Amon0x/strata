@@ -102,6 +102,11 @@ struct Renderer::Impl final {
         renderer.reset();
         if (context != nullptr)
             context->ClearState();
+        target.Reset();
+        back_buffer.Reset();
+        swap_chain.Reset();
+        context.Reset();
+        device.Reset();
         if (owns_com)
             CoUninitialize();
     }
@@ -191,7 +196,7 @@ struct Renderer::Impl final {
     }
 
     /** The back buffer as it stands: a staging copy, mapped and read row by row. */
-    [[nodiscard]] FrameCapture read_back_buffer() {
+    [[nodiscard]] host::PresentationCapture read_back_buffer() {
         D3D11_TEXTURE2D_DESC description{};
         back_buffer->GetDesc(&description);
         description.Usage = D3D11_USAGE_STAGING;
@@ -205,7 +210,7 @@ struct Renderer::Impl final {
         D3D11_MAPPED_SUBRESOURCE mapped{};
         require_hresult(context->Map(staging.Get(), 0U, D3D11_MAP_READ, 0U, &mapped),
                         "capture map");
-        FrameCapture frame{description.Width, description.Height, {}};
+        host::PresentationCapture frame{description.Width, description.Height, {}};
         frame.rgba.resize(static_cast<std::size_t>(frame.width) * frame.height * 4U);
         for (std::uint32_t row = 0U; row < frame.height; ++row) {
             std::memcpy(frame.rgba.data() + static_cast<std::size_t>(row) * frame.width * 4U,
@@ -224,7 +229,7 @@ struct Renderer::Impl final {
 
     bool capture_requested = false;
     bool transparent = false;
-    std::optional<FrameCapture> capture;
+    std::optional<host::PresentationCapture> capture;
     HWND window = nullptr;
     bool owns_com = false;
     bool vsync = true;
@@ -236,7 +241,7 @@ struct Renderer::Impl final {
     ComPtr<ID3D11Texture2D> back_buffer;
     ComPtr<ID3D11RenderTargetView> target;
     std::unique_ptr<d3d11::RenderContext> renderer;
-    RendererInfo info;
+    host::PresentationInfo info;
     std::chrono::steady_clock::time_point started_at = std::chrono::steady_clock::now();
 };
 
@@ -248,6 +253,10 @@ Renderer& Renderer::operator=(Renderer&&) noexcept = default;
 
 void Renderer::declare_material(const std::string_view id, const std::string_view hlsl_source) {
     impl_->renderer->declare_material(id, hlsl_source);
+}
+
+void Renderer::release_programs(const std::string_view prefix) {
+    impl_->renderer->release_programs(prefix);
 }
 
 void Renderer::declare_effect_pass(const std::string_view effect_id, const std::uint32_t index,
@@ -303,18 +312,106 @@ void Renderer::capture_next_frame() noexcept {
     impl_->capture_requested = true;
 }
 
-std::optional<FrameCapture> Renderer::take_capture() {
+std::optional<host::PresentationCapture> Renderer::take_capture() {
     return std::exchange(impl_->capture, std::nullopt);
 }
 
-bool Renderer::render(const host::RenderPacket& packet) {
-    begin_frame();
-    static_cast<void>(render_layer("default", packet));
-    return end_frame();
+host::PresentationInfo Renderer::info() const {
+    return impl_->info;
 }
 
-RendererInfo Renderer::info() const {
-    return impl_->info;
+namespace {
+
+/** The desktop driver owns every GPU call and never receives a runtime or Surface pointer. */
+class PresentationDriver final : public host::PresentationDriver {
+  public:
+    PresentationDriver(HWND window, const bool vsync, const bool asynchronous_shaders)
+        : renderer_(window, vsync, asynchronous_shaders) {}
+    [[nodiscard]] host::PresentationInfo info() const override { return renderer_.info(); }
+    void declare_material(const host::MaterialSource& material) override {
+        renderer_.declare_material(material.declaration.id, material.source);
+    }
+    void release_programs(const std::string_view prefix) override {
+        renderer_.release_programs(prefix);
+    }
+    void declare_effect(const host::EffectSource& effect) override {
+        const EffectPassDeclaration& pass = effect.declaration;
+        renderer_.declare_effect_pass(
+            pass.effect_id, pass.index, static_cast<std::uint32_t>(pass.kind), pass.radius,
+            pass.downsample, pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
+            pass.downsample_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE), effect.source);
+    }
+    void resize(const host::PresentationViewport& viewport) override {
+        renderer_.resize(viewport.width, viewport.height, viewport.logical_width,
+                         viewport.logical_height);
+    }
+    void set_pointer(const std::optional<std::array<double, 2U>> position) override {
+        renderer_.set_pointer(position);
+    }
+    void set_transparent(const bool transparent) override { renderer_.set_transparent(transparent); }
+    void consume_resources(const host::RenderPacket& packet) override {
+        renderer_.consume_resources(packet);
+    }
+    void release_layer(const std::string_view id) noexcept override { renderer_.release_layer(id); }
+    [[nodiscard]] bool begin_frame() override {
+        renderer_.begin_frame();
+        return true;
+    }
+    [[nodiscard]] host::PresentationLayerTiming draw(
+        const std::string_view id, const host::RenderPacket& packet) override {
+        const RenderLayerTelemetry measured = renderer_.render_layer(id, packet);
+        return {measured.blur_passes, measured.blur_target_width, measured.blur_target_height,
+                measured.blur_nanos, measured.effect_passes, measured.effect_target_width,
+                measured.effect_target_height, measured.effect_nanos, measured.gpu_nanos,
+                measured.live};
+    }
+    [[nodiscard]] std::vector<strata_backdrop_sample> take_backdrop_samples(
+        const std::string_view id) override {
+        return renderer_.take_backdrop_samples(id);
+    }
+    [[nodiscard]] host::PresentationResult end_frame() override {
+        const bool presented = renderer_.end_frame();
+        return {presented, !presented};
+    }
+    void capture_next_frame() override { renderer_.capture_next_frame(); }
+    [[nodiscard]] std::optional<host::PresentationCapture> take_capture() override {
+        return renderer_.take_capture();
+    }
+
+  private:
+    Renderer renderer_;
+};
+
+} // namespace
+
+std::unique_ptr<host::Presentation, PresentationDeleter> create_presentation(
+    HWND window, const bool vsync, const bool asynchronous_shader_compilation,
+    const host::PresentationExecution execution) {
+    return std::unique_ptr<host::Presentation, PresentationDeleter>(new host::Presentation(
+        [window, vsync, asynchronous_shader_compilation] {
+            return std::make_unique<PresentationDriver>(window, vsync,
+                                                         asynchronous_shader_compilation);
+        }, execution, [window] {
+            // A destroyed window has no recipient; shutdown still observes the owner's receipt.
+            static_cast<void>(PostMessageW(window, WM_NULL, 0U, 0));
+        }));
+}
+
+void dispatch_presentation_shutdown_messages() noexcept {
+    static_cast<void>(MsgWaitForMultipleObjects(0U, nullptr, FALSE, 10U, QS_SENDMESSAGE));
+    MSG message{};
+    // PeekMessage dispatches sent messages even when no posted message is removed. Do not
+    // re-enter application input or actions while their host is shutting down.
+    static_cast<void>(PeekMessageW(&message, nullptr, 0U, 0U, PM_NOREMOVE));
+}
+
+void PresentationDeleter::operator()(host::Presentation* const presentation) const noexcept {
+    if (presentation == nullptr)
+        return;
+    presentation->stop();
+    while (!presentation->stopped())
+        dispatch_presentation_shutdown_messages();
+    delete presentation;
 }
 
 } // namespace strata::desktop

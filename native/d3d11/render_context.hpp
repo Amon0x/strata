@@ -39,6 +39,8 @@ class RenderContext final {
                     double logical_width, double logical_height);
     void release_target();
     void declare_material(std::string_view id, std::string_view hlsl_source);
+    /** Removes a retired consumer's declarations without joining pending shader compilation. */
+    void release_programs(std::string_view prefix);
     void declare_effect_pass(std::string_view effect_id, std::uint32_t index, std::uint32_t kind,
                              double radius, std::uint32_t downsample,
                              std::uint32_t radius_parameter, std::uint32_t downsample_parameter,

@@ -22,9 +22,17 @@ std::uint64_t RuntimeImageStore::publish(std::string id, const ImageDimensions d
         throw std::overflow_error("runtime image generation exhausted");
     }
     ++generation_;
+    const auto previous = images_.find(id);
+    const bool metadata_changed =
+        previous == images_.end() || previous->second->dimensions != dimensions;
     auto image = std::make_shared<RuntimeImage>(
         RuntimeImage{id, dimensions, sampling, std::move(pixels), generation_});
-    images_.insert_or_assign(std::move(id), std::move(image));
+    if (previous == images_.end())
+        images_.emplace(std::move(id), std::move(image));
+    else
+        previous->second = std::move(image);
+    if (metadata_changed)
+        ++metadata_generation_;
     return generation_;
 }
 
@@ -37,6 +45,7 @@ bool RuntimeImageStore::release(const std::string_view id) {
     }
     images_.erase(found);
     ++generation_;
+    ++metadata_generation_;
     return true;
 }
 

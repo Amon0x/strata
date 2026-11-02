@@ -505,6 +505,9 @@ void DescriptionBuilder::index_reads(const ComponentInstance& instance) {
     }
     for (const RetainedRead& read : instance.reads.retained)
         retained_readers_[read.name].insert(instance.id);
+    if (std::ranges::any_of(instance.reads.readiness, &base::ReadinessRead::watching)) {
+        readiness_readers_.insert(instance.id);
+    }
     if (instance.reads.raised_errors)
         erroring_.insert(instance.id);
 }
@@ -527,6 +530,7 @@ void DescriptionBuilder::unindex_reads(const ComponentInstance& instance) noexce
     }
     for (const RetainedRead& read : instance.reads.retained)
         remove(retained_readers_, read.name);
+    readiness_readers_.erase(instance.id);
     erroring_.erase(instance.id);
 }
 
@@ -614,7 +618,18 @@ void DescriptionBuilder::collect_invalidations() {
             return !retained_reads_current(reader);
         });
     }
+    stale_by(readiness_readers_, [](const ComponentInstance& reader) {
+        return !std::ranges::all_of(reader.reads.readiness, &base::ReadinessRead::current);
+    });
     checked();
+}
+
+bool DescriptionBuilder::readiness_changed() const {
+    return std::ranges::any_of(readiness_readers_, [this](const InstanceId id) {
+        const ComponentInstance* const reader = find_instance(id);
+        return reader != nullptr && reader->attached &&
+               !std::ranges::all_of(reader->reads.readiness, &base::ReadinessRead::current);
+    });
 }
 
 void DescriptionBuilder::describe_stale() {
@@ -890,6 +905,7 @@ void DescriptionBuilder::reset() noexcept {
     state_readers_.clear();
     host_readers_.clear();
     retained_readers_.clear();
+    readiness_readers_.clear();
     erroring_.clear();
     stale_.clear();
     emitted_changed_.clear();

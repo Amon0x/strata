@@ -9,6 +9,9 @@
 #include "host/system_fonts.hpp"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <barrier>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -18,6 +21,7 @@
 #include <iterator>
 #include <mutex>
 #include <optional>
+#include <semaphore>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -184,6 +188,7 @@ void action_bindings_decode_at_the_boundary() {
     strata_runtime_config config{};
     config.struct_size = sizeof(config);
     config.abi_version = STRATA_ABI_VERSION_CURRENT;
+    config.task_execution = STRATA_TASK_EXECUTION_DETERMINISTIC;
     config.required_capabilities =
         STRATA_CAPABILITY_CORE_LIFECYCLE | STRATA_CAPABILITY_CALLER_CLOCK |
         STRATA_CAPABILITY_APPLICATION_LIFECYCLE | STRATA_CAPABILITY_ACTION_DISPATCH;
@@ -207,12 +212,13 @@ void action_bindings_decode_at_the_boundary() {
     runtime.configure_application(application);
 
     std::optional<HostTestAction> captured;
-    strata::host::Bindings bindings(runtime, "strata.host-tests");
+    strata::host::Bindings bindings("strata.host-tests");
     bindings.on<HostTestAction>([&captured](HostTestAction action) {
         captured = std::move(action);
         return strata::host::ActionResult::handled;
     });
     strata::Runtime active_runtime = std::move(runtime);
+    bindings.attach(active_runtime);
     const strata::ActionDispatchInfo info = active_runtime.dispatch(strata::ActionDispatch{
         .action_id = "host.test",
         .payload_json = "null",
@@ -234,6 +240,7 @@ void raw_runtime_config_retains_activation_diagnostics() {
     strata_runtime_config config{};
     config.struct_size = sizeof(config);
     config.abi_version = STRATA_ABI_VERSION_CURRENT;
+    config.task_execution = STRATA_TASK_EXECUTION_DETERMINISTIC;
     config.required_capabilities =
         STRATA_CAPABILITY_CORE_LIFECYCLE | STRATA_CAPABILITY_CALLER_CLOCK |
         STRATA_CAPABILITY_APPLICATION_LIFECYCLE | STRATA_CAPABILITY_COMPILER_ACTIVATION |
@@ -287,6 +294,7 @@ void public_runtime_facade_owns_host_boundaries() {
     std::int64_t now = 100;
     std::vector<strata::Diagnostic> observed_diagnostics;
     strata::RuntimeOptions options;
+    options.task_execution = strata::TaskExecution::deterministic;
     options.clock = [&now] { return now; };
     options.diagnostic = [&observed_diagnostics](const strata::Diagnostic& diagnostic) {
         observed_diagnostics.push_back(diagnostic);
@@ -376,9 +384,11 @@ void public_runtime_facade_owns_host_boundaries() {
                   .accepted_event_count == 1U,
           "owned input event did not enqueue");
     ++now;
-    check(surface.frame(now).processed_input_event_count == 1U,
+    const auto framed = surface.frame(now);
+    check(framed.processed_input_event_count == 1U,
           "owned input event did not reach the Surface frame");
     strata::ProfilerHostFrame host_frame;
+    host_frame.frame_index = framed.frame_index;
     host_frame.draw_calls = 1U;
     surface.record_host_frame(host_frame);
     check(surface.profiler().scope == strata::ProfilerScope::surface &&
@@ -395,12 +405,11 @@ void public_runtime_facade_owns_host_boundaries() {
     try {
         surface.close();
     } catch (const strata::AbiError& error) {
-        enriched = error.diagnostic().has_value() &&
-                   error.diagnostic()->code == "STRATA.SURFACE.RELEASE_BARRIER_INCOMPLETE" &&
-                   std::string_view(error.what()).find("prepared, synchronously consumed") !=
-                       std::string_view::npos;
+        enriched = error.status() == STRATA_STATUS_INVALID_ARGUMENT &&
+                   error.diagnostic().has_value() &&
+                   error.diagnostic()->code == "STRATA.SURFACE.RELEASE_BARRIER_INCOMPLETE";
     }
-    check(enriched, "AbiError did not include the retained diagnostic code and message");
+    check(enriched, "AbiError did not retain the release-barrier status and diagnostic");
     check(surface.diagnostics().frame_index == 1U,
           "owned Surface diagnostic snapshot lost its frame identity");
 
@@ -427,6 +436,7 @@ void snapshot_bindings_publish_only_changed_revisions() {
     strata_runtime_config config{};
     config.struct_size = sizeof(config);
     config.abi_version = STRATA_ABI_VERSION_CURRENT;
+    config.task_execution = STRATA_TASK_EXECUTION_DETERMINISTIC;
     config.required_capabilities = STRATA_CAPABILITY_CORE_LIFECYCLE |
                                    STRATA_CAPABILITY_CALLER_CLOCK |
                                    STRATA_CAPABILITY_HOST_SNAPSHOTS;
@@ -470,11 +480,140 @@ void snapshot_bindings_publish_only_changed_revisions() {
     active_runtime.close();
 }
 
+void snapshot_bindings_track_acceptance_failure_and_retry() {
+    std::counting_semaphore<> wakes{0};
+    strata::RuntimeOptions options;
+    options.task_execution = strata::TaskExecution::asynchronous;
+    options.frame_wake = [&] { wakes.release(); };
+    strata::Runtime runtime(std::move(options));
+    strata::host::Bindings bindings(runtime, "host-tests.pending");
+    std::uint64_t revision = 1U;
+    std::size_t captures = 0U;
+    bool valid = false;
+    bindings.snapshot("pending.model", [&] { return revision; }, [&] {
+        ++captures;
+        return valid ? strata::host::Value::object({{"model", strata::host::Value::object({{"count", 7}})}})
+                     : strata::host::Value::array({1, 2});
+    });
+    bindings.synchronize();
+    check(runtime.host_snapshot_info().has_snapshot == 0U && captures == 1U,
+          "pending binding revision was treated as adopted");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    bool failed = false;
+    while (!failed) {
+        check(wakes.try_acquire_until(deadline), "invalid binding snapshot did not complete");
+        try {
+            bindings.synchronize();
+        } catch (const strata::AbiError& error) {
+            failed = error.status() == STRATA_STATUS_INVALID_ARGUMENT;
+            if (!failed) throw;
+        }
+    }
+    std::uint64_t accepted = 0U;
+    strata::require_ok(strata_runtime_get_host_snapshot_accepted_generation(
+        runtime.native_handle(), strata::view("pending.model"), &accepted), "accepted revision");
+    check(accepted == 1U && captures == 1U && runtime.host_snapshot_info().has_snapshot == 0U,
+          "failed binding work was published or repeatedly submitted while pending");
+
+    valid = true;
+    bindings.synchronize();
+    while (runtime.host_snapshot_info().generation != 2U) {
+        check(wakes.try_acquire_until(deadline), "unchanged binding revision was not retried");
+        bindings.synchronize();
+    }
+    bindings.synchronize();
+    check(captures == 2U, "an unchanged adopted revision was captured again");
+
+    strata_host_snapshot_config direct{
+        sizeof(strata_host_snapshot_config), strata::view("pending.model"), 40U,
+        strata::view(R"({"model":{"count":8}})"),
+        STRATA_HOST_SNAPSHOT_EXECUTION_RUNTIME, 0U, nullptr};
+    strata::require_ok(strata_runtime_publish_host_snapshot(runtime.native_handle(), &direct),
+                       "direct pending generation");
+    ++revision;
+    bindings.synchronize();
+    strata::require_ok(strata_runtime_get_host_snapshot_accepted_generation(
+        runtime.native_handle(), strata::view("pending.model"), &accepted), "interleaved generation");
+    check(accepted == 41U && captures == 3U,
+          "facade allocation ignored a direct ABI admission's pending high-water mark");
+    while (runtime.host_snapshot_info().generation != 41U) {
+        check(wakes.try_acquire_until(deadline), "interleaved binding revision did not adopt");
+        bindings.synchronize();
+    }
+    revision = 1U;
+    bool regressed = false;
+    try {
+        bindings.synchronize();
+    } catch (const std::logic_error&) {
+        regressed = true;
+    }
+    check(regressed, "binding revision regression was accepted after asynchronous adoption");
+    runtime.close();
+}
+
+void live_snapshots_adopt_before_frame_geometry() {
+    std::counting_semaphore<> wakes{0};
+    strata::host::SessionOptions options;
+    options.application_id = "host-tests.live-snapshot";
+    options.frame_wake = [&] { wakes.release(); };
+    options.schemas = R"({
+      "widgets":{"registry":"strata.builtins.v1","required":[],"definitions":[]},
+      "actions":{"registry":"host-tests.live","required":[],"definitions":[]},
+      "host":[{"path":"model","type":{"kind":"object","fields":[
+        {"name":"width","type":{"kind":"number"},"required":true},
+        {"name":"key","type":{"kind":"key"},"required":true}
+      ]}}]
+    })";
+    strata::host::Session session(std::move(options), {});
+    static_cast<void>(session.runtime().publish_host_snapshot(
+        "live", R"({"model":{"width":80,"key":"live.panel"}})",
+        strata::HostSnapshotExecution::inline_execution));
+    static_cast<void>(session.activate_source("live.strata", R"(
+      overlay Main {
+        root Panel(key: "root", layout: { kind: "COLUMN", alignItems: "START" }) {
+          Panel(key: model.key, layout: { width: model.width, height: 20 })
+        }
+      }
+    )", 1U));
+    strata::host::SessionSurface surface;
+    surface.root_name = "Main";
+    surface.environment.struct_size = sizeof(strata_surface_environment);
+    surface.environment.generation = 1U;
+    surface.environment.framebuffer_width = 320;
+    surface.environment.framebuffer_height = 200;
+    surface.environment.logical_width = 320;
+    surface.environment.logical_height = 200;
+    surface.environment.scale = 1;
+    session.create_surface(surface);
+    static_cast<void>(session.frame(1));
+    const auto width = [&] {
+        return strata::host::Value::parse(session.surface().inspection_node_json("live.panel"))
+            .require("bounds").require("width");
+    };
+    check(width() == strata::host::Value(80), "inline startup roots were not visible to activation");
+    auto publication = session.runtime().publish_host_snapshot(
+        "live", R"({"model":{"width":160,"key":"live.panel"}})");
+    check(publication.info().status == STRATA_HOST_PUBLICATION_PENDING &&
+              session.runtime().host_snapshot_info().generation == 1U &&
+              width() == strata::host::Value(80),
+          "live admission mutated the current visible geometry");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (publication.info().status == STRATA_HOST_PUBLICATION_PENDING) {
+        check(wakes.try_acquire_until(deadline), "live snapshot did not wake the next frame");
+        static_cast<void>(session.frame(2));
+    }
+    check(publication.info().status == STRATA_HOST_PUBLICATION_ADOPTED &&
+              width() == strata::host::Value(160),
+          "frame-start adoption did not precede typed-key description and layout");
+    session.close({});
+}
+
 void generated_root_models_publish_changed_fields_only() {
     std::int64_t now = 1;
     strata_runtime_config config{};
     config.struct_size = sizeof(config);
     config.abi_version = STRATA_ABI_VERSION_CURRENT;
+    config.task_execution = STRATA_TASK_EXECUTION_DETERMINISTIC;
     config.required_capabilities = STRATA_CAPABILITY_CORE_LIFECYCLE |
                                    STRATA_CAPABILITY_CALLER_CLOCK |
                                    STRATA_CAPABILITY_HOST_SNAPSHOTS;
@@ -506,6 +645,7 @@ void generated_root_models_publish_changed_fields_only() {
 void runtime_images_upload_only_when_sampled() {
     std::int64_t now = 100;
     strata::RuntimeOptions options;
+    options.task_execution = strata::TaskExecution::deterministic;
     options.clock = [&now] { return now; };
     strata::Runtime runtime(std::move(options));
     runtime.configure_application(strata::ApplicationOptions{.id = "host-tests.images"});
@@ -542,7 +682,7 @@ void runtime_images_upload_only_when_sampled() {
     const auto frame = [&]() -> const strata::host::RenderPacket& {
         now += 16'000'000;
         static_cast<void>(surface.frame(now));
-        return decoder.decode(surface.render_packet());
+        return decoder.decode(surface.render_packet().bytes());
     };
     const auto sampled = [](const strata::host::RenderPacket& packet) {
         return std::ranges::count_if(packet.batches, [](const auto& batch) {
@@ -588,8 +728,8 @@ void runtime_images_upload_only_when_sampled() {
               released.resources.front().texture == host_id && sampled(released) == 0,
           "a released runtime image was not released from the host and dropped from drawing");
 
-    const std::vector<std::uint8_t> teardown = surface.prepare_release_packet();
-    const strata::host::RenderPacket& closing = decoder.decode(teardown);
+    const auto teardown = surface.prepare_release_packet();
+    const strata::host::RenderPacket& closing = decoder.decode(teardown.bytes());
     check(std::ranges::none_of(closing.resources,
                                [&host_id](const auto& resource) { return resource.texture == host_id; }),
           "Surface teardown released a runtime image the host no longer held");
@@ -641,6 +781,55 @@ void resource_root_maps_failures_and_confines_links() {
     }
     check(load(unicode_id) == std::pair{STRATA_STATUS_OK, std::string("unicode")},
           "a UTF-8 resource id was decoded through the narrow code page");
+
+    constexpr std::size_t file_count = 32U;
+    constexpr std::size_t readers = 8U;
+    std::array<std::string, file_count> names;
+    std::array<std::string, file_count> contents;
+    for (std::size_t index = 0U; index < file_count; ++index) {
+        names[index] = "shared-" + std::to_string(index) + ".bin";
+        contents[index] = std::to_string(index) + std::string(4096U, static_cast<char>('A' + index % 26U));
+        std::ofstream file(root / names[index], std::ios::binary);
+        file << contents[index];
+    }
+    strata_bytes_view held{};
+    check(resources.load("late.txt", held) == STRATA_STATUS_OK,
+          "a cached resource could not be retained before concurrent insertion");
+    std::array<std::array<strata_bytes_view, file_count>, readers> observed{};
+    std::array<bool, readers> valid{};
+    valid.fill(true);
+    std::barrier start(static_cast<std::ptrdiff_t>(readers));
+    std::vector<std::jthread> threads;
+    for (std::size_t reader = 0U; reader < readers; ++reader) {
+        threads.emplace_back([&, reader] {
+            start.arrive_and_wait();
+            for (std::size_t pass = 0U; pass < 4U; ++pass) {
+                for (std::size_t offset = 0U; offset < file_count; ++offset) {
+                    const std::size_t index = (offset + reader) % file_count;
+                    strata_bytes_view bytes{};
+                    const auto status = resources.load(names[index], bytes);
+                    if (status != STRATA_STATUS_OK || bytes.data == nullptr ||
+                        bytes.size != contents[index].size() ||
+                        std::string_view(reinterpret_cast<const char*>(bytes.data), bytes.size) !=
+                            contents[index] ||
+                        (pass != 0U && bytes.data != observed[reader][index].data)) {
+                        valid[reader] = false;
+                    }
+                    observed[reader][index] = bytes;
+                }
+            }
+        });
+    }
+    threads.clear();
+    for (std::size_t reader = 0U; reader < readers; ++reader) {
+        check(valid[reader], "concurrent resource acquisition corrupted bytes or invalidated a view");
+        for (std::size_t index = 0U; index < file_count; ++index) {
+            check(observed[reader][index].data == observed[0U][index].data,
+                  "concurrent cold reads published different borrowed storage for one resource");
+        }
+    }
+    check(std::string_view(reinterpret_cast<const char*>(held.data), held.size) == "late",
+          "concurrent insertion invalidated an older borrowed resource");
 
 #if defined(_WIN32)
     const fs::path link = root / "linked";
@@ -757,13 +946,14 @@ void durable_writer_isolates_and_retries_failures() {
 #endif
 
 // The portable Session every host shell uses: imports resolve through the host reader, the Surface
-// frames into decoded packets on the Session's clock, and the release barrier hands the terminal
+// frames on the Session's clock, and the release barrier hands the owned terminal
 // packet to the backend before the Surface and runtime close.
 void portable_session_runs_the_application_lifecycle() {
     std::vector<std::string> codes;
     std::vector<std::string> reads;
     strata::host::SessionOptions options;
     options.application_id = "host-tests.session";
+    options.task_execution = strata::TaskExecution::deterministic;
     options.stable_identity_seed = 7U;
     options.read_text = [&reads](const std::string_view id) -> std::string {
         reads.emplace_back(id);
@@ -810,37 +1000,12 @@ void portable_session_runs_the_application_lifecycle() {
     session.create_surface(surface);
     check(session.has_surface(), "a Session did not create its Surface");
 
-    const strata::host::SurfacePacketFrame first = session.frame(5'000'000);
-    check(session.time() == 5'000'000 && first.packet != nullptr &&
-              first.packet->frame_index == first.surface.frame_index &&
-              first.packet_bytes == first.surface.render_packet_size,
-          "a Session frame did not decode the packet of the frame it produced");
-    session.record_host_frame(*first.packet, 1'000);
-    check(session.runtime().snapshot().info().time_nanoseconds == 5'000'000,
+    const strata::host::SurfacePacketCommit first = session.frame(5'000'000);
+    strata::host::RenderPacketDecoder decoder;
+    static_cast<void>(decoder.decode(first.encoded.bytes()));
+    check(session.time() == 5'000'000 &&
+              session.runtime().snapshot().info().time_nanoseconds == 5'000'000,
           "the Session clock did not drive the runtime clock");
-
-    // A backend's own measurements reach the profiler beside the packet's counts, which win.
-    session.surface().set_profiler_capture(true);
-    const strata::host::SurfacePacketFrame measured = session.frame(6'000'000);
-    strata::ProfilerHostFrame backend;
-    backend.draw_calls = measured.packet->planned_draw_count + 7U;
-    backend.blur_passes = 3U;
-    backend.blur_target_width = 160U;
-    backend.blur_target_height = 100U;
-    backend.submit_nanoseconds = 2'000;
-    session.record_host_frame(*measured.packet, backend);
-    const auto counter = [&session](const std::string_view name) -> std::uint64_t {
-        for (const strata::ProfilerCounter& value : session.surface().profiler().counters) {
-            if (value.name == name)
-                return value.value;
-        }
-        throw std::runtime_error("the Surface profiler has no counter " + std::string(name));
-    };
-    check(counter("blur.passes") == 3U && counter("blur.target_width") == 160U &&
-              counter("blur.target_height") == 100U,
-          "a Session did not publish the backend's blur measurements");
-    check(counter("render.draw_calls") == measured.packet->planned_draw_count,
-          "a Session published a backend draw count instead of the packet's");
 
     strata_surface_environment resized = surface.environment;
     resized.generation = 2U;
@@ -848,12 +1013,279 @@ void portable_session_runs_the_application_lifecycle() {
     resized.logical_width = 640.0;
     check(session.adopt_environment(resized), "a Session did not adopt a new environment");
 
-    bool consumed = false;
-    session.close([&consumed](const strata::host::RenderPacket&) { consumed = true; });
-    check(consumed && !session.has_surface(),
-          "a Session did not hand the terminal packet to its backend before closing");
+    session.close([&decoder](const strata::EncodedRenderPacket& terminal) {
+        static_cast<void>(decoder.decode(terminal.bytes()));
+    });
+    check(!session.has_surface(), "an ordered Session close retained its Surface");
     check(std::ranges::find(codes, "STRATA.SURFACE.RELEASE_ABANDONED") == codes.end(),
           "an ordered Session close abandoned its Surface");
+}
+
+/** Worker gates expose transfer boundaries without sleeps or access to an owner model. */
+struct SessionPreparationProbe final {
+    std::binary_semaphore entered{0};
+    std::binary_semaphore proceed{0};
+    std::binary_semaphore read_finished{0};
+    std::counting_semaphore<64> wakes{0};
+    std::thread::id reader_thread;
+    std::thread::id durable_thread;
+    std::thread::id owner_thread = std::this_thread::get_id();
+    std::vector<std::string> diagnostics;
+    std::atomic_bool wrong_diagnostic_thread{false};
+    std::atomic_uint32_t retired_handlers{0U};
+    std::atomic_bool handler_retired_on_owner{false};
+    std::size_t live_loads = 0U;
+    std::string saved;
+
+    static strata_status load(void* const context, strata_string_view,
+                               strata_bytes_view*) noexcept {
+        ++static_cast<SessionPreparationProbe*>(context)->live_loads;
+        return STRATA_STATUS_NOT_FOUND;
+    }
+
+    static strata_status write(void* const context, strata_string_view,
+                                const strata_bytes_view bytes) noexcept {
+        auto& self = *static_cast<SessionPreparationProbe*>(context);
+        if (std::this_thread::get_id() != self.owner_thread)
+            return STRATA_STATUS_WRONG_THREAD;
+        try {
+            self.saved.assign(reinterpret_cast<const char*>(bytes.data), bytes.size);
+            return STRATA_STATUS_OK;
+        } catch (...) {
+            return STRATA_STATUS_OUT_OF_MEMORY;
+        }
+    }
+};
+
+/** The UI must retire its callback capture even while a worker retains registration endpoints. */
+struct PreparedHandlerLifetime final {
+    std::shared_ptr<SessionPreparationProbe> probe;
+    ~PreparedHandlerLifetime() {
+        probe->handler_retired_on_owner.store(std::this_thread::get_id() == probe->owner_thread);
+        probe->retired_handlers.fetch_add(1U);
+    }
+};
+
+void prepared_sessions_capture_models_and_adopt_on_the_owner() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() /
+                          ("strata-prepared-session-" +
+                           std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root);
+    {
+        std::ofstream source(root / "main.strata", std::ios::binary);
+        source << R"(
+overlay Main {
+  state saved: number = persisted("saved", 11);
+  root Panel(key: "prepared.root", layout: { kind: "COLUMN", alignItems: "START" }) {
+    Panel(key: model.itemKey, layout: { width: model.width, height: 20 })
+    Panel(key: "restored", layout: { width: saved, height: 20 })
+    Button(key: "prepared.action", label: "", onClick: action("host.test"))
+  }
+}
+)";
+        std::ofstream broken(root / "broken.strata", std::ios::binary);
+        broken << "import \"missing.strata\";\noverlay Main { root Panel() }";
+    }
+    const auto resources = std::make_shared<strata::host::ResourceRoot>(root);
+    const auto options_for = [&resources](const std::shared_ptr<SessionPreparationProbe>& probe,
+                                          const bool broken) {
+        strata::host::SessionPrepareOptions options;
+        options.resources = resources;
+        options.session.application_id = "host-tests.prepared";
+        options.session.schemas = R"({
+          "widgets":{"registry":"strata.builtins.v1","required":[],"definitions":[]},
+          "actions":{"registry":"host-tests.prepared","required":["host.test"],"definitions":[{
+            "id":"host.test","dispatchPolicy":"required","summary":"prepared owner action",
+            "payloadContract":"no payload","arguments":[]
+          }]},
+          "host":[{
+          "path":"model","type":{"kind":"object","fields":[
+            {"name":"width","type":{"kind":"number"},"required":true},
+            {"name":"itemKey","type":{"kind":"key"},"required":true}
+          ]}
+        }]})";
+        options.session.read_text = [resources, probe](const std::string_view id) {
+            if (id == "main.strata" || id == "broken.strata") {
+                probe->reader_thread = std::this_thread::get_id();
+                probe->entered.release();
+                probe->proceed.acquire();
+            }
+            std::string text = resources->read_text(strata::host::utf8_path(id));
+            if (id == "main.strata" || id == "broken.strata")
+                probe->read_finished.release();
+            return text;
+        };
+        options.session.frame_wake = [probe] { probe->wakes.release(); };
+        options.session.on_diagnostic = [probe](const strata_diagnostic& diagnostic) {
+            probe->wrong_diagnostic_thread =
+                probe->wrong_diagnostic_thread || std::this_thread::get_id() != probe->owner_thread;
+            probe->diagnostics.emplace_back(diagnostic.code.data, diagnostic.code.size);
+        };
+        options.load_durable = [probe]() -> std::optional<std::string> {
+            probe->durable_thread = std::this_thread::get_id();
+            return R"({"application":{"saved":57}})";
+        };
+        options.module_resource = broken ? "broken.strata" : "main.strata";
+        options.surface.root_name = "Main";
+        options.surface.environment.struct_size = sizeof(strata_surface_environment);
+        options.surface.environment.generation = 1U;
+        options.surface.environment.framebuffer_width = 320;
+        options.surface.environment.framebuffer_height = 200;
+        options.surface.environment.logical_width = 320.0;
+        options.surface.environment.logical_height = 200.0;
+        options.surface.environment.scale = 1.0;
+        return options;
+    };
+    for (const bool change_while_preparing : {false, true}) {
+        const auto probe = std::make_shared<SessionPreparationProbe>();
+        strata::host::Revision revision;
+        std::int64_t width = 80;
+        std::size_t snapshots = 0U;
+        std::size_t actions = 0U;
+        auto bindings = std::make_unique<strata::host::Bindings>("host-tests.prepared");
+        bindings->on("host.test", [&](const strata::host::ActionEvent&) {
+            check(std::this_thread::get_id() == probe->owner_thread,
+                  "a prepared action ran off-owner");
+            width = 140;
+            revision.changed();
+            ++actions;
+            return strata::host::ActionResult::handled;
+        });
+        bindings->snapshot(
+            "model", [&revision] { return revision.value(); },
+            [&] {
+                check(std::this_thread::get_id() == probe->owner_thread,
+                      "preparation called a model snapshot off-owner");
+                ++snapshots;
+                return strata::host::Value::object({
+                    {"model", strata::host::Value::object({{"width", width}, {"itemKey", "model.panel"}})},
+                });
+            });
+        auto options = options_for(probe, false);
+        options.snapshots = bindings->capture_snapshots();
+        options.actions = bindings->capture_actions();
+        auto pending = strata::host::Session::prepare(std::move(options));
+        const bool entered = probe->entered.try_acquire_for(std::chrono::seconds(5));
+        if (!entered)
+            static_cast<void>(pending.ready());
+        check(entered, "Session preparation did not reach its owned reader");
+        check(!pending.ready() && probe->diagnostics.empty() && snapshots == 1U &&
+                  probe->reader_thread != probe->owner_thread &&
+                  probe->durable_thread != probe->owner_thread,
+              "Session preparation blocked, invoked an owner observer, or read on the UI thread");
+        if (change_while_preparing) {
+            width = 120;
+            revision.changed();
+        }
+        probe->proceed.release();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!pending.ready()) {
+            check(probe->wakes.try_acquire_until(deadline), "Session preparation did not become ready");
+        }
+        strata::host::SessionAdapters adapters;
+        adapters.durable_store = strata_durable_store_adapter{
+            sizeof(strata_durable_store_adapter), probe.get(),
+            &SessionPreparationProbe::load, &SessionPreparationProbe::write,
+        };
+        auto prepared = pending.take(adapters, std::move(bindings));
+        check(prepared.session->runtime().host_snapshot_info().generation == 1U &&
+                  probe->live_loads == 0U,
+              "Session adoption repeated startup publication or reloaded durable state on the UI");
+        const auto frame_until_ready = [&](const std::int64_t time) {
+            do {
+                static_cast<void>(prepared.session->frame(time));
+                if (prepared.session->runtime().task_info().pending_tasks == 0U) break;
+                check(probe->wakes.try_acquire_until(deadline), "prepared live snapshot did not settle");
+            } while (true);
+        };
+        frame_until_ready(1'000'000);
+        const auto panel = strata::host::Value::parse(
+            prepared.session->surface().inspection_node_json("model.panel"));
+        const auto restored = strata::host::Value::parse(
+            prepared.session->surface().inspection_node_json("restored"));
+        check(panel.require("bounds").require("width") == strata::host::Value(width) &&
+                  restored.require("bounds").require("width") == strata::host::Value(57) &&
+                  snapshots == (change_while_preparing ? 2U : 1U) &&
+                  prepared.session->runtime().host_snapshot_info().generation ==
+                      (change_while_preparing ? 2U : 1U),
+              "prepared model revisions or restored durable values did not reach visible geometry");
+        const auto saved = strata::host::Value::parse(probe->saved);
+        check(saved.require("application").require("saved") == strata::host::Value(57) &&
+                  saved.require("version") == strata::host::Value(1) &&
+                  !probe->wrong_diagnostic_thread,
+              "prepared durability did not write its migration through the adopted owner adapter");
+        const auto dispatched = prepared.session->runtime().dispatch(strata::ActionDispatch{
+            .action_id = "host.test", .payload_json = "null", .event_kind = "prepared-action",
+            .source_key = "prepared.action", .event_value_json = "null",
+            .state_scope = std::nullopt, .dynamic = false,
+        });
+        frame_until_ready(2'000'000);
+        const auto changed = strata::host::Value::parse(
+            prepared.session->surface().inspection_node_json("model.panel"));
+        check(dispatched.status == strata::ActionDispatchStatus::handled && actions == 1U &&
+                  changed.require("bounds").require("width") == strata::host::Value(140),
+              "a required prepared action did not update visible owner state after adoption");
+        prepared.session->close({});
+    }
+    {
+        const auto probe = std::make_shared<SessionPreparationProbe>();
+        auto pending = strata::host::Session::prepare(options_for(probe, true));
+        const bool entered = probe->entered.try_acquire_for(std::chrono::seconds(5));
+        if (!entered)
+            static_cast<void>(pending.ready());
+        check(entered, "failing Session preparation did not reach its reader");
+        probe->proceed.release();
+        bool failed = false;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        try {
+            while (!pending.ready())
+                check(probe->wakes.try_acquire_until(deadline), "failing Session preparation stalled");
+        } catch (const std::runtime_error&) {
+            failed = true;
+        }
+        check(failed && !probe->wrong_diagnostic_thread &&
+                  std::ranges::find(probe->diagnostics, "STRATA.DSL.IMPORT_LOAD_FAILED") !=
+                      probe->diagnostics.end(),
+              "failed preparation lost its import diagnostic or called the observer off-owner");
+    }
+    {
+        const auto probe = std::make_shared<SessionPreparationProbe>();
+        auto bindings = std::make_unique<strata::host::Bindings>("host-tests.retired");
+        auto lifetime = std::make_shared<PreparedHandlerLifetime>();
+        lifetime->probe = probe;
+        bindings->on("host.test", [lifetime = std::move(lifetime)](const strata::host::ActionEvent&) {
+            lifetime->probe->wrong_diagnostic_thread = true;
+            return strata::host::ActionResult::handled;
+        });
+        auto options = options_for(probe, false);
+        options.actions = bindings->capture_actions();
+        std::optional<strata::host::SessionPreparation> pending(
+            strata::host::Session::prepare(std::move(options)));
+        const bool entered = probe->entered.try_acquire_for(std::chrono::seconds(5));
+        if (!entered)
+            static_cast<void>(pending->ready());
+        check(entered, "retiring Session did not reach its worker");
+        std::binary_semaphore closed{0};
+        std::atomic_bool forced{false};
+        std::jthread rescue([&] {
+            if (!closed.try_acquire_for(std::chrono::seconds(5))) {
+                forced.store(true);
+                probe->proceed.release();
+            }
+        });
+        pending.reset();
+        bindings.reset();
+        closed.release();
+        rescue.join();
+        if (!forced.load())
+            probe->proceed.release();
+        check(probe->read_finished.try_acquire_for(std::chrono::seconds(5)) && !forced.load() &&
+                  probe->retired_handlers.load() == 1U && probe->handler_retired_on_owner.load() &&
+                  !probe->wrong_diagnostic_thread,
+              "Session close joined its worker or let preparation retain/execute owner callbacks");
+    }
+    fs::remove_all(root);
 }
 
 /** What a document asked the host for through the `strata.platform` effect, in order. */
@@ -879,6 +1311,7 @@ void platform_requests_carry_gestures_rectangles_and_the_system_look() {
     PlatformRequests requests;
     strata::host::SessionOptions options;
     options.application_id = "host-tests.platform";
+    options.task_execution = strata::TaskExecution::deterministic;
     options.stable_identity_seed = 11U;
     options.read_text = [](const std::string_view id) -> std::string {
         if (id != "platform/main.strata")
@@ -1027,7 +1460,7 @@ component Probe() {
     frame();
     check(status().ends_with("|false|none"),
           "env did not follow the system's light theme without an accent: " + status());
-    session.close([](const strata::host::RenderPacket&) {});
+    session.close({});
 }
 
 } // namespace
@@ -1042,12 +1475,15 @@ int strata_test_host() {
         action_bindings_decode_at_the_boundary();
         raw_runtime_config_retains_activation_diagnostics();
         snapshot_bindings_publish_only_changed_revisions();
+        snapshot_bindings_track_acceptance_failure_and_retry();
+        live_snapshots_adopt_before_frame_geometry();
         generated_root_models_publish_changed_fields_only();
         public_runtime_facade_owns_host_boundaries();
         runtime_images_upload_only_when_sampled();
         resource_root_maps_failures_and_confines_links();
         system_font_search_tolerates_unicode_names();
         portable_session_runs_the_application_lifecycle();
+        prepared_sessions_capture_models_and_adopt_on_the_owner();
         platform_requests_carry_gestures_rectangles_and_the_system_look();
 #if defined(_WIN32)
         durable_writer_isolates_and_retries_failures();

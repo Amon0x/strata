@@ -1,7 +1,5 @@
 #pragma once
 
-#include "resource/svg_image.hpp"
-
 #include <map>
 #include <memory>
 #include <string>
@@ -24,17 +22,8 @@ public:
         std::int64_t delay_nanos
     );
     void clear() noexcept;
-    /** The Surface's images, for the playback timelines of animated ones. */
-    void set_images(const resource::SvgImageRegistry* images) noexcept {
-        images_ = images;
-    }
-    [[nodiscard]] const resource::SvgImageRegistry* images() const noexcept {
-        return images_;
-    }
-
 private:
     std::shared_ptr<const runtime::RuntimeUnit> unit_;
-    const resource::SvgImageRegistry* images_ = nullptr;
     std::map<std::string, CompiledMotion, std::less<>> compiled_;
     std::map<std::string, CompiledMotion, std::less<>> timed_;
     std::map<std::string, CompiledMotion, std::less<>> supplemental_;

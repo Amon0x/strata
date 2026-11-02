@@ -38,10 +38,13 @@ class RuntimeImageStore final {
     [[nodiscard]] const Images& images() const noexcept { return images_; }
     /** Advances on every publish and release, so a Surface skips unchanged stores cheaply. */
     [[nodiscard]] std::uint64_t generation() const noexcept { return generation_; }
+    /** Presence or natural-size changes only; pixel and sampling updates do not dirty fit readers. */
+    [[nodiscard]] std::uint64_t metadata_generation() const noexcept { return metadata_generation_; }
 
   private:
     Images images_;
     std::uint64_t generation_ = 0U;
+    std::uint64_t metadata_generation_ = 0U;
 };
 
 } // namespace strata::resource

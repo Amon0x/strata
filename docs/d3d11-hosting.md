@@ -18,8 +18,9 @@ Applications with another graphics API retain the same runtime, Surface, input, 
 packet contracts and replace only the final submission target. A Vulkan or OpenGL backend should
 own its native target type and consume `Strata::render_host` rather than acquire dependencies on
 the D3D11 implementation. C++ backend adapters can use `host::SurfacePacketStream` for the common
-frame/read/decode and terminal-delivery ordering. The D3D11 presenter is therefore an optional
-adapter, not a graphics abstraction embedded in the runtime.
+frame/acquire/decode and terminal-delivery ordering. Encoded handles can cross threads independently
+of the runtime; the decoder's returned plan remains borrowed until its next decode. The D3D11
+presenter is therefore an optional adapter, not a graphics abstraction embedded in the runtime.
 
 ## CMake
 
@@ -127,7 +128,8 @@ Strata.
 For each decoded packet:
 
 ```cpp
-const strata::host::RenderPacket& packet = decoder.decode(surface.render_packet());
+const strata::EncodedRenderPacket encoded = surface.render_packet();
+const strata::host::RenderPacket& packet = decoder.decode(encoded.bytes());
 
 const strata::d3d11::RenderTarget target{
     back_buffer,
@@ -208,8 +210,8 @@ Normal `render()` calls apply packet resource operations before drawing. A termi
 may contain only releases and needs no target:
 
 ```cpp
-const auto terminal_bytes = surface.prepare_release_packet();
-renderer.consume_resources(decoder.decode(terminal_bytes));
+const auto terminal = surface.prepare_release_packet();
+renderer.consume_resources(decoder.decode(terminal.bytes()));
 surface.acknowledge_release_packet();
 renderer.release_layer("main.surface");
 surface.close();

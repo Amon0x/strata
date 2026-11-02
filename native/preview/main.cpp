@@ -3,7 +3,6 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -17,6 +16,9 @@
 #include "headless/png.hpp"
 #include "input.hpp"
 #include "services.hpp"
+#ifdef STRATA_HAS_VULKAN
+#include "vulkan.hpp"
+#endif
 
 namespace {
 using namespace strata;
@@ -27,6 +29,7 @@ void check_sdl(const bool success, const std::string_view operation) {
 }
 struct Video final {
     Video() {
+        SDL_SetMainReady();
         SDL_SetHint(SDL_HINT_IME_SHOW_UI, "1");
         SDL_SetHint(SDL_HINT_IME_SUPPORT_EXTENDED_TEXT, "1");
         check_sdl(SDL_Init(SDL_INIT_VIDEO) == 0, "initialize SDL video");
@@ -120,6 +123,10 @@ int main(const int argc, char** argv) {
             throw std::invalid_argument("preview backend must be vulkan or reference");
         headless::use_default_shader_cache();
         manifest.application.render_backend = backend;
+#ifdef STRATA_HAS_VULKAN
+        if (backend == "vulkan")
+            return preview::run_vulkan(manifest, smoke, uncapped, std::move(screenshot));
+#endif
         const auto& scenario = manifest.application;
         const Uint32 flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
                              (smoke ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN);
@@ -143,6 +150,14 @@ int main(const int argc, char** argv) {
         options.clipboard = services.clipboard();
         options.ime = services.ime();
         options.capture_frames = false;
+        options.task_execution = smoke ? TaskExecution::deterministic : TaskExecution::asynchronous;
+        const Uint32 wake_event = SDL_RegisterEvents(1);
+        check_sdl(wake_event != static_cast<Uint32>(-1), "register preview wake event");
+        options.frame_wake = [wake_event] {
+            SDL_Event event{};
+            event.type = wake_event;
+            check_sdl(SDL_PushEvent(&event) == 1, "wake preview");
+        };
         auto app =
             std::make_unique<headless::ApplicationHost>(scenario, manifest.resource_root, options);
         std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)> texture(nullptr,
@@ -209,7 +224,7 @@ int main(const int argc, char** argv) {
             if (!running)
                 break;
             if ((SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MINIMIZED) != 0) {
-                SDL_Delay(30);
+                static_cast<void>(SDL_WaitEventTimeout(nullptr, 30));
                 continue;
             }
             int width = 0, height = 0, pixel_width = 0, pixel_height = 0;
@@ -217,7 +232,7 @@ int main(const int argc, char** argv) {
             check_sdl(SDL_GetRendererOutputSize(renderer.get(), &pixel_width, &pixel_height) == 0,
                       "read framebuffer size");
             if (width <= 0 || height <= 0 || pixel_width <= 0 || pixel_height <= 0) {
-                SDL_Delay(16);
+                static_cast<void>(SDL_WaitEventTimeout(nullptr, 16));
                 continue;
             }
             if (width != previous_width || height != previous_height ||
@@ -256,7 +271,8 @@ int main(const int argc, char** argv) {
             if (!uncapped) {
                 const auto remaining = 16'666'667 - (now() - frame_start);
                 if (remaining > 0)
-                    SDL_Delay(static_cast<Uint32>(remaining / 1'000'000));
+                    static_cast<void>(
+                        SDL_WaitEventTimeout(nullptr, static_cast<int>(remaining / 1'000'000)));
             }
         }
         app->close();

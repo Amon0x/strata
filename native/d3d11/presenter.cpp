@@ -303,7 +303,7 @@ struct Presenter::Impl final {
         options.time_seconds = static_cast<double>(time_nanoseconds) / 1'000'000'000.0;
         const PresentedFrame presented{
             frame.surface,
-            frame.packet_bytes,
+            frame.encoded.bytes().size(),
             renderer.render(layer_id, *frame.packet, target, options),
         };
         // What this layer's backdrop probes measured goes back to the Surface that asked.

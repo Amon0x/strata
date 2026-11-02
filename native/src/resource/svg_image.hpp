@@ -5,12 +5,14 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <strata/svg.hpp>
 
+#include "base/pending.hpp"
 #include "resource/image.hpp"
 #include "resource/lottie.hpp"
 #include "resource/runtime_images.hpp"
@@ -23,63 +25,53 @@ struct SvgImageResource final {
     svg::Document document;
 };
 
-/**
- * Immutable lookup table used by widget presentation to project SVGs into vector render commands,
- * and to learn any image's natural size: an SVG's own, a static raster's, or one the host publishes
- * while the runtime runs.
- */
-/**
- * How an animated image (GIF, APNG, animated WebP) plays: when each frame ends, from the start of
- * a play, and how many plays (0 forever). Frame k is the texture `<id>#k`; frame 0 is `<id>`.
- */
-class ImageStream;
-
-struct ImageAnimation final {
-    std::vector<std::int64_t> frame_ends_nanos;
-    std::uint32_t loop_count = 0U;
-    /**
-     * An animation too long to hold decoded plays from its bytes instead: one texture, `<id>`,
-     * shows each frame in turn, and the stream keeps its own timing and plays.
-     */
-    std::shared_ptr<ImageStream> stream{};
-
-    /** How long the playback clock runs before it starts over; a stream times itself. */
-    [[nodiscard]] std::int64_t duration_nanos() const noexcept {
-        if (stream != nullptr)
-            return std::int64_t{3600} * 1'000'000'000;
-        return frame_ends_nanos.empty() ? 0 : frame_ends_nanos.back();
-    }
-    /** The texture showing `elapsed` into the playback (all plays), for an image `id`. */
-    [[nodiscard]] std::string frame_texture(std::string_view id, std::int64_t elapsed) const;
+/** An adapter-independent input copied on the owner before preparation begins. */
+struct ImageSource final {
+    std::string logical_id;
+    std::string host_id;
+    std::string resource_id;
+    TextureSampling sampling = TextureSampling::linear;
+    std::vector<std::uint8_t> bytes;
 };
 
+/** One coherent owner-call view. Borrowed document and player pointers must not escape the call. */
+struct ImageView final {
+    std::optional<ImageDimensions> dimensions;
+    const svg::Document* document = nullptr;
+    ImageStream* stream = nullptr;
+};
+
+/**
+ * Owner-published image resources. Workers receive owned bytes and a stateless SVG validator,
+ * never this registry, its runtime image store or an adapter. Declared ids shadow runtime images
+ * even while pending or failed. Its task owner and runtime store must outlive the registry.
+ */
 class SvgImageRegistry final {
 public:
-    SvgImageRegistry() = default;
+    using Validator = void (*)(const svg::Document&);
+    SvgImageRegistry();
+    /** Ready native construction, including dimensions-only entries used by fitting consumers. */
     explicit SvgImageRegistry(std::vector<SvgImageResource> images,
-                              std::map<std::string, ImageDimensions, std::less<>> rasters = {},
-                              const RuntimeImageStore* runtime_images = nullptr,
-                              std::map<std::string, ImageAnimation, std::less<>> animations = {},
-                              std::shared_ptr<const LottieLibrary> lottie = nullptr);
-    /** How the image animates, or nothing for a still one. */
-    [[nodiscard]] const ImageAnimation* animation(std::string_view logical_id) const noexcept;
+                              std::map<std::string, ImageDimensions, std::less<>> rasters = {});
+    SvgImageRegistry(base::TaskOwner& tasks, std::vector<ImageSource> sources, Validator validate,
+                     const RuntimeImageStore* runtime_images,
+                     std::shared_ptr<const LottieLibrary> lottie);
+    ~SvgImageRegistry();
 
-    [[nodiscard]] const svg::Document* find(std::string_view logical_id) const noexcept;
-    [[nodiscard]] std::size_t size() const noexcept;
-    /** The image's natural size in its own units, or nothing for an unknown id. */
-    [[nodiscard]] std::optional<ImageDimensions> dimensions(std::string_view logical_id) const;
+    [[nodiscard]] base::ResourceResult<ImageView> lookup(std::string_view logical_id) const;
+    [[nodiscard]] bool declares(std::string_view logical_id) const noexcept;
+    /** Repeated runtime metadata publication is separate from pixel revisions. Call before framing. */
+    void sync_metadata() const;
+    [[nodiscard]] std::uint64_t texture_generation() const noexcept;
+    /** Null slots are pending, failed or vector resources; binding order never follows completion. */
+    [[nodiscard]] std::span<const std::shared_ptr<const TextureResource>> textures() const noexcept;
     /** The surface's Lottie animations, loaded by resource id on first use; null without a loader.
      */
-    [[nodiscard]] const LottieLibrary* lottie() const noexcept {
-        return lottie_.get();
-    }
+    [[nodiscard]] const LottieLibrary* lottie() const noexcept;
 
 private:
-    std::map<std::string, svg::Document, std::less<>> images_;
-    std::map<std::string, ImageDimensions, std::less<>> rasters_;
-    const RuntimeImageStore* runtime_images_ = nullptr;
-    std::map<std::string, ImageAnimation, std::less<>> animations_;
-    std::shared_ptr<const LottieLibrary> lottie_;
+    struct State;
+    std::shared_ptr<State> state_;
 };
 
 } // namespace strata::resource

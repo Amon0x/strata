@@ -1,18 +1,29 @@
+#include <array>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <new>
+#include <semaphore>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <vector>
 
 #include "base/allocator.hpp"
 #include "base/arena.hpp"
 #include "base/identity.hpp"
+#include "base/pending.hpp"
 #include "base/status.hpp"
+#include "base/task_pool.hpp"
 #include "base/utf8.hpp"
 #include "core/diagnostics.hpp"
+#include "core/runtime.hpp"
+#include "data/json.hpp"
 
 namespace {
 
@@ -126,6 +137,345 @@ void test_foreign_diagnostic_exception_is_contained() {
     check(emitted.diagnostic_id == 1U, "diagnostic identity must be deterministic per runtime");
 }
 
+void test_failed_preparation_publishes_an_owner_diagnostic() {
+    using namespace strata;
+    const auto owner_thread = std::this_thread::get_id();
+    std::string code;
+    std::atomic_bool wrong_thread{false};
+    core::Runtime runtime(
+        base::HostAllocator(base::default_allocator()),
+        core::Clock{nullptr, [](void*) -> std::int64_t { return 0; }},
+        [&](const core::DiagnosticEvent& event) {
+            if (std::this_thread::get_id() != owner_thread) {
+                wrong_thread.store(true);
+                return;
+            }
+            code = event.code;
+        },
+        0U, base::TaskExecution::asynchronous);
+    runtime.configure_application("failed-preparation", nullptr, {});
+    const auto document = base::Pending<data::JsonValue>::start(
+        runtime.tasks(), base::TaskKind::snapshot, base::TaskPriority::frame_critical,
+        "malformed-document", [](const base::TaskCancellation&) {
+            return data::parse_json("{");
+        });
+    check(runtime.tasks().wait_for_completion(std::chrono::seconds(5)) && code.empty(),
+          "a worker published diagnostics before owner adoption");
+    static_cast<void>(runtime.tasks().drain());
+    auto& services = runtime.application().services();
+    static_cast<void>(services.begin_frame());
+    services.end_frame();
+    check(document.status() == base::PendingStatus::failed && document.get() == nullptr &&
+              code == "STRATA.TASK.PREPARATION_FAILED" && !wrong_thread.load(),
+          "malformed preparation failed silently or published from a worker");
+}
+
+void test_task_priorities_cancellation_and_owner_adoption() {
+    using namespace strata::base;
+    TaskPool pool(1U);
+    std::atomic_uint wakes{0U};
+    const auto owner_thread = std::this_thread::get_id();
+    std::atomic_bool wrong_thread{false};
+    std::binary_semaphore started(0);
+    std::binary_semaphore release(0);
+    std::vector<int> worked;
+    std::vector<int> adopted;
+    bool saw_cancellation = false;
+    bool saw_failure = false;
+    unsigned reports = 0U;
+    TaskOwner owner(
+        TaskExecution::asynchronous, [&] { ++wakes; }, &pool,
+        [&](const TaskKind kind, const std::exception_ptr& error) {
+            if (std::this_thread::get_id() != owner_thread)
+                wrong_thread.store(true);
+            check(kind == TaskKind::image && error != nullptr,
+                  "task failure reporting lost its preparation error");
+            ++reports;
+        });
+    const auto completion = [&](const int value) {
+        return [&, value](const TaskOutcome& outcome) {
+            if (std::this_thread::get_id() != owner_thread) {
+                wrong_thread.store(true);
+                return;
+            }
+            if (outcome.cancelled) {
+                saw_cancellation = true;
+            } else if (outcome.error != nullptr) {
+                try {
+                    std::rethrow_exception(outcome.error);
+                } catch (const std::runtime_error& error) {
+                    saw_failure = std::string_view(error.what()) == "preparation failed";
+                }
+            } else {
+                adopted.push_back(value);
+            }
+        };
+    };
+    static_cast<void>(owner.post(
+        TaskKind::image, TaskPriority::idle,
+        [&](const TaskCancellation&) {
+            started.release();
+            release.acquire();
+            worked.push_back(0);
+        }, completion(0)));
+    started.acquire();
+    static_cast<void>(owner.post(TaskKind::image, TaskPriority::idle,
+        [&](const TaskCancellation&) { worked.push_back(3); }, completion(3)));
+    static_cast<void>(owner.post(TaskKind::image, TaskPriority::prefetch,
+        [&](const TaskCancellation&) { worked.push_back(2); }, completion(2)));
+    static_cast<void>(owner.post(TaskKind::image, TaskPriority::frame_critical,
+        [&](const TaskCancellation&) { worked.push_back(1); }, completion(1)));
+    const TaskCancellation cancelled = owner.post(TaskKind::image, TaskPriority::prefetch,
+        [&](const TaskCancellation&) { worked.push_back(4); }, completion(4));
+    cancelled.cancel();
+    static_cast<void>(owner.post(TaskKind::image, TaskPriority::prefetch,
+        [](const TaskCancellation&) { throw std::runtime_error("preparation failed"); },
+        completion(5)));
+    release.release();
+    check(owner.wait_for_completion(std::chrono::seconds(5)),
+          "worker completion did not reach its owner");
+    check(adopted.empty(), "worker adopted a result before the owner drained");
+    while (owner.pending() != 0U) {
+        check(owner.wait_for_completion(std::chrono::seconds(5)),
+              "task completion stopped making progress");
+        static_cast<void>(owner.drain());
+    }
+    check(!wrong_thread.load() && worked == std::vector<int>{0, 1, 2, 3} &&
+              adopted == worked && saw_cancellation && saw_failure && reports == 1U &&
+              wakes.load() != 0U,
+          "task priorities, cancellation, failure or owner-thread adoption changed");
+    const TaskStatistics statistics = owner.statistics();
+    const auto& images = statistics.kinds[static_cast<std::size_t>(TaskKind::image)];
+    check(statistics.pending == 0U && statistics.queued == 0U && statistics.running == 0U &&
+              images.submitted == 6U && images.completed == 6U && images.adopted == 6U &&
+              images.cancelled == 1U &&
+              images.failed == 1U,
+          "task accounting lost a terminal transition");
+}
+
+void test_task_inline_and_late_cancellation() {
+    using namespace strata::base;
+    const auto caller = std::this_thread::get_id();
+    unsigned wakes = 0U;
+    TaskOwner inline_owner(TaskExecution::deterministic, [&] { ++wakes; });
+    int prepared = 0;
+    int adopted = 0;
+    static_cast<void>(inline_owner.post(
+        TaskKind::module, TaskPriority::prefetch,
+        [&](const TaskCancellation&) {
+            check(std::this_thread::get_id() == caller, "inline work changed threads");
+            prepared = 42;
+        },
+        [&](const TaskOutcome& outcome) {
+            check(std::this_thread::get_id() == caller && outcome.error == nullptr &&
+                      !outcome.cancelled,
+                  "inline completion changed ownership or failed");
+            adopted = prepared;
+        }));
+    check(adopted == 42 && inline_owner.pending() == 0U && wakes == 0U,
+          "deterministic work was deferred or scheduled another frame");
+
+    TaskPool pool(1U);
+    TaskOwner owner(TaskExecution::asynchronous, {}, &pool);
+    bool cancelled_at_adoption = false;
+    const TaskCancellation ticket = owner.post(
+        TaskKind::module, TaskPriority::prefetch,
+        [&](const TaskCancellation&) { prepared = 73; },
+        [&](const TaskOutcome& outcome) {
+            cancelled_at_adoption = outcome.cancelled;
+            if (!outcome.cancelled)
+                adopted = prepared;
+        });
+    check(owner.wait_for_completion(std::chrono::seconds(5)),
+          "late-cancellation preparation did not finish");
+    ticket.cancel();
+    static_cast<void>(owner.drain());
+    check(cancelled_at_adoption && adopted == 42 && owner.pending() == 0U,
+          "cancellation after preparation adopted the stale result");
+}
+
+void test_task_owner_close_does_not_wait_for_preparation() {
+    using namespace strata::base;
+    auto pool = std::make_unique<TaskPool>(1U);
+    std::atomic_uint wakes{0U};
+    std::atomic_bool adopted{false};
+    std::atomic_bool cancellation_seen{false};
+    TaskOwner owner(TaskExecution::asynchronous, [&] { ++wakes; }, pool.get());
+    std::binary_semaphore started(0);
+    std::binary_semaphore release(0);
+    std::binary_semaphore closed(0);
+    static_cast<void>(owner.post(
+        TaskKind::font, TaskPriority::prefetch,
+        [&](const TaskCancellation& cancellation) {
+            started.release();
+            release.acquire();
+            cancellation_seen.store(cancellation.cancelled());
+        },
+        [&](const TaskOutcome&) { adopted.store(true); }));
+    started.acquire();
+    std::jthread closer([&] {
+        owner.close();
+        closed.release();
+    });
+    const bool closed_without_work = closed.try_acquire_for(std::chrono::seconds(5));
+    release.release();
+    closer.join();
+    pool.reset();
+    check(closed_without_work && cancellation_seen.load() && !adopted.load() &&
+              wakes.load() == 0U && owner.pending() == 0U,
+          "owner close waited for preparation, adopted a result or called a dead wake adapter");
+}
+
+void test_blocking_batches_do_not_wait_for_unclaimed_helpers() {
+    using namespace strata::base;
+    TaskPool pool(1U);
+    TaskOwner owner(TaskExecution::asynchronous, {}, &pool);
+    std::binary_semaphore started(0);
+    std::binary_semaphore release(0);
+    std::binary_semaphore finished(0);
+    static_cast<void>(owner.post(
+        TaskKind::image, TaskPriority::idle,
+        [&](const TaskCancellation&) {
+            started.release();
+            release.acquire();
+        }, [](const TaskOutcome&) {}));
+    started.acquire();
+    std::atomic_int result{0};
+    std::jthread caller([&] {
+        pool.run(1U, [&] { pool.run(1U, [&] { result = 91; }); });
+        finished.release();
+    });
+    const bool completed_without_worker = finished.try_acquire_for(std::chrono::seconds(5));
+    release.release();
+    caller.join();
+    check(completed_without_worker && result.load() == 91,
+          "a nested blocking batch waited for helpers occupied by background work");
+
+    std::array<std::atomic_uint, 64U> visits{};
+    parallel_for(visits.size(), 2U, [&](const std::size_t index) {
+        parallel_for(5U, 2U, [&](const std::size_t) { ++visits[index]; });
+    });
+    for (const auto& count : visits)
+        check(count.load() == 5U, "nested parallel work lost or repeated an index");
+}
+
+void test_pending_resources_publish_on_owner() {
+    using namespace strata::base;
+    TaskPool pool(1U);
+    TaskOwner owner(TaskExecution::asynchronous, {}, &pool);
+    auto resource = Pending<std::string>::start(
+        owner, TaskKind::image, TaskPriority::prefetch, "image:example",
+        [](const TaskCancellation&) { return std::string("prepared pixels"); });
+    const ReadinessRead dependency{resource.readiness(), PendingStatus::pending};
+    check(owner.wait_for_completion(std::chrono::seconds(5)),
+          "resource preparation did not finish");
+    check(resource.get() == nullptr && dependency.current(),
+          "a worker published its resource before owner adoption");
+    static_cast<void>(owner.drain());
+    check(resource.get() != nullptr && *resource.get() == "prepared pixels" &&
+              !dependency.current() && dependency.resource.label() == "image:example",
+          "owner adoption did not expose the immutable result or invalidate its dependency");
+
+    auto failed = Pending<std::string>::start(
+        owner, TaskKind::font, TaskPriority::prefetch, "font:broken",
+        [](const TaskCancellation&) -> std::string { throw std::runtime_error("broken font"); });
+    check(owner.wait_for_completion(std::chrono::seconds(5)),
+          "failed resource did not complete");
+    static_cast<void>(owner.drain());
+    check(failed.status() == PendingStatus::failed && failed.get() == nullptr &&
+              failed.readiness().failure().error != nullptr && *resource.get() == "prepared pixels",
+          "failed preparation exposed a payload or damaged an earlier resource");
+
+    std::binary_semaphore started(0);
+    std::binary_semaphore release(0);
+    static_cast<void>(owner.post(
+        TaskKind::other, TaskPriority::prefetch,
+        [&](const TaskCancellation&) {
+            started.release();
+            release.acquire();
+        }, [](const TaskOutcome&) {}));
+    started.acquire();
+    std::atomic_bool abandoned_work{false};
+    {
+        auto abandoned = Pending<int>::start(
+            owner, TaskKind::image, TaskPriority::prefetch, "image:removed",
+            [&](const TaskCancellation&) {
+                abandoned_work.store(true);
+                return 9;
+            });
+        check(abandoned.status() == PendingStatus::pending, "queued resource became ready");
+    }
+    release.release();
+    while (owner.pending() != 0U) {
+        check(owner.wait_for_completion(std::chrono::seconds(5)),
+              "abandoned resource prevented settling");
+        static_cast<void>(owner.drain());
+    }
+    check(!abandoned_work.load(), "dropping a queued resource still ran its preparation");
+}
+
+void test_pending_owner_transfer() {
+    using namespace strata::base;
+    TaskPool pool(1U);
+    TaskOwner owner(TaskExecution::asynchronous, {}, &pool);
+    const auto caller = std::this_thread::get_id();
+    auto prepared = std::make_shared<std::unique_ptr<int>>(std::make_unique<int>(41));
+    std::unique_ptr<int> adopted;
+    const auto transfer = Pending<void>::start(
+        owner, TaskKind::image, TaskPriority::frame_critical, "decoder-continuation",
+        [prepared](const TaskCancellation&) { ++**prepared; },
+        [&, prepared](const TaskOutcome& outcome) {
+            check(std::this_thread::get_id() == caller && outcome.error == nullptr,
+                  "mutable preparation was adopted outside its owner");
+            adopted = std::move(*prepared);
+        });
+    check(owner.wait_for_completion(std::chrono::seconds(5)),
+          "owned continuation preparation did not complete");
+    check(adopted == nullptr && transfer.status() == PendingStatus::pending,
+          "worker completion transferred ownership before adoption");
+    static_cast<void>(owner.drain());
+    check(adopted != nullptr && *adopted == 42 && *prepared == nullptr &&
+              transfer.status() == PendingStatus::ready,
+          "owner adoption lost exclusive continuation ownership");
+
+    bool cancelled_adoption = false;
+    const auto cancelled = Pending<void>::start(
+        owner, TaskKind::image, TaskPriority::frame_critical, "removed-continuation",
+        [prepared](const TaskCancellation&) { *prepared = std::make_unique<int>(1); },
+        [&](const TaskOutcome&) { cancelled_adoption = true; });
+    check(owner.wait_for_completion(std::chrono::seconds(5)),
+          "removed continuation preparation did not complete");
+    cancelled.cancel();
+    static_cast<void>(owner.drain());
+    check(!cancelled_adoption && cancelled.readiness().failure().cancelled,
+          "late cancellation still transferred a mutable result to its old owner");
+
+    const auto failed = Pending<void>::start(
+        owner, TaskKind::image, TaskPriority::frame_critical, "failed-adoption",
+        [prepared](const TaskCancellation&) { ++**prepared; },
+        [](const TaskOutcome&) { throw std::runtime_error("adoption failed"); });
+    check(owner.wait_for_completion(std::chrono::seconds(5)),
+          "failed-adoption preparation did not complete");
+    bool threw = false;
+    try {
+        static_cast<void>(owner.drain());
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    check(threw && failed.status() == PendingStatus::failed &&
+              failed.readiness().failure().error != nullptr,
+          "an adoption exception left its resource pending or hid the owner error");
+
+    TaskOwner inline_owner(TaskExecution::deterministic);
+    const auto inline_transfer = Pending<void>::start(
+        inline_owner, TaskKind::image, TaskPriority::frame_critical, "inline-continuation",
+        [prepared](const TaskCancellation&) { ++**prepared; },
+        [&, prepared](const TaskOutcome&) { adopted = std::move(*prepared); });
+    check(inline_transfer.status() == PendingStatus::ready && *adopted == 3 &&
+              inline_owner.pending() == 0U,
+          "inline adoption retained an in-flight ticket or deferred ownership transfer");
+}
+
 } // namespace
 
 int strata_test_core() {
@@ -134,6 +484,13 @@ int strata_test_core() {
         test_arena_uses_host_allocator();
         test_stable_identity_and_resource_handles();
         test_foreign_diagnostic_exception_is_contained();
+        test_failed_preparation_publishes_an_owner_diagnostic();
+        test_task_priorities_cancellation_and_owner_adoption();
+        test_task_inline_and_late_cancellation();
+        test_task_owner_close_does_not_wait_for_preparation();
+        test_blocking_batches_do_not_wait_for_unclaimed_helpers();
+        test_pending_resources_publish_on_owner();
+        test_pending_owner_transfer();
         std::cout << "strata_core_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {

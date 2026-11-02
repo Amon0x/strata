@@ -1,7 +1,5 @@
 #include "host_services.hpp"
 
-#include "host/resource_root.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -12,6 +10,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -24,6 +23,8 @@
 #include <imm.h>
 
 #include <strata/strata.hpp>
+
+#include "host/resource_root.hpp"
 
 namespace strata::desktop {
 namespace {
@@ -71,10 +72,11 @@ struct HostServices::Impl final {
         Impl* host = nullptr;
     };
 
-    Impl(HWND window, std::filesystem::path root) : window(window), resources(std::move(root)) {
+    Impl(HWND window, std::filesystem::path root)
+        : window(window), resources(std::make_shared<host::ResourceRoot>(std::move(root))) {
         if (window == nullptr)
             throw std::invalid_argument("desktop services require a window");
-        if (!std::filesystem::is_directory(resources.root())) {
+        if (!std::filesystem::is_directory(resources->root())) {
             throw std::invalid_argument("desktop resource root is not a directory");
         }
     }
@@ -86,19 +88,11 @@ struct HostServices::Impl final {
     }
 
     [[nodiscard]] std::string text(const std::string_view id) const {
-        return resources.read_text(host::utf8_path(id));
+        return resources->read_text(host::utf8_path(id));
     }
 
     [[nodiscard]] std::vector<std::uint8_t> bytes(const std::string_view id) const {
-        return resources.read(host::utf8_path(id));
-    }
-
-    static strata_status load_resource(void* const user_data, const strata_string_view id,
-                                       strata_bytes_view* const output) noexcept {
-        if (user_data == nullptr || output == nullptr)
-            return STRATA_STATUS_INVALID_ARGUMENT;
-        return static_cast<Impl*>(user_data)->resources.load(
-            std::string_view(id.data != nullptr ? id.data : "", id.size), *output);
+        return resources->read(host::utf8_path(id));
     }
 
     static strata_status clipboard_read(void* const user_data,
@@ -243,7 +237,7 @@ struct HostServices::Impl final {
     }
 
     HWND window = nullptr;
-    host::ResourceRoot resources;
+    std::shared_ptr<host::ResourceRoot> resources;
     std::map<std::string, std::unique_ptr<ImeClient>, std::less<>> ime_clients;
     std::string clipboard_text;
     HIMC detached_ime_context = nullptr;
@@ -263,8 +257,12 @@ std::vector<std::uint8_t> HostServices::bytes(const std::string_view id) const {
     return impl_->bytes(id);
 }
 
+std::shared_ptr<host::ResourceRoot> HostServices::resources() const noexcept {
+    return impl_->resources;
+}
+
 std::filesystem::path HostServices::path(const std::string_view id) const {
-    return impl_->resources.root() / host::utf8_path(id);
+    return impl_->resources->root() / host::utf8_path(id);
 }
 
 bool HostServices::write_clipboard(const std::string_view text) noexcept {
@@ -272,11 +270,7 @@ bool HostServices::write_clipboard(const std::string_view text) noexcept {
 }
 
 strata_resource_adapter HostServices::resource_adapter() noexcept {
-    return strata_resource_adapter{
-        sizeof(strata_resource_adapter),
-        impl_.get(),
-        &Impl::load_resource,
-    };
+    return impl_->resources->adapter();
 }
 
 strata_clipboard_adapter HostServices::clipboard_adapter() noexcept {

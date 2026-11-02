@@ -14,11 +14,12 @@
 #include <iterator>
 #include <memory>
 #include <numbers>
+#include <semaphore>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <thread>
+#include <utility>
 #include <vector>
 
 #include "../headless/application_host.hpp"
@@ -556,26 +557,10 @@ void measure_frames(const std::filesystem::path& root, const std::string& backen
     }
     module += "  }\n}\n";
     write(root / "assets/lottie-tests/frames.strata", module);
-    headless::ApplicationHost host(
-        scenario(backend, "assets/lottie-tests/frames.strata", cell * columns, cell * rows), root);
-    host.frame(0);
-    host.frame(16'666'667);
-    // Text in a system font is drawn once the system's font names are read, on a worker, as a
-    // page's text waits for a web font: frame until it shows (paused, nothing else moves).
-    const auto system_text = std::ranges::find(all, std::string_view("system font text"),
-                                               [](const Case& entry) { return entry.name; });
-    if (system_text != all.end()) {
-        const auto index = static_cast<std::size_t>(system_text - all.begin());
-        const double left = cell * static_cast<double>(index % columns);
-        const double top = cell * static_cast<double>(index / columns);
-        std::int64_t now = 16'666'667;
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-        while (covered(host, left, top, cell, cell) < 100.0 &&
-               std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            host.frame(now += 16'666'667);
-        }
-    }
+    auto config = scenario(backend, "assets/lottie-tests/frames.strata", cell * columns, cell * rows);
+    config.task_execution = TaskExecution::asynchronous;
+    headless::ApplicationHost host(config, root);
+    host.settle(0);
     std::string failures;
     std::vector<double> areas;
     for (std::size_t index = 0U; index < all.size(); ++index) {
@@ -619,7 +604,8 @@ void measure_frames(const std::filesystem::path& root, const std::string& backen
  * a second in it is near half the size; past its end it holds the last frame and its onComplete
  * has run (the marker it reveals is drawn).
  */
-void measure_playback(const std::filesystem::path& root, const std::string& backend) {
+void measure_playback(const std::filesystem::path& root, const std::string& backend,
+                      const bool reverse) {
     write(
         root / "assets/lottie-tests/grow.json",
         composition(shape_layer(1, rect(0, 0, 100, 100) + "," + white, {},
@@ -631,7 +617,8 @@ void measure_playback(const std::filesystem::path& root, const std::string& back
           "  state done = false;\n"
           "  Panel(style: { background: null, border: null }, layout: { kind: \"PANEL\", width: "
           "400, height: 200 }) {\n"
-          "    Lottie(source: \"assets/lottie-tests/grow.json\", loop: false, onComplete: "
+          "    Lottie(source: \"assets/lottie-tests/grow.json\", loop: false, speed: " +
+          std::string(reverse ? "-1" : "1") + ", onComplete: "
           "action(\"state.toggle\", name: \"done\"), layout: { width: 200, height: 200, placement: "
           "{ x: 0, y: 0 } })\n"
           "    if done {\n"
@@ -653,13 +640,103 @@ void measure_playback(const std::filesystem::path& root, const std::string& back
         host.frame(now += frame);
     const double full = covered(host, 0.0, 0.0, 200.0, 200.0);
     const double marker = covered(host, 200.0, 0.0, 200.0, 200.0);
-    std::cout << "  " << backend << " playback: half a second " << half << ", end " << full
+    std::cout << "  " << backend << (reverse ? " reverse" : " forward")
+              << " playback: half a second " << half << ", end " << full
               << ", completion marker " << marker_early << " -> " << marker << "\n";
     // Half a second of a linear 0-100% scale, give or take the frames before the clock starts.
     check(half > 1600.0 && half < 2700.0, backend + ": playback did not reach half way in time");
-    check(std::abs(full - 10000.0) / 10000.0 < 0.01, backend + ": playback did not hold its end");
+    check(std::abs(full - (reverse ? 0.0 : 10000.0)) < 100.0,
+          backend + ": playback did not hold its directional end");
     check(marker_early < 1.0 && std::abs(marker - 1600.0) < 16.0,
           backend + ": onComplete did not run once at the end");
+}
+
+/** Latest-frame adoption stays drawable, source changes reject stale frames, and paused time is held. */
+void measure_preparation(const std::filesystem::path& root, const std::string& backend) {
+    write(root / "assets/lottie-tests/replacement.json",
+          composition(shape_layer(1, rect(100, 100, 80, 40) + "," + white)));
+    write(root / "assets/lottie-tests/preparation.strata",
+          "screen Frames {\n"
+          "  root Lottie(source: player.source, progress: player.progress, playing: player.playing, "
+          "loop: false, layout: { width: 200, height: 200 })\n"
+          "}\n");
+    const auto snapshot = [](const std::string& source, const double progress, const bool playing) {
+        return headless::SnapshotConfig{
+            "lottie.player", data::JsonValue(data::JsonValue::Object{
+                {"player", data::JsonValue(data::JsonValue::Object{
+                    {"source", data::JsonValue("assets/lottie-tests/" + source + ".json")},
+                    {"progress", data::JsonValue(progress)},
+                    {"playing", data::JsonValue(playing)}})}})};
+    };
+    auto config = scenario(backend, "assets/lottie-tests/preparation.strata", 200.0, 200.0);
+    config.task_execution = TaskExecution::asynchronous;
+    config.snapshots.push_back(snapshot("grow", 0.25, false));
+    std::counting_semaphore<> wakes{0};
+    headless::ApplicationHostOptions options;
+    options.frame_wake = [&] { wakes.release(); };
+    headless::ApplicationHost host(config, root, std::move(options));
+    std::int64_t now = 0;
+    host.settle(now);
+    const auto expect = [&](const double area, const std::string_view message) {
+        check(std::abs(covered(host, 0, 0, 200, 200) - area) < std::max(20.0, area * 0.02),
+              backend + ": " + std::string(message));
+    };
+    expect(625.0, "fixed-time preparation did not reach its requested frame");
+    for (int index = 1; index <= 50; ++index) {
+        host.publish(snapshot("grow", 0.25 + static_cast<double>(index) * 0.01, false));
+        host.frame(now += 16'666'667);
+        check(covered(host, 0, 0, 200, 200) >= 600.0,
+              backend + ": moving requests discarded their compatible completed frame");
+    }
+    host.settle(now);
+    expect(5625.0, "latest-frame coalescing did not settle at the newest request");
+
+    host.publish(snapshot("grow", 0.8, false));
+    host.frame(now += 16'666'667);
+    const auto replacement = host.publish(snapshot("replacement", 0.0, false));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    do {
+        host.frame(now += 16'666'667);
+        if (replacement.info().status != STRATA_HOST_PUBLICATION_PENDING) break;
+        check(wakes.try_acquire_until(deadline), backend + ": replacement snapshot did not finish");
+    } while (true);
+    check(replacement.info().status == STRATA_HOST_PUBLICATION_ADOPTED,
+          backend + ": replacement snapshot was not adopted");
+    check(covered(host, 0, 0, 200, 200) < 3264.0,
+          backend + ": source replacement displayed an incompatible older frame");
+    host.settle(now);
+    expect(3200.0, "replacement source did not settle");
+
+    host.publish(snapshot("grow", 0.5, false));
+    host.settle(now);
+    expect(2500.0, "returning to a cached source reused its old playhead");
+    host.publish(snapshot("grow", 0.5, true));
+    host.settle(now);
+    host.frame(now += 100'000'000);
+    host.settle(now);
+    expect(3600.0, "prepared playback did not advance from its drawable start");
+    host.publish(snapshot("grow", 0.5, false));
+    host.settle(now);
+    host.frame(now += 2'000'000'000);
+    host.publish(snapshot("grow", 0.5, true));
+    host.settle(now);
+    expect(3600.0, "resuming counted paused time as elapsed playback");
+    host.frame(now += 100'000'000);
+    host.settle(now);
+    expect(4900.0, "resumed playback did not continue from its held position");
+    check(host.diagnostics().empty(), backend + ": asynchronous preparation emitted diagnostics");
+    host.publish(snapshot("grow", 0.9, false));
+    host.frame(now += 16'666'667);
+    host.close();
+
+    config.reduced_motion = true;
+    config.snapshots = {snapshot("grow", 0.4, true)};
+    headless::ApplicationHost reduced(config, root);
+    reduced.settle(0);
+    reduced.frame(1'000'000'000);
+    reduced.settle(1'000'000'000);
+    check(std::abs(covered(reduced, 0, 0, 200, 200) - 1600.0) < 32.0,
+          backend + ": reduced-motion preparation advanced its fixed playhead");
 }
 
 } // namespace
@@ -671,7 +748,9 @@ int main(const int argument_count, const char* const* const arguments) {
         const std::filesystem::path root = arguments[1];
         for (const std::string& backend : available_backends()) {
             measure_frames(root, backend);
-            measure_playback(root, backend);
+            measure_playback(root, backend, false);
+            measure_playback(root, backend, true);
+            measure_preparation(root, backend);
         }
         std::cout << "strata_lottie_render_tests: OK\n";
         return 0;

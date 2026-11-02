@@ -53,7 +53,7 @@ void collect_focus_entries(RetainedNode& node, const auto& accepts, std::vector<
 
 } // namespace
 
-std::vector<RetainedNode*> InputRouter::focusable_nodes() const {
+std::vector<RetainedNode*> InputPresentation::focusable_nodes() const {
     std::vector<RetainedNode*> result;
     if (tree_ == nullptr || tree_->root() == nullptr)
         return result;
@@ -120,7 +120,8 @@ bool InputRouter::move_focus_spatial(const std::string_view direction,
         if (record == nullptr)
             return std::nullopt;
         Rect bounds =
-            hit_bounds_resolver_ ? hit_bounds_resolver_(node, *record) : record->hit_bounds;
+            hit_bounds_resolver_ ? hit_bounds_resolver_(node, *record, *layout_, *this)
+                                : record->hit_bounds;
         return presented_bounds(node, bounds);
     };
     const std::optional<Rect> source = presented(*current);
@@ -262,43 +263,55 @@ bool InputRouter::dismiss_topmost(InputOperationResult& result) {
     return true;
 }
 
-void InputRouter::sync_modal_focus(InputOperationResult& result) {
+InputPresentation::ModalFocusPlan InputPresentation::plan_modal_focus(
+    const std::optional<std::uint64_t> synchronized,
+    const std::optional<std::uint64_t> before) const {
     RetainedNode* next_modal = active_modal();
     const std::optional<std::uint64_t> next_identity =
         next_modal != nullptr ? std::optional(next_modal->identity()) : std::nullopt;
-    if (next_identity == synchronized_modal_)
-        return;
-
+    ModalFocusPlan plan{next_identity, before, std::nullopt, false};
+    if (next_identity == synchronized)
+        return plan;
     if (!next_identity.has_value()) {
-        if (!synchronized_modal_.has_value())
-            return;
-        const std::optional<std::uint64_t> restore = focus_before_modal_;
-        synchronized_modal_.reset();
-        focus_before_modal_.reset();
-        if (restore.has_value() && tree_ != nullptr) {
-            if (RetainedNode* node = tree_->find_identity(*restore); node != nullptr) {
-                focus(*node, "programmatic", result);
-                return;
-            }
-        }
-        clear_focus("programmatic", result);
-        return;
+        plan.before.reset();
+        plan.request = true;
+        if (before.has_value() && tree_ != nullptr && tree_->find_identity(*before) != nullptr)
+            plan.target = before;
+        return plan;
     }
-
-    if (!synchronized_modal_.has_value())
-        focus_before_modal_ = focused_;
-    synchronized_modal_ = next_identity;
+    if (!synchronized.has_value())
+        plan.before = focused_;
     RetainedNode* current =
         focused_.has_value() && tree_ != nullptr ? tree_->find_identity(*focused_) : nullptr;
     if (current != nullptr && descendant_of(*current, *next_modal))
-        return;
-
+        return plan;
     const std::vector<RetainedNode*> candidates = focusable_nodes();
-    if (!candidates.empty()) {
-        focus(*candidates.front(), "programmatic", result);
-    } else {
-        focus(*next_modal, "programmatic", result);
-    }
+    plan.target = !candidates.empty() ? candidates.front()->identity() : next_modal->identity();
+    plan.request = true;
+    return plan;
+}
+
+bool InputPresentation::focus_request_allowed(const RetainedNode& node) const noexcept {
+    return !inside_native_presentation(node) && within_focus_containment(node);
+}
+
+bool InputPresentation::focus_valid(const std::uint64_t identity) const {
+    const RetainedNode* node = tree_ != nullptr ? tree_->find_identity(identity) : nullptr;
+    const RetainedNode* modal = active_modal();
+    return node != nullptr && focusable(*node) &&
+           (modal == nullptr || descendant_of(*node, *modal)) && within_focus_containment(*node);
+}
+
+void InputRouter::sync_modal_focus(InputOperationResult& result) {
+    const ModalFocusPlan plan = plan_modal_focus(synchronized_modal_, focus_before_modal_);
+    synchronized_modal_ = plan.modal;
+    focus_before_modal_ = plan.before;
+    if (!plan.request)
+        return;
+    if (plan.target.has_value())
+        focus(*tree_->find_identity(*plan.target), "programmatic", result);
+    else
+        clear_focus("programmatic", result);
 }
 
 void InputRouter::sanitize_focus(InputOperationResult& result) {
@@ -308,10 +321,7 @@ void InputRouter::sanitize_focus(InputOperationResult& result) {
     }
     if (!focused_.has_value() || tree_ == nullptr)
         return;
-    RetainedNode* node = tree_->find_identity(*focused_);
-    RetainedNode* modal = active_modal();
-    if (node == nullptr || !focusable(*node) ||
-        (modal != nullptr && !descendant_of(*node, *modal)) || !within_focus_containment(*node)) {
+    if (!focus_valid(*focused_)) {
         clear_focus("invalid_target", result);
     }
 }

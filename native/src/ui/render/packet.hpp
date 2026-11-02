@@ -53,14 +53,13 @@ struct HostRenderPacketTelemetry final {
     std::int64_t cold_submission_atlas_warmup_nanos = 0;
     std::int64_t cold_submission_text_preparation_nanos = 0;
     std::int64_t cold_submission_mesh_encoding_nanos = 0;
-    std::int64_t cold_geometry_packet_nanos = 0;
-    std::int64_t cold_resource_packet_nanos = 0;
+    std::int64_t cold_serialization_nanos = 0;
     std::int64_t submission_nanos = 0;
     std::int64_t submission_planning_nanos = 0;
     std::int64_t submission_atlas_warmup_nanos = 0;
     std::int64_t submission_text_preparation_nanos = 0;
     std::int64_t submission_mesh_encoding_nanos = 0;
-    std::int64_t geometry_packet_nanos = 0;
+    std::int64_t serialization_nanos = 0;
     bool geometry_patched = false;
     std::size_t geometry_patch_bytes = 0U;
     bool geometry_topology_reused = false;
@@ -71,6 +70,7 @@ struct HostRenderPacketTelemetry final {
     std::size_t topology_change_item = 0U;
     std::size_t previous_item_count = 0U;
     std::size_t item_count = 0U;
+    std::size_t planned_draws = 0U;
 };
 
 class RenderCommandBuffer;
@@ -86,7 +86,34 @@ class VectorGlyphPool;
 namespace strata::ui {
 
 /**
- * Packet v14: retained geometry epochs, incremental geometry patches, GPU presentation groups,
+ * One immutable encoded stream item. References may cross threads and outlive the producer.
+ * Only the encoder recycles exclusively owned spare storage; published bytes never change.
+ */
+class EncodedPacket final {
+  public:
+    struct Storage;
+    EncodedPacket() noexcept = default;
+    EncodedPacket(const EncodedPacket& other) noexcept;
+    EncodedPacket& operator=(const EncodedPacket& other) noexcept;
+    EncodedPacket(EncodedPacket&& other) noexcept;
+    EncodedPacket& operator=(EncodedPacket&& other) noexcept;
+    ~EncodedPacket();
+
+    [[nodiscard]] std::span<const std::uint8_t> bytes() const noexcept;
+    [[nodiscard]] Storage* get() const noexcept { return storage_; }
+    static void retain(Storage* storage) noexcept;
+    static void release(Storage* storage) noexcept;
+    [[nodiscard]] static std::span<const std::uint8_t> bytes(const Storage* storage) noexcept;
+
+  private:
+    friend class HostRenderPacketCache;
+    [[nodiscard]] static EncodedPacket recycle(EncodedPacket spare);
+    [[nodiscard]] std::vector<std::uint8_t>& writable_bytes() noexcept;
+    Storage* storage_ = nullptr;
+};
+
+/**
+ * Packet v25: retained geometry epochs, incremental geometry patches, GPU presentation groups,
  * rate-limited effects, explicit current/surface backdrop sources, ordered application effect
  * programs, rounded descendant masks, interned material/effect ids with clip-adapted blends, and
  * decoded RGBA8 images. The logical v3 encoder remains available only to command-stream inspection tooling.
@@ -100,16 +127,15 @@ class HostRenderPacketCache final {
     HostRenderPacketCache& operator=(HostRenderPacketCache&&) = delete;
 
     /**
-     * A null TextEngine selects the packet-v14 non-text path; text runs are then rejected. Null
+     * A null TextEngine selects the non-text path; text runs are then rejected. Null
      * textures means the stream draws no raster images.
      */
-    [[nodiscard]] const std::vector<std::uint8_t>&
+    [[nodiscard]] const EncodedPacket&
     encode(const RenderCommandBuffer& commands, std::uint64_t frame_index,
            SurfaceTextures* textures, font::GlyphAtlas& glyph_atlas, const TextEngine* text_engine,
            double display_scale, std::int64_t framebuffer_width, std::int64_t framebuffer_height,
            double logical_width, double logical_height);
-    /** Compatibility overload for text-backed surfaces. */
-    [[nodiscard]] const std::vector<std::uint8_t>&
+    [[nodiscard]] const EncodedPacket&
     encode(const RenderCommandBuffer& commands, std::uint64_t frame_index,
            SurfaceTextures* textures, font::GlyphAtlas& glyph_atlas, const TextEngine& text_engine,
            double display_scale, std::int64_t framebuffer_width, std::int64_t framebuffer_height,
@@ -121,6 +147,9 @@ class HostRenderPacketCache final {
      * keep coming, and encoding, until it is drawn at rest.
      */
     [[nodiscard]] bool refining() const noexcept;
+    [[nodiscard]] const std::shared_ptr<const NodeReadinessSnapshot>& readiness() const noexcept {
+        return submission_cache_.readiness();
+    }
     /** How coverage text is antialiased from the next encode on (subpixel where it can be). */
     void set_text_subpixel(font::SubpixelOrder order) noexcept {
         text_subpixel_ = order;
@@ -129,7 +158,7 @@ class HostRenderPacketCache final {
      * Encodes terminal releases for the glyph atlas and every texture the host holds. The encoded
      * packet is retained before either resource set is committed/drained.
      */
-    [[nodiscard]] const std::vector<std::uint8_t>&
+    [[nodiscard]] const EncodedPacket&
     prepare_resource_release(std::uint64_t frame_index, font::GlyphAtlas& glyph_atlas,
                              std::span<const std::string> textures);
     /** The atlas shape coverage masks pack into, beside the glyph atlas; it must outlive this. */
@@ -140,7 +169,7 @@ class HostRenderPacketCache final {
      */
     void set_vector_glyphs(VectorGlyphPool* glyphs) noexcept;
     void clear() noexcept;
-    [[nodiscard]] const std::vector<std::uint8_t>& packet() const noexcept;
+    [[nodiscard]] const EncodedPacket& packet() const noexcept;
     [[nodiscard]] const HostRenderPacketTelemetry& telemetry() const noexcept;
 
   private:
@@ -148,14 +177,12 @@ class HostRenderPacketCache final {
     RenderSubmissionCache submission_cache_;
     font::GlyphAtlas* shape_atlas_ = nullptr;
     VectorGlyphPool* vector_glyphs_ = nullptr;
-    std::vector<std::uint8_t> geometry_packet_;
-    std::vector<std::uint8_t> reuse_packet_;
-    std::vector<std::uint8_t> resource_packet_;
-    const std::vector<std::uint8_t>* current_packet_ = &geometry_packet_;
+    EncodedPacket current_packet_;
+    EncodedPacket spare_packet_;
+    bool has_geometry_ = false;
     // World-composed presentation groups of the latest frame; every packet carries them.
     std::vector<RenderGroup> groups_;
     HostRenderPacketTelemetry telemetry_;
-    std::size_t planned_draws_ = 0U;
     std::size_t skipped_draws_ = 0U;
     // A failed packet encode must be retried even if the retained UI becomes settled meanwhile.
     bool frame_encoding_incomplete_ = false;

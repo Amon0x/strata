@@ -38,7 +38,7 @@ void append(InputOperationResult& destination, InputOperationResult source) {
 
 } // namespace
 
-RetainedNode* InputRouter::active_modal() const {
+RetainedNode* InputPresentation::active_modal() const {
     if (tree_ == nullptr)
         return nullptr;
     // Highest priority first; within a type the last open node in tree order wins.
@@ -55,7 +55,7 @@ RetainedNode* InputRouter::active_modal() const {
     return nullptr;
 }
 
-bool InputRouter::descendant_of(const RetainedNode& node, const RetainedNode& ancestor) noexcept {
+bool InputPresentation::descendant_of(const RetainedNode& node, const RetainedNode& ancestor) noexcept {
     for (const RetainedNode* current = &node; current != nullptr; current = current->parent()) {
         if (current == &ancestor)
             return true;
@@ -63,7 +63,7 @@ bool InputRouter::descendant_of(const RetainedNode& node, const RetainedNode& an
     return false;
 }
 
-const DescriptionBehavior* InputRouter::behavior(const RetainedNode& node,
+const DescriptionBehavior* InputPresentation::behavior(const RetainedNode& node,
                                                  const std::string_view id) noexcept {
     const auto found =
         std::ranges::find(node.description().behaviors, id, &DescriptionBehavior::id);

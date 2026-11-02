@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include "base/process_lifetime.hpp"
+
 namespace strata::ui {
 namespace {
 
@@ -565,6 +567,17 @@ void RenderCommandBuffer::append(const std::vector<RenderCommand>& commands) {
     view_.size_ += commands.size();
 }
 
+void RenderCommandBuffer::append(std::vector<RenderCommand>&& commands) {
+    if (commands.empty())
+        return;
+    const std::size_t count = commands.size();
+    auto storage = std::make_shared<const std::vector<RenderCommand>>(std::move(commands));
+    view_.flush_tail();
+    tail_open_ = false;
+    view_.tail_ = RenderCommandView::Segment{std::move(storage), 0U, count};
+    view_.size_ += count;
+}
+
 void RenderCommandBuffer::append(const RenderCommandView& source, const std::size_t begin,
                                  const std::size_t end) {
     if (begin >= end)
@@ -592,8 +605,8 @@ void RenderCommandBuffer::set_groups(std::vector<RenderGroup> groups) {
 }
 
 const std::vector<RenderGroup>& RenderCommandBuffer::groups() const noexcept {
-    static const std::vector<RenderGroup> empty;
-    return groups_ != nullptr ? *groups_ : empty;
+    static const base::ProcessLifetime<std::vector<RenderGroup>> empty;
+    return groups_ != nullptr ? *groups_ : empty.get();
 }
 
 JsonValue render_command_json(const RenderCommand& command) {

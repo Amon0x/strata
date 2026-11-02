@@ -60,8 +60,9 @@ struct ProfilerSnapshot final {
     std::vector<ProfilerSpike> spikes;
 };
 
-/** Host render/GPU measurements attached to the most recently completed Surface frame. */
+/** Host render/GPU measurements correlated with the Surface frame that produced their packet. */
 struct ProfilerHostFrame final {
+    std::uint64_t frame_index = 0U;
     std::uint64_t draw_calls = 0U;
     std::uint64_t batches = 0U;
     std::uint64_t vertices = 0U;
@@ -85,6 +86,7 @@ struct ProfilerHostFrame final {
             sizeof(strata_profiler_host_frame),
             STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT,
             0U,
+            frame_index,
             draw_calls,
             batches,
             vertices,

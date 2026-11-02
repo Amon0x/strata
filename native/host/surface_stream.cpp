@@ -5,46 +5,6 @@
 #include <strata/strata.hpp>
 
 namespace strata::host {
-namespace {
-
-struct ByteTarget final {
-    std::vector<std::uint8_t>* bytes = nullptr;
-    bool failed = false;
-};
-
-void capture_bytes(
-    void* const user_data,
-    const strata_bytes_view bytes
-) noexcept {
-    auto& target = *static_cast<ByteTarget*>(user_data);
-    try {
-        if (bytes.size == 0U) {
-            target.bytes->clear();
-        } else {
-            target.bytes->assign(bytes.data, bytes.data + bytes.size);
-        }
-    } catch (...) {
-        target.failed = true;
-    }
-}
-
-void read_bytes(
-    strata_surface* const surface,
-    std::vector<std::uint8_t>& bytes,
-    const bool release
-) {
-    ByteTarget target{&bytes, false};
-    const strata_bytes_sink sink{sizeof(strata_bytes_sink), &target, &capture_bytes};
-    require_ok(
-        release
-            ? strata_surface_prepare_release_packet(surface, &sink)
-            : strata_surface_read_render_packet(surface, &sink),
-        release ? "surface release packet preparation" : "render packet read"
-    );
-    if (target.failed) throw std::bad_alloc();
-}
-
-} // namespace
 
 SurfacePacketStream::SurfacePacketStream(Surface& surface)
     : SurfacePacketStream(surface.native_handle()) {}
@@ -57,27 +17,36 @@ SurfacePacketStream::SurfacePacketStream(strata_surface* const surface) : surfac
 
 SurfacePacketStream::~SurfacePacketStream() = default;
 
-SurfacePacketFrame SurfacePacketStream::frame(const std::int64_t time_nanoseconds) {
-    if (surface_ == nullptr) {
+SurfacePacketCommit frame_surface(strata_surface* const surface,
+                                   const std::int64_t time_nanoseconds) {
+    if (surface == nullptr) {
         throw std::logic_error("Surface packet stream is not attached to a live Surface");
     }
     strata_surface_frame_info frame{};
     frame.struct_size = sizeof(frame);
     require_ok(
-        strata_surface_frame(surface_, time_nanoseconds, &frame),
+        strata_surface_frame(surface, time_nanoseconds, &frame),
         "surface frame"
     );
-    read_bytes(surface_, bytes_, false);
-    const RenderPacket& packet = decoder_.decode(bytes_);
-    return SurfacePacketFrame{frame, &packet, bytes_.size(), bytes_};
+    strata_render_packet* raw = nullptr;
+    require_ok(strata_surface_acquire_render_packet(surface, &raw), "render packet acquisition");
+    return SurfacePacketCommit{frame, EncodedRenderPacket(raw)};
+}
+
+SurfacePacketFrame SurfacePacketStream::frame(const std::int64_t time_nanoseconds) {
+    SurfacePacketCommit commit = frame_surface(surface_, time_nanoseconds);
+    const RenderPacket& packet = decoder_.decode(commit.encoded.bytes());
+    return SurfacePacketFrame{commit.surface, &packet, std::move(commit.encoded)};
 }
 
 const RenderPacket& SurfacePacketStream::prepare_release() {
     if (surface_ == nullptr) {
         throw std::logic_error("Surface packet stream is not attached to a live Surface");
     }
-    read_bytes(surface_, bytes_, true);
-    return decoder_.decode(bytes_);
+    strata_render_packet* raw = nullptr;
+    require_ok(strata_surface_prepare_release_packet(surface_, &raw), "release packet preparation");
+    const EncodedRenderPacket encoded(raw);
+    return decoder_.decode(encoded.bytes());
 }
 
 void SurfacePacketStream::acknowledge_release() {
@@ -104,7 +73,6 @@ strata_surface* SurfacePacketStream::native_surface() const noexcept {
 
 void SurfacePacketStream::reset() noexcept {
     decoder_.reset();
-    bytes_.clear();
 }
 
 } // namespace strata::host

@@ -11,8 +11,13 @@
  * the runtime untouched. Distinct runtimes are independent.
  *
  * The async completion functions (strata_runtime_async_progress, strata_runtime_async_succeed_json
- * and strata_runtime_async_fail) are the exception: they post to a synchronized mailbox, may be
- * called from any thread at any time, and report failures as bare statuses.
+ * and strata_runtime_async_fail) and strata_runtime_request_frame are the exception: they post to
+ * synchronized endpoints, may overlap owner calls, and report failures as bare statuses. The host
+ * must quiesce its callers before releasing the runtime.
+ *
+ * A frame-wake callback may run on a worker or during an owner call. It only signals the host's
+ * event loop, must not block, and must not enter or release its runtime. Such reentry is refused.
+ * Runtime release quiesces wake callbacks before their caller-owned storage may be destroyed.
  *
  * Reentrancy
  *
@@ -21,7 +26,7 @@
  * them. From inside a callback the host may call back into the same runtime only for reads and
  * host-service calls: the get/read functions, strata_runtime_next_identity,
  * strata_runtime_create_snapshot, the clipboard/IME/effect calls, strata_runtime_read_resource,
- * strata_surface_read_render_packet, and the profiler and diagnostic reads. Every other runtime or
+ * strata_surface_acquire_render_packet, and the profiler and diagnostic reads. Every other runtime or
  * Surface call (release, abandon, activation, configuration, adapter installation, publication,
  * input, framing, themes, and so on) is refused with STRATA_STATUS_REENTRANT_CALL, because it could
  * destroy or replace state the in-progress call is using. Refusals emit no diagnostic. Extension
@@ -64,8 +69,10 @@ extern "C" {
 #define STRATA_ABI_VERSION_5 UINT32_C(5)
 #define STRATA_ABI_VERSION_6 UINT32_C(6)
 #define STRATA_ABI_VERSION_7 UINT32_C(7)
-#define STRATA_ABI_VERSION_CURRENT STRATA_ABI_VERSION_7
-#define STRATA_ABI_VERSION_MINIMUM STRATA_ABI_VERSION_7
+#define STRATA_ABI_VERSION_8 UINT32_C(8)
+#define STRATA_ABI_VERSION_9 UINT32_C(9)
+#define STRATA_ABI_VERSION_CURRENT STRATA_ABI_VERSION_9
+#define STRATA_ABI_VERSION_MINIMUM STRATA_ABI_VERSION_9
 
 typedef uint32_t strata_status;
 
@@ -169,8 +176,8 @@ typedef struct strata_diagnostics_snapshot_sink {
 
 #define STRATA_PROFILER_SNAPSHOT_VERSION_1 UINT32_C(1)
 #define STRATA_PROFILER_SNAPSHOT_VERSION_CURRENT STRATA_PROFILER_SNAPSHOT_VERSION_1
-#define STRATA_PROFILER_HOST_FRAME_VERSION_1 UINT32_C(1)
-#define STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT STRATA_PROFILER_HOST_FRAME_VERSION_1
+#define STRATA_PROFILER_HOST_FRAME_VERSION_2 UINT32_C(2)
+#define STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT STRATA_PROFILER_HOST_FRAME_VERSION_2
 
 typedef uint32_t strata_profiler_scope;
 #define STRATA_PROFILER_SCOPE_RUNTIME UINT32_C(0)
@@ -181,6 +188,9 @@ typedef struct strata_profiler_host_frame {
     size_t struct_size;
     uint32_t version;
     uint32_t reserved;
+    /* Originating Surface frame, never zero or a future frame. Late timing samples retain this
+     * identity without replacing the latest frame's counters. */
+    uint64_t frame_index;
     uint64_t draw_calls;
     uint64_t batches;
     uint64_t vertices;
@@ -332,6 +342,10 @@ typedef uint64_t strata_capabilities;
 #define STRATA_CAPABILITY_COMPILED_MODULE_ACTIVATION (UINT64_C(1) << 23)
 #define STRATA_CAPABILITY_DURABLE_STATE (UINT64_C(1) << 24)
 #define STRATA_CAPABILITY_ASYNC_HOST_DATA (UINT64_C(1) << 25)
+#define STRATA_CAPABILITY_TASK_EXECUTION (UINT64_C(1) << 26)
+#define STRATA_CAPABILITY_PREPARATION (UINT64_C(1) << 27)
+#define STRATA_CAPABILITY_HOST_PUBLICATIONS (UINT64_C(1) << 28)
+#define STRATA_CAPABILITY_OWNED_RENDER_PACKETS (UINT64_C(1) << 29)
 
 typedef struct strata_api_info {
     size_t struct_size;
@@ -339,6 +353,61 @@ typedef struct strata_api_info {
     uint32_t minimum_abi_version;
     strata_capabilities capabilities;
 } strata_api_info;
+
+typedef uint32_t strata_task_execution;
+#define STRATA_TASK_EXECUTION_ASYNCHRONOUS UINT32_C(0)
+#define STRATA_TASK_EXECUTION_DETERMINISTIC UINT32_C(1)
+
+/* Non-blocking notification only; a failed status is reported on the next owner frame. */
+typedef strata_status (*strata_frame_wake_fn)(void* user_data);
+typedef struct strata_frame_wake_adapter {
+    size_t struct_size;
+    void* user_data;
+    strata_frame_wake_fn wake;
+} strata_frame_wake_adapter;
+
+typedef struct strata_preparation strata_preparation;
+typedef struct strata_cancellation strata_cancellation;
+typedef struct strata_render_packet strata_render_packet;
+
+typedef uint32_t strata_preparation_status;
+#define STRATA_PREPARATION_PENDING UINT32_C(0)
+#define STRATA_PREPARATION_READY UINT32_C(1)
+#define STRATA_PREPARATION_FAILED UINT32_C(2)
+#define STRATA_PREPARATION_CANCELLED UINT32_C(3)
+#define STRATA_PREPARATION_TAKEN UINT32_C(4)
+
+/*
+ * Runs with exclusive access to an owned context on the engine pool (inline in deterministic mode).
+ * The cancellation token is borrowed only for this call. On success, return a non-null owned result
+ * independent of the input context. Any non-null result, including one returned on failure, belongs
+ * to the engine until taken. Error text is copied before context cleanup; keep it alive in the
+ * context or static storage until then. Callbacks must not throw or access live UI-owner state.
+ */
+typedef strata_status (*strata_preparation_work_fn)(
+    void* context, const strata_cancellation* cancellation, void** out_result,
+    strata_string_view* out_error);
+/* Cleanup may run on any thread, must not throw, and must own every lifetime it needs. */
+typedef void (*strata_preparation_cleanup_fn)(void* value);
+
+typedef struct strata_preparation_config {
+    size_t struct_size;
+    strata_task_execution execution;
+    uint32_t reserved;
+    strata_frame_wake_adapter frame_wake;
+    void* context;
+    strata_preparation_work_fn work;
+    strata_preparation_cleanup_fn release_context;
+    strata_preparation_cleanup_fn release_result;
+} strata_preparation_config;
+
+typedef struct strata_preparation_info {
+    size_t struct_size;
+    strata_preparation_status status;
+    strata_status failure_status;
+    /* Borrowed until release; nonempty only on terminal failure. */
+    strata_string_view failure_message;
+} strata_preparation_info;
 
 typedef struct strata_runtime_config {
     size_t struct_size;
@@ -349,7 +418,18 @@ typedef struct strata_runtime_config {
     strata_allocator allocator;
     strata_clock clock;
     strata_diagnostic_sink diagnostics;
+    strata_task_execution task_execution;
+    /* All zero disables notifications for hosts that drive their own frame loop. */
+    strata_frame_wake_adapter frame_wake;
 } strata_runtime_config;
+
+typedef struct strata_runtime_task_info {
+    size_t struct_size;
+    uint64_t pending_tasks;
+    uint64_t wake_generation;
+    uint32_t completions_ready;
+    strata_task_execution execution;
+} strata_runtime_task_info;
 
 typedef struct strata_snapshot_info {
     size_t struct_size;
@@ -381,13 +461,44 @@ typedef struct strata_runtime_memory_info {
     uint64_t arena_deallocation_count;
 } strata_runtime_memory_info;
 
-/* The runtime copies both strings during the call; values_json must contain one JSON object. */
+typedef struct strata_host_publication strata_host_publication;
+
+typedef uint32_t strata_host_publication_status;
+#define STRATA_HOST_PUBLICATION_PENDING UINT32_C(0)
+#define STRATA_HOST_PUBLICATION_ADOPTED UINT32_C(1)
+#define STRATA_HOST_PUBLICATION_FAILED UINT32_C(2)
+#define STRATA_HOST_PUBLICATION_CANCELLED UINT32_C(3)
+
+typedef uint32_t strata_host_snapshot_execution;
+#define STRATA_HOST_SNAPSHOT_EXECUTION_RUNTIME UINT32_C(0)
+#define STRATA_HOST_SNAPSHOT_EXECUTION_INLINE UINT32_C(1)
+
+/*
+ * Both strings are copied during admission. Runtime mode prepares JSON and typed values on the
+ * runtime's task endpoint, then adopts in acceptance order at frame start or explicit poll.
+ * OK means accepted, not adopted. Accepted generations remain consumed after failure/cancellation.
+ * Inline mode completes before returning and requires no earlier outstanding publications.
+ * out_publication is optional; a returned receipt must be released independently of the runtime.
+ */
 typedef struct strata_host_snapshot_config {
     size_t struct_size;
     strata_string_view id;
     uint64_t generation;
     strata_string_view values_json;
+    strata_host_snapshot_execution execution;
+    uint32_t reserved;
+    strata_host_publication** out_publication;
 } strata_host_snapshot_config;
+
+/* Terminal result/message are immutable; message bytes remain valid until receipt release. */
+typedef struct strata_host_publication_info {
+    size_t struct_size;
+    strata_host_publication_status status;
+    uint32_t reserved;
+    uint64_t generation;
+    strata_result result;
+    strata_string_view message;
+} strata_host_publication_info;
 
 /*
  * A runtime image: tightly packed straight-alpha RGBA8 rows, width * height * 4 bytes, copied
@@ -1865,6 +1976,10 @@ typedef struct strata_surface_frame_info {
      * Surface (and stop drawing it, unless what it shows animates on its own, such as a material
      * reading time). Framing an idle Surface anyway is cheap and harmless. */
     uint32_t idle;
+    /* Retained packet planning counts, available without decoding on the runtime owner. */
+    uint64_t planned_draw_count;
+    uint64_t planned_batch_count;
+    uint64_t planned_vertex_count;
 } strata_surface_frame_info;
 
 /*
@@ -2164,10 +2279,35 @@ STRATA_API strata_capabilities strata_capability_bits(void) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_get_api_info(uint32_t requested_abi,
                                              strata_api_info* out_info) STRATA_NOEXCEPT;
 
+/*
+ * Starts preparation without a runtime, using the same engine-wide pool as runtime tasks.
+ * Success transfers context ownership; on failure it remains with the caller. Configuration is
+ * copied. The wake adapter only signals the event loop and cannot enter or release this endpoint.
+ * Handle calls must be serialized, like runtime calls. Release quiesces wakes but never joins work.
+ */
+STRATA_API strata_result strata_preparation_start(
+    const strata_preparation_config* config, strata_preparation** out_preparation) STRATA_NOEXCEPT;
+/* Adopts completed work on the caller, without waiting for pending work. */
+STRATA_API strata_result strata_preparation_get_info(
+    strata_preparation* preparation, strata_preparation_info* out_info) STRATA_NOEXCEPT;
+/* Transfers a ready result exactly once; NOT_FOUND for pending, failed, cancelled or taken work. */
+STRATA_API strata_result strata_preparation_take_result(
+    strata_preparation* preparation, void** out_result) STRATA_NOEXCEPT;
+/* Discards an untaken result. Repeated cancellation and cancellation after take are harmless. */
+STRATA_API strata_result strata_preparation_cancel(strata_preparation* preparation) STRATA_NOEXCEPT;
+STRATA_API strata_result strata_preparation_release(strata_preparation* preparation) STRATA_NOEXCEPT;
+/* Valid only inside the work callback; a null token reports cancellation. */
+STRATA_API uint32_t strata_cancellation_requested(
+    const strata_cancellation* cancellation) STRATA_NOEXCEPT;
+
 STRATA_API strata_result strata_runtime_create(const strata_runtime_config* config,
                                                strata_runtime** out_runtime) STRATA_NOEXCEPT;
 /* Refuses to destroy a runtime that still owns any Surface, leaving every handle recoverable. */
 STRATA_API strata_result strata_runtime_release(strata_runtime* runtime) STRATA_NOEXCEPT;
+/* Thread-safe notification; does not enter the runtime or touch any Surface. */
+STRATA_API strata_result strata_runtime_request_frame(strata_runtime* runtime) STRATA_NOEXCEPT;
+STRATA_API strata_result strata_runtime_get_task_info(
+    const strata_runtime* runtime, strata_runtime_task_info* out_info) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_runtime_get_memory_info(
     const strata_runtime* runtime, strata_runtime_memory_info* out_info) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_runtime_next_identity(strata_runtime* runtime,
@@ -2176,6 +2316,15 @@ STRATA_API strata_result strata_runtime_create_snapshot(
     strata_runtime* runtime, strata_snapshot** out_snapshot) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_runtime_publish_host_snapshot(
     strata_runtime* runtime, const strata_host_snapshot_config* snapshot) STRATA_NOEXCEPT;
+/* Drains completed work and adopts the contiguous completed publication prefix, without waiting. */
+STRATA_API strata_result strata_runtime_poll_host_snapshots(strata_runtime* runtime) STRATA_NOEXCEPT;
+/* Observes only; does not enter or keep the runtime alive. May be read after runtime release. */
+STRATA_API strata_result strata_host_publication_get_info(
+    const strata_host_publication* publication, strata_host_publication_info* out_info) STRATA_NOEXCEPT;
+/* Requests cancellation; poll/frame adopts it. Already terminal receipts are unaffected. */
+STRATA_API strata_result strata_host_publication_cancel(strata_host_publication* publication) STRATA_NOEXCEPT;
+/* Releasing a receipt does not cancel its publication. Serialize release with receipt calls. */
+STRATA_API void strata_host_publication_release(strata_host_publication* publication) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_runtime_get_host_snapshot_info(
     const strata_runtime* runtime, strata_host_snapshot_info* out_info) STRATA_NOEXCEPT;
 /*
@@ -2190,6 +2339,9 @@ STRATA_API strata_result strata_runtime_release_image(strata_runtime* runtime,
                                                       strata_string_view id) STRATA_NOEXCEPT;
 /* Reads the retained generation for one snapshot producer id. */
 STRATA_API strata_result strata_runtime_get_host_snapshot_generation(
+    const strata_runtime* runtime, strata_string_view id, uint64_t* out_generation) STRATA_NOEXCEPT;
+/* Highest admitted generation, including pending, failed and cancelled publications. */
+STRATA_API strata_result strata_runtime_get_host_snapshot_accepted_generation(
     const strata_runtime* runtime, strata_string_view id, uint64_t* out_generation) STRATA_NOEXCEPT;
 /* Reads the canonical bounded runtime diagnostic history without materializing frame JSON. */
 STRATA_API strata_result strata_runtime_read_diagnostics(
@@ -2398,13 +2550,13 @@ STRATA_API strata_result strata_runtime_restore_application_state(
 STRATA_API void strata_application_state_snapshot_release(
     strata_application_state_snapshot* snapshot) STRATA_NOEXCEPT;
 /*
- * Terminal ordered teardown. Prepare and synchronously consume the resource-only packet while its
- * GPU owner is alive, acknowledge that consumption, then release. Preparation alone is never a
- * delivery acknowledgement. Repeated preparation returns the same retained terminal packet;
+ * Terminal ordered teardown. Prepare and consume the resource-only packet in stream order while its
+ * GPU owner is alive, acknowledge completed consumption, then release. Preparation alone is never a
+ * delivery acknowledgement. Repeated preparation returns another reference to the same terminal packet;
  * ordinary Surface mutation/framing is rejected after the first successful preparation.
  */
 STRATA_API strata_result strata_surface_prepare_release_packet(
-    strata_surface* surface, const strata_bytes_sink* sink) STRATA_NOEXCEPT;
+    strata_surface* surface, strata_render_packet** out_packet) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_surface_acknowledge_release_packet(strata_surface* surface)
     STRATA_NOEXCEPT;
 /* Refuses out-of-order release and leaves the Surface handle recoverable for retry. */
@@ -2489,15 +2641,25 @@ STRATA_API strata_result strata_surface_read_profiler(
     const strata_surface* surface, const strata_profiler_snapshot_sink* sink) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_surface_set_profiler_capture(strata_surface* surface,
                                                              uint32_t enabled) STRATA_NOEXCEPT;
-/* Called after submission to attach one complete genuine host boundary to the latest frame. */
+/* Called on the runtime owner after submission, including delayed render-thread feedback. */
 STRATA_API strata_result strata_surface_record_host_frame(
     strata_surface* surface, const strata_profiler_host_frame* telemetry) STRATA_NOEXCEPT;
 /* Drains bounded ordered lifecycle events and paired action outcomes since the prior drain. */
 STRATA_API strata_result strata_surface_drain_events_json(
     strata_surface* surface, const strata_value_json_sink* sink) STRATA_NOEXCEPT;
-/* The complete packet is borrowed only for the duration of emit. */
-STRATA_API strata_result strata_surface_read_render_packet(
-    const strata_surface* surface, const strata_bytes_sink* sink) STRATA_NOEXCEPT;
+/*
+ * Acquires one owned reference to the current immutable encoded stream item without copying.
+ * Bytes survive later frames and Surface/runtime destruction; compact packets still require every
+ * preceding stream item. Ownership does not retain historical GPU resources or authorize replay.
+ */
+STRATA_API strata_result strata_surface_acquire_render_packet(
+    const strata_surface* surface, strata_render_packet** out_packet) STRATA_NOEXCEPT;
+/* Thread-safe for valid owned references, independent of runtime admission. Null is harmless. */
+STRATA_API void strata_render_packet_retain(strata_render_packet* packet) STRATA_NOEXCEPT;
+STRATA_API void strata_render_packet_release(strata_render_packet* packet) STRATA_NOEXCEPT;
+/* The immutable view lasts until the caller releases its reference; null returns an empty view. */
+STRATA_API strata_bytes_view strata_render_packet_bytes(
+    const strata_render_packet* packet) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_surface_inspector_select(strata_surface* surface,
                                                          strata_string_view key,
                                                          uint32_t* out_selected) STRATA_NOEXCEPT;

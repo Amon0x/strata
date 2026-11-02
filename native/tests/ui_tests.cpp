@@ -22,6 +22,8 @@
 #include <strata/render_packet.hpp>
 #include <strata/svg.hpp>
 
+#include "base/pending.hpp"
+#include "base/task_pool.hpp"
 #include "data/json.hpp"
 #include "font/atlas.hpp"
 #include "font/opentype.hpp"
@@ -302,20 +304,20 @@ void test_bundled_font_metrics(const std::filesystem::path& resource_root) {
     check(has_multichannel_distance, "native MSDF raster collapsed to a monochrome SDF");
     strata::font::GlyphAtlas atlas("ui-test-surface");
     const std::optional<strata::font::GlyphAtlasEntry> first_entry =
-        atlas.request_coverage("strata:fonts/default-medium", font, latin_a, 12.0, {});
+        atlas.request_coverage("strata:fonts/default-medium", font, latin_a, 12.0, {}).value;
     check(first_entry.has_value(), "native glyph atlas rejected a valid coverage glyph");
     strata::font::GlyphAtlas explicit_mode_atlas("ui-test-explicit-raster-mode");
     const auto default_large_entry =
-        explicit_mode_atlas.request("strata:fonts/default-medium", font, latin_a, 72.0, {});
+        explicit_mode_atlas.request("strata:fonts/default-medium", font, latin_a, 72.0, {}).value;
     const auto explicit_msdf_entry =
         explicit_mode_atlas.request("strata:fonts/default-medium", font, latin_a, 72.0, {}, 0U,
-                                    strata::font::GlyphRasterMode::msdf);
+                                    strata::font::GlyphRasterMode::msdf).value;
     check(default_large_entry.has_value() && explicit_msdf_entry.has_value() &&
               default_large_entry->mode == strata::font::GlyphRasterMode::coverage &&
               explicit_msdf_entry->mode == strata::font::GlyphRasterMode::msdf,
           "glyph size implicitly selected MSDF or explicit MSDF opt-in was ignored");
     const std::optional<strata::font::GlyphAtlasEntry> cached_entry =
-        atlas.request_coverage("strata:fonts/default-medium", font, latin_a, 12.0, {});
+        atlas.request_coverage("strata:fonts/default-medium", font, latin_a, 12.0, {}).value;
     check(cached_entry.has_value() && cached_entry->texture == first_entry->texture &&
               cached_entry->u == first_entry->u && cached_entry->v == first_entry->v,
           "native glyph atlas cache changed a stable entry");
@@ -403,7 +405,7 @@ void test_bundled_font_metrics(const std::filesystem::path& resource_root) {
     bounded_config.maximum_cached_glyphs = 1U;
     strata::font::GlyphAtlas bounded_atlas("ui-test-bounded-atlas", bounded_config);
     check(bounded_atlas.request_coverage("strata:fonts/default-medium", font, latin_a, 12.0, {})
-              .has_value(),
+              .value.has_value(),
           "bounded atlas rejected its initial glyph");
     const std::uint64_t bounded_generation = bounded_atlas.generation();
     try {
@@ -418,7 +420,7 @@ void test_bundled_font_metrics(const std::filesystem::path& resource_root) {
               bounded_atlas.generation() == bounded_generation + 1U,
           "bounded atlas did not reclaim its scheduled generation at frame preparation");
     check(bounded_atlas.request_coverage("strata:fonts/default-medium", font, latin_b, 12.0, {})
-              .has_value(),
+              .value.has_value(),
           "bounded atlas did not reuse reclaimed capacity during warmup");
     bounded_atlas.end_frame_preparation();
     check(!bounded_atlas.frame_preparation_active() &&
@@ -429,10 +431,10 @@ void test_bundled_font_metrics(const std::filesystem::path& resource_root) {
     check(!one_recycle_atlas.begin_frame_preparation(),
           "empty atlas unexpectedly advanced at frame preparation");
     check(one_recycle_atlas.request_coverage("strata:fonts/default-medium", font, latin_a, 12.0, {})
-                  .has_value() &&
+                  .value.has_value() &&
               one_recycle_atlas
                   .request_coverage("strata:fonts/default-medium", font, latin_b, 12.0, {})
-                  .has_value(),
+                  .value.has_value(),
           "atlas did not admit one bounded in-preparation recycle");
     const std::uint64_t recycled_generation = one_recycle_atlas.generation();
     try {
@@ -525,9 +527,10 @@ void test_svg_image_projection_and_compound_fill() {
 <svg width="20" height="10" viewBox="0 0 10 10">
   <rect width="10" height="10" fill="currentColor"/>
 </svg>)SVG");
-    std::vector<RenderCommand> commands;
-    append_svg_image(commands, document, Rect{0.0, 0.0, 100.0, 50.0}, TextureRegion{},
+    RenderCommandBuffer output;
+    append_svg_image(output, document, Rect{0.0, 0.0, 100.0, 50.0}, TextureRegion{},
                      RenderColor{70U, 120U, 240U, 200U}, 0.5);
+    const RenderCommandView& commands = output.commands();
     check(commands.size() == 5U &&
               std::holds_alternative<ClipPushRenderCommand>(commands.front()) &&
               std::holds_alternative<TransformPushRenderCommand>(commands[1]) &&
@@ -731,7 +734,7 @@ void test_bundled_texture_descriptor(const std::filesystem::path& resource_root)
     }
 }
 
-std::uint32_t packet_u32(const std::vector<std::uint8_t>& packet, std::size_t& offset) {
+std::uint32_t packet_u32(const std::span<const std::uint8_t> packet, std::size_t& offset) {
     check(offset + 4U <= packet.size(), "render packet truncated a u32 field");
     std::uint32_t value = 0U;
     for (std::size_t byte = 0U; byte < 4U; ++byte) {
@@ -740,7 +743,7 @@ std::uint32_t packet_u32(const std::vector<std::uint8_t>& packet, std::size_t& o
     return value;
 }
 
-std::uint64_t packet_u64(const std::vector<std::uint8_t>& packet, std::size_t& offset) {
+std::uint64_t packet_u64(const std::span<const std::uint8_t> packet, std::size_t& offset) {
     check(offset + 8U <= packet.size(), "render packet truncated a u64 field");
     std::uint64_t value = 0U;
     for (std::size_t byte = 0U; byte < 8U; ++byte) {
@@ -801,6 +804,25 @@ void test_render_streams_share_runs_without_copies() {
     check(second.size() == 9U && second.commands().back() == rect(300) &&
               copy.commands().back() == rect(400),
           "appending to a copy changed the stream it was copied from");
+
+    RenderCommandBuffer adopted;
+    adopted.append(rect(-1));
+    {
+        std::vector<RenderCommand> prepared{rect(1), rect(2)};
+        adopted.append(std::move(prepared));
+    }
+    adopted.append(rect(3));
+    const RenderCommandView published = adopted.commands();
+    adopted.append(std::vector<RenderCommand>{rect(4), rect(5)});
+    adopted.append(rect(6));
+    check(adopted.commands() ==
+              std::vector<RenderCommand>{rect(-1), rect(1), rect(2), rect(3), rect(4), rect(5), rect(6)} &&
+              published == std::vector<RenderCommand>{rect(-1), rect(1), rect(2), rect(3)},
+          "adopting complete runs lost command order or changed an already published frame");
+    adopted.clear();
+    adopted.append(rect(7));
+    check(published == std::vector<RenderCommand>{rect(-1), rect(1), rect(2), rect(3)},
+          "reusing an adopter's buffer destroyed a retained prepared frame");
 
     RenderCommandBuffer stream;
     std::vector<RenderCommand> expected;
@@ -942,7 +964,8 @@ void test_subpixel_text_runs(const std::filesystem::path& resource_root) {
     using namespace strata;
     const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
         resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
-    const std::uint32_t glyph = text_engine->font("strata:fonts/default").glyph_id('H');
+    const std::uint32_t glyph =
+        text_engine->font("strata:fonts/default").value.value()->glyph_id('H');
     const auto run = [glyph](const double x) {
         ui::TextRunRenderCommand text;
         text.origin = ui::Point{x, 40.0};
@@ -1076,8 +1099,9 @@ void test_render_submission_cache(const std::filesystem::path& resource_root) {
     static_cast<void>(cache.resolve(commands, atlas, *text_engine, environment));
     check(cache.miss_count() == 6U, "explicit cache clear retained cached geometry");
 
-    const std::uint16_t visible_glyph = text_engine->control_font().glyph_id('A');
-    const std::uint16_t clipped_glyph = text_engine->control_font().glyph_id('B');
+    const auto& control_font = *text_engine->font("strata:fonts/default-medium").value.value();
+    const std::uint16_t visible_glyph = control_font.glyph_id('A');
+    const std::uint16_t clipped_glyph = control_font.glyph_id('B');
     check(visible_glyph != 0U && clipped_glyph != 0U, "submission culling fixture lost its glyphs");
     ui::RenderCommandBuffer culled_text;
     culled_text.append(ui::TextRunRenderCommand{
@@ -1277,7 +1301,8 @@ void test_render_submission_translation_reuse(const std::filesystem::path& resou
     using namespace strata;
     const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
         resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
-    const std::uint16_t glyph = text_engine->control_font().glyph_id('A');
+    const std::uint16_t glyph =
+        text_engine->font("strata:fonts/default-medium").value.value()->glyph_id('A');
     check(glyph != 0U, "translation reuse fixture lost its text glyph");
     const ui::LogicalGlyph logical{
         "strata:fonts/default-medium", glyph, 'A', 0U, 1U, 0.0, 9.0, 7.0,
@@ -1318,12 +1343,13 @@ void test_render_submission_changed_draws_match_full_plan(
         resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
     const ui::TextEngine& text = *text_engine;
     const auto run = [&text](const std::string_view characters) {
+        const auto& face = *text.font("strata:fonts/default-medium").value.value();
         std::vector<ui::LogicalGlyph> glyphs;
         double x = 0.0;
         for (const char character : characters) {
             glyphs.push_back(ui::LogicalGlyph{
-                "strata:fonts/default-medium", text.control_font().glyph_id(
-                    static_cast<std::uint32_t>(character)),
+                "strata:fonts/default-medium",
+                face.glyph_id(static_cast<std::uint32_t>(character)),
                 static_cast<std::uint32_t>(character), glyphs.size(), glyphs.size() + 1U, x,
                 9.0, 7.0,
             });
@@ -1524,7 +1550,8 @@ void test_render_submission_structural_alignment(const std::filesystem::path& re
     using namespace strata;
     const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
         resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
-    const std::uint16_t glyph = text_engine->control_font().glyph_id('A');
+    const std::uint16_t glyph =
+        text_engine->font("strata:fonts/default-medium").value.value()->glyph_id('A');
     check(glyph != 0U, "structural alignment fixture lost its text glyph");
     const ui::LogicalGlyph logical{
         "strata:fonts/default-medium", glyph, 'A', 0U, 1U, 0.0, 9.0, 7.0,
@@ -1591,12 +1618,11 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
     });
     const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
         resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
-    std::vector<resource::EncodedTextureResource> textures{
-        resource::EncodedTextureResource{
+    std::vector<resource::TextureResource> textures{
+        resource::TextureResource{
             "fixture:nine-patch",
             "fixture/nine-patch.png",
             resource::TextureSampling::linear,
-            resource::ImageEncoding::rgba8,
             resource::ImageDimensions{16U, 16U},
             std::vector<std::uint8_t>(16U * 16U * 4U, 255U),
         },
@@ -1628,7 +1654,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
 
     ui::HostRenderPacketCache packet_cache;
     textures.front().dimensions = texture_descriptors.front().dimensions;
-    textures.front().bytes.assign(32U * 16U * 4U, 255U);
+    textures.front().pixels.assign(32U * 16U * 4U, 255U);
     ui::SurfaceTextures surface_textures("fixture", textures);
     static_cast<void>(packet_cache.encode(commands, 1U, &surface_textures, atlas, *text_engine, 1.0,
                                           640, 480, 640.0, 480.0));
@@ -1636,24 +1662,24 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
         ui::Rect{0.0, 0.0, 1.0, 1.0},
         ui::RenderColor{255U, 255U, 255U, 255U},
     });
-    const std::vector<std::uint8_t>& later_packet = packet_cache.encode(
-        commands, 2U, &surface_textures, atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0);
+    const auto later_packet = packet_cache.encode(
+        commands, 2U, &surface_textures, atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0).bytes();
     check(!later_packet.empty() && surface_textures.resident().size() == 1U,
           "an uploaded texture lost the descriptor later geometry needs");
 
-    const std::uint16_t teardown_glyph = text_engine->control_font().glyph_id('A');
+    const auto& control_font = *text_engine->font("strata:fonts/default-medium").value.value();
+    const std::uint16_t teardown_glyph = control_font.glyph_id('A');
     check(teardown_glyph != 0U, "control font lost the atlas teardown fixture");
     check(atlas
-              .request_coverage("strata:fonts/control", text_engine->control_font(), teardown_glyph,
+              .request_coverage("strata:fonts/control", control_font, teardown_glyph,
                                 12.0, {})
-              .has_value(),
+              .value.has_value(),
           "atlas teardown fixture did not allocate a live page");
     // Publish the page once so teardown models a resource that can genuinely be host-owned.
     static_cast<void>(packet_cache.encode(commands, 3U, &surface_textures, atlas, *text_engine, 1.0,
                                           640, 480, 640.0, 480.0));
     const std::vector<std::string> resident = surface_textures.resident();
-    const std::vector<std::uint8_t>& release_packet =
-        packet_cache.prepare_resource_release(4U, atlas, resident);
+    const auto release_packet = packet_cache.prepare_resource_release(4U, atlas, resident).bytes();
     std::size_t release_offset = 8U;
     check(release_packet.size() >= release_offset &&
               std::string_view(reinterpret_cast<const char*>(release_packet.data()),
@@ -3570,6 +3596,89 @@ void test_virtualization_cache_queries_only_observed_keys() {
     check(reset.anchor_changed && reset.offset == 0.0 && replacement->key_queries == 0U &&
               sorted->lookup_queries == 0U,
           "explicit sort/reset policy preserved an unrelated virtual anchor");
+}
+
+/** A shared preparation invalidates independent trees, not unrelated cached measurements. */
+void test_preparation_invalidates_cached_measurement() {
+    using namespace strata;
+    using namespace strata::ui;
+    base::TaskOwner tasks(base::TaskExecution::asynchronous);
+    const auto prepared = base::Pending<double>::start(
+        tasks, base::TaskKind::font, base::TaskPriority::frame_critical, "prepared-metrics",
+        [](const base::TaskCancellation&) { return 72.0; });
+    const auto description = node("Panel", "root", {
+        node("Text", "dependent", {}, layout_properties(object({
+            {"width", runtime::Value("content")}, {"height", runtime::Value("content")},
+        }))),
+        node("Text", "fixed", {}, layout_properties(object({
+            {"width", runtime::Value("content")}, {"height", runtime::Value("content")},
+        }))),
+    });
+    RetainedTree left;
+    RetainedTree right;
+    static_cast<void>(left.reconcile(description));
+    static_cast<void>(right.reconcile(description));
+    std::size_t dependent_measures = 0U;
+    std::size_t fixed_measures = 0U;
+    const auto measure = [&](const RetainedNode& value, const Constraints&) {
+        if (value.description().key == "dependent") {
+            ++dependent_measures;
+            value.observe_preparation(prepared.readiness());
+            return Size{prepared.get() != nullptr ? *prepared.get() : 12.0, 10.0};
+        }
+        if (value.description().key == "fixed") {
+            ++fixed_measures;
+            return Size{30.0, 10.0};
+        }
+        return Size{};
+    };
+    LayoutEngine left_layout(measure);
+    LayoutEngine right_layout(measure);
+    const LayoutEnvironment environment{
+        0U, Rect{0.0, 0.0, 320.0, 180.0}, 1.0, {},
+        PointSnapPolicy::nearest, RectangleSnapPolicy::outward, false,
+    };
+    const auto width = [](const LayoutResult& result, const RetainedTree& tree) {
+        return result.find(tree.find_key("dependent")->identity())->bounds.width;
+    };
+    check(width(left_layout.layout(left, environment), left) == 12.0 &&
+              width(right_layout.layout(right, environment), right) == 12.0 &&
+              left.find_key("dependent")->identity() == right.find_key("dependent")->identity(),
+          "pending metrics escaped owner adoption or the shared-node-id fixture changed");
+    base::TaskOwner other_tasks(base::TaskExecution::deterministic);
+    const auto other = base::Pending<double>::start(
+        other_tasks, base::TaskKind::font, base::TaskPriority::frame_critical, "other-metrics",
+        [](const base::TaskCancellation&) { return 48.0; });
+    check(prepared.id() == other.id() &&
+              right.preparation_reads()->references(prepared.readiness()) &&
+              !right.preparation_reads()->references(other.readiness()),
+          "preparation liveness confused equal resource ids from different task owners");
+    const std::size_t pending_measures = dependent_measures;
+    const std::size_t unchanged_measures = fixed_measures;
+    static_cast<void>(left_layout.layout(left, environment));
+    static_cast<void>(right_layout.layout(right, environment));
+    check(dependent_measures == pending_measures,
+          "pending metrics prevented measurement cache reuse");
+    check(tasks.wait_for_completion(std::chrono::seconds(5)),
+          "metric preparation did not complete");
+    static_cast<void>(tasks.drain());
+    left.preparation_reads()->invalidate(left);
+    check(left.find_key("dependent")->dirty().contains(DirtyReason::text),
+          "font readiness did not invalidate text-dependent input geometry");
+    check(width(left_layout.layout(left, environment), left) == 72.0 &&
+              width(right_layout.result(), right) == 12.0,
+          "one tree consumed another tree's pending measurement");
+    right.preparation_reads()->invalidate(right);
+    check(width(right_layout.layout(right, environment), right) == 72.0 &&
+              fixed_measures == unchanged_measures,
+          "font adoption missed a cached consumer or remeasured unrelated content");
+    const auto observed = right.find_key("dependent")->preparation_readiness();
+    check(observed.size() == 1U && observed.front().phase == ReadinessPhase::layout &&
+              observed.front().dependency.observed == base::PendingStatus::ready,
+          "measurement readiness did not retain its observed phase and state");
+    right.clear();
+    check(!right.preparation_reads()->references(prepared.readiness()),
+          "retiring a measured consumer retained its resource dependency");
 }
 
 void test_retained_layout_cache_scale_and_invalidation() {
@@ -6894,7 +7003,7 @@ overlay Shared {
             record->bounds, surface.input().presentation_transform(*node));
         const host::RenderPacket& packet = decoder.decode(packet_cache.encode(
             surface.render_commands(), ++packet_frame, {}, atlas,
-            static_cast<const ui::TextEngine*>(nullptr), 1.0, 300, 260, 300.0, 260.0));
+            static_cast<const ui::TextEngine*>(nullptr), 1.0, 300, 260, 300.0, 260.0).bytes());
         double left = std::numeric_limits<double>::infinity();
         double top = left;
         double right = -left;
@@ -7064,7 +7173,7 @@ overlay Grouped {
     const auto encode = [&](const std::uint64_t frame) -> const host::RenderPacket& {
         return decoder.decode(packet_cache.encode(surface.render_commands(), frame, {}, atlas,
                                                   static_cast<const ui::TextEngine*>(nullptr),
-                                                  1.0, 200, 120, 200.0, 120.0));
+                                                  1.0, 200, 120, 200.0, 120.0).bytes());
     };
 
     static_cast<void>(surface.frame(1'000'000));
@@ -7161,7 +7270,7 @@ overlay Spinning {
     const host::RenderPacket& packet =
         decoder.decode(packet_cache.encode(half, 1U, {}, atlas,
                                            static_cast<const ui::TextEngine*>(nullptr), 1.0, 200,
-                                           200, 200.0, 200.0));
+                                           200, 200.0, 200.0).bytes());
     check(group.index < packet.groups.size(), "the packet did not carry the rotating group");
     const host::PresentationGroup& decoded = packet.groups[group.index];
     check(std::abs(decoded.place_x(100.0, 100.0) - 100.0) < 1e-6 &&
@@ -7248,7 +7357,7 @@ overlay Toned {
                 check(counters.nodes_visited == 0U, "tone fixture missed the base cache path");
             const auto& packet = decoder.decode(packets.encode(
                 commands, ++packet_index, {}, atlas,
-                static_cast<const ui::TextEngine*>(nullptr), 1.0, 200, 120, 200.0, 120.0));
+                static_cast<const ui::TextEngine*>(nullptr), 1.0, 200, 120, 200.0, 120.0).bytes());
             check(commands.groups().size() == 2U,
                   "cached pointer frame lost its presentation groups");
             for (const ui::RenderGroup& group : commands.groups()) {
@@ -8780,8 +8889,9 @@ void test_tuning_slider_pipeline_is_proportional(const std::filesystem::path& re
     font::GlyphAtlas atlas("tuning-incremental");
     ui::HostRenderPacketCache packet_cache;
     host::RenderPacketDecoder decoder;
-    const std::vector<std::uint8_t> baseline_encoded = packet_cache.encode(
+    const auto baseline_owned = packet_cache.encode(
         surface.render_commands(), 1U, {}, atlas, *text_engine, 1.0, 1280, 800, 1280.0, 800.0);
+    const auto baseline_encoded = baseline_owned.bytes();
     const std::size_t baseline_packet = baseline_encoded.size();
     static_cast<void>(decoder.decode(baseline_encoded));
 
@@ -8799,8 +8909,9 @@ void test_tuning_slider_pipeline_is_proportional(const std::filesystem::path& re
         2'410'000'000,
     }));
     const ui::SurfaceFrame changed = surface.frame(2'416'666'667);
-    const std::vector<std::uint8_t> patch_encoded = packet_cache.encode(
+    const auto patch_owned = packet_cache.encode(
         surface.render_commands(), 2U, {}, atlas, *text_engine, 1.0, 1280, 800, 1280.0, 800.0);
+    const auto patch_encoded = patch_owned.bytes();
     const std::size_t patch_packet = patch_encoded.size();
     const host::RenderPacket& decoded_patch = decoder.decode(patch_encoded);
     const ui::HostRenderPacketTelemetry& packet = packet_cache.telemetry();
@@ -8886,7 +8997,7 @@ void test_tuning_slider_pipeline_is_proportional(const std::filesystem::path& re
     }));
     static_cast<void>(surface.frame(2'461'000'000));
     static_cast<void>(decoder.decode(packet_cache.encode(
-        surface.render_commands(), 3U, {}, atlas, *text_engine, 1.0, 1280, 800, 1280.0, 800.0)));
+        surface.render_commands(), 3U, {}, atlas, *text_engine, 1.0, 1280, 800, 1280.0, 800.0).bytes()));
     ui::Point previous = moved;
     for (std::size_t index = 0U; index < 512U; ++index) {
         const double fraction = index % 2U == 0U ? 0.08 + static_cast<double>(index % 17U) * 0.01
@@ -8908,7 +9019,7 @@ void test_tuning_slider_pipeline_is_proportional(const std::filesystem::path& re
         static_cast<void>(surface.frame(timestamp));
         const host::RenderPacket& decoded =
             decoder.decode(packet_cache.encode(surface.render_commands(), 4U + index, {}, atlas,
-                                               *text_engine, 1.0, 1280, 800, 1280.0, 800.0));
+                                               *text_engine, 1.0, 1280, 800, 1280.0, 800.0).bytes());
         check(!decoded.vertices.empty() && !decoded.indices.empty(),
               "repeated tuning slider movement lost retained geometry");
         if (index >= 4U) {
@@ -9855,6 +9966,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_anchored_portal_is_out_of_flow_and_flips();
         test_virtualization_cache_queries_only_observed_keys();
         test_retained_layout_cache_scale_and_invalidation();
+        test_preparation_invalidates_cached_measurement();
         test_retained_layout_cache_translates_unchanged_subtrees();
         test_explicit_container_size_constrains_descendants();
         test_scroll_content_box_constrains_fill_child();

@@ -1,6 +1,8 @@
 #include <strata/strata.h>
 #include <strata/widget_api.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -9,7 +11,9 @@
 #include <iostream>
 #include <initializer_list>
 #include <iterator>
+#include <memory>
 #include <new>
+#include <semaphore>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -101,13 +105,25 @@ void capture_bytes(void* const user_data, const strata_bytes_view value) {
 struct FileResources final {
     std::filesystem::path root;
     std::string loaded;
+    std::thread::id expected_thread{};
+    std::atomic_bool foreign_thread = false;
+    bool corrupt_control_font = false;
 };
 
 strata_status load_file_resource(void* const user_data, const strata_string_view id,
                                  strata_bytes_view* const out_bytes) {
     auto& resources = *static_cast<FileResources*>(user_data);
+    if (resources.expected_thread != std::thread::id{} &&
+        resources.expected_thread != std::this_thread::get_id()) {
+        resources.foreign_thread.store(true);
+        return STRATA_STATUS_WRONG_THREAD;
+    }
     try {
-        resources.loaded = read_file(resources.root / std::string_view(id.data, id.size));
+        const std::string_view resource(id.data, id.size);
+        if (resources.corrupt_control_font && resource.ends_with("/medium.ttf"))
+            resources.loaded.assign(1U, '\0');
+        else
+            resources.loaded = read_file(resources.root / resource);
         *out_bytes = strata_bytes_view{
             reinterpret_cast<const std::uint8_t*>(resources.loaded.data()),
             resources.loaded.size(),
@@ -146,6 +162,8 @@ strata_status load_file_resource(void* const user_data, const strata_string_view
             &diagnostics,
             &capture_diagnostic,
         },
+        STRATA_TASK_EXECUTION_DETERMINISTIC,
+        strata_frame_wake_adapter{},
     };
 }
 
@@ -157,6 +175,8 @@ void test_negotiation() {
     check(info.minimum_abi_version == STRATA_ABI_VERSION_MINIMUM, "minimum ABI changed");
     check(strata_get_api_info(STRATA_ABI_VERSION_6, &info).status == STRATA_STATUS_UNSUPPORTED_ABI,
           "replaceable-resource ABI remained falsely negotiable");
+    check(strata_get_api_info(STRATA_ABI_VERSION_7, &info).status == STRATA_STATUS_UNSUPPORTED_ABI,
+          "runtime configuration without task/wake options remained falsely negotiable");
     check(info.capabilities == strata_capability_bits(), "capability reports disagree");
     check((info.capabilities & STRATA_CAPABILITY_ALLOCATOR_TELEMETRY) != 0U,
           "allocator telemetry capability is missing");
@@ -323,6 +343,133 @@ void test_lazy_host_snapshot_abi() {
     check(info.generation == 11U && info.evaluated_scalar_count == 0U,
           "new host generation retained old field cache");
     strata_runtime_release(runtime);
+}
+
+void test_async_host_snapshot_publication() {
+    Clock clock{7000};
+    DiagnosticCapture diagnostics;
+    std::counting_semaphore<> wakes{0};
+    auto options = config(clock, diagnostics);
+    options.task_execution = STRATA_TASK_EXECUTION_ASYNCHRONOUS;
+    options.required_capabilities |= STRATA_CAPABILITY_HOST_PUBLICATIONS;
+    options.frame_wake = {
+        sizeof(strata_frame_wake_adapter), &wakes,
+        [](void* const context) noexcept -> strata_status {
+            static_cast<std::counting_semaphore<>*>(context)->release();
+            return STRATA_STATUS_OK;
+        }};
+    strata_runtime* raw = nullptr;
+    check(strata_runtime_create(&options, &raw).status == STRATA_STATUS_OK,
+          "asynchronous snapshot runtime did not start");
+    std::unique_ptr<strata_runtime, decltype(&strata_runtime_release)>
+        runtime(raw, &strata_runtime_release);
+    using Receipt = std::unique_ptr<strata_host_publication, decltype(&strata_host_publication_release)>;
+    const auto submit = [&](const std::string_view id, const std::uint64_t generation,
+                            const std::string_view json) {
+        strata_host_publication* receipt = nullptr;
+        strata_host_snapshot_config snapshot{
+            sizeof(strata_host_snapshot_config), view(id), generation, view(json),
+            STRATA_HOST_SNAPSHOT_EXECUTION_RUNTIME, 0U, &receipt};
+        check(strata_runtime_publish_host_snapshot(raw, &snapshot).status == STRATA_STATUS_OK &&
+                  receipt != nullptr,
+              "snapshot admission did not return an owned receipt");
+        return Receipt(receipt, &strata_host_publication_release);
+    };
+    const auto info = [](const Receipt& receipt) {
+        strata_host_publication_info value{};
+        value.struct_size = sizeof(value);
+        check(strata_host_publication_get_info(receipt.get(), &value).status == STRATA_STATUS_OK,
+              "snapshot receipt could not be observed");
+        return value;
+    };
+    const auto settle = [&](const Receipt& receipt) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (info(receipt).status == STRATA_HOST_PUBLICATION_PENDING) {
+            check(strata_runtime_poll_host_snapshots(raw).status == STRATA_STATUS_OK,
+                  "snapshot owner poll failed");
+            if (info(receipt).status != STRATA_HOST_PUBLICATION_PENDING) break;
+            check(wakes.try_acquire_until(deadline), "snapshot preparation failed to wake its owner");
+        }
+    };
+    const auto title = [&] {
+        std::string text;
+        const strata_value_json_sink sink{sizeof(strata_value_json_sink), &text, &capture_json};
+        check(strata_runtime_read_host_value_json(raw, view("app.title"), &sink).status ==
+                  STRATA_STATUS_OK,
+              "adopted snapshot root was not readable");
+        return text;
+    };
+
+    std::string input = R"({"app":{"title":"first"}})";
+    auto first = submit("A", 10U, input);
+    input.assign(input.size(), 'x');
+    auto second = submit("B", 1U, R"({"app":{"title":"second"}})");
+    std::uint64_t generation = 0U;
+    check(info(first).status == STRATA_HOST_PUBLICATION_PENDING &&
+              strata_runtime_get_host_snapshot_generation(raw, view("A"), &generation).status ==
+                  STRATA_STATUS_NOT_FOUND &&
+              strata_runtime_get_host_snapshot_accepted_generation(raw, view("A"), &generation).status ==
+                  STRATA_STATUS_OK && generation == 10U,
+          "snapshot acceptance was exposed as adoption");
+    strata_host_snapshot_config rejected{
+        sizeof(strata_host_snapshot_config), view("A"), 10U, view("{}"),
+        STRATA_HOST_SNAPSHOT_EXECUTION_RUNTIME, 0U, nullptr};
+    check(strata_runtime_publish_host_snapshot(raw, &rejected).status == STRATA_STATUS_INVALID_ARGUMENT,
+          "a duplicate pending producer generation was admitted");
+    rejected.generation = 11U;
+    rejected.execution = STRATA_HOST_SNAPSHOT_EXECUTION_INLINE;
+    check(strata_runtime_publish_host_snapshot(raw, &rejected).status == STRATA_STATUS_INVALID_ARGUMENT,
+          "inline publication bypassed earlier pending generations");
+    settle(second);
+    check(info(first).status == STRATA_HOST_PUBLICATION_ADOPTED && title() == "\"second\"\n",
+          "cross-producer acceptance order or copied input lifetime was lost");
+
+    const auto count = diagnostics.count;
+    auto invalid_json = submit("A", 11U, "{");
+    auto invalid_roots = submit("A", 12U, "[]");
+    auto successor = submit("B", 2U, R"({"app":{"title":"after failure"}})");
+    check(info(invalid_json).status == STRATA_HOST_PUBLICATION_PENDING && diagnostics.count == count,
+          "worker preparation published a diagnostic before owner adoption");
+    settle(successor);
+    const auto json_failure = info(invalid_json);
+    const auto roots_failure = info(invalid_roots);
+    check(json_failure.status == STRATA_HOST_PUBLICATION_FAILED &&
+              json_failure.result.status == STRATA_STATUS_INVALID_ARGUMENT &&
+              roots_failure.status == STRATA_HOST_PUBLICATION_FAILED &&
+              roots_failure.result.diagnostic_id != json_failure.result.diagnostic_id &&
+              roots_failure.message.size != 0U &&
+              diagnostics.last_code == "STRATA.HOST.INVALID_ROOTS" &&
+              title() == "\"after failure\"\n",
+          "failed publications lost their terminal failures or blocked later adoption");
+    check(strata_runtime_get_host_snapshot_generation(raw, view("A"), &generation).status ==
+                  STRATA_STATUS_OK && generation == 10U &&
+              strata_runtime_get_host_snapshot_accepted_generation(raw, view("A"), &generation).status ==
+                  STRATA_STATUS_OK && generation == 12U,
+          "a failed accepted generation was published or released for reuse");
+    rejected.generation = 12U;
+    rejected.execution = STRATA_HOST_SNAPSHOT_EXECUTION_RUNTIME;
+    check(strata_runtime_publish_host_snapshot(raw, &rejected).status == STRATA_STATUS_INVALID_ARGUMENT,
+          "a failed accepted generation was reused");
+    auto retry = submit("A", 13U, R"({"app":{"title":"retried"}})");
+    settle(retry);
+    check(title() == "\"retried\"\n", "a newer retry did not become the overlapping-root winner");
+
+    auto cancelled = submit("A", 14U, R"({"app":{"title":"cancelled"}})");
+    auto after_cancel = submit("B", 3U, R"({"app":{"title":"after cancel"}})");
+    check(strata_host_publication_cancel(cancelled.get()).status == STRATA_STATUS_OK,
+          "snapshot cancellation failed");
+    settle(after_cancel);
+    check(info(cancelled).status == STRATA_HOST_PUBLICATION_CANCELLED &&
+              title() == "\"after cancel\"\n",
+          "cancelled publication became visible or held its successors");
+    auto retired = submit("A", 15U, R"({"app":{"title":"retired"}})");
+    check(strata_runtime_release(runtime.get()).status == STRATA_STATUS_OK,
+          "pending snapshot prevented runtime close");
+    static_cast<void>(runtime.release());
+    check(info(retired).status == STRATA_HOST_PUBLICATION_CANCELLED &&
+              info(retry).status == STRATA_HOST_PUBLICATION_ADOPTED &&
+              info(invalid_json).result.diagnostic_id == json_failure.result.diagnostic_id,
+          "runtime close lost retained terminal receipts or left a publication pending");
 }
 
 struct ActionCapture final {
@@ -1057,13 +1204,14 @@ screen Main {
               inspected == 1U,
           "C ABI inspector could not pick by logical position");
     std::string render_packet;
-    const strata_bytes_sink render_sink{
-        sizeof(strata_bytes_sink),
-        &render_packet,
-        &capture_bytes,
-    };
-    check(strata_surface_read_render_packet(surface, &render_sink).status == STRATA_STATUS_OK &&
-              render_packet.size() == frame_info.render_packet_size &&
+    strata_render_packet* render_raw = nullptr;
+    check(strata_surface_acquire_render_packet(surface, &render_raw).status == STRATA_STATUS_OK,
+          "Surface packet acquisition failed");
+    std::unique_ptr<strata_render_packet, decltype(&strata_render_packet_release)>
+        retained_render(render_raw, &strata_render_packet_release);
+    const auto render_bytes = strata_render_packet_bytes(render_raw);
+    capture_bytes(&render_packet, render_bytes);
+    check(render_packet.size() == frame_info.render_packet_size &&
               render_packet.starts_with("STRATARP") &&
               static_cast<unsigned char>(render_packet[8]) == STRATA_RENDER_PACKET_VERSION_CURRENT,
           "Surface render output was not published as one versioned binary batch");
@@ -1177,27 +1325,21 @@ screen Main {
                   STRATA_STATUS_OK &&
               strata_surface_clear_diagnostics(surface).status == STRATA_STATUS_OK,
           "Surface diagnostic snapshot/clear aliases failed");
-    std::string release_packet;
-    const strata_bytes_sink release_sink{
-        sizeof(strata_bytes_sink),
-        &release_packet,
-        &capture_bytes,
-    };
+    strata_render_packet* terminal_raw = nullptr;
     check(strata_surface_release(surface).status == STRATA_STATUS_INVALID_ARGUMENT &&
               strata_runtime_release(runtime).status == STRATA_STATUS_INVALID_ARGUMENT,
           "out-of-order Surface/Runtime release destroyed recoverable live handles");
-    check(strata_surface_prepare_release_packet(surface, &release_sink).status ==
-                  STRATA_STATUS_OK &&
-              release_packet.starts_with("STRATARP"),
+    check(strata_surface_prepare_release_packet(surface, &terminal_raw).status == STRATA_STATUS_OK,
           "Surface terminal release packet was not published");
-    const std::string first_release_packet = release_packet;
-    release_packet.clear();
-    check(strata_surface_prepare_release_packet(surface, &release_sink).status ==
-                  STRATA_STATUS_OK &&
-              release_packet == first_release_packet &&
+    const std::unique_ptr<strata_render_packet, decltype(&strata_render_packet_release)>
+        retained_terminal(terminal_raw, &strata_render_packet_release);
+    strata_render_packet* repeated_terminal = nullptr;
+    check(strata_surface_prepare_release_packet(surface, &repeated_terminal).status ==
+                  STRATA_STATUS_OK && repeated_terminal == terminal_raw &&
               strata_surface_frame(surface, 12'000, &frame_info).status ==
                   STRATA_STATUS_INVALID_ARGUMENT,
           "Surface release preparation was not idempotent and terminal");
+    strata_render_packet_release(repeated_terminal);
     check(strata_surface_release(surface).status == STRATA_STATUS_INVALID_ARGUMENT &&
               strata_surface_acknowledge_release_packet(surface).status == STRATA_STATUS_OK &&
               strata_surface_release(surface).status == STRATA_STATUS_OK,
@@ -1238,6 +1380,18 @@ screen Broken {
     check(strata_runtime_release(runtime).status == STRATA_STATUS_OK,
           "empty Runtime release failed after Surface barrier completion");
     strata_action_registration_release(registration);
+    std::atomic_bool retained_bytes_match{false};
+    std::thread reader([owned = std::move(retained_render), expected = std::move(render_packet),
+                        original = render_bytes.data, &retained_bytes_match] {
+        strata_render_packet_retain(owned.get());
+        const auto bytes = strata_render_packet_bytes(owned.get());
+        retained_bytes_match = bytes.data == original && bytes.size == expected.size() &&
+            std::memcmp(bytes.data, expected.data(), bytes.size) == 0;
+        strata_render_packet_release(owned.get());
+    });
+    reader.join();
+    check(retained_bytes_match && strata_render_packet_bytes(retained_terminal.get()).size >= 60U,
+          "owned packet bytes changed or expired across framing, teardown, or cross-thread release");
 }
 
 struct ServiceCapture final {
@@ -1461,9 +1615,17 @@ struct FragmentFixture final {
     using SubtargetHook = void (*)(void* user_data, strata_widget_subtargets_context* context);
 
     FragmentFixture(const std::filesystem::path& resource_root, const Presenter presenter,
-                    void* const user_data, const SubtargetHook subtargets = nullptr)
+                    void* const user_data, const SubtargetHook subtargets = nullptr,
+                    const strata_frame_wake_adapter frame_wake = {},
+                    const strata_task_execution execution = STRATA_TASK_EXECUTION_DETERMINISTIC,
+                    const bool corrupt_control_font = false)
         : resources{resource_root, {}} {
         strata_runtime_config runtime_config = config(clock, diagnostics);
+        runtime_config.frame_wake = frame_wake;
+        runtime_config.task_execution = execution;
+        resources.corrupt_control_font = corrupt_control_font;
+        if (execution == STRATA_TASK_EXECUTION_ASYNCHRONOUS)
+            resources.expected_thread = std::this_thread::get_id();
         runtime_config.required_capabilities |= STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
                                                 STRATA_CAPABILITY_COMPILER_ACTIVATION;
         check(strata_runtime_create(&runtime_config, &runtime).status == STRATA_STATUS_OK,
@@ -1606,6 +1768,57 @@ screen Main {
 
 void present_nothing(void*, strata_widget_render_context*) {}
 
+void test_owned_font_preparation(const std::filesystem::path& resource_root) {
+    strata_surface_frame_info expected{};
+    {
+        FragmentFixture reference(resource_root, &present_nothing, nullptr);
+        check(reference.frame(expected).status == STRATA_STATUS_OK,
+              "font fixture reference frame failed");
+    }
+    for (const bool malformed : {false, true}) {
+        std::counting_semaphore<> completed{0};
+        const strata_frame_wake_adapter wake{
+            sizeof(strata_frame_wake_adapter), &completed,
+            [](void* const context) noexcept -> strata_status {
+                static_cast<std::counting_semaphore<>*>(context)->release();
+                return STRATA_STATUS_OK;
+            },
+        };
+        FragmentFixture fixture(resource_root, &present_nothing, nullptr, nullptr, wake,
+                                STRATA_TASK_EXECUTION_ASYNCHRONOUS, malformed);
+        // The adapter's borrowed storage is deliberately gone before owner adoption.
+        fixture.resources.loaded.assign(131071U, 'X');
+        strata_surface_frame_info frame{};
+        bool settled = false;
+        for (std::size_t pass = 0U; pass < 64U; ++pass) {
+            check(fixture.frame(frame).status == STRATA_STATUS_OK,
+                  "pending/failed fonts prevented an ABI Surface frame");
+            strata_runtime_task_info tasks{};
+            tasks.struct_size = sizeof(tasks);
+            check(strata_runtime_get_task_info(fixture.runtime, &tasks).status == STRATA_STATUS_OK,
+                  "font fixture could not inspect preparation");
+            if (tasks.pending_tasks == 0U) {
+                settled = true;
+                break;
+            }
+            if (tasks.completions_ready == 0U)
+                check(completed.try_acquire_for(std::chrono::seconds(5)),
+                      "font preparation did not wake its ABI host");
+        }
+        check(settled && !fixture.resources.foreign_thread.load(),
+              "font preparation stalled or borrowed the owner-only resource adapter on a worker");
+        if (malformed) {
+            check(fixture.diagnostics.count == 1U &&
+                      fixture.diagnostics.last_code == "STRATA.TASK.PREPARATION_FAILED",
+                  "malformed async fonts did not report one owner-side preparation failure");
+        } else {
+            check(fixture.diagnostics.count == 0U &&
+                      frame.render_command_count == expected.render_command_count,
+                  "borrowed adapter storage corrupted the prepared font registry or settled text");
+        }
+    }
+}
+
 void present_discarded(void*, strata_widget_render_context* const context) {
     strata_widget_render_solid_rect(context, strata_widget_render_bounds(context),
                                     strata_color{1U, 2U, 3U, 255U});
@@ -1727,6 +1940,7 @@ struct ReentryProbe final {
     strata_status memory = STRATA_STATUS_INTERNAL_ERROR;
     strata_status packet = STRATA_STATUS_INTERNAL_ERROR;
     strata_status other_thread = STRATA_STATUS_OK;
+    strata_status frame_request = STRATA_STATUS_INTERNAL_ERROR;
 };
 
 void present_reentrant(void* const user_data, strata_widget_render_context*) {
@@ -1754,14 +1968,15 @@ void present_reentrant(void* const user_data, strata_widget_render_context*) {
     strata_runtime_memory_info memory{};
     memory.struct_size = sizeof(memory);
     probe.memory = strata_runtime_get_memory_info(probe.runtime, &memory).status;
-    std::string packet;
-    const strata_bytes_sink packet_sink{sizeof(strata_bytes_sink), &packet, &capture_bytes};
-    probe.packet = strata_surface_read_render_packet(probe.surface, &packet_sink).status;
+    strata_render_packet* packet = nullptr;
+    probe.packet = strata_surface_acquire_render_packet(probe.surface, &packet).status;
+    strata_render_packet_release(packet);
     // Another thread may not enter while this one is inside the runtime.
     std::thread other([&probe] {
         strata_runtime_memory_info other_memory{};
         other_memory.struct_size = sizeof(other_memory);
         probe.other_thread = strata_runtime_get_memory_info(probe.runtime, &other_memory).status;
+        probe.frame_request = strata_runtime_request_frame(probe.runtime).status;
     });
     other.join();
 }
@@ -1785,6 +2000,8 @@ void test_reentrant_and_cross_thread_calls(const std::filesystem::path& resource
           "a callback could not read the last render packet");
     check(probe.other_thread == STRATA_STATUS_WRONG_THREAD,
           "a second thread entered a runtime another thread was inside");
+    check(probe.frame_request == STRATA_STATUS_OK,
+          "a worker could not request a frame while the owner was framing");
 
     // Serialized calls may move between threads once the runtime is idle.
     strata_status handed_off = STRATA_STATUS_INTERNAL_ERROR;
@@ -1795,6 +2012,65 @@ void test_reentrant_and_cross_thread_calls(const std::filesystem::path& resource
     render_thread.join();
     check(handed_off == STRATA_STATUS_OK, "an idle runtime refused a serialized call from a "
                                           "different thread");
+}
+
+struct WakeProbe final {
+    strata_runtime* runtime = nullptr;
+    std::uint64_t calls = 0U;
+    strata_status reentry = STRATA_STATUS_OK;
+    bool reject = false;
+};
+
+strata_status frame_wake(void* const user_data) noexcept {
+    auto& probe = *static_cast<WakeProbe*>(user_data);
+    ++probe.calls;
+    strata_runtime_task_info info{};
+    info.struct_size = sizeof(info);
+    probe.reentry = strata_runtime_get_task_info(probe.runtime, &info).status;
+    return probe.reject ? STRATA_STATUS_INTERNAL_ERROR : STRATA_STATUS_OK;
+}
+
+void test_worker_frame_wakes(const std::filesystem::path& resource_root) {
+    WakeProbe probe;
+    FragmentFixture fixture(resource_root, &present_nothing, nullptr, nullptr,
+                            strata_frame_wake_adapter{
+                                sizeof(strata_frame_wake_adapter), &probe, &frame_wake,
+                            });
+    probe.runtime = fixture.runtime;
+    strata_surface_frame_info frame{};
+    check(fixture.frame(frame).status == STRATA_STATUS_OK, "wake fixture initial frame failed");
+    strata_runtime_task_info before{};
+    before.struct_size = sizeof(before);
+    check(strata_runtime_get_task_info(fixture.runtime, &before).status == STRATA_STATUS_OK,
+          "runtime task state was unavailable");
+    const std::uint64_t initial_calls = probe.calls;
+    bool accepted = true;
+    std::thread worker([&] {
+        for (int request = 0; request < 5; ++request)
+            accepted = strata_runtime_request_frame(fixture.runtime).status == STRATA_STATUS_OK &&
+                       accepted;
+    });
+    worker.join();
+    strata_runtime_task_info after{};
+    after.struct_size = sizeof(after);
+    check(strata_runtime_get_task_info(fixture.runtime, &after).status == STRATA_STATUS_OK &&
+              accepted && probe.calls == initial_calls + 1U &&
+              after.wake_generation == before.wake_generation + 5U &&
+              after.execution == STRATA_TASK_EXECUTION_DETERMINISTIC &&
+              probe.reentry == STRATA_STATUS_REENTRANT_CALL,
+          "worker wakes lost requests, failed coalescing or admitted callback reentry");
+    check(fixture.frame(frame).status == STRATA_STATUS_OK, "requested frame did not run");
+    check(strata_runtime_request_frame(fixture.runtime).status == STRATA_STATUS_OK &&
+              probe.calls == initial_calls + 2U,
+          "framing did not rearm the coalesced wake notification");
+    check(fixture.frame(frame).status == STRATA_STATUS_OK, "rearmed frame did not run");
+    probe.reject = true;
+    check(strata_runtime_request_frame(fixture.runtime).status == STRATA_STATUS_OK &&
+              fixture.frame(frame).status == STRATA_STATUS_INTERNAL_ERROR,
+          "a failed wake callback was not reported by the next owner frame");
+    probe.reject = false;
+    check(fixture.frame(frame).status == STRATA_STATUS_OK,
+          "a wake callback failure poisoned later owner frames");
 }
 
 void count_presentation(void* const user_data, strata_widget_render_context*) {
@@ -2077,6 +2353,220 @@ void test_widget_api_table() {
           "an unknown widget context kind was not read as absent");
 }
 
+/** Synchronization belongs to the test; owned input/result boxes never retain a runtime or UI. */
+struct PreparationProbe final {
+    std::atomic<strata_preparation*> handle{nullptr};
+    std::atomic_uint32_t inputs_released{0U};
+    std::atomic_uint32_t results_released{0U};
+    std::atomic_uint32_t wakes{0U};
+    std::atomic_bool wake_reentry_rejected{false};
+    std::atomic_bool saw_cancellation{false};
+    std::binary_semaphore entered{0};
+    std::binary_semaphore proceed{0};
+    std::binary_semaphore woke{0};
+    std::binary_semaphore input_released{0};
+    std::thread::id work_thread;
+    bool block = false;
+    bool fail = false;
+};
+
+struct PreparationInput final {
+    PreparationProbe* probe;
+    std::string error;
+};
+
+struct PreparationValue final {
+    PreparationProbe* probe;
+    int value;
+};
+
+void release_preparation_input(void* const value) {
+    const std::unique_ptr<PreparationInput> input(static_cast<PreparationInput*>(value));
+    PreparationProbe& probe = *input->probe;
+    probe.inputs_released.fetch_add(1U);
+    probe.input_released.release();
+}
+
+void release_preparation_value(void* const value) {
+    const std::unique_ptr<PreparationValue> output(static_cast<PreparationValue*>(value));
+    output->probe->results_released.fetch_add(1U);
+}
+
+strata_status prepare_value(void* const context, const strata_cancellation* const cancellation,
+                            void** const out_result, strata_string_view* const out_error) {
+    auto& input = *static_cast<PreparationInput*>(context);
+    PreparationProbe& probe = *input.probe;
+    probe.work_thread = std::this_thread::get_id();
+    if (probe.block) {
+        probe.entered.release();
+        probe.proceed.acquire();
+    }
+    probe.saw_cancellation.store(strata_cancellation_requested(cancellation) != 0U);
+    *out_result = new PreparationValue{&probe, 42};
+    if (probe.fail) {
+        input.error = "owned preparation failure";
+        *out_error = view(input.error);
+        return STRATA_STATUS_COMPILE_FAILED;
+    }
+    return STRATA_STATUS_OK;
+}
+
+strata_status wake_preparation(void* const context) {
+    auto& probe = *static_cast<PreparationProbe*>(context);
+    strata_preparation* const handle = probe.handle.load();
+    strata_preparation_info info{};
+    info.struct_size = sizeof(info);
+    probe.wake_reentry_rejected.store(
+        strata_preparation_get_info(handle, &info).status == STRATA_STATUS_REENTRANT_CALL &&
+        strata_preparation_cancel(handle).status == STRATA_STATUS_REENTRANT_CALL &&
+        strata_preparation_release(handle).status == STRATA_STATUS_REENTRANT_CALL);
+    probe.wakes.fetch_add(1U);
+    probe.woke.release();
+    return STRATA_STATUS_OK;
+}
+
+strata_preparation_config preparation_config(PreparationProbe& probe,
+                                             const strata_task_execution execution) {
+    strata_preparation_config result{};
+    result.struct_size = sizeof(result);
+    result.execution = execution;
+    result.context = new PreparationInput{&probe, {}};
+    result.work = &prepare_value;
+    result.release_context = &release_preparation_input;
+    result.release_result = &release_preparation_value;
+    return result;
+}
+
+strata_preparation_info preparation_info(strata_preparation* const preparation) {
+    strata_preparation_info info{};
+    info.struct_size = sizeof(info);
+    check(strata_preparation_get_info(preparation, &info).status == STRATA_STATUS_OK,
+          "preparation polling failed");
+    return info;
+}
+
+void test_owned_preparation() {
+    {
+        PreparationProbe probe;
+        const strata_preparation_config options =
+            preparation_config(probe, STRATA_TASK_EXECUTION_DETERMINISTIC);
+        strata_preparation* handle = nullptr;
+        check(strata_preparation_start(&options, &handle).status == STRATA_STATUS_OK,
+              "deterministic preparation did not start");
+        check(probe.work_thread == std::this_thread::get_id() &&
+                  probe.inputs_released.load() == 1U &&
+                  preparation_info(handle).status == STRATA_PREPARATION_READY,
+              "deterministic preparation did not publish and clean its input inline");
+        void* output = nullptr;
+        check(strata_preparation_take_result(handle, &output).status == STRATA_STATUS_OK &&
+                  output != nullptr && static_cast<PreparationValue*>(output)->value == 42,
+              "preparation did not transfer its complete result");
+        void* duplicate = output;
+        check(strata_preparation_take_result(handle, &duplicate).status == STRATA_STATUS_NOT_FOUND &&
+                  duplicate == nullptr &&
+                  strata_preparation_cancel(handle).status == STRATA_STATUS_OK &&
+                  preparation_info(handle).status == STRATA_PREPARATION_TAKEN,
+              "taken preparation was transferred twice or retroactively cancelled");
+        check(strata_preparation_release(handle).status == STRATA_STATUS_OK &&
+                  probe.results_released.load() == 0U,
+              "releasing preparation destroyed a transferred result");
+        release_preparation_value(output);
+        check(probe.results_released.load() == 1U, "transferred result cleanup was not exclusive");
+    }
+    {
+        PreparationProbe probe;
+        probe.block = true;
+        strata_preparation_config options =
+            preparation_config(probe, STRATA_TASK_EXECUTION_ASYNCHRONOUS);
+        options.frame_wake = {sizeof(strata_frame_wake_adapter), &probe, &wake_preparation};
+        strata_preparation* handle = nullptr;
+        check(strata_preparation_start(&options, &handle).status == STRATA_STATUS_OK,
+              "asynchronous preparation did not start");
+        probe.handle.store(handle);
+        check(probe.entered.try_acquire_for(std::chrono::seconds(5)),
+              "asynchronous preparation did not reach its worker");
+        void* output = nullptr;
+        check(preparation_info(handle).status == STRATA_PREPARATION_PENDING &&
+                  strata_preparation_take_result(handle, &output).status == STRATA_STATUS_NOT_FOUND &&
+                  output == nullptr && probe.inputs_released.load() == 0U,
+              "a running preparation exposed or destroyed its input/result");
+        probe.proceed.release();
+        check(probe.woke.try_acquire_for(std::chrono::seconds(5)),
+              "completed preparation did not wake its owner");
+        check(preparation_info(handle).status == STRATA_PREPARATION_READY &&
+                  probe.work_thread != std::this_thread::get_id() &&
+                  probe.inputs_released.load() == 1U && probe.wake_reentry_rejected.load(),
+              "worker preparation violated owner adoption or notification-only wake admission");
+        check(strata_preparation_cancel(handle).status == STRATA_STATUS_OK &&
+                  strata_preparation_cancel(handle).status == STRATA_STATUS_OK &&
+                  preparation_info(handle).status == STRATA_PREPARATION_CANCELLED &&
+                  probe.results_released.load() == 1U,
+              "cancellation did not discard an untaken ready result exactly once");
+        check(strata_preparation_release(handle).status == STRATA_STATUS_OK &&
+                  probe.results_released.load() == 1U,
+              "cancelled result was destroyed twice");
+    }
+    {
+        PreparationProbe probe;
+        probe.fail = true;
+        const strata_preparation_config options =
+            preparation_config(probe, STRATA_TASK_EXECUTION_DETERMINISTIC);
+        strata_preparation* handle = nullptr;
+        check(strata_preparation_start(&options, &handle).status == STRATA_STATUS_OK,
+              "a callback failure incorrectly failed ownership transfer at start");
+        const strata_preparation_info info = preparation_info(handle);
+        check(info.status == STRATA_PREPARATION_FAILED &&
+                  info.failure_status == STRATA_STATUS_COMPILE_FAILED &&
+                  std::string_view(info.failure_message.data, info.failure_message.size) ==
+                      "owned preparation failure" &&
+                  probe.inputs_released.load() == 1U && probe.results_released.load() == 1U,
+              "failed preparation lost its owned error or retained a partial result");
+        check(strata_preparation_release(handle).status == STRATA_STATUS_OK,
+              "failed preparation could not be released");
+    }
+    for (const bool explicit_cancel : {false, true}) {
+        PreparationProbe probe;
+        probe.block = true;
+        strata_preparation_config options =
+            preparation_config(probe, STRATA_TASK_EXECUTION_ASYNCHRONOUS);
+        options.frame_wake = {sizeof(strata_frame_wake_adapter), &probe, &wake_preparation};
+        strata_preparation* handle = nullptr;
+        check(strata_preparation_start(&options, &handle).status == STRATA_STATUS_OK,
+              "retirement preparation did not start");
+        probe.handle.store(handle);
+        check(probe.entered.try_acquire_for(std::chrono::seconds(5)),
+              "retirement preparation did not begin work");
+        std::binary_semaphore closed{0};
+        bool close_ok = false;
+        std::jthread closer([&] {
+            close_ok = !explicit_cancel ||
+                       (strata_preparation_cancel(handle).status == STRATA_STATUS_OK &&
+                        preparation_info(handle).status == STRATA_PREPARATION_CANCELLED);
+            close_ok = strata_preparation_release(handle).status == STRATA_STATUS_OK && close_ok;
+            closed.release();
+        });
+        const bool nonjoining = closed.try_acquire_for(std::chrono::seconds(5));
+        probe.proceed.release();
+        closer.join();
+        const bool cleaned = probe.input_released.try_acquire_for(std::chrono::seconds(5));
+        check(nonjoining && close_ok && cleaned && probe.saw_cancellation.load() &&
+                  probe.inputs_released.load() == 1U && probe.results_released.load() == 1U &&
+                  probe.wakes.load() == 0U,
+              "retirement joined work, leaked its owned data, or notified a retired owner");
+    }
+    {
+        PreparationProbe probe;
+        strata_preparation_config options =
+            preparation_config(probe, STRATA_TASK_EXECUTION_DETERMINISTIC);
+        options.execution = UINT32_MAX;
+        strata_preparation* handle = nullptr;
+        check(strata_preparation_start(&options, &handle).status == STRATA_STATUS_INVALID_ARGUMENT &&
+                  handle == nullptr && probe.inputs_released.load() == 0U,
+              "rejected preparation consumed caller-owned input");
+        release_preparation_input(options.context);
+    }
+}
+
 void test_invalid_contracts() {
     Clock clock{0};
     DiagnosticCapture diagnostics;
@@ -2090,6 +2580,23 @@ void test_invalid_contracts() {
     runtime_config.clock.now_nanoseconds = nullptr;
     check(strata_runtime_create(&runtime_config, &runtime).status == STRATA_STATUS_INVALID_ARGUMENT,
           "missing caller clock was accepted");
+    runtime_config = config(clock, diagnostics);
+    runtime_config.task_execution = UINT32_MAX;
+    check(strata_runtime_create(&runtime_config, &runtime).status == STRATA_STATUS_INVALID_ARGUMENT &&
+              runtime == nullptr,
+          "an unknown task execution mode created a runtime");
+    runtime_config.task_execution = STRATA_TASK_EXECUTION_ASYNCHRONOUS;
+    for (const strata_frame_wake_adapter invalid : {
+             strata_frame_wake_adapter{sizeof(strata_frame_wake_adapter), nullptr, nullptr},
+             strata_frame_wake_adapter{0U, nullptr, &frame_wake},
+             strata_frame_wake_adapter{0U, &clock, nullptr},
+         }) {
+        runtime_config.frame_wake = invalid;
+        check(strata_runtime_create(&runtime_config, &runtime).status ==
+                      STRATA_STATUS_INVALID_ARGUMENT &&
+                  runtime == nullptr,
+              "an incomplete wake adapter created a runtime");
+    }
     strata_runtime_memory_info memory_info{};
     check(strata_runtime_get_memory_info(nullptr, &memory_info).status ==
               STRATA_STATUS_INVALID_ARGUMENT,
@@ -2114,16 +2621,20 @@ int strata_test_abi(const int argument_count, const char* const* const arguments
         test_negotiation();
         test_lifecycle_identity_snapshot_and_clock();
         test_lazy_host_snapshot_abi();
+        test_async_host_snapshot_publication();
         if (argument_count == 2) {
             test_application_activation_and_action_abi(arguments[1]);
+            test_owned_font_preparation(arguments[1]);
             test_extension_fragment_failure_isolation(arguments[1]);
             test_extension_allocation_failure_status(arguments[1]);
             test_extension_clip_balance(arguments[1]);
             test_idle_frames(arguments[1]);
             test_reentrant_and_cross_thread_calls(arguments[1]);
+            test_worker_frame_wakes(arguments[1]);
             test_struct_size_versioning(arguments[1]);
         }
         test_host_service_adapters();
+        test_owned_preparation();
         test_allocator_ownership_and_validation();
         test_invalid_contracts();
         test_widget_api_table();

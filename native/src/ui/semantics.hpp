@@ -17,7 +17,7 @@
 
 namespace strata::ui {
 
-class InputRouter;
+class InputPresentation;
 
 /** Retained semantic projection with publish-on-change generations. */
 class SemanticsEngine final {
@@ -26,7 +26,7 @@ public:
     [[nodiscard]] bool update(
         const RetainedTree& tree,
         const CommandIndex& commands,
-        const InputRouter& input,
+        const InputPresentation& input,
         std::string_view surface_id
     );
     [[nodiscard]] const data::JsonValue* find(std::uint64_t identity) const;
@@ -49,7 +49,7 @@ private:
     std::optional<DirtyGenerationSnapshot> dirty_generations_;
     const RetainedTree* tree_ = nullptr;
     const CommandIndex* commands_ = nullptr;
-    const InputRouter* input_ = nullptr;
+    const InputPresentation* input_ = nullptr;
     mutable std::uint64_t materialized_generation_ = 0U;
     mutable data::JsonValue root_;
     mutable std::map<std::uint64_t, data::JsonValue> nodes_;

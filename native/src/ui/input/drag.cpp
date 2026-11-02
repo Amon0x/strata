@@ -122,7 +122,10 @@ bool InputRouter::route_pointer_drag(
             created.preview_bounds = source_layout->bounds;
         }
         if (drag_preview_resolver_) {
-            created.preview_commands = drag_preview_resolver_(*preview_node);
+            auto commands = drag_preview_resolver_(*preview_node);
+            if (!commands.empty())
+                created.preview_commands =
+                    std::make_shared<const std::vector<RenderCommand>>(std::move(commands));
         }
         session = drag_sessions_.emplace(event.pointer_id, std::move(created)).first;
     }
@@ -224,29 +227,30 @@ bool InputRouter::cancel_active_drag(InputOperationResult& result) {
     return cancelled;
 }
 
-std::optional<DragPreviewPresentation> InputRouter::drag_preview(
+std::optional<DragPreviewPresentation> InputPresentation::drag_preview(
     const std::uint64_t identity
 ) const noexcept {
-    for (const auto& [pointer_id, session] : drag_sessions_) {
-        static_cast<void>(pointer_id);
-        if (!session.active || session.source_identity != identity) continue;
-        return DragPreviewPresentation{
-            session.position,
-            session.preview_bounds,
-            &session.preview_commands,
-            session.target_identity.has_value(),
-        };
+    if (input_owner_ != nullptr) {
+        for (const auto& [pointer_id, session] : input_owner_->drag_sessions_) {
+            static_cast<void>(pointer_id);
+            if (!session.active || session.source_identity != identity) continue;
+            return DragPreviewPresentation{
+                session.position, session.preview_bounds, session.preview_commands.get(),
+                session.target_identity.has_value()};
+        }
     }
     return std::nullopt;
 }
 
-std::optional<DropTargetPresentation> InputRouter::drop_target(
+std::optional<DropTargetPresentation> InputPresentation::drop_target(
     const std::uint64_t identity
 ) const noexcept {
-    for (const auto& [pointer_id, session] : drag_sessions_) {
-        static_cast<void>(pointer_id);
-        if (!session.active || session.target_identity != identity) continue;
-        return DropTargetPresentation{session.position, session.placement};
+    if (input_owner_ != nullptr) {
+        for (const auto& [pointer_id, session] : input_owner_->drag_sessions_) {
+            static_cast<void>(pointer_id);
+            if (!session.active || session.target_identity != identity) continue;
+            return DropTargetPresentation{session.position, session.placement};
+        }
     }
     return std::nullopt;
 }

@@ -27,11 +27,13 @@ namespace {
 AsyncDataService::AsyncDataService(
     BindingValidator validator,
     ResultNormalizer result_normalizer,
-    Publisher publisher
+    Publisher publisher,
+    Wake wake
 )
     : validator_(std::move(validator)),
       result_normalizer_(std::move(result_normalizer)),
-      publisher_(std::move(publisher)) {}
+      publisher_(std::move(publisher)),
+      wake_(std::move(wake)) {}
 
 AsyncDataService::~AsyncDataService() {
     for (auto& [binding, state] : bindings_) {
@@ -190,8 +192,7 @@ bool AsyncDataService::post_progress(
           next_progress.completed > *next_progress.total))) {
         return false;
     }
-    std::scoped_lock lock(completion_mutex_);
-    completions_.push_back(Completion{
+    post_completion(Completion{
         CompletionKind::progress, request_id, std::move(next_progress), std::nullopt, std::nullopt,
     });
     return true;
@@ -199,8 +200,7 @@ bool AsyncDataService::post_progress(
 
 bool AsyncDataService::post_succeed(const std::uint64_t request_id, Value result) {
     if (request_id == 0U) return false;
-    std::scoped_lock lock(completion_mutex_);
-    completions_.push_back(Completion{
+    post_completion(Completion{
         CompletionKind::succeed, request_id, std::nullopt, std::move(result), std::nullopt,
     });
     return true;
@@ -214,11 +214,19 @@ bool AsyncDataService::post_fail(
         !base::valid_utf8(failure.code)) {
         return false;
     }
-    std::scoped_lock lock(completion_mutex_);
-    completions_.push_back(Completion{
+    post_completion(Completion{
         CompletionKind::fail, request_id, std::nullopt, std::nullopt, std::move(failure),
     });
     return true;
+}
+
+void AsyncDataService::post_completion(Completion completion) {
+    {
+        const std::scoped_lock lock(completion_mutex_);
+        completions_.push_back(std::move(completion));
+    }
+    if (wake_)
+        wake_();
 }
 
 bool AsyncDataService::cancel(const std::uint64_t request_id) {

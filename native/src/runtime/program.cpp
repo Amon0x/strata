@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "base/process_lifetime.hpp"
 #include "compiler/builtin_catalog.hpp"
 
 namespace strata::runtime {
@@ -87,14 +88,15 @@ using JsonObject = data::JsonObjectView;
 
 /** Helper names and aliases come from the built-in catalog, which names each one's evaluator. */
 [[nodiscard]] HelperKind helper_kind(const std::string_view name) {
-    static const std::map<std::string, HelperKind, std::less<>> helpers = [] {
+    static const base::ProcessLifetime<std::map<std::string, HelperKind, std::less<>>> storage([] {
         std::map<std::string, HelperKind, std::less<>> result;
         for (const compiler::DeclaredHelper& helper : compiler::builtin_catalog().helpers) {
             if (helper.evaluator != HelperKind::unknown)
                 result.emplace(helper.name, helper.evaluator);
         }
         return result;
-    }();
+    });
+    const auto& helpers = storage.get();
     const auto found = helpers.find(name);
     return found != helpers.end() ? found->second : HelperKind::unknown;
 }

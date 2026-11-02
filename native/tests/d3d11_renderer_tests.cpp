@@ -28,6 +28,7 @@
 #include <strata/render_packet.hpp>
 
 #include "d3d11/effect_pass.hpp"
+#include "d3d11/render_context.hpp"
 #include "gpu/isolation.hpp"
 #include "d3d11/raster_pass.hpp"
 #include <strata/raster_job.hpp>
@@ -179,6 +180,68 @@ void test_target_is_validated_on_its_own() {
     check(rejected, "a target whose size disagrees with its texture was accepted");
 }
 
+/** A pending static shader must not put an idle host to sleep with its fallback still visible. */
+void test_pending_material_keeps_framing_until_adopted() {
+    Fixture fixture;
+    d3d11::RenderContext renderer(fixture.device.Get(), fixture.context.Get(), true);
+    renderer.set_target(fixture.texture.Get(), fixture.view.Get(), 4U, 4U, 4.0, 4.0);
+    renderer.begin_frame(std::array<float, 4U>{}, 0.0);
+    // Declaration after begin_frame keeps adoption pending regardless of compiler scheduling.
+    renderer.declare_material("test:static", R"(
+        float4 material(PixelInput input) { return float4(0, 0, 1, 1); }
+    )");
+    host::RenderPacket packet = quad(1U, 255U, 0U, 0U);
+    packet.materials = {"test:static"};
+    auto rendered = renderer.render_layer("pending", packet);
+    check(rendered.live && fixture.center() == std::array<int, 4>{255, 0, 0, 255},
+          "a pending material slept before its fallback could be replaced");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (rendered.live && std::chrono::steady_clock::now() < deadline) {
+        renderer.begin_frame(std::array<float, 4U>{}, 0.0);
+        rendered = renderer.render_layer("pending", packet);
+        std::this_thread::yield();
+    }
+    check(!rendered.live && fixture.center() == std::array<int, 4>{0, 0, 255, 255},
+          "a ready static material failed to replace its fallback and return to idle");
+}
+
+void test_effect_clock_keeps_retained_presentation_live() {
+    Fixture fixture;
+    d3d11::Renderer renderer(fixture.device.Get(), fixture.context.Get());
+    renderer.declare_effect_pass("test:clock", 0U, 1U, 0.0, 1U,
+        STRATA_EFFECT_PARAMETER_NONE, STRATA_EFFECT_PARAMETER_NONE, R"(
+            float4 effect(EffectInput input) {
+                return effectTime() < 0.1 ? float4(1,0,0,1) : float4(0,0,1,1);
+            }
+        )");
+    auto packet = quad(1U, 255U, 255U, 255U);
+    packet.effects = {"test:clock"};
+    host::EffectBatch effect;
+    effect.scissor = host::Scissor{0U, 0U, 4U, 4U};
+    effect.width = 4.0;
+    effect.height = 4.0;
+    effect.opacity = 1.0;
+    effect.refresh_rate = 30.0;
+    effect.sample_revision = 1U;
+    packet.batches.emplace_back(effect);
+    d3d11::FrameOptions options;
+    options.load_action = d3d11::TargetLoadAction::clear;
+    auto rendered = renderer.render("clock", packet, fixture.target(), options);
+    check(fixture.center() == std::array<int, 4>{255, 0, 0, 255}, "effect clock fixture did not draw");
+    check(rendered.live, "a time-driven effect put retained presentation to sleep");
+    options.time_seconds = 0.01;
+    rendered = renderer.render("clock", packet, fixture.target(), options);
+    check(rendered.live && fixture.center() == std::array<int, 4>{255, 0, 0, 255},
+          "a cached effect sample lost its future refresh");
+    options.time_seconds = 0.25;
+    rendered = renderer.render("clock", packet, fixture.target(), options);
+    check(rendered.live && fixture.center() == std::array<int, 4>{0, 0, 255, 255},
+          "retained effect did not advance with the presentation clock");
+    packet.batches.pop_back();
+    rendered = renderer.render("clock", packet, fixture.target(), options);
+    check(!rendered.live, "an unused time-driven effect prevented idle");
+}
+
 /** Drives one layer frame of rate-limited backdrop effects through the effect renderer. */
 void effect_frame(const Fixture& fixture, d3d11::EffectPassRenderer& effects,
                   const std::uint32_t effect_count, const double seconds) {
@@ -315,6 +378,67 @@ void test_image_texels_are_sampled_as_uploaded() {
     static_cast<void>(renderer.render("image", packet, fixture.target(), options));
     check(fixture.center() == std::array<int, 4>{0, 255, 128, 255},
           "an RGBA8 image texture was not sampled as uploaded");
+}
+
+void test_retained_art_keeps_presentation_live() {
+    Fixture fixture;
+    d3d11::Renderer renderer(fixture.device.Get(), fixture.context.Get());
+    auto packet = quad(1U, 255U, 255U, 255U);
+    for (std::size_t vertex = 0U; vertex < 4U; ++vertex) {
+        float position[2]{};
+        std::memcpy(position, packet.vertices.data() + vertex * 88U, sizeof(position));
+        write_float(packet.vertices, vertex, 12U, (position[0] + 1.0F) / 6.0F);
+        write_float(packet.vertices, vertex, 16U, (position[1] + 1.0F) / 6.0F);
+        write_float(packet.vertices, vertex, 80U, 1.0F);
+    }
+    std::get<host::DrawBatch>(packet.batches[0]).texture = "art";
+    host::RasterJobBuilder builder(4U, 4U);
+    host::RasterLayer paint;
+    paint.paint = host::RasterPaint::solid;
+    paint.color = 0xFF0000FFU;
+    host::RasterArt art;
+    art.source = R"(float2 artPoint(uint index, uint count) {
+        float right = artTime() < 100.0 ? 1.0 : 0.25;
+        return float2(index == 1 || index == 2 ? right : 0.0, index >= 2 ? 1.0 : 0.0);
+    })";
+    art.count = 4U;
+    art.closed = true;
+    art.width = art.height = 4.0F;
+    builder.add_art_layer(host::RasterFill::nonzero, paint, {}, std::move(art));
+    host::ResourceOperation create;
+    create.kind = host::resource_create;
+    create.texture = "art";
+    create.format = host::texture_format_rgba8;
+    create.width = create.height = 6U;
+    packet.resources.push_back(create);
+    create.kind = host::resource_raster;
+    create.raster = host::decode_raster_job(builder.encode(1U, 1U), 6U, 6U, create.format);
+    packet.resources.push_back(std::move(create));
+    d3d11::FrameOptions options;
+    options.load_action = d3d11::TargetLoadAction::clear;
+    auto rendered = renderer.render("art", packet, fixture.target(), options);
+    packet.resources.clear();
+    check(rendered.live, "retained GPU art put presentation to sleep before compilation or animation");
+    const auto started = std::chrono::steady_clock::now();
+    const auto deadline = started + std::chrono::seconds(10);
+    while (fixture.center() != std::array<int, 4>{255, 0, 0, 255} &&
+           std::chrono::steady_clock::now() < deadline) {
+        options.time_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        rendered = renderer.render("art", packet, fixture.target(), options);
+    }
+    check(rendered.live && fixture.center() == std::array<int, 4>{255, 0, 0, 255},
+          "retained art did not adopt its compiled program");
+    options.time_seconds = 1000.0;
+    rendered = renderer.render("art", packet, fixture.target(), options);
+    check(rendered.live && fixture.center() == std::array<int, 4>{0, 0, 0, 0},
+          "retained art did not move without another resource operation");
+    host::ResourceOperation release;
+    release.kind = host::resource_release;
+    release.texture = "art";
+    packet.resources.push_back(std::move(release));
+    packet.batches.clear();
+    rendered = renderer.render("art", packet, fixture.target(), options);
+    check(!rendered.live, "released art kept presentation active");
 }
 
 /** A polygon of `count` points on an ellipse, its radius modulated by `wobble` lobes. */
@@ -671,9 +795,12 @@ int main() {
         test_raster_jobs_match_the_reference(D3D_DRIVER_TYPE_HARDWARE, "hardware");
         test_geometry_after_a_failed_frame();
         test_target_is_validated_on_its_own();
+        test_pending_material_keeps_framing_until_adopted();
+        test_effect_clock_keeps_retained_presentation_live();
         test_unused_effect_samples_are_evicted();
         test_deep_isolation_is_bounded();
         test_image_texels_are_sampled_as_uploaded();
+        test_retained_art_keeps_presentation_live();
         test_shaders_are_kept_between_renderers();
         std::cout << "strata_d3d11_renderer_tests: OK\n";
         return 0;

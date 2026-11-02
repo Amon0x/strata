@@ -582,6 +582,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         return result;
     };
     const Size child_intrinsic = intrinsic_children(false);
+    PreparationReadScope preparation_reads(node, PreparationUse::measurement);
     Size own_intrinsic = intrinsic_measure_(node, content_constraints);
     if (measured.style.intrinsic_size.has_value()) {
         own_intrinsic.width = std::max(own_intrinsic.width, measured.style.intrinsic_size->width);
@@ -601,6 +602,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         resolved.min_width = resolved.max_width = measured.content_size.width;
         static_cast<void>(intrinsic_measure_(node, resolved));
     }
+    preparation_reads.commit();
     if (std::optional<ContentSizeMotionSpec> motion = parsed_layout(node).content_motion;
         motion.has_value()) {
         measured.content_motion_target_size = measured.content_size;

@@ -8,6 +8,8 @@
 #include <string>
 #include <string_view>
 
+#include "base/process_lifetime.hpp"
+
 namespace strata::ui {
 namespace {
 
@@ -810,13 +812,13 @@ constexpr std::string_view strata_type_introducers[] = {"component", "overlay"};
 }
 
 [[nodiscard]] Rules script_rules(const bool typescript) {
-    static const std::vector<std::string_view> ts_keywords = [] {
+    static const base::ProcessLifetime<std::vector<std::string_view>> ts_keywords([] {
         std::vector<std::string_view> words(std::begin(js_keywords), std::end(js_keywords));
         words.insert(words.end(), std::begin(ts_extra_keywords), std::end(ts_extra_keywords));
         return words;
-    }();
+    });
     Rules rules;
-    rules.keywords = typescript ? Words(ts_keywords) : Words(js_keywords);
+    rules.keywords = typescript ? Words(ts_keywords.get()) : Words(js_keywords);
     rules.types = typescript ? Words(ts_types) : none;
     rules.constants = js_constants;
     rules.builtins = js_builtins;
@@ -853,13 +855,13 @@ constexpr std::string_view strata_type_introducers[] = {"component", "overlay"};
 }
 
 [[nodiscard]] Rules c_rules(const bool cpp) {
-    static const std::vector<std::string_view> cpp_keywords = [] {
+    static const base::ProcessLifetime<std::vector<std::string_view>> cpp_keywords([] {
         std::vector<std::string_view> words(std::begin(c_keywords), std::end(c_keywords));
         words.insert(words.end(), std::begin(cpp_extra_keywords), std::end(cpp_extra_keywords));
         return words;
-    }();
+    });
     Rules rules;
-    rules.keywords = cpp ? Words(cpp_keywords) : Words(c_keywords);
+    rules.keywords = cpp ? Words(cpp_keywords.get()) : Words(c_keywords);
     rules.types = c_types;
     rules.constants = c_constants;
     rules.type_introducers = c_type_introducers;

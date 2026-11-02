@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/process_lifetime.hpp"
 #include "runtime/expression.hpp"
 
 // StrataScript's statements. A run is an explicit stack of frames, one per function call a
@@ -118,9 +119,62 @@ class Nesting final {
 }
 
 [[nodiscard]] const Value& data_of(const ExpressionValue& value) {
-    static const Value null;
+    static const base::ProcessLifetime<Value> null;
     const Value* data = value.data_value();
-    return data != nullptr ? *data : null;
+    return data != nullptr ? *data : null.get();
+}
+
+/** Bounds alias traversal; declining reuse never rejects a valid executable composite. */
+[[nodiscard]] bool reusable_action(const ActionValue& action, std::size_t& remaining,
+                                   const std::size_t depth) noexcept {
+    if (remaining == 0U || depth >= 32U || action.script != nullptr)
+        return false;
+    --remaining;
+    for (const auto& child : action.children) {
+        if (child != nullptr && !reusable_action(*child, remaining, depth + 1U))
+            return false;
+    }
+    return true;
+}
+
+/** Immutable actions and templates can be reused, but a closure factory must keep fresh cells. */
+[[nodiscard]] bool reusable_result(const ExpressionValue& value, std::size_t& remaining,
+                                   const std::size_t depth) noexcept {
+    if (remaining == 0U || depth >= 32U)
+        return false;
+    --remaining;
+    if (!value.executable() || value.collection() != nullptr)
+        return true;
+    if (const auto* action = value.action())
+        return *action == nullptr || reusable_action(**action, remaining, depth + 1U);
+    if (const auto* list = value.list(); list != nullptr && *list != nullptr) {
+        for (const auto& item : (*list)->values) {
+            if (!reusable_result(item, remaining, depth + 1U))
+                return false;
+        }
+        return true;
+    }
+    if (const auto* object = value.object(); object != nullptr && *object != nullptr) {
+        for (const auto& field : (*object)->fields) {
+            if (!reusable_result(field.second, remaining, depth + 1U))
+                return false;
+        }
+        return true;
+    }
+    if (const auto* component = value.component_template();
+        component != nullptr && *component != nullptr) {
+        for (const auto& argument : (*component)->arguments) {
+            if (!reusable_result(argument.second, remaining, depth + 1U))
+                return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+[[nodiscard]] bool reusable_result(const ExpressionValue& value) noexcept {
+    std::size_t remaining = 256U;
+    return reusable_result(value, remaining, 0U);
 }
 
 } // namespace
@@ -783,7 +837,7 @@ ExpressionValue ExpressionRuntime::invoke(const LambdaValue& function,
         return memoized(function, std::move(positional), std::move(named), reads);
     }
     ExpressionValue value = invoke_once(function, std::move(positional), std::move(named), reads);
-    if (constant) {
+    if (constant && reusable_result(value)) {
         constant_values_.insert_or_assign(
             ProgramNodeKey{function.program->serial(), function.function}, value);
     }
@@ -896,6 +950,8 @@ ExpressionValue ExpressionRuntime::memoized(const LambdaValue& function,
         recorded.hide(name);
     MemoizedCall call{key, owner, positional, named, {}, {}, {}};
     call.result = invoke_once(function, std::move(positional), std::move(named), recorded);
+    if (!reusable_result(call.result))
+        return std::move(call.result);
     call.lexical = std::move(recorded.lexical_reads());
     call.host = std::move(recorded.host_reads());
     // A few calls per function are kept, the oldest replaced first.

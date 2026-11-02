@@ -22,8 +22,10 @@
 #include FT_LCD_FILTER_H
 #include FT_MULTIPLE_MASTERS_H
 
+#include "base/process_lifetime.hpp"
+
 namespace strata::font {
-namespace {
+namespace raster_detail {
 
 [[noreturn]] void freetype_error(const char* operation, const FT_Error error) {
     throw FontError(std::string("FreeType ") + operation + " failed with error " +
@@ -63,24 +65,19 @@ class FreeTypeLibrary final {
     std::mutex lifecycle_mutex_;
 };
 
-[[nodiscard]] FreeTypeLibrary& freetype_library() {
-    static FreeTypeLibrary library;
-    return library;
-}
-
 class FreeTypeFace final {
   public:
-    FreeTypeFace(std::shared_ptr<const void> owner, const std::span<const std::uint8_t> bytes,
+    FreeTypeFace(std::shared_ptr<FreeTypeLibrary> library, std::shared_ptr<const void> owner,
+                 const std::span<const std::uint8_t> bytes,
                  const std::vector<double>& variation = {})
-        : owner_(std::move(owner)) {
+        : library_(std::move(library)), owner_(std::move(owner)) {
         if (bytes.empty() ||
             bytes.size() > static_cast<std::size_t>(std::numeric_limits<FT_Long>::max())) {
             throw FontError("FreeType font memory size cannot be represented");
         }
-        FreeTypeLibrary& library = freetype_library();
-        const std::scoped_lock lock(library.lifecycle_mutex());
+        const std::scoped_lock lock(library_->lifecycle_mutex());
         const FT_Error error =
-            FT_New_Memory_Face(library.get(), reinterpret_cast<const FT_Byte*>(bytes.data()),
+            FT_New_Memory_Face(library_->get(), reinterpret_cast<const FT_Byte*>(bytes.data()),
                                static_cast<FT_Long>(bytes.size()), 0, &face_);
         if (error != FT_Err_Ok)
             freetype_error("memory-face creation", error);
@@ -103,8 +100,7 @@ class FreeTypeFace final {
     ~FreeTypeFace() {
         if (face_ == nullptr)
             return;
-        FreeTypeLibrary& library = freetype_library();
-        const std::scoped_lock lock(library.lifecycle_mutex());
+        const std::scoped_lock lock(library_->lifecycle_mutex());
         static_cast<void>(FT_Done_Face(face_));
     }
 
@@ -123,6 +119,7 @@ class FreeTypeFace final {
     }
 
   private:
+    std::shared_ptr<FreeTypeLibrary> library_;
     std::shared_ptr<const void> owner_;
     FT_Face face_ = nullptr;
     FT_F26Dot6 selected_size_ = 0;
@@ -167,7 +164,7 @@ class FreeTypeFaceCache final {
             }
         }
         return Lease(*this, key,
-                     std::make_shared<FreeTypeFace>(std::move(owner), font.source_bytes(),
+                     std::make_shared<FreeTypeFace>(library_, std::move(owner), font.source_bytes(),
                                                     font.variation()));
     }
 
@@ -198,6 +195,7 @@ class FreeTypeFaceCache final {
         }
     }
 
+    std::shared_ptr<FreeTypeLibrary> library_ = std::make_shared<FreeTypeLibrary>();
     std::mutex mutex_;
     // FT_Face carries mutable size, transform, and glyph-slot state, so each face is leased to one
     // lane at a time; concurrent raster lanes take distinct faces of the same font.
@@ -205,12 +203,24 @@ class FreeTypeFaceCache final {
     std::uint64_t clock_ = 0U;
 };
 
-[[nodiscard]] FreeTypeFaceCache& freetype_faces() {
-    // The library must outlive cached FT_Face objects during process teardown.
-    static_cast<void>(freetype_library());
-    static FreeTypeFaceCache cache;
-    return cache;
+} // namespace raster_detail
+
+/** Jobs pin the cache; cached and leased faces independently retain their FreeType library. */
+struct RasterContext final {
+    raster_detail::FreeTypeFaceCache faces;
+};
+
+std::shared_ptr<RasterContext> shared_raster_context() {
+    // New detached callers may arrive after ordinary caller-owned runtimes have been destroyed.
+    static const base::ProcessLifetime<std::shared_ptr<RasterContext>> context(
+        [] { return std::make_shared<RasterContext>(); });
+    return context.get();
 }
+
+namespace {
+
+using raster_detail::FreeTypeFaceCache;
+using raster_detail::freetype_error;
 
 void validate(const CoverageRasterConfig& config) {
     if (config.maximum_dimension == 0U ||
@@ -327,7 +337,7 @@ std::optional<GlyphRasterBitmap>
 rasterize_glyph(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
                 const double display_scale, const SubpixelPhase phase,
                 const CoverageRasterConfig& config, const std::uint32_t font_style_flags,
-                const SubpixelOrder order) {
+                const SubpixelOrder order, RasterContext* context) {
     validate(config);
     if (!std::isfinite(pixel_size) || pixel_size <= 0.0 || !std::isfinite(display_scale) ||
         display_scale <= 0.0) {
@@ -341,7 +351,12 @@ rasterize_glyph(const OpenTypeFont& font, const std::uint16_t glyph, const doubl
         throw FontError("coverage raster physical size cannot be represented by FreeType");
     }
 
-    const FreeTypeFaceCache::Lease cached_face = freetype_faces().acquire(font);
+    std::shared_ptr<RasterContext> retained;
+    if (context == nullptr) {
+        retained = shared_raster_context();
+        context = retained.get();
+    }
+    const FreeTypeFaceCache::Lease cached_face = context->faces.acquire(font);
     FT_Face face = cached_face->get();
     cached_face->select_size(static_cast<FT_F26Dot6>(size_26_6_value));
 
@@ -476,20 +491,21 @@ rasterize_glyph(const OpenTypeFont& font, const std::uint16_t glyph, const doubl
 std::optional<GlyphRasterBitmap>
 rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
                    const double display_scale, const SubpixelPhase phase,
-                   const CoverageRasterConfig& config, const std::uint32_t font_style_flags) {
+                   const CoverageRasterConfig& config, const std::uint32_t font_style_flags,
+                   RasterContext* const context) {
     return rasterize_glyph(font, glyph, pixel_size, display_scale, phase, config,
-                           font_style_flags, SubpixelOrder::none);
+                           font_style_flags, SubpixelOrder::none, context);
 }
 
 std::optional<GlyphRasterBitmap>
 rasterize_subpixel(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
                    const double display_scale, const SubpixelOrder order,
                    const SubpixelPhase phase, const CoverageRasterConfig& config,
-                   const std::uint32_t font_style_flags) {
+                   const std::uint32_t font_style_flags, RasterContext* const context) {
     if (order == SubpixelOrder::none)
         throw FontError("subpixel rasterization needs a subpixel order");
     return rasterize_glyph(font, glyph, pixel_size, display_scale, phase, config,
-                           font_style_flags, order);
+                           font_style_flags, order, context);
 }
 
 } // namespace strata::font

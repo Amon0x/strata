@@ -172,9 +172,8 @@ struct PreviewSession::Impl final {
         programs.swap(program_pending);
         for (const std::string& resource_id : programs) {
             try {
-                if (host.reload_program_source(resource_id)) {
-                    std::cout << "STRATA PREVIEW HLSL APPLIED " << resource_id << '\n'
-                              << std::flush;
+                if (auto receipt = host.reload_program_source(resource_id)) {
+                    program_updates.emplace_back(resource_id, std::move(*receipt));
                 } else {
                     std::cerr << "STRATA PREVIEW RESTART REQUIRED " << resource_id
                               << ": shader is no longer predeclared\n";
@@ -193,15 +192,39 @@ struct PreviewSession::Impl final {
         }
     }
 
+    void adopt_programs() {
+        for (auto entry = program_updates.begin(); entry != program_updates.end();) {
+            if (!entry->second.ready()) {
+                ++entry;
+                continue;
+            }
+            try {
+                entry->second.get();
+                std::cout << "STRATA PREVIEW HLSL APPLIED " << entry->first << '\n' << std::flush;
+            } catch (const std::exception& error) {
+                std::cerr << "STRATA PREVIEW HLSL REJECTED; last-good program retained "
+                          << entry->first << ": " << error.what() << '\n';
+            }
+            entry = program_updates.erase(entry);
+        }
+    }
+
     void poll() noexcept {
         try {
+            adopt_programs();
+            if (!prepared_watches_initialized && host.active()) {
+                refresh_source_watches();
+                prepared_watches_initialized = true;
+            }
             const Clock::time_point now = Clock::now();
             if (now >= next_scan) {
                 next_scan = now + std::chrono::milliseconds(50);
                 scan(now);
             }
-            if (pending && now >= apply_after)
+            if (pending && now >= apply_after && host.active()) {
                 apply();
+                adopt_programs();
+            }
         } catch (const std::exception& error) {
             std::cerr << "STRATA PREVIEW WATCH ERROR " << error.what() << '\n';
         }
@@ -211,11 +234,13 @@ struct PreviewSession::Impl final {
     ApplicationHost& host;
     std::map<std::filesystem::path, WatchedFile> files;
     std::set<std::string, std::less<>> program_pending;
+    std::vector<std::pair<std::string, host::PresentationReceipt>> program_updates;
     std::set<std::filesystem::path> restart_pending;
     Clock::time_point next_scan = Clock::now();
     Clock::time_point apply_after{};
     bool source_pending = false;
     bool pending = false;
+    bool prepared_watches_initialized = false;
 };
 
 PreviewSession::PreviewSession(std::filesystem::path manifest_path,

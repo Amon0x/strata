@@ -85,6 +85,27 @@ constexpr std::array<std::string_view, static_cast<std::size_t>(ProfilerCounter:
         "render.retained_subtrees_reused",
         "render.retained_subtrees_translated",
         "layout.translated_nodes",
+        "tasks.queued",
+        "tasks.running",
+        "tasks.pending",
+        "tasks.submitted",
+        "tasks.completed",
+        "tasks.adopted",
+        "tasks.cancelled",
+        "tasks.failed",
+        "tasks.queue_nanos",
+        "tasks.work_nanos",
+        "tasks.latency_nanos",
+        "tasks.glyph_raster.work_nanos",
+        "tasks.vector_glyph.work_nanos",
+        "tasks.image.work_nanos",
+        "tasks.font.work_nanos",
+        "tasks.shaping.work_nanos",
+        "tasks.module.work_nanos",
+        "tasks.snapshot.work_nanos",
+        "tasks.geometry.work_nanos",
+        "tasks.lottie.work_nanos",
+        "tasks.other.work_nanos",
     };
 
 [[nodiscard]] std::int64_t steady_now_nanos() noexcept {
@@ -358,33 +379,47 @@ void Profiler::record_counters(
 }
 
 void Profiler::record_host_frame(const HostFrameProfilerTelemetry& value) {
-    if (value.submit_nanos < 0) {
-        throw std::invalid_argument("host frame profiler duration must be non-negative");
+    if (value.submit_nanos < 0 || value.frame_index == 0U) {
+        throw std::invalid_argument("host profiler requires a frame and non-negative duration");
     }
     std::scoped_lock lock(mutex_);
     if (!enabled_)
         return;
-    const auto set = [this](const ProfilerCounter counter, const std::uint64_t amount) {
-        counters_[static_cast<std::size_t>(counter)] = amount;
-    };
-    set(ProfilerCounter::draw_calls, value.draw_calls);
-    set(ProfilerCounter::batches, value.batches);
-    set(ProfilerCounter::vertices, value.vertices);
-    set(ProfilerCounter::texture_creations, value.texture_creations);
-    set(ProfilerCounter::texture_creation_bytes, value.texture_creation_bytes);
-    set(ProfilerCounter::texture_uploads, value.texture_uploads);
-    set(ProfilerCounter::texture_upload_bytes, value.texture_upload_bytes);
-    set(ProfilerCounter::pending_texture_creations, value.queued_texture_creations);
-    set(ProfilerCounter::queued_texture_uploads, value.queued_texture_uploads);
-    set(ProfilerCounter::queued_texture_upload_bytes, value.queued_texture_upload_bytes);
-    set(ProfilerCounter::deferred_gpu_resources, value.deferred_gpu_resources);
-    set(ProfilerCounter::deferred_gpu_resource_deletions, value.deferred_gpu_resource_deletions);
-    set(ProfilerCounter::blur_passes, value.blur_passes);
-    set(ProfilerCounter::blur_target_width, value.blur_target_width);
-    set(ProfilerCounter::blur_target_height, value.blur_target_height);
-    set(ProfilerCounter::blur_nanos, value.blur_nanos);
-    set(ProfilerCounter::host_submit_nanos, static_cast<std::uint64_t>(value.submit_nanos));
-    increment_saturated(counters_[static_cast<std::size_t>(ProfilerCounter::host_submissions)]);
+    if (value.frame_index > observed_frame_index_ ||
+        (frame_active_ && value.frame_index == frame_index_)) {
+        throw std::invalid_argument("host profiler frame has not completed");
+    }
+    if (value.frame_index > frame_index_)
+        return;
+    const std::array<ProfilerCounterSnapshot, 18U> values{{
+        {ProfilerCounter::draw_calls, value.draw_calls},
+        {ProfilerCounter::batches, value.batches},
+        {ProfilerCounter::vertices, value.vertices},
+        {ProfilerCounter::texture_creations, value.texture_creations},
+        {ProfilerCounter::texture_creation_bytes, value.texture_creation_bytes},
+        {ProfilerCounter::texture_uploads, value.texture_uploads},
+        {ProfilerCounter::texture_upload_bytes, value.texture_upload_bytes},
+        {ProfilerCounter::pending_texture_creations, value.queued_texture_creations},
+        {ProfilerCounter::queued_texture_uploads, value.queued_texture_uploads},
+        {ProfilerCounter::queued_texture_upload_bytes, value.queued_texture_upload_bytes},
+        {ProfilerCounter::deferred_gpu_resources, value.deferred_gpu_resources},
+        {ProfilerCounter::deferred_gpu_resource_deletions, value.deferred_gpu_resource_deletions},
+        {ProfilerCounter::blur_passes, value.blur_passes},
+        {ProfilerCounter::blur_target_width, value.blur_target_width},
+        {ProfilerCounter::blur_target_height, value.blur_target_height},
+        {ProfilerCounter::blur_nanos, value.blur_nanos},
+        {ProfilerCounter::host_submit_nanos, static_cast<std::uint64_t>(value.submit_nanos)},
+        {ProfilerCounter::host_submissions, 1U},
+    }};
+    if (value.frame_index == frame_index_) {
+        for (const auto& [counter, amount] : values) {
+            auto& target = counters_[static_cast<std::size_t>(counter)];
+            if (counter == ProfilerCounter::host_submissions)
+                increment_saturated(target, amount);
+            else
+                target = amount;
+        }
+    }
 
     if (!frame_root_id_.has_value()) {
         frame_root_id_ = find_or_create_section_locked("frame", std::nullopt);
@@ -394,7 +429,7 @@ void Profiler::record_host_frame(const HostFrameProfilerTelemetry& value) {
     } else if (const std::optional<std::uint64_t> id =
                    find_or_create_section_locked("host-submit", frame_root_id_);
                id.has_value()) {
-        record_timing_locked(*id, value.submit_nanos);
+        record_timing_locked(*id, value.submit_nanos, value.frame_index, values);
     } else {
         increment_saturated(dropped_section_samples_);
     }
@@ -422,7 +457,7 @@ void Profiler::record_external_timing(const std::string_view name,
         increment_saturated(dropped_section_samples_);
         return;
     }
-    record_timing_locked(*id, duration_nanos);
+    record_timing_locked(*id, duration_nanos, frame_index_);
     if (!frame_active_)
         invalidate_completed_snapshot_locked();
 }
@@ -535,6 +570,7 @@ void Profiler::reset() {
     frame_active_ = false;
     owner_thread_ = {};
     frame_index_ = 0U;
+    observed_frame_index_ = 0U;
     ++generation_;
     next_section_id_ = 1U;
     next_token_ = 1U;
@@ -565,6 +601,7 @@ std::int64_t Profiler::now() const noexcept {
 void Profiler::begin_frame(const std::uint64_t frame_index) {
     const std::int64_t started_at = now();
     std::scoped_lock lock(mutex_);
+    observed_frame_index_ = frame_index;
     if (!enabled_)
         return;
     if (frame_active_) {
@@ -668,11 +705,14 @@ void Profiler::close_top_locked(const std::int64_t ended_at_nanos) {
     if (open.generation != generation_)
         return;
     record_timing_locked(open.section_id,
-                         std::max<std::int64_t>(0, ended_at_nanos - open.started_at_nanos));
+                         std::max<std::int64_t>(0, ended_at_nanos - open.started_at_nanos),
+                         frame_index_);
 }
 
 void Profiler::record_timing_locked(const std::uint64_t section_id,
-                                    const std::int64_t duration_nanos) {
+                                    const std::int64_t duration_nanos,
+                                    const std::uint64_t frame_index,
+                                    const std::span<const ProfilerCounterSnapshot> counters) {
     SectionRecord* const section = section_locked(section_id);
     if (section == nullptr) {
         increment_saturated(dropped_timing_samples_);
@@ -687,16 +727,20 @@ void Profiler::record_timing_locked(const std::uint64_t section_id,
     if (section->timings.add(duration_nanos))
         increment_saturated(dropped_timing_samples_);
     // A section opened several times in one frame (input, prepare) reports its whole frame cost.
-    section->frame_total_nanos = section->last_sample_frame_index == frame_index_
-                                     ? section->frame_total_nanos + duration_nanos
-                                     : duration_nanos;
-    section->last_sample_frame_index = frame_index_;
+    if (frame_index >= section->last_sample_frame_index) {
+        section->frame_total_nanos = section->last_sample_frame_index == frame_index
+                                         ? section->frame_total_nanos + duration_nanos
+                                         : duration_nanos;
+        section->last_sample_frame_index = frame_index;
+    }
     if (spike)
-        record_spike_locked(*section, duration_nanos, baseline);
+        record_spike_locked(*section, duration_nanos, baseline, frame_index, counters);
 }
 
 void Profiler::record_spike_locked(const SectionRecord& section, const std::int64_t duration_nanos,
-                                   const std::int64_t baseline_nanos) {
+                                   const std::int64_t baseline_nanos,
+                                   const std::uint64_t frame_index,
+                                   const std::span<const ProfilerCounterSnapshot> counters) {
     const long double adaptive =
         std::ceil(static_cast<long double>(baseline_nanos) * config_.spike_baseline_multiplier);
     const std::int64_t adaptive_nanos = adaptive >= std::numeric_limits<std::int64_t>::max()
@@ -708,14 +752,22 @@ void Profiler::record_spike_locked(const SectionRecord& section, const std::int6
         section.name,
         section.path,
         stack_locked(section.id),
-        frame_index_,
+        frame_index,
         duration_nanos,
         config_.spike_absolute_floor_nanos,
         std::max(config_.spike_absolute_floor_nanos, adaptive_nanos),
         config_.spike_baseline_multiplier,
         baseline_nanos,
-        counters_locked(true),
+        {},
     };
+    if (frame_index == frame_index_) {
+        spike.counters = counters_locked(true);
+    } else {
+        for (const ProfilerCounterSnapshot& counter : counters) {
+            if (counter.value != 0U)
+                spike.counters.push_back(counter);
+        }
+    }
     if (spikes_.size() == config_.maximum_recent_spikes) {
         spikes_.pop_front();
         increment_saturated(dropped_spikes_);

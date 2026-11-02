@@ -10,6 +10,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -92,6 +93,27 @@ enum class ProfilerCounter : std::size_t {
     render_retained_subtrees_reused,
     render_retained_subtrees_translated,
     layout_translated_nodes,
+    tasks_queued,
+    tasks_running,
+    tasks_pending,
+    tasks_submitted,
+    tasks_completed,
+    tasks_adopted,
+    tasks_cancelled,
+    tasks_failed,
+    tasks_queue_nanos,
+    tasks_work_nanos,
+    tasks_latency_nanos,
+    tasks_glyph_raster_nanos,
+    tasks_vector_glyph_nanos,
+    tasks_image_nanos,
+    tasks_font_nanos,
+    tasks_shaping_nanos,
+    tasks_module_nanos,
+    tasks_snapshot_nanos,
+    tasks_geometry_nanos,
+    tasks_lottie_nanos,
+    tasks_other_nanos,
     count,
 };
 
@@ -129,6 +151,7 @@ struct ProfilerCounterSnapshot final {
 };
 
 struct HostFrameProfilerTelemetry final {
+    std::uint64_t frame_index = 0U;
     std::uint64_t draw_calls = 0U;
     std::uint64_t batches = 0U;
     std::uint64_t vertices = 0U;
@@ -238,7 +261,10 @@ class Profiler final {
     void increment(ProfilerCounter counter, std::uint64_t amount = 1U);
     void record(ProfilerCounter counter, std::uint64_t value);
     void record_counters(std::initializer_list<std::pair<ProfilerCounter, std::uint64_t>> values);
-    /** Atomically attaches host-GPU telemetry to the latest completed surface frame. */
+    /**
+     * Records host timings against their originating frame. Late reports leave current counters
+     * untouched; their spikes contain only the reported host counters, not another frame's work.
+     */
     void record_host_frame(const HostFrameProfilerTelemetry& telemetry);
     /** Records a host-owned phase against the latest completed frame under the canonical frame
      * root. */
@@ -308,9 +334,12 @@ class Profiler final {
     [[nodiscard]] std::optional<std::uint64_t>
     find_or_create_section_locked(std::string_view name, std::optional<std::uint64_t> parent_id);
     void close_top_locked(std::int64_t ended_at_nanos);
-    void record_timing_locked(std::uint64_t section_id, std::int64_t duration_nanos);
+    void record_timing_locked(std::uint64_t section_id, std::int64_t duration_nanos,
+                              std::uint64_t frame_index,
+                              std::span<const ProfilerCounterSnapshot> counters = {});
     void record_spike_locked(const SectionRecord& section, std::int64_t duration_nanos,
-                             std::int64_t baseline_nanos);
+                             std::int64_t baseline_nanos, std::uint64_t frame_index,
+                             std::span<const ProfilerCounterSnapshot> counters);
     [[nodiscard]] std::vector<std::uint64_t> stack_locked(std::uint64_t section_id) const;
     [[nodiscard]] std::vector<ProfilerCounterSnapshot> counters_locked(bool nonzero_only) const;
     [[nodiscard]] ProfilerSnapshot snapshot_locked() const;
@@ -330,6 +359,8 @@ class Profiler final {
     bool frame_active_ = false;
     std::thread::id owner_thread_;
     std::uint64_t frame_index_ = 0U;
+    /** Capture can be toggled while feedback for an uncaptured frame is still in flight. */
+    std::uint64_t observed_frame_index_ = 0U;
     std::uint64_t generation_ = 0U;
     std::uint64_t next_section_id_ = 1U;
     std::uint64_t next_token_ = 1U;

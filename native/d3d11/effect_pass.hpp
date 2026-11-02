@@ -20,6 +20,8 @@ struct EffectPassTelemetry final {
     std::uint64_t nanos = 0U;
     std::uint32_t target_width = 0U;
     std::uint32_t target_height = 0U;
+    /** A visible frame-input or pending shader needs future presentation, even while cached. */
+    bool live = false;
 };
 
 /** The isolation targets an effect renderer holds, for tests and diagnostics. */
@@ -90,6 +92,8 @@ class EffectPassRenderer final {
         std::string_view layer_id
     );
     void release_layer(std::string_view layer_id) noexcept;
+    /** Removes declarations in one consumer namespace; pending unreferenced shaders retire later. */
+    void release_programs(std::string_view prefix);
     void declare_pass(std::string_view effect_id, std::uint32_t index, std::uint32_t kind,
                       double radius, std::uint32_t downsample, std::uint32_t radius_parameter,
                       std::uint32_t downsample_parameter, std::string_view hlsl_source);

@@ -107,19 +107,19 @@ const runtime::Value* BehaviorInputScope::retained(const std::string_view name) 
 }
 
 const LayoutRecord* BehaviorInputScope::layout() const noexcept {
-    return router_.layout_ != nullptr ? router_.layout_->find(node_.identity()) : nullptr;
+    return presentation_.layout_result() != nullptr ? presentation_.layout_result()->find(node_.identity()) : nullptr;
 }
 
 const LayoutRecord* BehaviorInputScope::layout(const RetainedNode& node) const noexcept {
-    return router_.layout_ != nullptr ? router_.layout_->find(node.identity()) : nullptr;
+    return presentation_.layout_result() != nullptr ? presentation_.layout_result()->find(node.identity()) : nullptr;
 }
 
 Rect BehaviorInputScope::surface_bounds(const LayoutRecord& record, const Rect bounds) const noexcept {
-    return router_.layout_ != nullptr ? router_.layout_->surface_bounds(record, bounds) : Rect{};
+    return presentation_.layout_result() != nullptr ? presentation_.layout_result()->surface_bounds(record, bounds) : Rect{};
 }
 
 RetainedNode* BehaviorInputScope::find_key(const std::string_view key) const noexcept {
-    return router_.tree_ != nullptr ? router_.tree_->find_key(key) : nullptr;
+    return tree_ != nullptr ? tree_->find_key(key) : nullptr;
 }
 
 bool BehaviorInputScope::passive_pointer_descendant() const noexcept {
@@ -131,9 +131,9 @@ bool BehaviorInputScope::press_matches(const bool include_descendants) const noe
     if (event_ == nullptr)
         return false;
     const auto found = router_.pressed_pointer_targets_.find(event_->pointer_id);
-    if (found == router_.pressed_pointer_targets_.end() || router_.tree_ == nullptr)
+    if (found == router_.pressed_pointer_targets_.end() || tree_ == nullptr)
         return false;
-    const RetainedNode* pressed = router_.tree_->find_identity(found->second.identity);
+    const RetainedNode* pressed = tree_->find_identity(found->second.identity);
     const bool release_inside =
         pointer_target_ == &node_ ||
         (pointer_target_ != nullptr &&
@@ -152,10 +152,10 @@ bool BehaviorInputScope::press_moved_beyond_slop() const noexcept {
         const auto found = router_.pressed_pointer_targets_.find(event_->pointer_id);
         return found != router_.pressed_pointer_targets_.end() && found->second.moved_beyond_slop;
     }
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return false;
     return std::ranges::any_of(router_.pressed_pointer_targets_, [this](const auto& entry) {
-        const RetainedNode* pressed = router_.tree_->find_identity(entry.second.identity);
+        const RetainedNode* pressed = tree_->find_identity(entry.second.identity);
         return entry.second.moved_beyond_slop && pressed != nullptr &&
                (pressed == &node_ || InputRouter::descendant_of(*pressed, node_));
     });
@@ -171,11 +171,11 @@ bool BehaviorInputScope::long_press_emitted() const noexcept {
 GestureClaimState BehaviorInputScope::gesture_claim_state() const noexcept {
     if (dispatch_ != nullptr)
         return dispatch_->gesture_claim_state();
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return GestureClaimState::unclaimed;
     for (const auto& [pointer_id, press] : router_.pressed_pointer_targets_) {
         static_cast<void>(pointer_id);
-        const RetainedNode* pressed = router_.tree_->find_identity(press.identity);
+        const RetainedNode* pressed = tree_->find_identity(press.identity);
         if (pressed != nullptr &&
             (pressed == &node_ || InputRouter::descendant_of(*pressed, node_))) {
             return press.gesture;
@@ -206,9 +206,9 @@ void BehaviorInputScope::mark_long_press_emitted() {
     for (auto& [pointer_id, press] : router_.pressed_pointer_targets_) {
         if (event_ != nullptr && pointer_id != event_->pointer_id)
             continue;
-        if (router_.tree_ == nullptr)
+        if (tree_ == nullptr)
             continue;
-        const RetainedNode* owner = router_.tree_->find_identity(press.identity);
+        const RetainedNode* owner = tree_->find_identity(press.identity);
         if (owner != nullptr && (owner == &node_ || InputRouter::descendant_of(*owner, node_))) {
             press.long_press_emitted = true;
         }
@@ -220,11 +220,11 @@ bool BehaviorInputScope::request_frame() {
 }
 
 std::int64_t BehaviorInputScope::frame_time_nanos() const noexcept {
-    return router_.frame_time_nanos_;
+    return presentation_.frame_time_nanos();
 }
 
 bool BehaviorInputScope::reduced_motion() const noexcept {
-    return router_.reduced_motion_;
+    return presentation_.reduced_motion_;
 }
 
 void BehaviorInputScope::set_retained(std::string name, runtime::Value value,
@@ -234,11 +234,12 @@ void BehaviorInputScope::set_retained(std::string name, runtime::Value value,
 
 void BehaviorInputScope::set_retained(RetainedNode& node, std::string name, runtime::Value value,
                                       const DirtyReason reason) {
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return;
-    const bool changed = router_.tree_->set_retained_value(node.identity(), std::move(name),
+    const bool changed = tree_->set_retained_value(node.identity(), std::move(name),
                                                            std::move(value), reason);
-    if (changed && (reason == DirtyReason::structure || reason == DirtyReason::properties) &&
+    if (changed && tree_ == router_.tree_ &&
+        (reason == DirtyReason::structure || reason == DirtyReason::properties) &&
         router_.description_invalidator_) {
         router_.description_invalidator_(nullptr, {});
     }

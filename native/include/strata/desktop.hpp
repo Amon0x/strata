@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include <strata/host.hpp>
+#include <strata/presentation.hpp>
 
 struct HWND__;
 using HWND = HWND__*;
@@ -40,6 +42,8 @@ struct WindowRequest final {
     std::optional<double> height;
     std::optional<double> x;
     std::optional<double> y;
+    /** Preserve this lifetime token when answering; a reopened textual client is a new owner. */
+    std::shared_ptr<const std::atomic<bool>> closed;
 };
 
 struct FontResource final {
@@ -93,6 +97,7 @@ struct ApplicationConfig final {
 struct ApplicationOptions final {
     bool vsync = true;
     bool asynchronous_shader_compilation = true;
+    host::PresentationExecution presentation = host::PresentationExecution::threaded;
 };
 
 struct Diagnostic final {
@@ -110,8 +115,9 @@ struct Diagnostic final {
 /**
  * Reusable Win32/D3D11 host for one application and one Surface.
  *
- * Construct the host, register actions and snapshots through bindings(), then call activate(). The
- * window procedure delegates to handle_window_message() and the message loop calls frame(). The
+ * Construct the host, register actions and snapshots through bindings(), then call activate().
+ * Activation starts owned worker preparation; frame() adopts it without blocking. The window
+ * procedure delegates to handle_window_message() and the message loop calls frame(). The
  * host owns resource loading, source imports, clipboard/IME integration, packet decoding, D3D11
  * submission, and the ordered Surface release barrier.
  */
@@ -124,17 +130,19 @@ class ApplicationHost final {
     ApplicationHost(const ApplicationHost&) = delete;
     ApplicationHost& operator=(const ApplicationHost&) = delete;
 
-    [[nodiscard]] strata::Runtime& runtime() noexcept;
-    [[nodiscard]] strata::host::Bindings& bindings() noexcept;
+    /** Available after active() becomes true; preparation never exposes its private runtime. */
+    [[nodiscard]] strata::Runtime& runtime();
+    [[nodiscard]] strata::host::Bindings& bindings();
 
-    /** Publishes an immediate immutable snapshot. Revision-watched models belong in bindings(). */
-    void publish(std::string_view snapshot_id, const strata::host::Value& value);
-    /** Compiles the configured source module and creates the Surface. */
+    /** Publishes owned data, retaining its order while preparing. Watched models use bindings(). */
+    void publish(std::string_view snapshot_id, strata::host::Value value);
+    /** Starts compiling the configured source module and creating its Surface off-owner. */
     void activate();
     /** Reactivates compatible source while retaining the current Surface and stable-key state. */
     [[nodiscard]] bool reactivate();
-    /** Replaces one predeclared HLSL body. Returns false when the resource id is not declared. */
-    [[nodiscard]] bool reload_program_source(std::string_view resource_id);
+    /** Enqueues a predeclared HLSL replacement; no receipt means the resource is not declared. */
+    [[nodiscard]] std::optional<host::PresentationReceipt>
+    reload_program_source(std::string_view resource_id);
     [[nodiscard]] const std::vector<std::string>& module_resources() const noexcept;
     [[nodiscard]] const std::vector<std::string>& program_resources() const noexcept;
 
@@ -157,7 +165,7 @@ class ApplicationHost final {
     [[nodiscard]] std::optional<std::intptr_t>
     handle_window_message(std::uint32_t message, std::uintptr_t word, std::intptr_t long_value);
 
-    /** Synchronizes host bindings, frames the Surface, submits D3D11 work, and presents. */
+    /** Adopts feedback/preparation, synchronizes bindings and posts a frame without waiting. */
     void frame();
     /** The windows the document asked to open or close since the last call. */
     [[nodiscard]] std::vector<WindowRequest> take_window_requests();
@@ -169,13 +177,17 @@ class ApplicationHost final {
      */
     [[nodiscard]] std::unique_ptr<ApplicationHost>
     open_window(HWND window, const WindowRequest& request, ApplicationOptions options = {});
-    /** Performs the packet consumption barrier and releases all runtime ownership. */
-    void close();
+    /**
+     * Nonblocking ordered shutdown. Keep dispatching window messages and call again until true,
+     * then destroy the HWND. A destructor supplies a sent-message-only emergency barrier.
+     */
+    [[nodiscard]] bool close();
 
     [[nodiscard]] bool active() const noexcept;
     [[nodiscard]] bool has_frame() const noexcept;
-    /** The last frame showed something new: its present already waited for the display. */
+    /** A completed presentation was adopted by the last frame call; it need not block that call. */
     [[nodiscard]] bool presented() const noexcept;
+    [[nodiscard]] std::uint64_t present_count() const noexcept;
     /** The last frame left nothing to do until input or a host change. */
     [[nodiscard]] bool idle() const noexcept;
     [[nodiscard]] double scale() const noexcept;

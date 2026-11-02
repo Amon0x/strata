@@ -9,6 +9,7 @@
 #include <string>
 #include <utility>
 
+#include "base/process_lifetime.hpp"
 #include "compiler/builtin_catalog.hpp"
 
 namespace strata::compiler {
@@ -517,10 +518,12 @@ WidgetSchema::find_binding(const std::string_view shorthand) const noexcept {
 }
 
 SchemaRegistry SchemaRegistry::builtins() {
-    static const std::shared_ptr<const SchemaRegistry> registry =
-        std::make_shared<const SchemaRegistry>(from_catalog(builtin_catalog()));
+    // Keep admission itself alive, not only the schema handles already held by worker runtimes.
+    static const base::ProcessLifetime<std::shared_ptr<const SchemaRegistry>> registry([] {
+        return std::make_shared<const SchemaRegistry>(from_catalog(builtin_catalog()));
+    });
     SchemaRegistry application;
-    application.base_ = registry;
+    application.base_ = registry.get();
     return application;
 }
 

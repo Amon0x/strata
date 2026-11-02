@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -12,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include "base/pending.hpp"
+#include "base/task_pool.hpp"
 #include "font/opentype.hpp"
 #include "font/vector_glyph.hpp"
 
@@ -79,18 +82,18 @@ struct VectorGlyphWant final {
  */
 class VectorGlyphPool final {
   public:
-    explicit VectorGlyphPool(std::string id) : id_(std::move(id)) {}
+    explicit VectorGlyphPool(std::string id, base::TaskOwner* tasks = nullptr);
 
     /** The host resource the buffers are kept under; draws of vector text name it as texture. */
     [[nodiscard]] const std::string& id() const noexcept {
         return id_;
     }
     /**
-     * The glyph's record index (the first of its vector_glyph_detail_levels), made now if it is
-     * new; nothing when the font draws it some other way: a colour glyph, or one it has no
-     * TrueType outline for (bitmap and CFF fonts).
+     * The glyph's record index (the first of its vector_glyph_detail_levels), or its preparation
+     * dependency. A ready empty value means the font draws it another way; a pending or failed
+     * vector must not fall through to synchronous rasterization.
      */
-    [[nodiscard]] std::optional<std::uint32_t>
+    [[nodiscard]] base::ResourceResult<std::uint32_t>
     glyph(std::string_view font_id, const font::OpenTypeFont& font, std::uint16_t glyph);
     /**
      * The record of glyph `index` fitted to the pixel grid at `scale` device pixels a font unit
@@ -98,14 +101,15 @@ class VectorGlyphPool final {
      * curves within a thirty-second of a pixel, so small text has a few segments where the
      * outline drawn at any size has many: each pixel reads fewer.
      */
-    [[nodiscard]] std::uint32_t fitted(std::uint32_t index, double scale);
+    [[nodiscard]] base::ResourceResult<std::uint32_t> fitted(std::uint32_t index, double scale);
     /**
-     * Makes the wanted glyphs and fitted variants the pool lacks, spread over the raster pool's
-     * lanes (font::parallel_for), so glyph and fitted then find them: a page of new text builds
-     * its outlines at once rather than one after another as planning asks. Records are added in
-     * the order wanted, so the buffers are the same however the work was spread.
+     * Posts missing glyphs and fits as owned batches. Workers can use the pool's blocking lanes
+     * without blocking the UI owner. Deterministic owners run the same work inline; records are
+     * adopted only by lookups in draw order.
      */
     void prepare(std::span<const VectorGlyphWant> wants);
+    /** Cancels queued work no currently visible preparation observes. */
+    void retain_preparations(std::span<const std::uint64_t> resources);
     [[nodiscard]] const VectorGlyphRecord& record(std::uint32_t index) const {
         return records_.at(index);
     }
@@ -128,6 +132,14 @@ class VectorGlyphPool final {
   private:
     /** A glyph's records, its own and its coarser levels; its own empty when it has none. */
     using Levels = std::array<font::VectorGlyph, vector_glyph_detail_levels>;
+    /** A retained face; its once-initialized zones are safe to read from any worker. */
+    struct FontSource final {
+        explicit FontSource(font::OpenTypeFont face) : font(std::move(face)) {}
+        [[nodiscard]] const font::FontHintZones& zones() const;
+        const font::OpenTypeFont font;
+        mutable std::once_flag initialized;
+        mutable font::FontHintZones hints;
+    };
     struct Source;
 
     [[nodiscard]] static std::shared_ptr<const font::GlyphOutline>
@@ -138,26 +150,42 @@ class VectorGlyphPool final {
     /** The variant of `source` fitted at `scale`; nothing when its outline flattens to none. */
     [[nodiscard]] static std::optional<font::VectorGlyph> build_fitted(const Source& source,
                                                                        double scale);
-    [[nodiscard]] const font::FontHintZones& zones(std::string_view font_id,
-                                                   const font::OpenTypeFont& font);
+    [[nodiscard]] std::shared_ptr<const FontSource> font_source(
+        std::string_view font_id, const font::OpenTypeFont& font);
+    void prepare_fits(std::span<const std::pair<std::uint32_t, double>> wants);
     /** Adds a glyph's levels and indexes it; nothing when it has no records. */
     std::optional<std::uint32_t> adopt(std::string_view font_id, std::uint16_t glyph,
                                        std::shared_ptr<const font::GlyphOutline> outline,
-                                       std::uint16_t units_per_em,
-                                       const font::FontHintZones* zones, const Levels& levels);
+                                       std::shared_ptr<const FontSource> font,
+                                       const Levels& levels);
     [[nodiscard]] std::uint32_t add(const font::VectorGlyph& glyph);
 
     std::string id_;
+    /** Standalone native packet callers have an inline owner; runtime Surfaces supply theirs. */
+    std::optional<base::TaskOwner> owned_tasks_;
+    base::TaskOwner* tasks_ = nullptr;
     std::map<std::tuple<std::string, std::uint16_t>, std::optional<std::uint32_t>, std::less<>>
         indices_;
     std::map<std::pair<std::uint32_t, double>, std::uint32_t> fitted_;
-    std::map<std::string, font::FontHintZones, std::less<>> zones_;
+    std::map<std::string, std::shared_ptr<const FontSource>, std::less<>> fonts_;
     /** What each glyph's fitted variants are made from, by its record index. */
     struct Source final {
         std::shared_ptr<const font::GlyphOutline> outline;
-        std::uint16_t units_per_em = 0U;
-        const font::FontHintZones* zones = nullptr;
+        std::shared_ptr<const FontSource> font;
     };
+    struct Built final {
+        Source source;
+        Levels levels;
+    };
+    template <typename T>
+    struct Preparation final {
+        base::Pending<std::vector<T>> batch;
+        std::size_t index = 0U;
+    };
+    std::map<std::tuple<std::string, std::uint16_t>, Preparation<Built>, std::less<>>
+        preparing_glyphs_;
+    std::map<std::pair<std::uint32_t, double>, Preparation<std::optional<font::VectorGlyph>>>
+        preparing_fits_;
     std::map<std::uint32_t, Source> sources_;
     std::vector<VectorGlyphRecord> records_;
     std::vector<float> segments_;

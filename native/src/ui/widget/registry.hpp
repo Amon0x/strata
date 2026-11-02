@@ -15,6 +15,7 @@
 #include "runtime/expression.hpp"
 #include "ui/layout.hpp"
 #include "ui/theme.hpp"
+#include "ui/tree.hpp"
 #include "ui/widget/subtarget.hpp"
 
 namespace strata::runtime {
@@ -24,7 +25,7 @@ class RuntimeActionRegistry;
 
 namespace strata::ui {
 
-class InputRouter;
+class InputPresentation;
 class WidgetInputScope;
 class WidgetInspectionScope;
 class WidgetRegistry;
@@ -59,6 +60,7 @@ struct WidgetDescriptionExpansion final {
     std::shared_ptr<const DescriptionChildren> generated_children;
     /** Deferred widget row factory finalized by DescriptionBuilder into an owned evaluator. */
     std::shared_ptr<const WidgetGeneratedChildren> generated_widget_children;
+    std::vector<base::ReadinessRead> readiness{};
 };
 
 using WidgetPresentHook = std::function<void(WidgetRenderScope& scope)>;
@@ -67,7 +69,7 @@ using WidgetClipHook = std::function<std::optional<Rect>(WidgetRenderScope& scop
  * Whether an overlay has anything to show, without presenting it. Like retained paint hooks,
  * changes to inputs owned by a node (including timer visibility) must mark that node dirty.
  */
-using WidgetOverlayShown = bool (*)(const RetainedNode& node, const InputRouter& input);
+using WidgetOverlayShown = bool (*)(const RetainedNode& node, const InputPresentation& input);
 using WidgetInputHook = std::function<bool(WidgetInputScope& scope)>;
 /** Handles `<namespace>.<operation>` for a widget that is that namespace's target. */
 using WidgetFrameworkActionHook = std::function<bool(
@@ -83,9 +85,11 @@ using WidgetFrameHook = std::function<void(WidgetInputScope& scope, const Widget
 /**
  * What advancing a widget's frame changes: its drawing (paint), its size or position (layout), or
  * only presentation it set itself, a transform or a view its children are drawn under, which
- * leaves its drawing as it was (presentation).
+ * leaves its drawing as it was (presentation). Resource callbacks update prepared pixels without
+ * invalidating retained geometry; they may run before layout and explicitly dirty consumers if
+ * metadata changes. Playback starts on the owner, never while describing or painting a candidate.
  */
-enum class WidgetFrameCost { paint, layout, presentation };
+enum class WidgetFrameCost { paint, layout, presentation, resource };
 using WidgetDescriptionHook = std::function<void(WidgetDescriptionScope& scope)>;
 using WidgetParticipationHook = bool (*)(const RetainedNode& node) noexcept;
 using WidgetSubtargetsHook =
@@ -278,6 +282,8 @@ struct WidgetFramePhase final {
      * starts, stops and follows its properties from its hook alone.
      */
     bool follows_description = false;
+    /** Cost of the initial/property-driven request; subsequent requests declare their own cost. */
+    WidgetFrameCost initial_cost = WidgetFrameCost::paint;
 };
 
 struct WidgetLifecycle final {
@@ -331,6 +337,7 @@ class WidgetRegistry final {
     WidgetRegistry& operator=(WidgetRegistry&& other) noexcept;
 
     [[nodiscard]] const WidgetLifecycle* find(std::string_view type) const noexcept;
+    /** Owned declarations can be shared with prepared trees without borrowing registry callbacks. */
     /** Changes whenever the registry does, assignment included, and never repeats: what was
      * looked up in it stays good while this does. */
     [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }

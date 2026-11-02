@@ -24,6 +24,7 @@ class SoftwareRenderer final : public CaptureRenderer {
                 double logical_width, double logical_height) override;
     void set_clear_color(std::array<std::uint8_t, 4U> rgba) noexcept override;
     void declare_material(std::string_view id, std::string_view source) override;
+    void release_programs(std::string_view prefix) override;
     void declare_effect_pass(std::string_view effect_id, std::uint32_t index, std::uint32_t kind,
                              double radius, std::uint32_t downsample,
                              std::uint32_t radius_parameter, std::uint32_t downsample_parameter,

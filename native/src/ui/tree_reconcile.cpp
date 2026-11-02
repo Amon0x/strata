@@ -226,7 +226,8 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
         reconcile_indexes_changed_ = true;
         detach(std::move(existing), &stats);
         existing = std::unique_ptr<RetainedNode>(new RetainedNode(
-            next_identity(), description, parent, source_index, std::move(structural_path)));
+            next_identity(), description, parent, source_index, std::move(structural_path),
+            *preparation_reads_));
         hydrate_persistence(*existing);
         ++stats.created;
         bump_dirty_generation(DirtyReason::structure);

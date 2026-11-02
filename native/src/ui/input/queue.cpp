@@ -168,7 +168,8 @@ Point InputRouter::injection_point(const std::string_view key) const {
     if (node == nullptr || record == nullptr) {
         throw std::invalid_argument("input target key is not retained and arranged");
     }
-    Rect hit = hit_bounds_resolver_ ? hit_bounds_resolver_(*node, *record) : record->hit_bounds;
+    Rect hit = hit_bounds_resolver_ ? hit_bounds_resolver_(*node, *record, *layout_, *this)
+                                   : record->hit_bounds;
     hit = presented_bounds(*node, hit);
     return Point{hit.x + hit.width * 0.5, hit.y + hit.height * 0.5};
 }

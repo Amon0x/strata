@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <iterator>
 #include <memory>
@@ -17,9 +18,12 @@
 #include <utility>
 #include <vector>
 
-#include "font/opentype.hpp"
+#include "base/pending.hpp"
+#include "base/task_pool.hpp"
 #include "font/atlas.hpp"
+#include "font/opentype.hpp"
 #include "font/raster.hpp"
+#include "font/system_fonts.hpp"
 #include "font/vector_glyph.hpp"
 #include <strata/vector_text.hpp>
 #include "resource/resource.hpp"
@@ -747,18 +751,18 @@ void test_optional_tables_and_generic_positioning(const std::filesystem::path& r
         strata::font::GlyphAtlas msdf_atlas(owner + "-msdf");
         const auto coverage_base = coverage_atlas.request_coverage(
             "positioned", positioned, base, 20.0, {}, style_flags
-        );
+        ).value;
         const auto coverage_mark = coverage_atlas.request_coverage(
             "positioned", positioned, mark1, 20.0, {}, style_flags
-        );
+        ).value;
         const auto msdf_base = msdf_atlas.request(
             "positioned", positioned, base, 20.0, {}, style_flags,
             strata::font::GlyphRasterMode::msdf
-        );
+        ).value;
         const auto msdf_mark = msdf_atlas.request(
             "positioned", positioned, mark1, 20.0, {}, style_flags,
             strata::font::GlyphRasterMode::msdf
-        );
+        ).value;
         check(coverage_base.has_value() && coverage_mark.has_value() &&
                   msdf_base.has_value() && msdf_mark.has_value() &&
                   coverage_base->mode == strata::font::GlyphRasterMode::coverage &&
@@ -1683,17 +1687,17 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
     const std::uint16_t atlas_glyph = regular.glyph_id('A');
     const std::optional<font::GlyphAtlasEntry> atlas_plain = atlas.request_coverage(
         "strata:fonts/default", regular, atlas_glyph, 48.0, {}
-    );
+    ).value;
     const std::optional<font::GlyphAtlasEntry> atlas_bold = atlas.request_coverage(
         "strata:fonts/default", regular, atlas_glyph, 48.0, {}, 1U
-    );
+    ).value;
     const std::optional<font::GlyphAtlasEntry> atlas_italic = atlas.request_coverage(
         "strata:fonts/default", regular, atlas_glyph, 48.0, {}, 2U
-    );
+    ).value;
     check(atlas_plain.has_value() && atlas_bold.has_value() && atlas_italic.has_value() &&
               atlas.request_coverage(
                   "strata:fonts/default", regular, atlas_glyph, 48.0, {}, 1U
-              ).has_value() &&
+              ).value.has_value() &&
               atlas.cached_glyph_count() == 3U,
           "realized bold/italic glyphs collapsed or missed their stable atlas identity");
     check(
@@ -1708,11 +1712,11 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
     const std::uint16_t intrinsic_glyph = intrinsic_bold.glyph_id('A');
     check(intrinsic_atlas.request_coverage(
               "family-bold", intrinsic_bold, intrinsic_glyph, 48.0, {}, 0U
-          ).has_value() &&
+          ).value.has_value() &&
               intrinsic_atlas.request_coverage(
                   "family-bold", intrinsic_bold, intrinsic_glyph, 48.0, {},
                   font::font_style_bold
-              ).has_value() &&
+              ).value.has_value() &&
               intrinsic_atlas.cached_glyph_count() == 1U,
           "intrinsic bold face duplicated an already-realized atlas entry");
 
@@ -1723,6 +1727,32 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
     const double word_width = engine.layout(measure_node, "AA").shaped.metrics.width;
     const double space_width = engine.layout(measure_node, " ").shaped.metrics.width;
     const double wrap_width = word_width + space_width * 2.0;
+    {
+        ui::RetainedTree narrow_tree;
+        ui::RetainedTree wide_tree;
+        const auto description = text_node("Text", object({
+            {"font", runtime::Value("primary")}, {"pixelSize", runtime::Value(12.0)},
+            {"wrapMode", runtime::Value("WORD")},
+        }));
+        const auto& narrow_node = *retain(narrow_tree, description);
+        const auto& wide_node = *retain(wide_tree, description);
+        const std::string source = "AA AA AA AA";
+        static_cast<void>(narrow_tree.set_retained_value(
+            narrow_node.identity(), "$text", runtime::Value(source), ui::DirtyReason::text));
+        static_cast<void>(wide_tree.set_retained_value(
+            wide_node.identity(), "$text", runtime::Value(source), ui::DirtyReason::text));
+        ui::Constraints narrow;
+        narrow.min_width = narrow.max_width = wrap_width;
+        ui::Constraints wide;
+        wide.min_width = wide.max_width = word_width * 2.0 + space_width * 2.0;
+        static_cast<void>(engine.measure(narrow_node, narrow));
+        static_cast<void>(engine.measure(wide_node, wide));
+        const auto narrow_layout = engine.layout(narrow_node, source);
+        const auto wide_layout = engine.layout(wide_node, source);
+        check(narrow_layout.wrap_width == narrow.max_width && narrow_layout.lines.size() == 4U &&
+                  wide_layout.wrap_width == wide.max_width && wide_layout.lines.size() == 2U,
+              "two trees sharing a text engine overwrote each other's measured wrap constraint");
+    }
     for (const std::string& alignment : {std::string("CENTER"), std::string("END")}) {
         ui::RetainedTree wrap_tree;
         const ui::RetainedNode& wrap_node = *retain(wrap_tree, text_node("Text", object({
@@ -2192,6 +2222,310 @@ void test_subpixel_raster(const std::filesystem::path& resources) {
     check(mirrored, "a BGR subpixel glyph was not the RGB one with red and blue swapped");
 }
 
+/** Cache timing cannot select a different face, and queued queries keep their catalog generation. */
+void test_system_font_catalog_generations(const std::filesystem::path& resources) {
+    using namespace strata;
+    const auto root = std::filesystem::temp_directory_path() /
+        ("strata-font-catalog-" + std::to_string(reinterpret_cast<std::uintptr_t>(&resources)) +
+         "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup final {
+        std::filesystem::path path;
+        ~Cleanup() {
+            try {
+                font::set_system_font_directories({});
+            } catch (...) {
+            }
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+    } cleanup{root};
+    std::filesystem::create_directories(root / "first");
+    std::filesystem::create_directories(root / "empty");
+    std::filesystem::copy_file(resources / "assets/strata/fonts/default.ttf",
+                               root / "first" / "segoeui.ttf");
+    std::filesystem::copy_file(resources / "assets/strata/fonts/medium.ttf",
+                               root / "first" / "arial.ttf");
+    std::filesystem::copy_file(resources / "assets/strata/fonts/default.ttf",
+                               root / "first" / "seguisym.ttf");
+    font::set_system_font_directories({root / "first"});
+    auto first = font::system_font_catalog();
+    const auto earlier = font::system_font_named(first, "ARIAL.TTF");
+    check(earlier.has_value() && earlier->id == "system:arial.ttf",
+          "catalog file lookup lost case-insensitive matching");
+    const auto preferred = font::system_font_for(first, 'A');
+    check(preferred.has_value() && preferred->id == "system:segoeui.ttf",
+          "a previously loaded face displaced the stable preferred candidate");
+    const auto symbol = font::system_font_for(first, 0x2014U);
+    check(symbol.has_value() && symbol->id == "system:seguisym.ttf",
+          "a loaded general font displaced the script-specific preferred candidate");
+    const auto advance = preferred->face.horizontal_advance(preferred->face.glyph_id('A'));
+
+    {
+        const auto primary = font::OpenTypeFont::parse(resource::load_binary_resource(
+            resources, resource::ResourceId::parse("assets/strata/fonts/mono.ttf")));
+        check(primary.glyph_id(0x0132U) == 0U && preferred->face.glyph_id(0x0132U) != 0U,
+              "catalog fixture lost its uncovered primary-font character");
+        base::TaskOwner font_tasks(base::TaskExecution::asynchronous);
+        const ui::TextEngine::FontRegistry registry{
+            {"strata:fonts/default", primary}, {"strata:fonts/default-medium", primary},
+        };
+        ui::TextEngine asynchronous(registry, &font_tasks);
+        ui::RetainedTree left;
+        ui::RetainedTree right;
+        const auto description = text_node("Text", object({{"pixelSize", runtime::Value(20.0)}}));
+        const auto& left_node = *retain(left, description);
+        const auto& right_node = *retain(right, description);
+        const std::string source = "A\xC4\xB2" "B";
+        const auto pending_layout = asynchronous.layout(left_node, source);
+        const auto shared_pending = asynchronous.layout(right_node, source);
+        const auto primary_metrics = asynchronous.layout(left_node, "AB").shaped.metrics;
+        check(pending_layout.shares_storage_with(shared_pending) &&
+                  pending_layout.shaped.glyphs.size() == 2U &&
+                  pending_layout.shaped.clusters.size() == 3U &&
+                  pending_layout.shaped.clusters[1U].text_start_offset == 1U &&
+                  pending_layout.shaped.clusters[1U].text_end_offset == 2U &&
+                  pending_layout.shaped.clusters[1U].advance == 0.0 &&
+                  pending_layout.shaped.metrics.height == primary_metrics.height &&
+                  pending_layout.shaped.missing_code_points.empty() &&
+                  pending_layout.readiness.size() == 1U &&
+                  pending_layout.readiness.front().observed == base::PendingStatus::pending,
+              "pending fallback lost primary metrics/source clusters or emitted a missing glyph");
+        const auto premature = asynchronous.take_diagnostics();
+        check(std::ranges::none_of(premature, [](const auto& diagnostic) {
+                  return diagnostic.code == "STRATA.TEXT.MISSING_GLYPH" ||
+                         diagnostic.code == "STRATA.TEXT.FONT_NOT_REGISTERED";
+              }), "pending fallback emitted a terminal missing-font diagnostic");
+        check(font_tasks.wait_for_completion(std::chrono::seconds(5)),
+              "asynchronous fallback did not finish");
+        static_cast<void>(font_tasks.drain());
+        left.preparation_reads()->invalidate(left);
+        right.preparation_reads()->invalidate(right);
+        check(left_node.dirty().contains(ui::DirtyReason::text) &&
+                  right_node.dirty().contains(ui::DirtyReason::text),
+              "a cached fallback consumer missed text/input invalidation");
+        const auto ready = asynchronous.layout(left_node, source);
+        ui::TextEngine deterministic(registry);
+        const auto exact = deterministic.layout(left_node, source);
+        check(ready.glyph_font_ids == exact.glyph_font_ids &&
+                  ready.glyph_font_ids == std::vector<std::string>{
+                      "strata:fonts/default", "system:segoeui.ttf", "strata:fonts/default"} &&
+                  ready.shaped.metrics.width == exact.shaped.metrics.width &&
+                  ui::text_layout_caret_rect(ready, {}, source, 2U) ==
+                      ui::text_layout_caret_rect(exact, {}, source, 2U) &&
+                  !ready.shares_storage_with(pending_layout) &&
+                  pending_layout.shaped.glyphs.size() == 2U &&
+                  asynchronous.layout(right_node, source).shares_storage_with(ready),
+              "fallback adoption diverged from deterministic geometry or mutated a prior layout");
+
+        ui::RetainedTree named_tree;
+        const auto& named_node = *retain(named_tree, text_node("Text", object({
+            {"font", runtime::Value("system:arial.ttf")}, {"pixelSize", runtime::Value(20.0)},
+        })));
+        const auto named_pending = asynchronous.layout(named_node, "A");
+        check(named_pending.glyph_font_ids == std::vector<std::string>{"strata:fonts/default"} &&
+                  named_pending.readiness.size() == 1U,
+              "pending named font did not retain a usable primary face and its dependency");
+        check(font_tasks.wait_for_completion(std::chrono::seconds(5)),
+              "named font preparation did not finish");
+        static_cast<void>(font_tasks.drain());
+        const auto named_ready = asynchronous.layout(named_node, "A");
+        check(named_ready.glyph_font_ids == std::vector<std::string>{"system:arial.ttf"} &&
+                  named_ready.shaped.metrics.width ==
+                      deterministic.layout(named_node, "A").shaped.metrics.width,
+              "named font adoption reused the primary placeholder");
+
+        ui::RetainedTree missing_tree;
+        const auto& missing_node = *retain(missing_tree, text_node("Text", object({
+            {"font", runtime::Value("system:absent.ttf")},
+        })));
+        const auto missing_pending = asynchronous.layout(missing_node, "A");
+        check(missing_pending.readiness.size() == 1U &&
+                  std::ranges::none_of(asynchronous.take_diagnostics(), [](const auto& diagnostic) {
+                      return diagnostic.code == "STRATA.TEXT.FONT_NOT_REGISTERED";
+                  }), "a named font miss became terminal before owner adoption");
+        check(font_tasks.wait_for_completion(std::chrono::seconds(5)),
+              "missing named font lookup did not finish");
+        static_cast<void>(font_tasks.drain());
+        const auto missing_ready = asynchronous.layout(missing_node, "A");
+        check(missing_ready.readiness.empty() &&
+                  std::ranges::any_of(asynchronous.take_diagnostics(), [](const auto& diagnostic) {
+                      return diagnostic.code == "STRATA.TEXT.FONT_NOT_REGISTERED";
+                  }), "an adopted named font miss did not report its terminal diagnostic");
+
+        ui::TextEngine shared(registry, &font_tasks);
+        ui::RetainedTree first_reader;
+        ui::RetainedTree second_reader;
+        const auto named_description = text_node("Text", object({
+            {"font", runtime::Value("system:arial.ttf")},
+        }));
+        const auto shared_request =
+            shared.layout(*retain(first_reader, named_description), "A");
+        static_cast<void>(shared.layout(*retain(second_reader, named_description), "A"));
+        first_reader.clear();
+        shared.retain_preparations();
+        check(font_tasks.wait_for_completion(std::chrono::seconds(5)),
+              "shared named font lookup did not finish");
+        static_cast<void>(font_tasks.drain());
+        check(shared_request.readiness.front().resource.status() == base::PendingStatus::ready &&
+                  shared.layout(*second_reader.root(), "A").glyph_font_ids ==
+                      std::vector<std::string>{"system:arial.ttf"},
+              "retiring one tree cancelled another tree's font preparation");
+
+        const auto abandoned_description = text_node("Text", object({
+            {"font", runtime::Value("system:segoeui.ttf")},
+        }));
+        const auto abandoned =
+            shared.layout(*retain(first_reader, abandoned_description), "A");
+        first_reader.clear();
+        shared.retain_preparations();
+        check(font_tasks.wait_for_completion(std::chrono::seconds(5)),
+              "unused named font lookup did not finish cancellation");
+        static_cast<void>(font_tasks.drain());
+        check(abandoned.readiness.front().resource.failure().cancelled,
+              "a font request without any live consumer was still adopted");
+        const auto renewed =
+            shared.layout(*retain(first_reader, abandoned_description), "A");
+        check(renewed.readiness.size() == 1U &&
+                  renewed.readiness.front().resource != abandoned.readiness.front().resource,
+              "a returning consumer reused cancelled preparation");
+        check(font_tasks.wait_for_completion(std::chrono::seconds(5)),
+              "renewed named font lookup did not finish");
+        static_cast<void>(font_tasks.drain());
+        check(shared.layout(*first_reader.root(), "A").glyph_font_ids ==
+                  std::vector<std::string>{"system:segoeui.ttf"},
+              "a returning consumer failed to adopt its replacement font");
+    }
+
+    base::TaskOwner owner(base::TaskExecution::asynchronous);
+    std::promise<void> release;
+    const std::weak_ptr<font::SystemFontCatalog> generation = first;
+    const auto pending = base::Pending<std::optional<font::SystemFont>>::start(
+        owner, base::TaskKind::font, base::TaskPriority::frame_critical, "catalog-generation",
+        [catalog = first, ready = release.get_future().share()](const base::TaskCancellation&) {
+            ready.wait();
+            return font::system_font_for(catalog, 'A');
+        });
+    font::set_system_font_directories({root / "empty"});
+    const auto second = font::system_font_catalog();
+    check(!font::system_font_for(second, 'A').has_value() &&
+              !font::system_font_named(second, "segoeui.ttf").has_value(),
+          "a new catalog inherited the previous generation's coverage or loaded faces");
+    first.reset();
+    release.set_value();
+    check(owner.wait_for_completion(std::chrono::seconds(5)),
+          "retained catalog query did not complete after directory replacement");
+    static_cast<void>(owner.drain());
+    const auto* resolved = pending.get();
+    check(resolved != nullptr && resolved->has_value() &&
+              resolved->value().id == "system:segoeui.ttf" && generation.expired() &&
+              resolved->value().face.horizontal_advance(
+                  resolved->value().face.glyph_id('A')) == advance,
+          "queued font lookup lost its directory snapshot or its face outlived its mapped bytes");
+}
+
+void test_initial_font_preparation(const std::filesystem::path& resources) {
+    using namespace strata;
+    const Bytes regular = resource::load_binary_resource(
+        resources, resource::ResourceId::parse("assets/strata/fonts/default.ttf"));
+    const Bytes medium = resource::load_binary_resource(
+        resources, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
+    const auto sources = [&] {
+        return ui::TextEngine::FontSources{
+            {"strata:fonts/default", regular}, {"strata:fonts/default-medium", medium},
+        };
+    };
+    base::TaskOwner tasks(base::TaskExecution::asynchronous);
+    ui::TextEngine engine(sources(), tasks);
+    const auto initial = engine.font("strata:fonts/default");
+    check(!initial.value.has_value() && initial.status() == base::PendingStatus::pending &&
+              !engine.font("strata:fonts/default-medium").value.has_value(),
+          "bound font parsing published a partial registry before owner adoption");
+    ui::RetainedTree tree;
+    const auto& node = *retain(tree, text_node("Text", object({
+        {"pixelSize", runtime::Value(20.0)}, {"lineHeight", runtime::Value(34.0)},
+    })));
+    const std::string source = "A\xC4\xB2\nB";
+    const auto pending = engine.layout(node, source);
+    check(pending.shaped.glyphs.empty() && pending.shaped.missing_code_points.empty() &&
+              pending.shaped.clusters.size() == 3U &&
+              pending.shaped.clusters[1U].text_start_offset == 1U &&
+              pending.shaped.clusters[1U].text_end_offset == 2U &&
+              pending.shaped.clusters[2U].text_start_offset == 3U &&
+              pending.lines.size() == 2U && pending.shaped.metrics.height == 68.0 &&
+              pending.readiness.size() == 1U && engine.take_diagnostics().empty(),
+          "pending bound fonts lost source offsets/authored line boxes or invented missing glyphs");
+    check(tasks.wait_for_completion(std::chrono::seconds(5)),
+          "initial font registry did not finish preparation");
+    static_cast<void>(tasks.drain());
+    tree.preparation_reads()->invalidate(tree);
+    check(node.dirty().contains(ui::DirtyReason::text) &&
+              engine.font("strata:fonts/default").value.has_value() &&
+              engine.font("strata:fonts/default-medium").value.has_value(),
+          "initial registry adoption did not atomically publish faces and invalidate text");
+    base::TaskOwner inline_tasks(base::TaskExecution::deterministic);
+    ui::TextEngine reference(sources(), inline_tasks);
+    const auto ready = engine.layout(node, source);
+    const auto exact = reference.layout(node, source);
+    check(ready.glyph_font_ids == exact.glyph_font_ids &&
+              ready.shaped.metrics.width == exact.shaped.metrics.width &&
+              ui::text_layout_caret_rect(ready, {}, source, 2U) ==
+                  ui::text_layout_caret_rect(exact, {}, source, 2U) &&
+              pending.shaped.glyphs.empty(),
+          "initial registry adoption diverged from deterministic geometry or changed an old layout");
+
+    auto optional_sources = sources();
+    auto& optional = optional_sources.at("strata:fonts/default");
+    set_u32(optional, table_record(optional, "OS/2") + 12U, 4U);
+    ui::TextEngine optional_engine(std::move(optional_sources), tasks);
+    check(optional_engine.take_diagnostics().empty(),
+          "a worker exposed optional-font diagnostics before adoption");
+    check(tasks.wait_for_completion(std::chrono::seconds(5)),
+          "optional font table preparation did not finish");
+    static_cast<void>(tasks.drain());
+    check(std::ranges::any_of(optional_engine.take_diagnostics(), [](const auto& diagnostic) {
+              return diagnostic.code == "STRATA.TEXT.FONT_OPTIONAL_TABLE_IGNORED";
+          }) && optional_engine.font("strata:fonts/default").value.value()->glyph_id('A') != 0U,
+          "adoption lost optional-table diagnostics or discarded a usable font");
+
+    std::size_t failures = 0U;
+    base::TaskOwner failed_tasks(base::TaskExecution::asynchronous, {}, nullptr,
+        [&failures](const base::TaskKind kind, const std::exception_ptr& error) {
+            check(kind == base::TaskKind::font && error != nullptr,
+                  "bound font parsing failed outside the font preparation channel");
+            ++failures;
+        });
+    auto bad = sources();
+    bad.at("strata:fonts/default-medium") = {0U};
+    ui::TextEngine failed(bad, failed_tasks);
+    check(failed_tasks.wait_for_completion(std::chrono::seconds(5)),
+          "malformed bound font did not finish preparation");
+    static_cast<void>(failed_tasks.drain());
+    check(failures == 1U &&
+              failed.font("strata:fonts/default").status() == base::PendingStatus::failed &&
+              !failed.font("strata:fonts/default").value.has_value() &&
+              !failed.font("strata:fonts/default-medium").value.has_value() &&
+              failed.layout(node, source).shaped.missing_code_points.empty(),
+          "a failed registry exposed its successfully parsed prefix or emitted missing-glyph noise");
+    bool rejected = false;
+    try {
+        ui::TextEngine invalid(std::move(bad), inline_tasks);
+    } catch (const font::FontError&) {
+        rejected = true;
+    }
+    check(rejected, "deterministic font parsing stopped reporting synchronous validation errors");
+
+    base::Readiness abandoned;
+    {
+        ui::TextEngine closing(sources(), tasks);
+        abandoned = closing.font("strata:fonts/default").readiness;
+    }
+    check(tasks.wait_for_completion(std::chrono::seconds(5)),
+          "closed text service did not finish cancelling its owned font input");
+    static_cast<void>(tasks.drain());
+    check(abandoned.failure().cancelled,
+          "closing a text service left its initial registry eligible for adoption");
+}
+
 void test_variable_font_instance(const std::filesystem::path& resources) {
     using namespace strata;
     const std::filesystem::path path("C:/Windows/Fonts/bahnschrift.ttf");
@@ -2243,6 +2577,25 @@ void test_variable_font_instance(const std::filesystem::path& resources) {
           "text did not use the varied system face: " + (layout.glyph_font_ids.empty()
                                                              ? std::string("none")
                                                              : layout.glyph_font_ids.front()));
+    base::TaskOwner tasks(base::TaskExecution::asynchronous);
+    ui::TextEngine asynchronous(ui::TextEngine::FontRegistry{
+        {"strata:fonts/default", fallback},
+        {"strata:fonts/default-medium", fallback},
+        {"system:bahnschrift.ttf", regular},
+    }, &tasks);
+    const auto pending = asynchronous.layout(node, "Strata");
+    check(pending.readiness.size() == 1U &&
+              pending.glyph_font_ids.front() == "system:bahnschrift.ttf",
+          "pending font variation lost its valid base face");
+    check(tasks.wait_for_completion(std::chrono::seconds(5)),
+          "font variation preparation did not finish");
+    static_cast<void>(tasks.drain());
+    const auto ready = asynchronous.layout(node, "Strata");
+    check(ready.glyph_font_ids == layout.glyph_font_ids &&
+              ready.shaped.metrics.width == layout.shaped.metrics.width &&
+              ui::text_layout_selection_rects(ready, {}, 1U, 4U) ==
+                  ui::text_layout_selection_rects(layout, {}, 1U, 4U),
+          "font variation adoption diverged from deterministic text/input geometry");
 }
 
 int strata_test_text_font_residual(const int argument_count, const char* const* arguments) {
@@ -2254,6 +2607,8 @@ int strata_test_text_font_residual(const int argument_count, const char* const* 
         test_layout_tables_bound_expansion(resources);
         test_layout_runs_fallback_and_soft_wrap(resources);
         test_layout_cache_drops_unused_text(resources);
+        test_system_font_catalog_generations(resources);
+        test_initial_font_preparation(resources);
         test_variable_font_instance(resources);
         test_msdf_overlapping_contours(resources);
         test_subpixel_raster(resources);

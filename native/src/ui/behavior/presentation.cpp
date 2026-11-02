@@ -14,7 +14,7 @@ namespace strata::ui {
 namespace {
 
 [[nodiscard]] bool hovered(const RetainedNode& node, const DescriptionBehavior&,
-                           const InputRouter& input) {
+                           const InputPresentation& input) {
     return input.hovered(node.identity());
 }
 
@@ -32,7 +32,7 @@ void hover_overlay(const DescriptionBehavior&, WidgetRenderScope& scope) {
 }
 
 [[nodiscard]] bool drag_preview_active(const RetainedNode& node, const DescriptionBehavior&,
-                                       const InputRouter& input) {
+                                       const InputPresentation& input) {
     return input.drag_preview(node.identity()).has_value();
 }
 
@@ -87,7 +87,7 @@ void drag_preview_overlay(const DescriptionBehavior& attachment, WidgetRenderSco
 }
 
 [[nodiscard]] bool drop_target_active(const RetainedNode& node, const DescriptionBehavior&,
-                                      const InputRouter& input) {
+                                      const InputPresentation& input) {
     return input.drop_target(node.identity()).has_value();
 }
 
@@ -158,7 +158,7 @@ void reorder_target_overlay(const DescriptionBehavior& attachment, WidgetRenderS
 }
 
 [[nodiscard]] bool movement_guides_active(const RetainedNode& node, const DescriptionBehavior&,
-                                          const InputRouter&) {
+                                          const InputPresentation&) {
     const runtime::Value* guides = node.retained_value("strata.movement.guides");
     return guides != nullptr && guides->object() != nullptr;
 }
@@ -208,7 +208,7 @@ void register_builtin_behavior_presenters(BehaviorRegistry& registry) {
 }
 
 bool has_behavior_overlay(const BehaviorRegistry& registry, const RetainedNode& node,
-                          const InputRouter& input, const bool detached) {
+                          const InputPresentation& input, const bool detached) {
     for (const DescriptionBehavior& attachment : node.description().behaviors) {
         if (!attachment.enabled)
             continue;
@@ -225,11 +225,13 @@ bool has_behavior_overlay(const BehaviorRegistry& registry, const RetainedNode& 
 
 void append_behavior_overlays(const BehaviorRegistry& registry, const RetainedNode& node,
                               const LayoutRecord& layout, const LayoutResult& layout_result,
-                              const InputRouter& input, const CommandIndex& commands,
+                              const InputPresentation& input, const CommandIndex& commands,
                               const TextEngine* text, const resource::SvgImageRegistry* svg_images,
                               const MotionRuntime* motion, const double inherited_opacity,
-                              const bool detached, std::vector<RenderCommand>& output,
+                              const bool detached, RenderCommandBuffer& output,
                               const bool apply_presentation_opacity) {
+    PreparationReadScope preparation_reads(
+        node, detached ? PreparationUse::detached_behavior : PreparationUse::behavior);
     for (const DescriptionBehavior& attachment : node.description().behaviors) {
         if (!attachment.enabled)
             continue;
@@ -244,6 +246,7 @@ void append_behavior_overlays(const BehaviorRegistry& registry, const RetainedNo
                                 apply_presentation_opacity);
         lifecycle->present.overlay(attachment, scope);
     }
+    preparation_reads.commit();
 }
 
 } // namespace strata::ui

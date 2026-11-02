@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vector>
-
 #include "ui/render.hpp"
 
 namespace strata::resource {
@@ -12,7 +10,7 @@ namespace strata::ui {
 
 class BehaviorRegistry;
 class CommandIndex;
-class InputRouter;
+class InputPresentation;
 class MotionRuntime;
 class RetainedNode;
 class TextEngine;
@@ -22,7 +20,7 @@ struct LayoutResult;
 [[nodiscard]] bool has_behavior_overlay(
     const BehaviorRegistry& registry,
     const RetainedNode& node,
-    const InputRouter& input,
+    const InputPresentation& input,
     bool detached
 );
 
@@ -31,14 +29,14 @@ void append_behavior_overlays(
     const RetainedNode& node,
     const LayoutRecord& layout,
     const LayoutResult& layout_result,
-    const InputRouter& input,
+    const InputPresentation& input,
     const CommandIndex& commands,
     const TextEngine* text,
     const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion,
     double inherited_opacity,
     bool detached,
-    std::vector<RenderCommand>& output,
+    RenderCommandBuffer& output,
     bool apply_presentation_opacity = true
 );
 

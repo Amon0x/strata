@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <span>
 #include <map>
@@ -11,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/task_pool.hpp"
 #include "compiler/compile.hpp"
 #include "compiler/schema.hpp"
 #include "data/json.hpp"
@@ -133,7 +135,9 @@ public:
     ApplicationContext(
         std::string id,
         std::shared_ptr<const ApplicationBundle> bundle,
-        RuntimeServices::PublishedDiagnosticSink diagnostic_sink = {}
+        RuntimeServices::PublishedDiagnosticSink diagnostic_sink = {},
+        base::TaskOwner* task_owner = nullptr,
+        std::function<void()> adopt_host_snapshots = {}
     );
     ~ApplicationContext();
 
@@ -152,6 +156,12 @@ public:
     [[nodiscard]] UndoManager& undo() noexcept;
     [[nodiscard]] const UndoManager& undo() const noexcept;
     [[nodiscard]] AsyncDataService& async() noexcept;
+    [[nodiscard]] base::TaskOwner& tasks() noexcept { return *tasks_; }
+    [[nodiscard]] const base::TaskOwner& tasks() const noexcept { return *tasks_; }
+    /** Runs only on the serialized owner, after task completions and before any frame reads. */
+    void adopt_host_snapshots() {
+        if (adopt_host_snapshots_) adopt_host_snapshots_();
+    }
     [[nodiscard]] bool undo_state(std::string_view scope, bool redo = false);
     void synchronize_durable_state();
     void configure_durable_store(DurableStoreAdapter adapter);
@@ -234,6 +244,10 @@ private:
 
     std::string id_;
     std::shared_ptr<const ApplicationBundle> bundle_;
+    /** Direct native contexts own an inline endpoint; ABI contexts use their runtime's endpoint. */
+    std::optional<base::TaskOwner> owned_tasks_;
+    base::TaskOwner* tasks_;
+    std::function<void()> adopt_host_snapshots_;
     std::uint64_t dirty_generation_ = 0U;
     std::uint64_t async_generation_ = 0U;
     StateStore state_;

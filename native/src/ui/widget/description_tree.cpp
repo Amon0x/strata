@@ -6,6 +6,8 @@
 #include <optional>
 #include <utility>
 
+#include "base/process_lifetime.hpp"
+
 namespace strata::ui::collection_description {
 namespace {
 
@@ -27,8 +29,10 @@ struct TreeTopology final {
 [[nodiscard]] std::shared_ptr<const TreeTopology> tree_topology(
     const runtime::Value& source
 ) {
-    static std::mutex cache_mutex;
-    static std::map<const void*, std::weak_ptr<const TreeTopology>> cache;
+    static base::ProcessLifetime<std::mutex> mutex_storage;
+    static base::ProcessLifetime<std::map<const void*, std::weak_ptr<const TreeTopology>>> storage;
+    auto& cache_mutex = mutex_storage.get();
+    auto& cache = storage.get();
     const void* const identity = source.composite_identity();
     if (identity != nullptr) {
         const std::lock_guard lock(cache_mutex);

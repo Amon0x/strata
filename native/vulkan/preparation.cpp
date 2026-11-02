@@ -30,9 +30,9 @@ std::size_t Renderer::prepare(VkFormat format) {
     const auto before = pipeline_count();
     for (const auto blend : blends) {
         impl_->pipeline("builtin", blend, format, false);
-        for (const auto& [id, program] : impl_->materials) {
+        for (const auto& [id, material] : impl_->materials) {
             (void)id;
-            impl_->pipeline(program, blend, format, false);
+            impl_->pipeline(material.program, blend, format, false);
         }
     }
     impl_->pipeline("blur", Blend::opaque, format, true);

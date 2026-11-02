@@ -51,6 +51,8 @@ void draw_text_layout(
             std::move(run),
             run_rasterization.value_or(engine->font_rasterization(scope.node())),
             clip,
+            {},
+            scope.node().identity(),
         });
         run.clear();
     };
@@ -612,7 +614,7 @@ void tooltip_overlay(WidgetRenderScope& scope) {
 }
 
 /** A tooltip's own overlay shows while it is disclosed, unless authored content presents it. */
-[[nodiscard]] bool tooltip_overlay_shown(const RetainedNode& node, const InputRouter&) {
+[[nodiscard]] bool tooltip_overlay_shown(const RetainedNode& node, const InputPresentation&) {
     const auto authored = node.description().properties.find("contentTemplate");
     return (authored == node.description().properties.end() ||
             authored->second.data_value() == nullptr) &&

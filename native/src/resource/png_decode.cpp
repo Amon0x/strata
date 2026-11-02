@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -442,7 +443,7 @@ struct Pass final {
     return result;
 }
 
-/** One APNG frame: its fcTL and, unless it is the default image, its fdAT data. */
+/** One APNG frame's control; compressed bytes belong only to the active decoder frame. */
 struct FrameControl final {
     std::uint32_t width = 0U;
     std::uint32_t height = 0U;
@@ -455,61 +456,106 @@ struct FrameControl final {
     std::uint8_t blend = 0U;
     /** The IDAT image is this frame, rather than a fallback the animation skips. */
     bool default_image = false;
-    std::vector<std::uint8_t> data;
 };
 
 struct Png final {
     Header header;
-    std::vector<std::uint8_t> idat;
     std::vector<std::array<std::uint8_t, 4U>> palette;
     std::optional<std::array<std::uint16_t, 3U>> transparent;
     /** An acTL preceded the image data, so the fcTL frames, not IDAT alone, are the image. */
     bool animated = false;
     std::uint32_t declared_frames = 0U;
     std::uint32_t plays = 0U;
-    std::vector<FrameControl> frames;
 };
 
 /**
- * Validates the chunk stream and gathers what decoding needs. APNG chunks are read only when
- * `animation` asks for them; otherwise they are ancillary chunks like any other and ignored.
+ * Both metadata validation and frame extraction use the same bounded, CRC-checked chunk walk.
+ * Damaged ancillary chunks are skipped exactly as in libpng, never interpreted on the second pass.
+ */
+class ChunkCursor final {
+  public:
+    struct Chunk final {
+        std::string_view type;
+        std::span<const std::uint8_t> data;
+    };
+
+    explicit ChunkCursor(const std::span<const std::uint8_t> bytes) : bytes_(bytes) {
+        constexpr std::array<std::uint8_t, 8U> signature{
+            0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU,
+        };
+        if (bytes.size() < signature.size() ||
+            !std::equal(signature.begin(), signature.end(), bytes.begin()))
+            fail("bytes are not a PNG");
+    }
+
+    [[nodiscard]] Chunk next() {
+        for (;;) {
+            if (bytes_.size() - offset_ < 12U)
+                fail("a chunk is truncated");
+            const std::uint32_t length = big_endian(bytes_.data() + offset_);
+            if (length > 0x7FFFFFFFU || length > bytes_.size() - offset_ - 12U)
+                fail("a chunk is truncated");
+            const auto typed = bytes_.subspan(offset_ + 4U, length + 4U);
+            const std::string_view type(reinterpret_cast<const char*>(typed.data()), 4U);
+            offset_ += 12U + length;
+            if (crc32(typed) != big_endian(typed.data() + typed.size())) {
+                if ((type[0U] & 0x20) == 0)
+                    fail("a critical chunk fails its CRC");
+                continue;
+            }
+            return {type, typed.subspan(4U)};
+        }
+    }
+
+    void rewind() noexcept { offset_ = 8U; }
+
+  private:
+    std::span<const std::uint8_t> bytes_;
+    std::size_t offset_ = 8U;
+};
+
+[[nodiscard]] FrameControl frame_control(const std::span<const std::uint8_t> data) {
+    if (data.size() != 26U)
+        fail("fcTL is malformed");
+    FrameControl frame;
+    frame.width = big_endian(data.data() + 4U);
+    frame.height = big_endian(data.data() + 8U);
+    frame.x = big_endian(data.data() + 12U);
+    frame.y = big_endian(data.data() + 16U);
+    const std::uint64_t numerator = static_cast<std::uint64_t>(data[20U]) << 8U | data[21U];
+    std::uint64_t denominator = static_cast<std::uint64_t>(data[22U]) << 8U | data[23U];
+    if (denominator == 0U)
+        denominator = 100U;
+    frame.delay_ms =
+        static_cast<std::uint32_t>((numerator * 1000U + denominator / 2U) / denominator);
+    frame.dispose = data[24U];
+    frame.blend = data[25U];
+    return frame;
+}
+
+/**
+ * Validates the complete container before decoding, without retaining compressed payloads or a
+ * frame table. Default-image decoding ignores APNG chunks; animation decoding validates them.
  */
 [[nodiscard]] Png parse(const std::span<const std::uint8_t> bytes,
                         const std::optional<ImageDimensions> expected, const bool animation) {
-    constexpr std::array<std::uint8_t, 8U> signature{
-        0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU,
-    };
-    if (bytes.size() < signature.size() ||
-        !std::equal(signature.begin(), signature.end(), bytes.begin())) {
-        fail("bytes are not a PNG");
-    }
+    ChunkCursor chunks(bytes);
     Png png;
     Header& header = png.header;
     bool have_header = false;
     bool idat_finished = false;
     bool ended = false;
-    std::vector<std::uint8_t>& compressed = png.idat;
+    bool have_data = false;
     std::vector<std::uint8_t> palette_alpha;
     std::uint32_t sequence = 0U;
     bool seen_animation_control = false;
-    std::size_t offset = signature.size();
+    std::optional<FrameControl> current_frame;
+    std::size_t frame_count = 0U;
+    bool frame_data = false;
     while (!ended) {
-        if (bytes.size() - offset < 12U)
-            fail("a chunk is truncated");
-        const std::uint32_t length = big_endian(bytes.data() + offset);
-        if (length > 0x7FFFFFFFU || length > bytes.size() - offset - 12U)
-            fail("a chunk is truncated");
-        const std::span<const std::uint8_t> typed = bytes.subspan(offset + 4U, length + 4U);
-        const std::string_view type(reinterpret_cast<const char*>(typed.data()), 4U);
-        const std::span<const std::uint8_t> data = typed.subspan(4U);
+        const auto [type, data] = chunks.next();
+        const std::size_t length = data.size();
         const bool critical = (type[0U] & 0x20) == 0;
-        offset += 12U + length;
-        if (crc32(typed) != big_endian(typed.data() + typed.size())) {
-            // As libpng does: a damaged critical chunk fails, a damaged ancillary one is ignored.
-            if (critical)
-                fail("a critical chunk fails its CRC");
-            continue;
-        }
         if (!have_header && type != "IHDR")
             fail("the first chunk is not IHDR");
         if (type == "IHDR") {
@@ -541,16 +587,17 @@ struct Png final {
             }
             have_header = true;
         } else if (type == "PLTE") {
-            if (!compressed.empty() || length % 3U != 0U || length == 0U || length > 768U)
+            if (have_data || length % 3U != 0U || length == 0U || length > 768U)
                 fail("PLTE is misplaced or malformed");
             png.palette.clear();
             for (std::size_t entry = 0U; entry < length; entry += 3U)
                 png.palette.push_back({data[entry], data[entry + 1U], data[entry + 2U], 255U});
         } else if (type == "tRNS") {
-            if (!compressed.empty())
+            if (have_data)
                 fail("tRNS follows image data");
             if (header.color == 3U) {
-                palette_alpha.assign(data.begin(), data.end());
+                const auto alpha = data.first(std::min<std::size_t>(data.size(), 256U));
+                palette_alpha.assign(alpha.begin(), alpha.end());
             } else if (header.color == 0U && length == 2U) {
                 const auto gray = static_cast<std::uint16_t>(data[0U] << 8U | data[1U]);
                 png.transparent = std::array<std::uint16_t, 3U>{gray, gray, gray};
@@ -564,7 +611,7 @@ struct Png final {
         } else if (type == "IDAT") {
             if (idat_finished)
                 fail("image data chunks are not consecutive");
-            compressed.insert(compressed.end(), data.begin(), data.end());
+            have_data = have_data || !data.empty();
         } else if (type == "IEND") {
             ended = true;
         } else if (animation && type == "acTL") {
@@ -572,7 +619,7 @@ struct Png final {
             if (seen_animation_control)
                 fail("acTL is repeated");
             seen_animation_control = true;
-            if (compressed.empty()) {
+            if (!have_data) {
                 if (length != 8U)
                     fail("acTL is malformed");
                 png.animated = true;
@@ -584,21 +631,8 @@ struct Png final {
         } else if (animation && png.animated && type == "fcTL") {
             if (length != 26U || big_endian(data.data()) != sequence++)
                 fail("fcTL is malformed or out of sequence");
-            FrameControl frame;
-            frame.width = big_endian(data.data() + 4U);
-            frame.height = big_endian(data.data() + 8U);
-            frame.x = big_endian(data.data() + 12U);
-            frame.y = big_endian(data.data() + 16U);
-            const std::uint64_t numerator = static_cast<std::uint64_t>(data[20U]) << 8U | data[21U];
-            std::uint64_t denominator = static_cast<std::uint64_t>(data[22U]) << 8U | data[23U];
-            // A zero denominator means hundredths of a second.
-            if (denominator == 0U)
-                denominator = 100U;
-            frame.delay_ms =
-                static_cast<std::uint32_t>((numerator * 1000U + denominator / 2U) / denominator);
-            frame.dispose = data[24U];
-            frame.blend = data[25U];
-            frame.default_image = compressed.empty();
+            FrameControl frame = frame_control(data);
+            frame.default_image = !have_data;
             if (frame.width == 0U || frame.height == 0U ||
                 static_cast<std::uint64_t>(frame.x) + frame.width > header.width ||
                 static_cast<std::uint64_t>(frame.y) + frame.height > header.height ||
@@ -606,29 +640,30 @@ struct Png final {
                 fail("fcTL places a frame outside the image or uses an unknown operation");
             }
             if (frame.default_image &&
-                (!png.frames.empty() || frame.x != 0U || frame.y != 0U ||
+                (current_frame.has_value() || frame.x != 0U || frame.y != 0U ||
                  frame.width != header.width || frame.height != header.height)) {
                 fail("the default image's fcTL must cover the whole image");
             }
-            if (!frame.default_image && !png.frames.empty() && !png.frames.back().default_image &&
-                png.frames.back().data.empty()) {
+            if (!frame.default_image && current_frame.has_value() &&
+                !current_frame->default_image && !frame_data) {
                 fail("an APNG frame has no data");
             }
-            png.frames.push_back(std::move(frame));
+            current_frame = frame;
+            frame_data = false;
+            ++frame_count;
         } else if (animation && png.animated && type == "fdAT") {
             if (length < 4U || big_endian(data.data()) != sequence++)
                 fail("fdAT is malformed or out of sequence");
-            if (png.frames.empty() || png.frames.back().default_image)
+            if (!current_frame.has_value() || current_frame->default_image)
                 fail("fdAT has no frame to belong to");
-            png.frames.back().data.insert(png.frames.back().data.end(), data.begin() + 4,
-                                          data.end());
+            frame_data = frame_data || data.size() > 4U;
         } else if (critical) {
             fail("an unknown critical chunk is present");
         }
-        if (type != "IDAT" && !compressed.empty())
+        if (type != "IDAT" && have_data)
             idat_finished = true;
     }
-    if (compressed.empty())
+    if (!have_data)
         fail("the image has no data");
     if (header.color == 3U) {
         if (png.palette.empty())
@@ -639,9 +674,9 @@ struct Png final {
         }
     }
     if (png.animated) {
-        if (png.frames.size() != png.declared_frames)
+        if (frame_count != png.declared_frames)
             fail("acTL's frame count disagrees with the frames present");
-        if (!png.frames.back().default_image && png.frames.back().data.empty())
+        if (!current_frame->default_image && !frame_data)
             fail("an APNG frame has no data");
     }
     return png;
@@ -760,59 +795,133 @@ decode_pixels(const Png& png, const Header& header,
     return pixels;
 }
 
+/** A validated container retains only one compressed frame and its compositing continuation. */
+struct PngDecoder final : codec::FrameDecoder {
+    PngDecoder(const std::span<const std::uint8_t> bytes,
+               const std::optional<ImageDimensions> expected, const bool animation)
+        : png(parse(bytes, expected, animation)), chunks(bytes) {
+        if (png.animated)
+            canvas.resize(static_cast<std::size_t>(png.header.width) * png.header.height * 4U);
+    }
+
+    [[nodiscard]] ImageDimensions dimensions() const noexcept override {
+        return {png.header.width, png.header.height};
+    }
+    [[nodiscard]] std::uint32_t loop_count() const noexcept override {
+        return png.animated ? png.plays : 1U;
+    }
+    [[nodiscard]] bool next(codec::FrameSink& sink) override;
+    void rewind() override {
+        chunks.rewind();
+        compressed.clear();
+        std::ranges::fill(canvas, std::uint8_t{0U});
+        saved.clear();
+        pending.reset();
+        have_idat = false;
+        first = true;
+        ended = false;
+    }
+
+    const Png png;
+    ChunkCursor chunks;
+    std::vector<std::uint8_t> compressed;
+    std::vector<std::uint8_t> canvas;
+    std::vector<std::uint8_t> saved;
+    std::optional<FrameControl> pending;
+    bool have_idat = false;
+    bool first = true;
+    bool ended = false;
+};
+
+bool PngDecoder::next(codec::FrameSink& sink) {
+    if (ended)
+        return false;
+    auto active = std::exchange(pending, std::nullopt);
+    compressed.clear();
+    for (;;) {
+        const auto [type, data] = chunks.next();
+        if (type == "IEND") {
+            ended = true;
+            break;
+        }
+        if (png.animated && type == "fcTL") {
+            FrameControl control = frame_control(data);
+            control.default_image = !have_idat;
+            if (active.has_value()) {
+                pending = control;
+                break;
+            }
+            active = control;
+        } else if (type == "IDAT") {
+            have_idat = have_idat || !data.empty();
+            // A hidden default image is validated, but never inflated for animation playback.
+            if (!png.animated || (active.has_value() && active->default_image))
+                compressed.insert(compressed.end(), data.begin(), data.end());
+        } else if (png.animated && type == "fdAT") {
+            compressed.insert(compressed.end(), data.begin() + 4, data.end());
+        }
+    }
+    sink.reserve_next();
+    if (!png.animated) {
+        sink.push(decode_pixels(png, png.header, compressed), 0U);
+        return true;
+    }
+    const FrameControl& frame = *active;
+    const std::uint32_t width = png.header.width;
+    Header region = png.header;
+    region.width = frame.width;
+    region.height = frame.height;
+    const std::vector<std::uint8_t> pixels = decode_pixels(png, region, compressed);
+    // The first frame has nothing to revert to, so PREVIOUS acts as BACKGROUND.
+    const std::uint32_t dispose = first && frame.dispose == 2U ? 1U : frame.dispose;
+    if (dispose == 2U)
+        saved = canvas;
+    for (std::uint32_t y = 0U; y < frame.height; ++y) {
+        const std::uint8_t* source =
+            pixels.data() + static_cast<std::size_t>(y) * frame.width * 4U;
+        std::uint8_t* target =
+            canvas.data() + ((static_cast<std::size_t>(frame.y) + y) * width + frame.x) * 4U;
+        if (frame.blend == 0U) {
+            std::copy_n(source, static_cast<std::size_t>(frame.width) * 4U, target);
+            continue;
+        }
+        for (std::uint32_t x = 0U; x < frame.width; ++x, source += 4U, target += 4U)
+            codec::blend_over(target, source);
+    }
+    sink.push(canvas, frame.delay_ms);
+    if (dispose == 1U)
+        codec::clear_rect(canvas, width, frame.x, frame.y, frame.width, frame.height);
+    else if (dispose == 2U)
+        canvas.swap(saved);
+    first = false;
+    return true;
+}
+
 } // namespace
 
 std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> bytes,
                                            const ImageDimensions expected) {
-    const Png png = parse(bytes, expected, false);
-    return decode_pixels(png, png.header, png.idat);
+    PngDecoder decoder(bytes, expected, false);
+    std::vector<std::uint8_t> pixels;
+    const ImageFrameConsumer consumer = [&pixels](auto& rgba, const std::uint32_t) {
+        pixels = std::move(rgba);
+        return false;
+    };
+    codec::FrameSink sink(expected, 1U, "PNG", &consumer);
+    static_cast<void>(decoder.next(sink));
+    return pixels;
 }
 
 namespace codec {
 
+std::unique_ptr<FrameDecoder> open_png(const std::span<const std::uint8_t> bytes) {
+    return std::make_unique<PngDecoder>(bytes, std::nullopt, true);
+}
+
 DecodedImage decode_png(const std::span<const std::uint8_t> bytes, const std::uint32_t frame_limit,
                         const ImageFrameConsumer* const consumer) {
-    const Png png = parse(bytes, std::nullopt, true);
-    const std::uint32_t width = png.header.width;
-    FrameSink sink(ImageDimensions{width, png.header.height}, frame_limit, "PNG", consumer);
-    if (!png.animated) {
-        sink.push(decode_pixels(png, png.header, png.idat), 0U);
-        return sink.finish(1U);
-    }
-    // APNG composites each frame onto a canvas that starts transparent black (APNG spec 4.3).
-    std::vector<std::uint8_t> canvas(static_cast<std::size_t>(width) * png.header.height * 4U);
-    std::vector<std::uint8_t> saved;
-    for (std::size_t index = 0U; index < png.frames.size() && sink.wants_more(); ++index) {
-        const FrameControl& frame = png.frames[index];
-        sink.reserve_next();
-        Header region = png.header;
-        region.width = frame.width;
-        region.height = frame.height;
-        const std::vector<std::uint8_t> pixels =
-            decode_pixels(png, region, frame.default_image ? png.idat : frame.data);
-        // The first frame has nothing to revert to, so PREVIOUS acts as BACKGROUND.
-        const std::uint32_t dispose = index == 0U && frame.dispose == 2U ? 1U : frame.dispose;
-        if (dispose == 2U)
-            saved = canvas;
-        for (std::uint32_t y = 0U; y < frame.height; ++y) {
-            const std::uint8_t* source =
-                pixels.data() + static_cast<std::size_t>(y) * frame.width * 4U;
-            std::uint8_t* target =
-                canvas.data() + ((static_cast<std::size_t>(frame.y) + y) * width + frame.x) * 4U;
-            if (frame.blend == 0U) {
-                std::copy_n(source, static_cast<std::size_t>(frame.width) * 4U, target);
-                continue;
-            }
-            for (std::uint32_t x = 0U; x < frame.width; ++x, source += 4U, target += 4U)
-                blend_over(target, source);
-        }
-        sink.push(canvas, frame.delay_ms);
-        if (dispose == 1U)
-            clear_rect(canvas, width, frame.x, frame.y, frame.width, frame.height);
-        else if (dispose == 2U)
-            canvas = std::move(saved);
-    }
-    return sink.finish(png.plays);
+    PngDecoder decoder(bytes, std::nullopt, true);
+    return decode_frames(decoder, frame_limit, "PNG", consumer);
 }
 
 } // namespace codec

@@ -61,6 +61,8 @@ public:
     [[nodiscard]] std::string_view state_scope() const noexcept;
     [[nodiscard]] const runtime::Value* property(std::string_view name) const noexcept;
     [[nodiscard]] const runtime::Value* retained(std::string_view name) const;
+    /** Reads without waiting; a terminal transition describes this widget again on its owner. */
+    [[nodiscard]] base::PendingStatus observe(const base::Readiness& resource);
     [[nodiscard]] double number(std::string_view name, double fallback) const noexcept;
     [[nodiscard]] bool boolean(std::string_view name, bool fallback) const noexcept;
     [[nodiscard]] std::string string(std::string_view name, std::string fallback = {}) const;

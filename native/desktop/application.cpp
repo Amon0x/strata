@@ -95,7 +95,9 @@ struct ApplicationHost::Impl final {
           platform(
               window, [this](const std::string_view id) { return services.bytes(id); },
               [this](const std::string_view id) { return services.path(id).wstring(); }),
-          renderer(window, options.vsync, options.asynchronous_shader_compilation) {
+          renderer(create_presentation(window, options.vsync,
+                                       options.asynchronous_shader_compilation,
+                                       options.presentation)) {
         try {
             initialize();
         } catch (...) {
@@ -106,7 +108,8 @@ struct ApplicationHost::Impl final {
 
     ~Impl() noexcept {
         try {
-            close();
+            while (!close())
+                dispatch_presentation_shutdown_messages();
         } catch (...) {
             dispose_after_failure();
         }
@@ -193,21 +196,22 @@ struct ApplicationHost::Impl final {
         const UINT dpi = GetDpiForWindow(window);
         resize_viewport(width, height, dpi == 0U ? 1.0 : static_cast<double>(dpi) / 96.0, false);
 
-        host::SessionOptions options;
+        setup.emplace();
+        setup->resources = services.resources();
+        setup->schemas_resource = config.schemas_resource;
+        setup->program_language = "hlsl";
+        host::SessionOptions& options = setup->session;
         options.application_id = config.application_id;
         options.stable_identity_seed = 0x5354524154414150ULL;
-        options.schemas = config.schemas_resource.empty() ? std::string{}
-                                                          : services.text(config.schemas_resource);
+        options.frame_wake = [target = window] {
+            if (!PostMessageW(target, WM_NULL, 0U, 0))
+                throw std::runtime_error("could not wake the desktop window");
+        };
         options.extension_packages = config.extension_packages;
         options.extension_search_paths = config.extension_search_paths;
-        options.read_text = [this](const std::string_view id) { return services.text(id); };
         options.on_diagnostic = [this](const strata_diagnostic& value) { record_diagnostic(value); };
-        host::SessionAdapters adapters;
-        adapters.resources = services.resource_adapter();
-        adapters.clipboard = services.clipboard_adapter();
-        adapters.ime = services.ime_adapter(config.application_id);
-        adapters.effects = platform.effect_adapter(config.application_id);
-        session.emplace(std::move(options), adapters);
+        pending_bindings = std::make_unique<host::Bindings>(config.application_id);
+        pending_modules.push_back(config.module_resource);
         // Files dragged in from the shell, in logical units.
         platform.accept_files([this](const std::uint32_t kind, const double x, const double y,
                                      const std::string& paths) {
@@ -218,24 +222,40 @@ struct ApplicationHost::Impl final {
             event.y = y / scale;
             enqueue(event, paths);
         });
+    }
 
-        for (const strata::MaterialDeclaration& declaration :
-             session->runtime().material_declarations("hlsl")) {
-            if (declaration.source.empty())
-                continue;
-            append_unique(program_resources, declaration.source);
-            renderer.declare_material(declaration.id, services.text(declaration.source));
+    void adopt_prepared() {
+        if (!preparation.has_value() || !preparation->ready())
+            return;
+        host::SessionAdapters adapters;
+        adapters.clipboard = services.clipboard_adapter();
+        adapters.ime = services.ime_adapter(config.application_id);
+        adapters.effects = platform.effect_adapter(config.application_id);
+        host::PreparedSession prepared = preparation->take(adapters, std::move(pending_bindings));
+        session = std::move(prepared.session);
+        preparation.reset();
+        source = std::move(prepared.source);
+        if (prepared_environment != environment_generation &&
+            !session->adopt_environment(environment())) {
+            throw std::runtime_error("prepared desktop environment generation was rejected");
         }
-        for (const strata::EffectPassDeclaration& pass :
-             session->runtime().effect_pass_declarations("hlsl")) {
+        for (const host::MaterialSource& material : prepared.materials) {
+            const strata::MaterialDeclaration& declaration = material.declaration;
+            append_unique(program_resources, declaration.source);
+        }
+        for (const host::EffectSource& effect : prepared.effects) {
+            const strata::EffectPassDeclaration& pass = effect.declaration;
             if (!pass.source.empty())
                 append_unique(program_resources, pass.source);
-            renderer.declare_effect_pass(
-                pass.effect_id, pass.index, static_cast<std::uint32_t>(pass.kind), pass.radius,
-                pass.downsample, pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
-                pass.downsample_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
-                pass.source.empty() ? std::string{} : services.text(pass.source));
         }
+        render_stream = renderer->attach(config.surface_id);
+        programs = renderer->declare_programs(
+            render_stream, {std::move(prepared.materials), std::move(prepared.effects)});
+        for (host::CapturedSnapshot& snapshot : pending_publications) {
+            static_cast<void>(
+                session->runtime().publish_host_snapshot(snapshot.source.id, snapshot.value.json()));
+        }
+        pending_publications.clear();
     }
 
     [[nodiscard]] bool activate_source() {
@@ -253,16 +273,22 @@ struct ApplicationHost::Impl final {
     }
 
     void activate() {
-        if (session->has_surface())
-            throw std::logic_error("desktop application is already active");
-        if (!activate_source()) {
-            const std::string detail =
-                diagnostics.empty() ? std::string("no compiler diagnostic was published")
-                                    : diagnostics.back().code + ": " + diagnostics.back().message;
-            throw std::runtime_error("desktop application activation was rejected: " + detail);
+        if (session != nullptr || preparation.has_value() || !setup.has_value())
+            throw std::logic_error("desktop application has already started or closed");
+        setup->module_resource = config.module_resource;
+        setup->generation = ++activation_generation;
+        setup->time_nanoseconds = now();
+        auto snapshots = pending_bindings->capture_snapshots();
+        if (setup->snapshots.empty()) {
+            setup->snapshots = std::move(snapshots);
+        } else {
+            // Preserve explicit startup order without copying large values during vector growth.
+            setup->snapshots.reserve(setup->snapshots.size() + snapshots.size());
+            for (host::CapturedSnapshot& snapshot : snapshots)
+                setup->snapshots.push_back(std::move(snapshot));
         }
-
-        host::SessionSurface surface;
+        setup->actions = pending_bindings->capture_actions();
+        host::SessionSurface& surface = setup->surface;
         surface.id = config.surface_id;
         surface.root_role = config.root_role == SurfaceRole::screen ? STRATA_SURFACE_ROOT_SCREEN
                                                                     : STRATA_SURFACE_ROOT_OVERLAY;
@@ -274,50 +300,57 @@ struct ApplicationHost::Impl final {
             surface.images.push_back(host::SessionImage{
                 image.id, image.resource, static_cast<std::uint32_t>(image.sampling)});
         }
-        session->create_surface(surface);
+        prepared_environment = surface.environment.generation;
+        preparation.emplace(host::Session::prepare(std::move(*setup)));
+        setup.reset();
     }
 
-    [[nodiscard]] bool reload_program_source(const std::string_view resource_id) {
+    [[nodiscard]] std::optional<host::PresentationReceipt> reload_program_source(
+        const std::string_view resource_id) {
+        if (session == nullptr)
+            throw std::logic_error("desktop application must be active before program reloading");
         if (std::ranges::find(program_resources, resource_id) == program_resources.end()) {
-            return false;
+            return std::nullopt;
         }
         const std::string hlsl_source = services.text(resource_id);
+        host::PresentationPrograms replacements;
         for (const strata::MaterialDeclaration& declaration :
              session->runtime().material_declarations("hlsl")) {
             if (declaration.source == resource_id) {
-                renderer.declare_material(declaration.id, hlsl_source);
+                replacements.materials.push_back({declaration, hlsl_source});
             }
         }
         for (const strata::EffectPassDeclaration& pass :
              session->runtime().effect_pass_declarations("hlsl")) {
             if (pass.source != resource_id)
                 continue;
-            renderer.declare_effect_pass(
-                pass.effect_id, pass.index, static_cast<std::uint32_t>(pass.kind), pass.radius,
-                pass.downsample, pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
-                pass.downsample_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE), hlsl_source);
+            replacements.effects.push_back({pass, hlsl_source});
         }
-        return true;
+        return renderer->declare_programs(render_stream, std::move(replacements));
     }
 
     void resize_viewport(const std::uint32_t width, const std::uint32_t height,
                          const double dpi_scale, const bool adopt) {
-        if (width == 0U || height == 0U || !std::isfinite(dpi_scale) || dpi_scale <= 0.0)
+        if (closing || width == 0U || height == 0U || !std::isfinite(dpi_scale) || dpi_scale <= 0.0)
             return;
         framebuffer_width = width;
         framebuffer_height = height;
         scale = display_scale(width, height, dpi_scale);
         services.set_surface_scale(scale);
-        renderer.resize(width, height, logical_width(), logical_height());
-        if (!adopt || !session.has_value() || !session->has_surface())
+        renderer->resize({width, height, logical_width(), logical_height()});
+        if (session == nullptr)
+            background_presented = false;
+        if (!adopt)
             return;
         ++environment_generation;
+        if (closing || session == nullptr || !session->has_surface())
+            return;
         if (!session->adopt_environment(environment()))
             throw std::runtime_error("desktop environment generation was rejected");
     }
 
     void enqueue(strata_input_event event, const std::string_view event_text = {}) {
-        if (!session.has_value() || !session->has_surface())
+        if (closing || session == nullptr || !session->has_surface())
             return;
         frame_time = now();
         session->set_time(frame_time);
@@ -363,7 +396,7 @@ struct ApplicationHost::Impl final {
             session->runtime().publish_image(frame.id, frame.width, frame.height, frame.rgba);
         // A video nothing shows any more (its page closed) pauses until something does again.
         platform.follow_video_use([this](std::string_view, const std::string_view image) {
-            return session.has_value() && session->has_surface() &&
+            return session != nullptr && session->has_surface() &&
                    session->surface().shows_image(image);
         });
         // The system's move loop swallowed the release of the press that began it.
@@ -372,66 +405,121 @@ struct ApplicationHost::Impl final {
             static_cast<void>(
                 strata_surface_cancel_interactions(session->surface().native_handle()));
         }
-        renderer.set_transparent(platform.transparent());
+        renderer->set_transparent(platform.transparent());
         // The user changed the system's theme or accent: env follows.
         if (platform.take_appearance_changed() && session->has_surface()) {
             ++environment_generation;
             static_cast<void>(session->adopt_environment(environment()));
         }
         // A node capture reads this frame's pixels once it is presented.
-        if (platform.wants_frame()) {
-            platform_capture = true;
-            renderer.capture_next_frame();
+        if (platform.wants_frame() && !platform_capture.has_value()) {
+            platform_capture = renderer->capture_next_frame();
+            platform.frame_requested(*platform_capture);
+        }
+    }
+
+    void adopt_rendering() {
+        renderer->rethrow_failure();
+        if (!closing && programs.has_value() && programs->ready()) {
+            programs->get();
+            programs.reset();
+        }
+        renderer->take_frames(rendered);
+        for (host::PresentationFrame& frame : rendered) {
+            last_frame_presented = last_frame_presented || frame.presented;
+            for (const host::PresentationLayerFeedback& layer : frame.layers) {
+                if (closing || session == nullptr || layer.stream != render_stream)
+                    continue;
+                frame_available = frame_available || frame.drawn;
+                if (!layer.backdrop.empty())
+                    session->surface().report_backdrop(layer.backdrop);
+                session->surface().record_host_frame(layer.profiler);
+            }
+            if (!closing && frame.capture.has_value() && platform_capture.has_value() &&
+                std::ranges::find(frame.capture_requests, *platform_capture) !=
+                    frame.capture_requests.end()) {
+                platform.frame_presented(*platform_capture, frame.capture->width, frame.capture->height,
+                                          frame.capture->rgba);
+                platform_capture.reset();
+            }
         }
     }
 
     void frame() {
-        if (!session.has_value() || !session->has_surface())
+        if (closing) {
+            static_cast<void>(close());
+            return;
+        }
+        if (session == nullptr && !preparation.has_value())
             throw std::logic_error("desktop application must be activated before framing");
         clock.begin_frame();
+        last_frame_presented = false;
+        adopt_rendering();
+        adopt_prepared();
+        if (session == nullptr) {
+            if (!background_presented) {
+                static_cast<void>(renderer->commit({}));
+                background_presented = true;
+            }
+            adopt_rendering();
+            last_frame_idle = true;
+            clock.end_frame();
+            return;
+        }
         answer_platform_requests();
         flush_pointer_move();
         frame_time = now();
-        const host::SurfacePacketFrame framed = session->frame(frame_time);
-        const host::RenderPacket& packet = *framed.packet;
-        const bool changed =
-            !frame_available || framed.surface.unchanged == 0U || platform_capture;
+        host::SurfacePacketCommit framed = session->frame(frame_time);
         last_frame_idle = framed.surface.idle != 0U;
-        last_frame_presented = renderer.render(packet) && changed;
-        frame_available = true;
-        if (platform_capture) {
-            platform_capture = false;
-            if (const std::optional<FrameCapture> captured = renderer.take_capture();
-                captured.has_value()) {
-                platform.frame_presented(captured->width, captured->height, captured->rgba);
-            }
-        }
-        // Backdrop probes read back without waiting on the GPU, so these describe an earlier frame.
-        const std::vector<strata_backdrop_sample> backdrop =
-            renderer.take_backdrop_samples("default");
-        if (!backdrop.empty())
-            session->surface().report_backdrop(backdrop);
-        session->record_host_frame(packet);
+        host::PresentationCommit commit;
+        commit.animate = !last_frame_idle;
+        commit.layers.push_back(
+            {render_stream, std::move(framed.encoded), framed.surface.unchanged != 0U});
+        commit.order.push_back(render_stream);
+        static_cast<void>(renderer->commit(std::move(commit)));
+        adopt_rendering();
         clock.end_frame();
     }
 
-    void close() {
-        pending_pointer_move.reset();
-        if (!session.has_value())
-            return;
-        // Its requests in flight, sockets, watches and sounds go with it.
-        platform.close_client(config.application_id);
-        session->close([this](const host::RenderPacket& terminal) {
-            renderer.consume_resources(terminal);
-        });
-        session.reset();
+    [[nodiscard]] bool close() {
+        if (!closing) {
+            closing = true;
+            pending_pointer_move.reset();
+            preparation.reset();
+            setup.reset();
+            pending_bindings.reset();
+            pending_publications.clear();
+            programs.reset();
+            platform_capture.reset();
+            platform.close_client(config.application_id);
+            if (session != nullptr)
+                release = renderer->retire(render_stream, session->prepare_release());
+        }
+        renderer->rethrow_failure();
+        if (release.has_value()) {
+            if (!release->ready())
+                return false;
+            release->get();
+            session->acknowledge_release();
+            session->close({});
+            session.reset();
+            release.reset();
+        }
+        renderer->stop();
+        return renderer->stopped();
     }
 
     void dispose_after_failure() noexcept {
         pending_pointer_move.reset();
-        if (session.has_value())
+        preparation.reset();
+        setup.reset();
+        pending_bindings.reset();
+        if (session != nullptr)
             session->abandon();
         session.reset();
+        renderer->stop();
+        while (!renderer->stopped())
+            dispatch_presentation_shutdown_messages();
     }
 
     HWND window = nullptr;
@@ -439,8 +527,18 @@ struct ApplicationHost::Impl final {
     std::filesystem::path resource_root;
     HostServices services;
     PlatformServices platform;
-    Renderer renderer;
-    std::optional<host::Session> session;
+    std::unique_ptr<host::Presentation, PresentationDeleter> renderer;
+    host::PresentationStream render_stream = 0U;
+    std::optional<host::PresentationReceipt> programs;
+    std::optional<host::PresentationReceipt> release;
+    std::vector<host::PresentationFrame> rendered;
+    std::unique_ptr<host::Bindings> pending_bindings;
+    std::optional<host::SessionPrepareOptions> setup;
+    std::optional<host::SessionPreparation> preparation;
+    std::unique_ptr<host::Session> session;
+    std::vector<host::CapturedSnapshot> pending_publications;
+    std::vector<std::string> pending_modules;
+    std::uint64_t prepared_environment = 0U;
     std::vector<Diagnostic> diagnostics;
     std::vector<std::string> program_resources;
     std::string source;
@@ -453,11 +551,13 @@ struct ApplicationHost::Impl final {
     std::uint32_t framebuffer_height = 1U;
     double scale = 1.0;
     bool frame_available = false;
+    bool closing = false;
+    bool background_presented = false;
     /** The last frame showed something new; and it left nothing to do until input. */
     bool last_frame_presented = false;
     bool last_frame_idle = false;
     /** A node capture waits for the frame being drawn. */
-    bool platform_capture = false;
+    std::optional<std::uint64_t> platform_capture;
     win32::WindowInputState input;
 };
 
@@ -467,16 +567,30 @@ ApplicationHost::ApplicationHost(HWND window, std::filesystem::path resource_roo
 
 ApplicationHost::~ApplicationHost() = default;
 
-strata::Runtime& ApplicationHost::runtime() noexcept {
+strata::Runtime& ApplicationHost::runtime() {
+    if (impl_->session == nullptr)
+        throw std::logic_error("desktop runtime is not yet adopted or has closed");
     return impl_->session->runtime();
 }
-strata::host::Bindings& ApplicationHost::bindings() noexcept {
-    return impl_->session->bindings();
+strata::host::Bindings& ApplicationHost::bindings() {
+    if (impl_->session != nullptr)
+        return impl_->session->bindings();
+    if (impl_->pending_bindings == nullptr)
+        throw std::logic_error("desktop bindings have closed");
+    return *impl_->pending_bindings;
 }
 
 void ApplicationHost::publish(const std::string_view snapshot_id,
-                              const strata::host::Value& value) {
-    static_cast<void>(impl_->session->runtime().publish_host_snapshot(snapshot_id, value.json()));
+                              strata::host::Value value) {
+    if (impl_->session != nullptr) {
+        static_cast<void>(impl_->session->runtime().publish_host_snapshot(snapshot_id, value.json()));
+    } else if (impl_->setup.has_value()) {
+        impl_->setup->snapshots.push_back({{std::string(snapshot_id), 0U}, std::move(value)});
+    } else if (impl_->preparation.has_value()) {
+        impl_->pending_publications.push_back({{std::string(snapshot_id), 0U}, std::move(value)});
+    } else {
+        throw std::logic_error("desktop application has closed");
+    }
 }
 
 void ApplicationHost::activate() {
@@ -484,18 +598,19 @@ void ApplicationHost::activate() {
 }
 
 bool ApplicationHost::reactivate() {
-    if (!impl_->session->has_surface()) {
+    if (impl_->session == nullptr || !impl_->session->has_surface()) {
         throw std::logic_error("desktop application must be active before source reactivation");
     }
     return impl_->activate_source();
 }
 
-bool ApplicationHost::reload_program_source(const std::string_view resource_id) {
+std::optional<host::PresentationReceipt> ApplicationHost::reload_program_source(
+    const std::string_view resource_id) {
     return impl_->reload_program_source(resource_id);
 }
 
 const std::vector<std::string>& ApplicationHost::module_resources() const noexcept {
-    return impl_->session->module_resources();
+    return impl_->session != nullptr ? impl_->session->module_resources() : impl_->pending_modules;
 }
 
 const std::vector<std::string>& ApplicationHost::program_resources() const noexcept {
@@ -509,6 +624,8 @@ void ApplicationHost::resize(const std::uint32_t framebuffer_width,
 
 void ApplicationHost::pointer(const std::uint32_t kind, const std::int32_t button,
                               const double framebuffer_x, const double framebuffer_y) {
+    if (impl_->closing)
+        return;
     strata_input_event event{};
     event.kind = kind;
     event.pointer_id = 0;
@@ -516,7 +633,7 @@ void ApplicationHost::pointer(const std::uint32_t kind, const std::int32_t butto
     event.x = framebuffer_x / impl_->scale;
     event.y = framebuffer_y / impl_->scale;
     // Materials follow the pointer on the GPU (materialPointer), with no frame of the interface.
-    impl_->renderer.set_pointer(
+    impl_->renderer->set_pointer(
         kind == STRATA_INPUT_POINTER_CANCEL
             ? std::nullopt
             : std::optional(std::array<double, 2U>{framebuffer_x, framebuffer_y}));
@@ -604,14 +721,14 @@ ApplicationHost::handle_window_message(const std::uint32_t message, const std::u
 
 void ApplicationHost::cancel_interactions() noexcept {
     impl_->pending_pointer_move.reset();
-    if (impl_->session.has_value() && impl_->session->has_surface()) {
+    if (impl_->session != nullptr && impl_->session->has_surface()) {
         static_cast<void>(
             strata_surface_cancel_interactions(impl_->session->surface().native_handle()));
     }
 }
 
 std::optional<std::uint32_t> ApplicationHost::pointer_cursor() const noexcept {
-    if (!impl_->session.has_value() || !impl_->session->has_surface())
+    if (impl_->session == nullptr || !impl_->session->has_surface())
         return std::nullopt;
     std::uint32_t cursor = STRATA_POINTER_CURSOR_DEFAULT;
     if (strata_surface_pointer_cursor(impl_->session->surface().native_handle(), &cursor).status !=
@@ -630,7 +747,7 @@ std::vector<WindowRequest> ApplicationHost::take_window_requests() {
 }
 
 void ApplicationHost::answer_window_request(const WindowRequest& request, std::string json) {
-    impl_->platform.answer(request.client, request.request, std::move(json));
+    impl_->platform.answer(request, std::move(json));
 }
 
 std::unique_ptr<ApplicationHost> ApplicationHost::open_window(HWND window,
@@ -643,16 +760,19 @@ std::unique_ptr<ApplicationHost> ApplicationHost::open_window(HWND window,
     return std::make_unique<ApplicationHost>(window, impl_->resource_root, std::move(config),
                                              options);
 }
-void ApplicationHost::close() {
-    impl_->close();
+bool ApplicationHost::close() {
+    return impl_->close();
 }
 bool ApplicationHost::active() const noexcept {
-    return impl_->session.has_value() && impl_->session->has_surface();
+    return !impl_->closing && impl_->session != nullptr && impl_->session->has_surface();
 }
 bool ApplicationHost::has_frame() const noexcept {
     return impl_->frame_available;
 }
 bool ApplicationHost::presented() const noexcept { return impl_->last_frame_presented; }
+std::uint64_t ApplicationHost::present_count() const noexcept {
+    return impl_->renderer->present_count();
+}
 bool ApplicationHost::idle() const noexcept { return impl_->last_frame_idle; }
 double ApplicationHost::scale() const noexcept {
     return impl_->scale;

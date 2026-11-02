@@ -4,6 +4,7 @@
 #include <array>
 #include <stdexcept>
 
+#include "resource/image_stream.hpp"
 #include "resource/svg_image.hpp"
 #include "ui/input.hpp"
 #include "ui/motion.hpp"
@@ -11,6 +12,7 @@
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
 #include "ui/widget/icon_geometry.hpp"
+#include "ui/widget/input.hpp"
 #include "ui/widget/menu_model.hpp"
 
 namespace strata::ui {
@@ -177,6 +179,22 @@ void button_content(WidgetRenderScope& scope) {
     return *name == "START" ? 0.0 : *name == "END" ? 1.0 : 0.5;
 }
 
+/** Resource playback changes pixels, not layout or cached image geometry. */
+void image_advance(WidgetInputScope& scope, const WidgetFrameInfo& frame) {
+    const std::string* id = widget_image_value(scope.property("image"));
+    if (id == nullptr || scope.images() == nullptr)
+        return;
+    const auto image = scope.images()->lookup(*id);
+    scope.node().observe_preparation(image.readiness);
+    if (!image.value.has_value() || image.value->stream == nullptr)
+        return;
+    auto& stream = *image.value->stream;
+    stream.advance(frame.time_nanos);
+    scope.node().observe_preparation(stream.readiness());
+    if (!stream.finished() && !frame.reduced_motion)
+        static_cast<void>(scope.request_frame(WidgetFrameCost::resource));
+}
+
 /**
  * The image's `fit` against its bounds. FILL stretches it; CONTAIN shows all of it at its aspect
  * ratio; COVER fills the bounds at its aspect ratio by cropping the source; NONE draws it at its
@@ -184,27 +202,20 @@ void button_content(WidgetRenderScope& scope) {
  * bounds, then CONTAIN. `alignX`/`alignY` place what does not fill. An image of unknown size fills.
  */
 void image_content(WidgetRenderScope& scope) {
-    const std::string* named = widget_image_value(scope.property("image"));
-    if (named == nullptr)
+    const std::string* image = widget_image_value(scope.property("image"));
+    if (image == nullptr)
         return;
-    // An animated image shows the frame its playback has reached.
-    std::string frame;
-    const std::string* image = named;
-    if (const resource::ImageAnimation* animation = scope.image_animation(*named);
-        animation != nullptr) {
-        const double progress = scope.motion_progress(image_playback_timeline, 0.0);
-        const double span =
-            static_cast<double>(animation->duration_nanos()) *
-            (animation->loop_count == 0U || animation->stream != nullptr ? 1.0
-                                                                         : animation->loop_count);
-        frame = animation->frame_texture(*named, static_cast<std::int64_t>(progress * span));
-        image = &frame;
-    }
+    const auto resource = scope.image_resource(*image);
     const RenderColor tint = widget_color(scope.property("tint"), untinted);
     TextureRegion source = widget_texture_region(scope.property("source"));
     const Rect bounds = scope.layout().bounds;
     const std::string* fit_name = widget_string_value(scope.property("fit"));
-    const std::optional<Size> natural = scope.image_size(*image);
+    std::optional<Size> natural;
+    if (resource.value.has_value() && resource.value->dimensions.has_value()) {
+        const auto dimensions = *resource.value->dimensions;
+        if (dimensions.width != 0U && dimensions.height != 0U)
+            natural = Size{static_cast<double>(dimensions.width), static_cast<double>(dimensions.height)};
+    }
     if (fit_name == nullptr || *fit_name == "FILL" || !natural.has_value() || bounds.empty()) {
         scope.image(bounds, *image, tint, source);
         return;
@@ -464,12 +475,9 @@ void register_primitive_widget_presenters(WidgetRegistry& registry) {
     add(registry, "Button", &button_content, nullptr, &command_tooltip_overlay, true, {},
         &command_tooltip_shown);
     add(registry, "Menu", &button_content, nullptr, &menu_overlay, true);
-    // An animated image shows the frame its playback timeline has reached.
-    {
-        WidgetPresentPhase image{&image_content, nullptr, nullptr, nullptr, false};
-        image.depends_on_motion_progress = true;
-        registry.register_present_phase("Image", std::move(image));
-    }
+    add(registry, "Image", &image_content);
+    registry.register_frame_phase(
+        "Image", WidgetFramePhase{&image_advance, true, WidgetFrameCost::resource});
     add(registry, "Draw", &draw_content);
     WidgetPresentPhase status;
     status.content = &status_content;

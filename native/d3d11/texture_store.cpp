@@ -150,7 +150,7 @@ struct TextureStore::Impl final {
         });
     }
 
-    void run_live(const double seconds) {
+    [[nodiscard]] bool run_live(const double seconds) {
         // Every live job of the frame in one batch.
         live_batch.clear();
         for (LiveJob& job : live) {
@@ -164,11 +164,12 @@ struct TextureStore::Impl final {
                 job.operation.x, job.operation.y, job.operation.width, job.operation.height});
             job.seconds = seconds;
         }
-        if (live_batch.empty())
-            return;
-        if (raster == nullptr)
-            raster = std::make_unique<RasterPass>(device.Get(), context.Get());
-        raster->run(live_batch, seconds);
+        if (!live_batch.empty()) {
+            if (raster == nullptr)
+                raster = std::make_unique<RasterPass>(device.Get(), context.Get());
+            raster->run(live_batch, seconds);
+        }
+        return !live.empty();
     }
 
     /** Writes `bytes` at element `first` of a vector glyph buffer, remaking it larger if full. */
@@ -336,8 +337,8 @@ TextureStore::~TextureStore() = default;
 void TextureStore::apply(const ResourceOperation& operation) {
     impl_->apply(operation);
 }
-void TextureStore::run_live(const double seconds) {
-    impl_->run_live(seconds);
+bool TextureStore::run_live(const double seconds) {
+    return impl_->run_live(seconds);
 }
 void TextureStore::bind(const DrawBatch& batch) const {
     impl_->bind(batch);

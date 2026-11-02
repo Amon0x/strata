@@ -179,6 +179,7 @@ int main() {
 
         std::int64_t now = 1'000'000;
         strata::RuntimeOptions runtime_options;
+        runtime_options.task_execution = strata::TaskExecution::deterministic;
         runtime_options.clock = [&now] { return now; };
         strata::Runtime runtime(std::move(runtime_options));
         runtime.configure_application(strata::ApplicationOptions{

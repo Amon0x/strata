@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+#include <strata/presentation.hpp>
+
 #include "d3d11/render_context.hpp"
 
 struct HWND__;
@@ -20,22 +22,6 @@ struct RenderPacket;
 namespace strata::desktop {
 
 using RenderLayerTelemetry = d3d11::RenderLayerTelemetry;
-
-struct RendererInfo final {
-    std::string adapter;
-    std::string driver_version;
-    std::uint32_t vendor_id = 0U;
-    std::uint32_t device_id = 0U;
-    std::uint64_t dedicated_video_memory = 0U;
-    bool vsync = true;
-};
-
-/** A presented frame's pixels: straight RGBA8 rows, top first. */
-struct FrameCapture final {
-    std::uint32_t width = 0U;
-    std::uint32_t height = 0U;
-    std::vector<std::uint8_t> rgba;
-};
 
 /** Win32 fidelity renderer for the backend-ready native render submission protocol. */
 class Renderer final {
@@ -54,6 +40,7 @@ class Renderer final {
      * to the built-in unified shader rather than failing the frame.
      */
     void declare_material(std::string_view id, std::string_view hlsl_source);
+    void release_programs(std::string_view prefix);
     void declare_effect_pass(std::string_view effect_id, std::uint32_t index, std::uint32_t kind,
                              double radius, std::uint32_t downsample,
                              std::uint32_t radius_parameter, std::uint32_t downsample_parameter,
@@ -80,13 +67,25 @@ class Renderer final {
     void set_pointer(std::optional<std::array<double, 2U>> framebuffer_position) noexcept;
     /** Frames clear to transparent, so a system backdrop (Mica) shows where nothing draws. */
     void set_transparent(bool transparent) noexcept;
-    [[nodiscard]] std::optional<FrameCapture> take_capture();
-    bool render(const host::RenderPacket& packet);
-    [[nodiscard]] RendererInfo info() const;
+    [[nodiscard]] std::optional<host::PresentationCapture> take_capture();
+    [[nodiscard]] host::PresentationInfo info() const;
 
   private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+/** Quiesces GPU ownership before constructor unwinding can let the HWND be destroyed. */
+struct PresentationDeleter final {
+    void operator()(host::Presentation* presentation) const noexcept;
+};
+
+/** Owns the swap chain on its presentation thread; the HWND stays live until stopped(). */
+[[nodiscard]] std::unique_ptr<host::Presentation, PresentationDeleter> create_presentation(
+    HWND window, bool vsync, bool asynchronous_shader_compilation,
+    host::PresentationExecution execution);
+
+/** Services only sent window-system messages during an exceptional/destructor shutdown barrier. */
+void dispatch_presentation_shutdown_messages() noexcept;
 
 } // namespace strata::desktop

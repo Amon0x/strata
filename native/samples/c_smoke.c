@@ -4,21 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
-struct packet_capture {
-    uint8_t header[12];
-    size_t size;
-};
-
 static int64_t smoke_clock(void* user_data) {
     return *(const int64_t*)user_data;
-}
-
-static void capture_packet(void* user_data, strata_bytes_view bytes) {
-    struct packet_capture* capture = (struct packet_capture*)user_data;
-    capture->size = bytes.size;
-    if (bytes.size >= sizeof(capture->header)) {
-        memcpy(capture->header, bytes.data, sizeof(capture->header));
-    }
 }
 
 static int failed(strata_result result) {
@@ -44,8 +31,9 @@ int main(void) {
     strata_surface_config surface_config = {0};
     strata_surface_frame_info frame_info = {0};
     strata_runtime_memory_info memory_info = {0};
-    struct packet_capture packet = {{0}, 0U};
-    strata_bytes_sink packet_sink = {0};
+    strata_render_packet* packet = NULL;
+    strata_render_packet* terminal = NULL;
+    strata_bytes_view bytes = {0};
     strata_theme theme_contract = {0};
     strata_scroll_animation_request scroll_contract = {0};
     strata_theme_visual_style theme_visual = {0};
@@ -65,6 +53,7 @@ int main(void) {
 
     runtime_config.struct_size = sizeof(runtime_config);
     runtime_config.abi_version = STRATA_ABI_VERSION_CURRENT;
+    runtime_config.task_execution = STRATA_TASK_EXECUTION_DETERMINISTIC;
     runtime_config.required_capabilities =
         STRATA_CAPABILITY_CORE_LIFECYCLE | STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
         STRATA_CAPABILITY_COMPILER_ACTIVATION | STRATA_CAPABILITY_SURFACE_RUNTIME |
@@ -118,20 +107,20 @@ int main(void) {
     if (failed(strata_surface_frame(surface, now, &frame_info)) || frame_info.frame_index != 1U ||
         frame_info.render_command_count == 0U)
         goto cleanup;
-    packet_sink.struct_size = sizeof(packet_sink);
-    packet_sink.user_data = &packet;
-    packet_sink.emit = capture_packet;
-    if (failed(strata_surface_read_render_packet(surface, &packet_sink)) ||
-        packet.size < sizeof(packet.header) || memcmp(packet.header, "STRATARP", 8U) != 0)
+    if (failed(strata_surface_acquire_render_packet(surface, &packet)))
+        goto cleanup;
+    bytes = strata_render_packet_bytes(packet);
+    if (bytes.size < 12U || memcmp(bytes.data, "STRATARP", 8U) != 0)
         goto cleanup;
     memory_info.struct_size = sizeof(memory_info);
     if (failed(strata_runtime_get_memory_info(runtime, &memory_info)) ||
         memory_info.routed_current_bytes == 0U ||
         memory_info.routed_peak_bytes < memory_info.routed_current_bytes)
         goto cleanup;
-    memset(&packet, 0, sizeof(packet));
-    if (failed(strata_surface_prepare_release_packet(surface, &packet_sink)) ||
-        packet.size < sizeof(packet.header) || memcmp(packet.header, "STRATARP", 8U) != 0)
+    if (failed(strata_surface_prepare_release_packet(surface, &terminal)))
+        goto cleanup;
+    bytes = strata_render_packet_bytes(terminal);
+    if (bytes.size < 12U || memcmp(bytes.data, "STRATARP", 8U) != 0)
         goto cleanup;
     if (failed(strata_surface_acknowledge_release_packet(surface)))
         goto cleanup;
@@ -146,6 +135,10 @@ cleanup:
     }
     if (failed(strata_runtime_release(runtime)))
         exit_code = 1;
+    if (exit_code == 0 && strata_render_packet_bytes(packet).size != frame_info.render_packet_size)
+        exit_code = 1;
+    strata_render_packet_release(packet);
+    strata_render_packet_release(terminal);
     if (exit_code == 0)
         puts("strata_c_smoke: compiled, activated, framed, emitted a packet, and read allocator "
              "telemetry");

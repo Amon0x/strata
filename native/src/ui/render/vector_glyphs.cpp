@@ -3,10 +3,24 @@
 #include <algorithm>
 #include <memory>
 #include <set>
+#include <unordered_set>
 
-#include "font/raster_pool.hpp"
+#include "base/task_pool.hpp"
 
 namespace strata::ui {
+
+VectorGlyphPool::VectorGlyphPool(std::string id, base::TaskOwner* const tasks)
+    : id_(std::move(id)), tasks_(tasks) {
+    if (tasks_ == nullptr) {
+        owned_tasks_.emplace(base::TaskExecution::deterministic);
+        tasks_ = &*owned_tasks_;
+    }
+}
+
+const font::FontHintZones& VectorGlyphPool::FontSource::zones() const {
+    std::call_once(initialized, [this] { hints = font::font_hint_zones(font); });
+    return hints;
+}
 
 std::shared_ptr<const font::GlyphOutline>
 VectorGlyphPool::drawn_outline(const font::OpenTypeFont& font, const std::uint16_t glyph) {
@@ -36,32 +50,35 @@ VectorGlyphPool::Levels VectorGlyphPool::build_levels(const font::GlyphOutline& 
 std::optional<font::VectorGlyph> VectorGlyphPool::build_fitted(const Source& source,
                                                                const double scale) {
     // Never finer than the outline drawn at any size already is.
-    const double em = std::max(1.0, static_cast<double>(source.units_per_em));
+    const std::uint16_t units_per_em = source.font->font.units_per_em();
+    const double em = std::max(1.0, static_cast<double>(units_per_em));
     const double tolerance = std::max(em / 4096.0, 1.0 / (32.0 * scale));
     const font::VectorGlyph vector =
-        font::build_vector_glyph(*source.outline, source.units_per_em, *source.zones, tolerance);
+        font::build_vector_glyph(*source.outline, units_per_em, source.font->zones(), tolerance);
     if (vector.empty())
         return std::nullopt;
     return font::fit_vector_glyph(vector, scale);
 }
 
-const font::FontHintZones& VectorGlyphPool::zones(const std::string_view font_id,
-                                                  const font::OpenTypeFont& font) {
-    auto zones = zones_.find(font_id);
-    if (zones == zones_.end())
-        zones = zones_.emplace(std::string(font_id), font::font_hint_zones(font)).first;
-    return zones->second;
+std::shared_ptr<const VectorGlyphPool::FontSource>
+VectorGlyphPool::font_source(const std::string_view font_id, const font::OpenTypeFont& font) {
+    auto source = fonts_.find(font_id);
+    if (source == fonts_.end()) {
+        source = fonts_.emplace(std::string(font_id),
+                                 std::make_shared<const FontSource>(font)).first;
+    }
+    return source->second;
 }
 
 std::optional<std::uint32_t>
 VectorGlyphPool::adopt(const std::string_view font_id, const std::uint16_t glyph,
                        std::shared_ptr<const font::GlyphOutline> outline,
-                       const std::uint16_t units_per_em, const font::FontHintZones* const zones,
+                       std::shared_ptr<const FontSource> font,
                        const Levels& levels) {
     std::optional<std::uint32_t> index;
     if (outline != nullptr && !levels[0].empty()) {
         index = add(levels[0]);
-        sources_.emplace(*index, Source{std::move(outline), units_per_em, zones});
+        sources_.emplace(*index, Source{std::move(outline), std::move(font)});
         for (std::uint32_t level = 1U; level < vector_glyph_detail_levels; ++level) {
             if (levels[level].empty())
                 records_.push_back(records_[*index]);
@@ -73,98 +90,145 @@ VectorGlyphPool::adopt(const std::string_view font_id, const std::uint16_t glyph
     return index;
 }
 
-std::optional<std::uint32_t> VectorGlyphPool::glyph(const std::string_view font_id,
-                                                    const font::OpenTypeFont& font,
-                                                    const std::uint16_t glyph) {
+base::ResourceResult<std::uint32_t> VectorGlyphPool::glyph(
+    const std::string_view font_id, const font::OpenTypeFont& font, const std::uint16_t glyph) {
     if (const auto found = indices_.find(std::make_tuple(font_id, glyph)); found != indices_.end())
-        return found->second;
-    std::shared_ptr<const font::GlyphOutline> outline = drawn_outline(font, glyph);
-    if (outline == nullptr)
-        return adopt(font_id, glyph, nullptr, font.units_per_em(), nullptr, Levels{});
-    const font::FontHintZones& font_zones = zones(font_id, font);
-    const Levels levels = build_levels(*outline, font.units_per_em(), font_zones);
-    return adopt(font_id, glyph, std::move(outline), font.units_per_em(), &font_zones, levels);
+        return {found->second, {}};
+    auto preparing = preparing_glyphs_.find(std::make_tuple(font_id, glyph));
+    if (preparing == preparing_glyphs_.end()) {
+        const VectorGlyphWant want{font_id, &font, glyph, 0.0};
+        prepare(std::span(&want, 1U));
+        return this->glyph(font_id, font, glyph);
+    }
+    const std::vector<Built>* const ready = preparing->second.batch.get();
+    if (ready == nullptr)
+        return {std::nullopt, preparing->second.batch.readiness()};
+    const Built& built = ready->at(preparing->second.index);
+    const auto index = adopt(font_id, glyph, built.source.outline, built.source.font, built.levels);
+    preparing_glyphs_.erase(preparing);
+    return {index, {}};
 }
 
-std::uint32_t VectorGlyphPool::fitted(const std::uint32_t index, const double scale) {
+base::ResourceResult<std::uint32_t> VectorGlyphPool::fitted(const std::uint32_t index,
+                                                          const double scale) {
     const auto source = sources_.find(index);
     if (source == sources_.end() || !(scale > 0.0))
-        return index;
+        return {index, {}};
     const auto key = std::make_pair(index, scale);
     if (const auto found = fitted_.find(key); found != fitted_.end())
-        return found->second;
-    const std::optional<font::VectorGlyph> vector = build_fitted(source->second, scale);
+        return {found->second, {}};
+    if (!preparing_fits_.contains(key))
+        prepare_fits(std::span(&key, 1U));
+    const auto preparing = preparing_fits_.find(key);
+    const auto* ready = preparing->second.batch.get();
+    // The unfitted outline is valid while its grid-fitted variant prepares.
+    if (ready == nullptr)
+        return {index, preparing->second.batch.readiness()};
+    const auto& vector = ready->at(preparing->second.index);
     const std::uint32_t result = vector.has_value() ? add(*vector) : index;
     fitted_.emplace(key, result);
-    return result;
+    preparing_fits_.erase(preparing);
+    return {result, {}};
 }
 
 void VectorGlyphPool::prepare(const std::span<const VectorGlyphWant> wants) {
-    // The glyphs new to the pool, each once, in the order wanted. Their outlines and zones are
-    // read here: only the building, which reads nothing it shares, is spread over lanes.
-    struct Build final {
-        const VectorGlyphWant* want = nullptr;
-        std::shared_ptr<const font::GlyphOutline> outline;
-        const font::FontHintZones* zones = nullptr;
-        Levels levels;
+    struct Input final {
+        std::shared_ptr<const FontSource> font;
+        std::uint16_t glyph = 0U;
     };
-    std::vector<Build> builds;
+    std::vector<Input> inputs;
+    std::vector<std::tuple<std::string, std::uint16_t>> keys;
     std::set<std::tuple<std::string_view, std::uint16_t>> queued;
     for (const VectorGlyphWant& want : wants) {
         if (indices_.contains(std::make_tuple(want.font_id, want.glyph)) ||
+            preparing_glyphs_.contains(std::make_tuple(want.font_id, want.glyph)) ||
             !queued.emplace(want.font_id, want.glyph).second) {
             continue;
         }
-        Build build;
-        build.want = &want;
-        build.outline = drawn_outline(*want.font, want.glyph);
-        if (build.outline != nullptr)
-            build.zones = &zones(want.font_id, *want.font);
-        builds.push_back(std::move(build));
+        inputs.push_back(Input{font_source(want.font_id, *want.font), want.glyph});
+        keys.emplace_back(want.font_id, want.glyph);
     }
-    // A glyph is five flattenings: a few are worth a lane.
-    constexpr std::size_t parallel_glyphs = 4U;
-    font::parallel_for(builds.size(), parallel_glyphs, [&builds](const std::size_t index) {
-        Build& build = builds[index];
-        if (build.outline != nullptr) {
-            build.levels =
-                build_levels(*build.outline, build.want->font->units_per_em(), *build.zones);
+    if (!inputs.empty()) {
+        auto batch = base::Pending<std::vector<Built>>::start(
+            *tasks_, base::TaskKind::vector_glyph, base::TaskPriority::frame_critical, id_,
+            [inputs = std::move(inputs)](const base::TaskCancellation& cancellation) {
+                std::vector<Built> result(inputs.size());
+                base::parallel_for(inputs.size(), 4U, [&](const std::size_t index) {
+                    if (cancellation.cancelled())
+                        return;
+                    const Input& input = inputs[index];
+                    Built& built = result[index];
+                    built.source = Source{drawn_outline(input.font->font, input.glyph), input.font};
+                    if (built.source.outline != nullptr) {
+                        built.levels = build_levels(*built.source.outline,
+                                                     input.font->font.units_per_em(),
+                                                     input.font->zones());
+                    }
+                });
+                return result;
+            });
+        for (std::size_t index = 0U; index < keys.size(); ++index) {
+            preparing_glyphs_.emplace(std::move(keys[index]), Preparation<Built>{batch, index});
         }
-    });
-    for (Build& build : builds) {
-        static_cast<void>(adopt(build.want->font_id, build.want->glyph, std::move(build.outline),
-                                build.want->font->units_per_em(), build.zones, build.levels));
     }
-
-    // Then the sizes the wanted glyphs are fitted at that are new.
-    struct Fit final {
-        std::uint32_t index = 0U;
-        double scale = 0.0;
-        const Source* source = nullptr;
-        std::optional<font::VectorGlyph> vector;
-    };
-    std::vector<Fit> fits;
-    std::set<std::pair<std::uint32_t, double>> queued_fits;
+    std::vector<std::pair<std::uint32_t, double>> fits;
     for (const VectorGlyphWant& want : wants) {
+        const auto ready = glyph(want.font_id, *want.font, want.glyph);
         if (!(want.fit_scale > 0.0))
             continue;
-        const auto found = indices_.find(std::make_tuple(want.font_id, want.glyph));
-        if (found == indices_.end() || !found->second.has_value())
-            continue;
-        const auto key = std::make_pair(*found->second, want.fit_scale);
+        if (ready.value.has_value())
+            fits.emplace_back(*ready.value, want.fit_scale);
+    }
+    prepare_fits(fits);
+}
+
+void VectorGlyphPool::prepare_fits(
+    const std::span<const std::pair<std::uint32_t, double>> wants) {
+    std::vector<std::pair<Source, double>> inputs;
+    std::vector<std::pair<std::uint32_t, double>> keys;
+    std::set<std::pair<std::uint32_t, double>> queued;
+    for (const auto& key : wants) {
         const auto source = sources_.find(key.first);
-        if (source == sources_.end() || fitted_.contains(key) || !queued_fits.insert(key).second)
+        if (source == sources_.end() || fitted_.contains(key) || preparing_fits_.contains(key) ||
+            !queued.insert(key).second)
             continue;
-        fits.push_back(Fit{key.first, key.second, &source->second, std::nullopt});
+        inputs.emplace_back(source->second, key.second);
+        keys.push_back(key);
     }
-    constexpr std::size_t parallel_fits = 8U;
-    font::parallel_for(fits.size(), parallel_fits, [&fits](const std::size_t index) {
-        fits[index].vector = build_fitted(*fits[index].source, fits[index].scale);
-    });
-    for (const Fit& fit : fits) {
-        fitted_.emplace(std::make_pair(fit.index, fit.scale),
-                        fit.vector.has_value() ? add(*fit.vector) : fit.index);
+    if (inputs.empty())
+        return;
+    auto batch = base::Pending<std::vector<std::optional<font::VectorGlyph>>>::start(
+        *tasks_, base::TaskKind::vector_glyph, base::TaskPriority::frame_critical, id_,
+        [inputs = std::move(inputs)](const base::TaskCancellation& cancellation) {
+            std::vector<std::optional<font::VectorGlyph>> result(inputs.size());
+            base::parallel_for(inputs.size(), 8U, [&](const std::size_t index) {
+                if (!cancellation.cancelled())
+                    result[index] = build_fitted(inputs[index].first, inputs[index].second);
+            });
+            return result;
+        });
+    for (std::size_t index = 0U; index < keys.size(); ++index) {
+        preparing_fits_.emplace(
+            keys[index], Preparation<std::optional<font::VectorGlyph>>{batch, index});
     }
+}
+
+void VectorGlyphPool::retain_preparations(const std::span<const std::uint64_t> resources) {
+    if (preparing_glyphs_.empty() && preparing_fits_.empty())
+        return;
+    std::unordered_set<std::uint64_t> retained;
+    retained.insert(resources.begin(), resources.end());
+    std::unordered_set<std::uint64_t> cancelled;
+    const auto unused = [&](const auto& item) {
+        const auto& batch = item.second.batch;
+        if (retained.contains(batch.id()))
+            return false;
+        if (cancelled.insert(batch.id()).second)
+            batch.cancel();
+        return true;
+    };
+    std::erase_if(preparing_glyphs_, unused);
+    std::erase_if(preparing_fits_, unused);
 }
 
 std::uint32_t VectorGlyphPool::add(const font::VectorGlyph& vector) {
@@ -213,9 +277,19 @@ void VectorGlyphPool::resend() noexcept {
 }
 
 void VectorGlyphPool::clear() noexcept {
+    for (const auto& [key, preparation] : preparing_glyphs_) {
+        static_cast<void>(key);
+        preparation.batch.cancel();
+    }
+    for (const auto& [key, preparation] : preparing_fits_) {
+        static_cast<void>(key);
+        preparation.batch.cancel();
+    }
+    preparing_glyphs_.clear();
+    preparing_fits_.clear();
     indices_.clear();
     fitted_.clear();
-    zones_.clear();
+    fonts_.clear();
     sources_.clear();
     records_.clear();
     segments_.clear();

@@ -6,6 +6,7 @@
 #include "shader_cache.hpp"
 #include "gpu/effect_policy.hpp"
 #include "gpu/effect_shaders.hpp"
+#include "gpu/frame_inputs.hpp"
 #include "gpu/isolation.hpp"
 #include "gpu/layer_shaders.hpp"
 
@@ -131,6 +132,7 @@ struct EffectPassRenderer::Impl final {
     struct ShaderProgram final {
         std::shared_future<ComPtr<ID3DBlob>> pending;
         ComPtr<ID3D11PixelShader> shader;
+        bool live = false;
     };
     struct CacheKey final {
         std::string layer;
@@ -1056,6 +1058,14 @@ struct EffectPassRenderer::Impl final {
             static_cast<std::uint32_t>(std::max<LONG>(0, clip.bottom - clip.top));
         if (sample_width == 0U || sample_height == 0U)
             return {};
+        const std::vector<Pass>* const program = program_of(effect);
+        const bool live = program != nullptr && std::ranges::any_of(*program, [this](const Pass& pass) {
+            if (pass.kind != 1U)
+                return false;
+            const auto compiled = shader_programs.find(pass.shader_source);
+            return compiled != shader_programs.end() &&
+                   (compiled->second.live || compiled->second.pending.valid());
+        });
         const bool rate_limited = effect.refresh_rate > 0.0;
         const CacheKey cache_key{
             std::string(layer_id),
@@ -1089,6 +1099,7 @@ struct EffectPassRenderer::Impl final {
                                                .count()),
                 width,
                 height,
+                live,
             };
         }
         ID3D11Texture2D* resolved_source = source_texture;
@@ -1108,7 +1119,6 @@ struct EffectPassRenderer::Impl final {
         context->OMSetRenderTargets(0U, nullptr, nullptr);
         ID3D11ShaderResourceView* cleared[]{nullptr, nullptr};
         context->PSSetShaderResources(0U, 2U, cleared);
-        const std::vector<Pass>* const program = program_of(effect);
         // An effect reads its inputs only inside its bounds extended by the sample reach and by its
         // widest blur, so that region is all the workspace has to hold. Capturing the whole
         // framebuffer instead makes every effect cost the window's area rather than its own.
@@ -1131,6 +1141,7 @@ struct EffectPassRenderer::Impl final {
             measure_backdrop(effect, current->view.Get(), logical_width, logical_height,
                              frame_seconds);
         EffectPassTelemetry telemetry;
+        telemetry.live = live;
         if (program != nullptr) {
             for (const Pass& pass : *program) {
                 if (pass.kind == 0U) {
@@ -1361,6 +1372,12 @@ void EffectPassRenderer::release_layer(const std::string_view layer_id) noexcept
     }
 }
 
+void EffectPassRenderer::release_programs(const std::string_view prefix) {
+    for (auto it = impl_->programs.lower_bound(prefix);
+         it != impl_->programs.end() && it->first.starts_with(prefix);)
+        it = impl_->programs.erase(it);
+}
+
 void EffectPassRenderer::declare_pass(const std::string_view effect_id, const std::uint32_t index,
                                       const std::uint32_t kind, const double radius,
                                       const std::uint32_t downsample,
@@ -1379,12 +1396,13 @@ void EffectPassRenderer::declare_pass(const std::string_view effect_id, const st
         pass.shader_source = std::string(effect_prelude) +
             std::string(rounded_clip_hlsl) + std::string(hlsl_source) +
             std::string(effect_entry);
-        auto [program, inserted] =
-            impl_->shader_programs.try_emplace(pass.shader_source);
-        if (inserted) {
+        const auto position = impl_->shader_programs.lower_bound(pass.shader_source);
+        if (position == impl_->shader_programs.end() || position->first != pass.shader_source) {
+            Impl::ShaderProgram compiled;
+            compiled.live = gpu::uses_frame_inputs(hlsl_source);
             if (impl_->asynchronous_shader_compilation) {
                 const std::string source = pass.shader_source;
-                program->second.pending = std::async(
+                compiled.pending = std::async(
                     std::launch::async,
                     [source] {
                         return compile_shader(source, "main", "ps_5_0");
@@ -1398,11 +1416,13 @@ void EffectPassRenderer::declare_pass(const std::string_view effect_id, const st
                         bytecode->GetBufferPointer(),
                         bytecode->GetBufferSize(),
                         nullptr,
-                        &program->second.shader
+                        &compiled.shader
                     ),
                     "D3D11 authored effect shader creation"
                 );
             }
+            // Failed synchronous compilation must remain a failure on the next declaration.
+            impl_->shader_programs.emplace_hint(position, pass.shader_source, std::move(compiled));
         }
     }
     std::vector<Impl::Pass>& program = impl_->programs[std::string(effect_id)];

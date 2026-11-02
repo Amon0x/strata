@@ -1,85 +1,58 @@
 #pragma once
 
-#include <chrono>
-#include <condition_variable>
 #include <cstdint>
-#include <deque>
 #include <memory>
-#include <mutex>
+#include <optional>
 #include <span>
-#include <thread>
+#include <string>
 #include <vector>
 
+#include "base/pending.hpp"
 #include "resource/image.hpp"
 
 namespace strata::resource {
 
+/** Usable first pixels and, for an animation, the second frame and exclusive decoder continuation. */
+struct ImagePreparation final {
+    ImageDimensions dimensions;
+    ImageFrame first;
+    std::optional<ImageFrame> second;
+    std::optional<ImageDecoder> continuation;
+};
+
+/** Decodes at most two frames; a still result retains neither encoded bytes nor a decoder. */
+[[nodiscard]] ImagePreparation prepare_image(std::vector<std::uint8_t> encoded);
+
 /**
- * An animation played from its encoded bytes as it goes, for one too long to hold decoded: a
- * worker decodes a few frames ahead and the player shows each in its turn, so memory holds a
- * handful of frames however many the animation has. Each play decodes the file again; the file's
- * loop count decides how many plays there are.
- *
- * show() and pixels() belong to one thread (the Surface's); the worker only fills the queue.
+ * Owner-clock playback with three-frame lookahead. Each pool job owns its decoder exclusively and
+ * returns when its reserved slots are full; no worker waits for the player. Completion adopts on
+ * the supplied task owner, which must outlive this stream. Closing cancels without joining.
  */
 class ImageStream final {
   public:
-    ImageStream(std::vector<std::uint8_t> encoded, ImageDimensions canvas,
-                std::vector<std::uint8_t> first_frame, std::uint32_t first_delay_ms);
+    ImageStream(ImagePreparation preparation, base::TaskOwner& tasks, std::string label);
     ~ImageStream();
 
     ImageStream(const ImageStream&) = delete;
     ImageStream& operator=(const ImageStream&) = delete;
 
     /**
-     * Moves to the frame showing now. The stream keeps its own clock, from the first call, so
-     * every Image showing it shows the same frame; the first call starts decoding.
+     * Starts from the first call's owner timestamp. Repeated samples share one clock; earlier
+     * timestamps do not rewind. A late decoder holds the current canvas instead of rushing frames.
      */
-    void advance();
+    void advance(std::int64_t frame_time_nanos);
     /** The frame showing now: straight-alpha RGBA8 rows of the canvas. */
-    [[nodiscard]] std::span<const std::uint8_t> pixels() const noexcept {
-        return current_;
-    }
+    [[nodiscard]] std::span<const std::uint8_t> pixels() const noexcept;
     /** Moves whenever pixels() changes. */
-    [[nodiscard]] std::uint64_t revision() const noexcept {
-        return revision_;
-    }
-    [[nodiscard]] ImageDimensions dimensions() const noexcept {
-        return canvas_;
-    }
+    [[nodiscard]] std::uint64_t revision() const noexcept;
+    [[nodiscard]] ImageDimensions dimensions() const noexcept;
+    [[nodiscard]] bool finished() const noexcept;
+    /** A frame callback observes decoding so fixed-timestamp settling can resume a starved player. */
+    [[nodiscard]] base::Readiness readiness() const noexcept;
 
   private:
-    struct Frame final {
-        std::vector<std::uint8_t> rgba;
-        std::int64_t delay_nanos = 0;
-    };
-
-    /** Starts a play from the file's first frame, on a fresh worker. */
-    void start_play();
-    void stop_worker() noexcept;
-    void decode_pass(std::stop_token stop);
-
-    const std::vector<std::uint8_t> encoded_;
-    const ImageDimensions canvas_;
-
-    // The worker's side, behind the mutex.
-    std::mutex mutex_;
-    std::condition_variable_any space_;
-    std::deque<Frame> ready_;
-    bool pass_done_ = false;
-    bool pass_failed_ = false;
-    std::uint32_t loop_count_ = 0U;
-    std::jthread worker_;
-
-    // The player's side.
-    std::vector<std::uint8_t> current_;
-    std::uint64_t revision_ = 1U;
-    bool started_ = false;
-    bool finished_ = false;
-    std::uint32_t plays_ = 0U;
-    std::chrono::steady_clock::time_point started_at_{};
-    /** When the frame showing now gives way, on the playback clock. */
-    std::int64_t frame_end_ = 0;
+    struct State;
+    std::shared_ptr<State> state_;
 };
 
 } // namespace strata::resource

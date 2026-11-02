@@ -473,6 +473,11 @@ struct PlatformServices::Impl final : PlatformOutbox {
 
     ~Impl() override {
         // Their threads answer through this; they end first.
+        for (const auto& [id, client] : clients) {
+            static_cast<void>(id);
+            client->closed->store(true);
+        }
+        dialogs.clear();
         services.clear();
         for (auto& [id, video] : videos)
             release(video);
@@ -550,6 +555,14 @@ struct PlatformServices::Impl final : PlatformOutbox {
             std::erase_if(requests, [id](const Request& request) { return request.client == id; });
             std::erase_if(answered, [id](const PlatformAnswer& said) { return said.client == id; });
         }
+        const auto belongs = [id](const Request& request) { return request.client == id; };
+        std::erase_if(captures, belongs);
+        for (auto& [capture, requests_for_frame] : capture_batches) {
+            static_cast<void>(capture);
+            std::erase_if(requests_for_frame, belongs);
+        }
+        std::erase_if(window_requests,
+                      [id](const WindowRequest& request) { return request.client == id; });
         for (const std::unique_ptr<PlatformService>& service : services)
             service->close_client(id);
         for (auto entry = videos.begin(); entry != videos.end();) {
@@ -1020,22 +1033,32 @@ struct PlatformServices::Impl final : PlatformOutbox {
         return result;
     }
 
-    void frame_presented(const std::uint32_t width, const std::uint32_t height,
+    void frame_requested(const std::uint64_t request) {
+        auto [batch, inserted] = capture_batches.try_emplace(request);
+        if (!inserted)
+            throw std::logic_error("capture presentation request is already pending");
+        batch->second.swap(captures);
+    }
+
+    void frame_presented(const std::uint64_t request_id, const std::uint32_t width,
+                         const std::uint32_t height,
                          const std::span<const std::uint8_t> rgba) {
-        std::vector<Request> due;
-        due.swap(captures);
-        std::vector<PlatformAnswer> finished;
-        for (const Request& request : due) {
+        auto batch = capture_batches.extract(request_id);
+        if (batch.empty())
+            throw std::logic_error("capture presentation request is not pending");
+        for (const Request& request : batch.mapped()) {
+            if (request.closed != nullptr && request.closed->load())
+                continue;
+            PlatformAnswer finished;
             try {
-                finished.push_back(capture(request, width, height, rgba));
+                finished = capture(request, width, height, rgba);
             } catch (const std::exception& error) {
-                finished.push_back(
-                    answer(request, captured(false, error.what(), 0U, 0U, {}, {}, false)));
+                finished = answer(request, captured(false, error.what(), 0U, 0U, {}, {}, false));
             }
+            const std::scoped_lock lock(mutex);
+            if (request.closed == nullptr || !request.closed->load())
+                answered.push_back(std::move(finished));
         }
-        const std::scoped_lock lock(mutex);
-        for (PlatformAnswer& done : finished)
-            answered.push_back(std::move(done));
     }
 
     // ---- dragging out ----
@@ -1150,6 +1173,7 @@ struct PlatformServices::Impl final : PlatformOutbox {
         window_request.height = number_field(request.payload, "height");
         window_request.x = number_field(request.payload, "x");
         window_request.y = number_field(request.payload, "y");
+        window_request.closed = request.closed;
         window_requests.push_back(std::move(window_request));
     }
 
@@ -1428,7 +1452,8 @@ struct PlatformServices::Impl final : PlatformOutbox {
                 if (SUCCEEDED(apartment))
                     CoUninitialize();
                 const std::scoped_lock lock(mutex);
-                answered.push_back(std::move(finished));
+                if (request.closed == nullptr || !request.closed->load())
+                    answered.push_back(std::move(finished));
             });
         } else if (kind == "system.notify") {
             answers.push_back(answer(request, {{"shown", JsonValue(notify(request))}}));
@@ -1635,8 +1660,6 @@ struct PlatformServices::Impl final : PlatformOutbox {
     std::map<std::string, Video, std::less<>> videos;
     /** Answers from dialogs that closed on their own threads, waiting for the next pump. */
     std::vector<PlatformAnswer> answered;
-    /** Declared last: joined first, while everything a dialog thread uses is still alive. */
-    std::vector<std::jthread> dialogs;
     bool ole = false;
     std::mutex mutex;
     std::deque<Request> requests;
@@ -1661,11 +1684,15 @@ struct PlatformServices::Impl final : PlatformOutbox {
     std::vector<WindowRequest> window_requests;
     /** `node.capture` requests waiting for the next presented frame. */
     std::vector<Request> captures;
+    /** Owner-only batches sealed to a particular asynchronous presentation request. */
+    std::map<std::uint64_t, std::vector<Request>> capture_batches;
     std::uint64_t capture_count = 0U;
     SystemAppearance system_appearance;
     bool appearance_changed = false;
     /** Network, files and sound: they finish later, on threads of their own. */
     std::vector<std::unique_ptr<PlatformService>> services;
+    /** Joined before platform/OLE teardown, while their reply queue and mutex still exist. */
+    std::vector<std::jthread> dialogs;
 };
 
 PlatformServices::PlatformServices(HWND window, ResourceReader read_resource,
@@ -1732,10 +1759,11 @@ std::string PlatformServices::event_json(const PlatformAnswer& event) {
     }));
 }
 
-void PlatformServices::answer(std::string client, const std::uint64_t request, std::string json) {
+void PlatformServices::answer(const WindowRequest& request, std::string json) {
     const std::scoped_lock lock(impl_->mutex);
-    impl_->answered.push_back(
-        PlatformAnswer{std::move(client), request, std::move(json), std::nullopt, std::nullopt});
+    if (request.closed == nullptr || !request.closed->load())
+        impl_->answered.push_back(
+            PlatformAnswer{request.client, request.request, std::move(json), std::nullopt, std::nullopt});
 }
 
 std::vector<WindowRequest> PlatformServices::take_window_requests() {
@@ -1754,9 +1782,14 @@ bool PlatformServices::wants_frame() const noexcept {
     return !impl_->captures.empty();
 }
 
-void PlatformServices::frame_presented(const std::uint32_t width, const std::uint32_t height,
+void PlatformServices::frame_requested(const std::uint64_t request) {
+    impl_->frame_requested(request);
+}
+
+void PlatformServices::frame_presented(const std::uint64_t request, const std::uint32_t width,
+                                       const std::uint32_t height,
                                        const std::span<const std::uint8_t> rgba) {
-    impl_->frame_presented(width, height, rgba);
+    impl_->frame_presented(request, width, height, rgba);
 }
 
 void PlatformServices::close_client(const std::string_view client) noexcept {

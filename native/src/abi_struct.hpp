@@ -23,6 +23,9 @@ namespace strata::abi_detail {
 template <typename T> inline constexpr std::size_t oldest_struct_size = sizeof(T);
 
 template <>
+inline constexpr std::size_t oldest_struct_size<strata_host_snapshot_config> =
+    offsetof(strata_host_snapshot_config, execution);
+template <>
 inline constexpr std::size_t oldest_struct_size<strata_surface_config> =
     offsetof(strata_surface_config, extensions);
 template <>

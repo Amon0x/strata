@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -68,6 +69,10 @@ struct ApplicationHostOptions final {
     bool capture_frames = true;
     /** Receives every framed render packet in stream order, for recording and replay. */
     std::function<void(const RecordedPacket&)> packet_observer;
+    /** When absent, use the scenario's mode (deterministic unless explicitly configured). */
+    std::optional<TaskExecution> task_execution;
+    /** Optional window-event notification for interactive hosts; called from workers too. */
+    std::function<void()> frame_wake;
 };
 
 /** One complete public-ABI application/Surface host with deterministic in-memory services. */
@@ -81,8 +86,12 @@ class ApplicationHost final {
     ApplicationHost& operator=(const ApplicationHost&) = delete;
 
     void frame(std::int64_t time_nanoseconds);
+    /** Frames/adopts until engine preparation is complete, preserving packet consumption order. */
+    void settle(std::int64_t time_nanoseconds,
+                std::chrono::milliseconds timeout = std::chrono::seconds(5));
     void enqueue(std::span<const strata_input_event> events);
-    void publish(const SnapshotConfig& snapshot);
+    /** Returns the admission receipt; discarding it does not cancel publication. */
+    HostPublication publish(const SnapshotConfig& snapshot);
     void resize(double width, double height, double scale, std::int64_t time_nanoseconds);
     void close();
     void cancel_interactions();

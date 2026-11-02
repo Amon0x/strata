@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <iterator>
 #include <limits>
 #include <optional>
 #include <span>
@@ -323,16 +322,16 @@ struct StyleShadow final {
     return result;
 }
 
-void append_fragment(RenderCommandBuffer& output, const std::vector<RenderCommand>& fragment,
+void append_fragment(RenderCommandBuffer& output, const RenderCommandView& fragment,
                      RenderOperationCounters& counters, const double opacity = 1.0) {
     if (opacity == 1.0 || fragment.empty()) {
-        output.append(fragment);
+        output.append(fragment, 0U, fragment.size());
         counters.commands_emitted += fragment.size();
         return;
     }
     // A scope rather than rewritten payloads: a fading fragment emits identical draws each frame.
     output.append(OpacityPushRenderCommand{opacity});
-    output.append(fragment);
+    output.append(fragment, 0U, fragment.size());
     output.append(OpacityPopRenderCommand{});
     counters.commands_emitted += fragment.size() + 2U;
 }
@@ -419,7 +418,7 @@ RenderEngine::RenderEngine() : implementation_(std::make_unique<Impl>()) {}
 RenderEngine::~RenderEngine() = default;
 
 bool RenderEngine::Impl::base_matches(const RetainedTree& tree, const LayoutResult& layout,
-                                      const InputRouter& input, const MotionRuntime& motion,
+                                      const InputPresentation& input, const MotionRuntime& motion,
                                       const RenderGenerationToken& generations) const noexcept {
     return retained_base_generations.has_value() && *retained_base_generations == generations &&
            tree.dirty_count() == 0U && motion.active_count() == 0U &&
@@ -432,7 +431,7 @@ bool RenderEngine::Impl::base_matches(const RetainedTree& tree, const LayoutResu
 }
 
 bool RenderEngine::Impl::presentation_frame(const RetainedTree& tree, const LayoutResult& layout,
-                                            const InputRouter& input, const MotionRuntime& motion,
+                                            const InputPresentation& input, const MotionRuntime& motion,
                                             const WidgetRegistry& widgets,
                                             const RenderGenerationToken& generations) {
     if (!retained_base_generations.has_value() || *retained_base_generations != generations ||
@@ -528,7 +527,7 @@ bool RenderEngine::Impl::presentation_frame(const RetainedTree& tree, const Layo
 }
 
 void RenderEngine::Impl::retain_base(const RetainedTree& tree, const LayoutResult& layout,
-                                     const InputRouter& input,
+                                     const InputPresentation& input,
                                      const RenderGenerationToken& generations,
                                      const RenderCommandBuffer& commands) {
     retained_base_commands = commands;
@@ -588,7 +587,7 @@ std::vector<RenderCommand> RenderEngine::snapshot_subtree(
 }
 
 RenderOperationCounters
-RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const InputRouter& input,
+RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const InputPresentation& input,
                      const CommandIndex& commands, const WidgetRegistry& widgets,
                      const BehaviorRegistry& behaviors, const MotionRuntime& motion,
                      const TextEngine* text, const resource::SvgImageRegistry* svg_images,
@@ -657,13 +656,13 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             const LayoutRecord* record = layout.find(node->identity());
             if (record == nullptr)
                 continue;
-            std::vector<RenderCommand> overlay = build_widget_overlay(
+            RenderCommandBuffer overlay = build_widget_overlay(
                 widgets, *node, *record, layout, input, commands, text, svg_images, &motion, 1.0);
             append_behavior_overlays(behaviors, *node, *record, layout, input, commands, text,
                                      svg_images, &motion, 1.0, true, overlay);
             if (overlay.empty())
                 continue;
-            append_fragment(output, overlay, counters);
+            append_fragment(output, overlay.commands(), counters);
             ++counters.overlays_rendered;
         }
     };
@@ -1175,7 +1174,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         }
         const bool rebuild = !retained_layout_matches && !has_fragment_translation;
         if (rebuild) {
-            std::vector<RenderCommand> fragment =
+            RenderCommandBuffer fragment =
                 build_widget_fragment(widgets, node, *record, layout, input, commands, text,
                                       svg_images, &motion, 1.0, false);
             Impl::CachedFragment next{
@@ -1191,7 +1190,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                     fragment_children_match ? std::move(found->second.layout)
                                             : Impl::LayoutSnapshot{},
                     fragment_children_match),
-                std::move(fragment),
+                fragment.commands(),
                 {},
             };
             if (found != implementation_->fragments.end())
@@ -1529,18 +1528,17 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 ? Impl::uniform_translation(retained_presentation->layout, node, *record, layout)
                 : std::nullopt;
         if (!retained_presentation_layout_matches && !presentation_translation.has_value()) {
-            std::vector<RenderCommand> presentation;
+            RenderCommandBuffer presentation;
             append_widget_foreground(widgets, node, *record, layout, input, commands, text,
                                      svg_images, &motion, 1.0, presentation, false);
             bool local_overlay_rendered = false;
             if (lifecycle != nullptr && lifecycle->present.overlay != nullptr &&
                 !lifecycle->present.detached_overlay) {
                 const std::size_t before = presentation.size();
-                std::vector<RenderCommand> overlay =
+                RenderCommandBuffer overlay =
                     build_widget_overlay(widgets, node, *record, layout, input, commands, text,
                                          svg_images, &motion, 1.0, false);
-                presentation.insert(presentation.end(), std::make_move_iterator(overlay.begin()),
-                                    std::make_move_iterator(overlay.end()));
+                presentation.append(overlay.commands(), 0U, overlay.size());
                 local_overlay_rendered = presentation.size() != before;
             }
             const std::size_t before_behavior = presentation.size();
@@ -1562,7 +1560,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                     presentation_children_match
                         ? std::move(retained_presentation->layout) : Impl::LayoutSnapshot{},
                     presentation_children_match),
-                std::move(presentation),
+                presentation.commands(),
                 local_overlay_rendered,
             };
         }

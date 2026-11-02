@@ -77,6 +77,8 @@ class DescriptionBuilder final : public runtime::AnimationHost {
     [[nodiscard]] bool reads_frame_time() const;
     [[nodiscard]] runtime::AnimateSample animate(const runtime::AnimateCall& call) override;
     explicit DescriptionBuilder(runtime::ApplicationContext& application);
+    /** Only pending readers are visited; each builder observes adoption independently. */
+    [[nodiscard]] bool readiness_changed() const;
     DescriptionBuilder(runtime::ApplicationContext& application, const WidgetRegistry& widgets);
     ~DescriptionBuilder();
     DescriptionBuilder(const DescriptionBuilder&) = delete;
@@ -166,6 +168,7 @@ class DescriptionBuilder final : public runtime::AnimationHost {
         std::map<std::string, runtime::ExpressionHostDependency, std::less<>> host;
         std::map<runtime::StateAddress, runtime::Value> state;
         std::vector<RetainedRead> retained;
+        std::vector<base::ReadinessRead> readiness;
         /**
          * The body raised an error. Build diagnostics are reported by every build, so such a body
          * is described again by each one; the bodies around it keep their output and take its new
@@ -223,6 +226,7 @@ class DescriptionBuilder final : public runtime::AnimationHost {
         runtime::DependencyRecorder::LexicalReads lexical;
         runtime::DependencyRecorder::HostReads host;
         std::vector<ChildRef> children;
+        std::vector<base::ReadinessRead> readiness;
     };
 
     /**
@@ -659,6 +663,8 @@ class DescriptionBuilder final : public runtime::AnimationHost {
     /** Readers of retained values, by the value's name. */
     std::unordered_map<std::string, Readers, KeyHash, std::equal_to<>> retained_readers_;
     /** Bodies that raised errors: described again by every build, which reports them. */
+    /** Bodies observing pending preparation or repeatedly published resource metadata. */
+    Readers readiness_readers_;
     Readers erroring_;
     // What changed since the last build looked.
     std::uint64_t state_observer_ = 0U;

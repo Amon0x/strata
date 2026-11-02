@@ -1,6 +1,7 @@
 #include "host/session.hpp"
 
 #include <exception>
+#include <mutex>
 #include <new>
 #include <stdexcept>
 #include <utility>
@@ -30,6 +31,118 @@ namespace {
     return result;
 }
 
+/** A prepared runtime and its ticket share only notification lifetime, never UI services. */
+class PreparationWake final {
+  public:
+    explicit PreparationWake(std::function<void()> callback) : callback_(std::move(callback)) {}
+
+    void notify() {
+        const std::scoped_lock lock(mutex_);
+        if (callback_)
+            callback_();
+    }
+
+    void close() noexcept {
+        const std::scoped_lock lock(mutex_);
+        callback_ = {};
+    }
+
+    static strata_status signal(void* const context) noexcept {
+        try {
+            static_cast<PreparationWake*>(context)->notify();
+            return STRATA_STATUS_OK;
+        } catch (...) {
+            return STRATA_STATUS_INTERNAL_ERROR;
+        }
+    }
+
+  private:
+    std::mutex mutex_;
+    std::function<void()> callback_;
+};
+
+/** Startup loading owns its reader; the live write callback is installed only after transfer. */
+struct PreparedDurability final {
+    std::function<std::optional<std::string>()> read;
+    std::optional<strata_durable_store_adapter> live;
+    std::string bytes;
+
+    static strata_status load(void* const context, strata_string_view,
+                               strata_bytes_view* const output) noexcept {
+        try {
+            auto& self = *static_cast<PreparedDurability*>(context);
+            std::optional<std::string> value = self.read();
+            if (!value.has_value())
+                return STRATA_STATUS_NOT_FOUND;
+            self.bytes = std::move(*value);
+            *output = {reinterpret_cast<const std::uint8_t*>(self.bytes.data()), self.bytes.size()};
+            return STRATA_STATUS_OK;
+        } catch (const std::bad_alloc&) {
+            return STRATA_STATUS_OUT_OF_MEMORY;
+        } catch (...) {
+            return STRATA_STATUS_SERVICE_UNAVAILABLE;
+        }
+    }
+
+    static strata_status write(void* const context, const strata_string_view application,
+                                const strata_bytes_view value) noexcept {
+        try {
+            const auto& self = *static_cast<PreparedDurability*>(context);
+            if (!self.live.has_value())
+                return STRATA_STATUS_SERVICE_UNAVAILABLE;
+            return self.live->write(self.live->user_data, application, value);
+        } catch (...) {
+            return STRATA_STATUS_INTERNAL_ERROR;
+        }
+    }
+};
+
+/** Preparation mutates this exclusively; after transfer only the Session owner may access it. */
+struct PreparedServices final {
+    std::shared_ptr<ResourceRoot> resources;
+    std::shared_ptr<PreparationWake> wake;
+    std::optional<PreparedDurability> durability;
+    std::vector<Diagnostic> diagnostics;
+    std::vector<SnapshotRevision> published;
+};
+
+void deliver_diagnostics(const std::function<void(const strata_diagnostic&)>& observer,
+                         std::vector<Diagnostic>& diagnostics) noexcept {
+    const std::vector<Diagnostic> batch = std::move(diagnostics);
+    if (observer) {
+        for (const Diagnostic& diagnostic : batch) {
+            strata_diagnostic value{};
+            value.struct_size = sizeof(value);
+            value.version = STRATA_DIAGNOSTIC_VERSION_CURRENT;
+            value.id = diagnostic.id;
+            value.severity = static_cast<strata_diagnostic_severity>(diagnostic.severity);
+            value.code = strata::view(diagnostic.code);
+            value.message = strata::view(diagnostic.message);
+            if (diagnostic.source_id.has_value())
+                value.source_id = strata::view(*diagnostic.source_id);
+            if (diagnostic.range.has_value()) {
+                const SourceRange& range = *diagnostic.range;
+                value.range = {range.byte_start, range.byte_end, range.line_start, range.column_start,
+                               range.line_end, range.column_end};
+            }
+            value.occurrence_count = diagnostic.occurrence_count;
+            value.sequence = diagnostic.sequence;
+            value.first_frame_index = diagnostic.first_frame_index;
+            value.frame_index = diagnostic.frame_index;
+            value.dropped_count = diagnostic.dropped_count;
+            if (diagnostic.component_path.has_value())
+                value.component_path = strata::view(*diagnostic.component_path);
+            if (diagnostic.expected.has_value())
+                value.expected = strata::view(*diagnostic.expected);
+            try {
+                observer(value);
+            } catch (...) {
+                // Diagnostic observers have the same non-unwinding contract before and after adoption.
+            }
+        }
+    }
+}
+
 } // namespace
 
 struct Session::Impl final {
@@ -45,6 +158,12 @@ struct Session::Impl final {
         config.clock = strata_clock{sizeof(strata_clock), this, &Impl::clock};
         config.diagnostics = strata_diagnostic_sink{sizeof(strata_diagnostic_sink), this,
                                                     &Impl::diagnostic};
+        config.task_execution = static_cast<strata_task_execution>(options.task_execution);
+        if (options.frame_wake) {
+            config.frame_wake = strata_frame_wake_adapter{
+                sizeof(strata_frame_wake_adapter), this, &Impl::wake,
+            };
+        }
         runtime = std::make_unique<strata::Runtime>(config);
         strata_runtime* const native = runtime->native_handle();
 
@@ -100,7 +219,7 @@ struct Session::Impl final {
     ~Impl() {
         // Bindings unregister through the runtime, so they go first.
         bindings.reset();
-        stream.reset();
+        prepared_actions = {};
         if (surface.has_value()) {
             try {
                 surface->abandon();
@@ -114,6 +233,15 @@ struct Session::Impl final {
 
     static std::int64_t clock(void* const user_data) noexcept {
         return static_cast<Impl*>(user_data)->time;
+    }
+
+    static strata_status wake(void* const user_data) noexcept {
+        try {
+            static_cast<const Impl*>(user_data)->options.frame_wake();
+            return STRATA_STATUS_OK;
+        } catch (...) {
+            return STRATA_STATUS_INTERNAL_ERROR;
+        }
     }
 
     static void diagnostic(void* const user_data, const strata_diagnostic* const value) noexcept {
@@ -178,19 +306,21 @@ struct Session::Impl final {
         return *surface;
     }
 
-    void close_surface(const std::function<void(const RenderPacket&)>& consume) {
+    void acknowledge_release() {
         if (!surface.has_value())
             return;
-        // The packet stream owns the decoder state for the terminal release.
-        if (stream == nullptr)
-            stream = std::make_unique<SurfacePacketStream>(*surface);
-        const RenderPacket& terminal = stream->prepare_release();
-        if (consume)
-            consume(terminal);
-        stream->acknowledge_release();
-        stream.reset();
+        surface->acknowledge_release_packet();
         surface->close();
         surface.reset();
+    }
+
+    void close_surface(const std::function<void(const EncodedRenderPacket&)>& consume) {
+        if (!surface.has_value())
+            return;
+        const EncodedRenderPacket terminal = surface->prepare_release_packet();
+        if (consume)
+            consume(terminal);
+        acknowledge_release();
     }
 
     SessionOptions options;
@@ -198,11 +328,12 @@ struct Session::Impl final {
     SelectedExtensions extensions;
     std::unique_ptr<Bindings> bindings;
     std::optional<strata::Surface> surface;
-    std::unique_ptr<SurfacePacketStream> stream;
     std::vector<std::string> module_resources;
     std::string module_id_scratch;
     std::string module_text_scratch;
     std::int64_t time = 0;
+    std::shared_ptr<PreparedServices> prepared;
+    ActionBindings prepared_actions;
 };
 
 Session::Session(SessionOptions options, const SessionAdapters& adapters)
@@ -340,37 +471,31 @@ void Session::enqueue(const std::span<const strata_input_event> events) {
         throw std::runtime_error("the Surface input queue accepted only part of a batch");
 }
 
-SurfacePacketFrame Session::frame(const std::int64_t time_nanoseconds) {
+SurfacePacketCommit Session::frame(const std::int64_t time_nanoseconds) {
     strata::Surface& surface = impl_->live_surface();
     if (impl_->bindings != nullptr)
         impl_->bindings->synchronize();
     impl_->time = time_nanoseconds;
-    if (impl_->stream == nullptr)
-        impl_->stream = std::make_unique<SurfacePacketStream>(surface);
-    return impl_->stream->frame(time_nanoseconds);
+    return frame_surface(surface.native_handle(), time_nanoseconds);
 }
 
-void Session::record_host_frame(const RenderPacket& packet, const std::int64_t submit_nanoseconds) {
-    ProfilerHostFrame backend;
-    backend.submit_nanoseconds = submit_nanoseconds;
-    record_host_frame(packet, backend);
+EncodedRenderPacket Session::prepare_release() {
+    return impl_->surface.has_value() ? impl_->surface->prepare_release_packet()
+                                     : EncodedRenderPacket{};
 }
 
-void Session::record_host_frame(const RenderPacket& packet, const ProfilerHostFrame& backend) {
-    ProfilerHostFrame telemetry = backend;
-    telemetry.draw_calls = packet.planned_draw_count;
-    telemetry.batches = packet.batches.size();
-    telemetry.vertices = packet.vertices.size() / packet_vertex_bytes;
-    impl_->live_surface().record_host_frame(telemetry);
+void Session::acknowledge_release() {
+    impl_->acknowledge_release();
 }
 
-void Session::close_surface(const std::function<void(const RenderPacket&)>& consume) {
+void Session::close_surface(const std::function<void(const EncodedRenderPacket&)>& consume) {
     impl_->close_surface(consume);
 }
 
-void Session::close(const std::function<void(const RenderPacket&)>& consume) {
+void Session::close(const std::function<void(const EncodedRenderPacket&)>& consume) {
     impl_->close_surface(consume);
     impl_->bindings.reset();
+    impl_->prepared_actions = {};
     if (impl_->runtime != nullptr) {
         impl_->runtime->close();
         impl_->runtime.reset();
@@ -378,7 +503,6 @@ void Session::close(const std::function<void(const RenderPacket&)>& consume) {
 }
 
 void Session::abandon() noexcept {
-    impl_->stream.reset();
     if (impl_->surface.has_value()) {
         try {
             impl_->surface->abandon();
@@ -387,6 +511,256 @@ void Session::abandon() noexcept {
         }
         impl_->surface.reset();
     }
+}
+
+struct SessionPreparation::Impl final {
+    struct Input final {
+        SessionPrepareOptions options;
+        std::shared_ptr<PreparedServices> services;
+        std::string error;
+    };
+
+    explicit Impl(SessionPrepareOptions options)
+        : services(std::make_shared<PreparedServices>()),
+          on_diagnostic(std::move(options.session.on_diagnostic)) {
+        if (options.resources == nullptr || options.module_resource.empty())
+            throw std::invalid_argument("Session preparation requires owned resources and a module");
+        services->resources = options.resources;
+        if (options.session.frame_wake) {
+            services->wake =
+                std::make_shared<PreparationWake>(std::move(options.session.frame_wake));
+            options.session.frame_wake = [wake = services->wake] { wake->notify(); };
+        }
+        if (!options.session.read_text) {
+            options.session.read_text = [resources = options.resources](const std::string_view id) {
+                return resources->read_text(utf8_path(id));
+            };
+        }
+        options.session.on_diagnostic = [retained = services](const strata_diagnostic& diagnostic) {
+            retained->diagnostics.push_back(strata::detail::copy_diagnostic(diagnostic));
+        };
+        if (options.load_durable)
+            services->durability.emplace(PreparedDurability{std::move(options.load_durable), {}, {}});
+        auto input = std::make_unique<Input>(Input{std::move(options), services, {}});
+        strata_preparation_config config{};
+        config.struct_size = sizeof(config);
+        config.execution = static_cast<strata_task_execution>(input->options.session.task_execution);
+        if (services->wake != nullptr) {
+            config.frame_wake = {sizeof(strata_frame_wake_adapter), services->wake.get(),
+                                 &PreparationWake::signal};
+        }
+        config.context = input.get();
+        config.work = &Impl::run;
+        config.release_context = &Impl::release_input;
+        config.release_result = &Impl::release_result;
+        const strata_result started = strata_preparation_start(&config, &handle);
+        if (started.status == STRATA_STATUS_OK)
+            static_cast<void>(input.release());
+        strata::require_ok(started, "Session preparation submission");
+    }
+
+    ~Impl() {
+        if (handle != nullptr && strata_preparation_release(handle).status != STRATA_STATUS_OK)
+            std::terminate();
+        if (!taken && services->wake != nullptr)
+            services->wake->close();
+    }
+
+    static void release_input(void* const input) noexcept {
+        delete static_cast<Input*>(input);
+    }
+
+    static void release_result(void* const value) noexcept {
+        delete static_cast<PreparedSession*>(value);
+    }
+
+    static strata_status fail(Input& input, const strata_status status, const char* const message,
+                               strata_string_view& error) noexcept {
+        try {
+            input.error = message;
+            error = strata::view(input.error);
+            return status;
+        } catch (...) {
+            error = strata::view("Session preparation exhausted memory while retaining its error.");
+            return STRATA_STATUS_OUT_OF_MEMORY;
+        }
+    }
+
+    static strata_status run(void* const context, const strata_cancellation* const cancellation,
+                              void** const output, strata_string_view* const error) noexcept {
+        auto& input = *static_cast<Input*>(context);
+        std::vector<CapturedSnapshot> snapshots = std::move(input.options.snapshots);
+        try {
+            SessionPrepareOptions& options = input.options;
+            if (!options.schemas_resource.empty()) {
+                options.session.schemas =
+                    options.resources->read_text(utf8_path(options.schemas_resource));
+            }
+            if (strata_cancellation_requested(cancellation) != 0U)
+                return STRATA_STATUS_SERVICE_UNAVAILABLE;
+            SessionAdapters adapters;
+            adapters.resources = options.resources->adapter();
+            if (input.services->durability.has_value()) {
+                adapters.durable_store = strata_durable_store_adapter{
+                    sizeof(strata_durable_store_adapter), &*input.services->durability,
+                    &PreparedDurability::load, &PreparedDurability::write,
+                };
+            }
+            auto prepared = std::make_unique<PreparedSession>();
+            prepared->session = std::make_unique<Session>(std::move(options.session), adapters);
+            Session& session = *prepared->session;
+            session.impl_->prepared = input.services;
+            options.actions.install(session.runtime());
+            session.impl_->prepared_actions = std::move(options.actions);
+            session.set_time(options.time_nanoseconds);
+            input.services->published.reserve(snapshots.size());
+            for (CapturedSnapshot& snapshot : snapshots) {
+                if (strata_cancellation_requested(cancellation) != 0U)
+                    return STRATA_STATUS_SERVICE_UNAVAILABLE;
+                static_cast<void>(
+                    session.runtime().publish_host_snapshot(
+                        snapshot.source.id, snapshot.value.json(), HostSnapshotExecution::inline_execution));
+                if (snapshot.source.revision != 0U)
+                    input.services->published.push_back(std::move(snapshot.source));
+            }
+            snapshots.clear();
+            if (strata_cancellation_requested(cancellation) != 0U)
+                return STRATA_STATUS_SERVICE_UNAVAILABLE;
+            strata_activation_info activated{};
+            if (options.module_format == SessionModuleFormat::compiled) {
+                const std::vector<std::uint8_t> artifact =
+                    options.resources->read(utf8_path(options.module_resource));
+                if (strata_cancellation_requested(cancellation) != 0U)
+                    return STRATA_STATUS_SERVICE_UNAVAILABLE;
+                activated = session.activate_compiled(artifact, options.generation);
+            } else if (options.module_format == SessionModuleFormat::source) {
+                prepared->source = session.impl_->read_text(options.module_resource);
+                if (strata_cancellation_requested(cancellation) != 0U)
+                    return STRATA_STATUS_SERVICE_UNAVAILABLE;
+                activated = session.activate_source(options.module_resource, prepared->source,
+                                                    options.generation);
+            } else {
+                throw std::invalid_argument("Session preparation module format is invalid");
+            }
+            if (activated.status != STRATA_ACTIVATION_ACTIVATED) {
+                throw std::runtime_error(
+                    input.services->diagnostics.empty()
+                        ? "Session module activation was rejected."
+                        : input.services->diagnostics.back().code + ": " +
+                              input.services->diagnostics.back().message);
+            }
+            if (strata_cancellation_requested(cancellation) != 0U)
+                return STRATA_STATUS_SERVICE_UNAVAILABLE;
+            if (!options.program_language.empty()) {
+                for (MaterialDeclaration& declaration :
+                     session.runtime().material_declarations(options.program_language)) {
+                    if (declaration.source.empty())
+                        continue;
+                    std::string source = session.impl_->read_text(declaration.source);
+                    prepared->materials.push_back({std::move(declaration), std::move(source)});
+                }
+                for (EffectPassDeclaration& declaration :
+                     session.runtime().effect_pass_declarations(options.program_language)) {
+                    std::string source = declaration.source.empty()
+                                             ? std::string{} : session.impl_->read_text(declaration.source);
+                    prepared->effects.push_back({std::move(declaration), std::move(source)});
+                }
+            }
+            if (strata_cancellation_requested(cancellation) != 0U)
+                return STRATA_STATUS_SERVICE_UNAVAILABLE;
+            session.create_surface(options.surface);
+            session.impl_->prepared_actions.rethrow_failure();
+            *output = prepared.release();
+            return STRATA_STATUS_OK;
+        } catch (const strata::AbiError& exception) {
+            return fail(input, exception.status(), exception.what(), *error);
+        } catch (const std::bad_alloc&) {
+            *error = strata::view("Session preparation exhausted memory.");
+            return STRATA_STATUS_OUT_OF_MEMORY;
+        } catch (const std::exception& exception) {
+            return fail(input, STRATA_STATUS_INTERNAL_ERROR, exception.what(), *error);
+        } catch (...) {
+            *error = strata::view("Session preparation failed with a non-standard exception.");
+            return STRATA_STATUS_INTERNAL_ERROR;
+        }
+    }
+
+    std::shared_ptr<PreparedServices> services;
+    std::function<void(const strata_diagnostic&)> on_diagnostic;
+    strata_preparation* handle = nullptr;
+    bool taken = false;
+};
+
+SessionPreparation Session::prepare(SessionPrepareOptions options) {
+    return SessionPreparation(std::make_unique<SessionPreparation::Impl>(std::move(options)));
+}
+
+SessionPreparation::SessionPreparation(std::unique_ptr<Impl> impl) noexcept
+    : impl_(std::move(impl)) {}
+SessionPreparation::~SessionPreparation() = default;
+SessionPreparation::SessionPreparation(SessionPreparation&&) noexcept = default;
+SessionPreparation& SessionPreparation::operator=(SessionPreparation&&) noexcept = default;
+
+bool SessionPreparation::ready() {
+    if (impl_ == nullptr || impl_->taken)
+        throw std::logic_error("Session preparation has already transferred or moved");
+    strata_preparation_info info{};
+    info.struct_size = sizeof(info);
+    strata::require_ok(strata_preparation_get_info(impl_->handle, &info), "Session preparation poll");
+    if (info.status == STRATA_PREPARATION_FAILED) {
+        deliver_diagnostics(impl_->on_diagnostic, impl_->services->diagnostics);
+        throw std::runtime_error("Session preparation failed: " + copy(info.failure_message));
+    }
+    return info.status == STRATA_PREPARATION_READY;
+}
+
+PreparedSession SessionPreparation::take(const SessionAdapters& adapters,
+                                          std::unique_ptr<Bindings> bindings) {
+    if (!ready())
+        throw std::logic_error("Session preparation is not ready");
+    if (adapters.resources.has_value())
+        throw std::invalid_argument("prepared Session resources cannot be replaced during adoption");
+    if (adapters.durable_store.has_value() != impl_->services->durability.has_value())
+        throw std::invalid_argument("prepared durable state requires its matching live adapter");
+    if (adapters.durable_store.has_value() &&
+        (adapters.durable_store->struct_size < sizeof(strata_durable_store_adapter) ||
+         adapters.durable_store->load == nullptr || adapters.durable_store->write == nullptr)) {
+        throw std::invalid_argument("Session adoption requires a complete durable adapter");
+    }
+    void* result = nullptr;
+    strata::require_ok(strata_preparation_take_result(impl_->handle, &result),
+                       "Session preparation transfer");
+    std::unique_ptr<PreparedSession> prepared(static_cast<PreparedSession*>(result));
+    Session& session = *prepared->session;
+    if (bindings == nullptr && !session.impl_->prepared_actions.empty())
+        throw std::invalid_argument("prepared actions require their original owner bindings");
+    strata_runtime* const native = session.runtime().native_handle();
+    if (adapters.clipboard.has_value()) {
+        strata::require_ok(strata_runtime_set_clipboard_adapter(native, &*adapters.clipboard),
+                           "Session clipboard adapter adoption");
+    }
+    if (adapters.ime.has_value()) {
+        strata::require_ok(strata_runtime_set_ime_adapter(native, &*adapters.ime),
+                           "Session IME adapter adoption");
+    }
+    if (adapters.effects.has_value()) {
+        strata::require_ok(strata_runtime_set_effect_adapter(native, &*adapters.effects),
+                           "Session effect adapter adoption");
+    }
+    if (adapters.async_host.has_value())
+        session.runtime().set_async_host(*adapters.async_host);
+    if (adapters.durable_store.has_value())
+        impl_->services->durability->live = *adapters.durable_store;
+    if (bindings != nullptr) {
+        bindings->attach(session.runtime(), impl_->services->published,
+                         std::move(session.impl_->prepared_actions));
+        session.impl_->bindings = std::move(bindings);
+    }
+    session.impl_->options.on_diagnostic = std::move(impl_->on_diagnostic);
+    deliver_diagnostics(session.impl_->options.on_diagnostic, impl_->services->diagnostics);
+    impl_->services->published.clear();
+    impl_->taken = true;
+    return std::move(*prepared);
 }
 
 } // namespace strata::host

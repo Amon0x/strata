@@ -717,6 +717,7 @@ void test_external_package_and_schema_projection() {
     strata_runtime_config config{};
     config.struct_size = sizeof(strata_runtime_config);
     config.abi_version = STRATA_ABI_VERSION_CURRENT;
+    config.task_execution = STRATA_TASK_EXECUTION_DETERMINISTIC;
     config.required_capabilities =
         STRATA_CAPABILITY_CORE_LIFECYCLE | STRATA_CAPABILITY_CALLER_CLOCK |
         STRATA_CAPABILITY_APPLICATION_LIFECYCLE | STRATA_CAPABILITY_COMPILER_ACTIVATION |

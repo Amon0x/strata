@@ -51,6 +51,9 @@ void Renderer::Impl::release_frame(Frame& slot) {
     slot.framebuffers.clear();
     slot.retired_images.clear();
     slot.retired_buffers.clear();
+    for (const VkPipeline pipeline : slot.retired_pipelines)
+        vkDestroyPipeline(device.device, pipeline, nullptr);
+    slot.retired_pipelines.clear();
 }
 void Renderer::Impl::wait_idle() {
     for (auto& slot : frames) {
@@ -77,6 +80,14 @@ void Renderer::Impl::retire(std::unique_ptr<Buffer> buffer) {
         frame().retired_buffers.push_back(std::move(buffer));
     else if (last_submitted && frames[*last_submitted].pending)
         frames[*last_submitted].retired_buffers.push_back(std::move(buffer));
+}
+void Renderer::Impl::retire(const VkPipeline pipeline) {
+    if (recording)
+        frame().retired_pipelines.push_back(pipeline);
+    else if (last_submitted && frames[*last_submitted].pending)
+        frames[*last_submitted].retired_pipelines.push_back(pipeline);
+    else
+        vkDestroyPipeline(device.device, pipeline, nullptr);
 }
 void Renderer::Impl::drop_effects(const std::optional<std::string_view> layer) {
     for (auto entry = cached_effects.begin(); entry != cached_effects.end();) {
@@ -170,9 +181,9 @@ void Renderer::Impl::initialize() {
     finish();
 }
 
-void Renderer::Impl::add_program(const std::string& name, const std::string& source) {
-    if (programs.contains(name))
-        return;
+std::string_view Renderer::Impl::add_program(const std::string& name, const std::string& source) {
+    if (const auto found = programs.find(name); found != programs.end())
+        return found->first;
     // A draw stage writes per-channel alpha second, for subpixel text's dual-source blend; a
     // device without dual-source blending compiles it with its colour alone.
     const bool draw_stage = source.find("channelAlpha : SV_TARGET1") != std::string::npos;
@@ -183,7 +194,7 @@ void Renderer::Impl::add_program(const std::string& name, const std::string& sou
                      false, name);
     if (draw_stage && device.dual_source_blend)
         route_second_output_to_dual_source(spirv);
-    programs.emplace(name, std::move(spirv));
+    return programs.emplace(name, std::move(spirv)).first->first;
 }
 void Renderer::Impl::prune_programs() {
     const auto used = [&](const std::string& name) {
@@ -191,9 +202,9 @@ void Renderer::Impl::prune_programs() {
             name == "cached_composite" || name == "layer_filter" || name == "layer_shadow" ||
             name == "layer_composite")
             return true;
-        for (const auto& [id, program] : materials) {
+        for (const auto& [id, material] : materials) {
             (void)id;
-            if (program == name)
+            if (material.program == name)
                 return true;
         }
         for (const auto& [id, passes] : effects) {
@@ -209,7 +220,7 @@ void Renderer::Impl::prune_programs() {
     std::erase_if(pipelines, [&](const auto& entry) {
         if (used(std::get<0>(entry.first)))
             return false;
-        vkDestroyPipeline(device.device, entry.second, nullptr);
+        retire(entry.second);
         return true;
     });
     std::erase_if(programs, [&](const auto& entry) { return !used(entry.first); });

@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -187,10 +188,48 @@ template <typename T> class Observable final {
     Revision revision_;
 };
 
+/** A model revision already published by preparation, independent of its runtime generation. */
+struct SnapshotRevision final {
+    std::string id;
+    /** Zero denotes an explicit startup snapshot without a watched model cursor. */
+    std::uint64_t revision = 0U;
+};
+
+/** Owned point-in-time model data; serializing it never calls back into the model. */
+struct CapturedSnapshot final {
+    SnapshotRevision source;
+    Value value;
+};
+
+/**
+ * Captured action availability without ownership of UI callbacks. A preparation worker installs
+ * independent endpoints; only adoption by the original Bindings enables their dispatch.
+ */
+class ActionBindings final {
+  public:
+    ActionBindings() noexcept;
+    ~ActionBindings();
+    ActionBindings(ActionBindings&&) noexcept;
+    ActionBindings& operator=(ActionBindings&&) noexcept;
+    ActionBindings(const ActionBindings&) = delete;
+    ActionBindings& operator=(const ActionBindings&) = delete;
+
+    [[nodiscard]] bool empty() const noexcept;
+    void install(Runtime& runtime);
+    /** Premature dispatch is an error, not a call into the UI or a successful placeholder action. */
+    void rethrow_failure();
+
+  private:
+    friend class Bindings;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 /**
  * High-level host boundary for one runtime. Handlers receive typed values; snapshot sources are
  * republished automatically when their watched revision changes. The stable ABI remains JSON, but
- * application code never assembles or parses it.
+ * application code never assembles or parses it. Unattached bindings retain owner callbacks while
+ * a runtime prepares from captured values, then attach without replaying unchanged snapshots.
  */
 class Bindings final {
   public:
@@ -198,12 +237,23 @@ class Bindings final {
     using RevisionSource = std::function<std::uint64_t()>;
     using SnapshotSource = std::function<Value()>;
 
+    explicit Bindings(std::string owner);
     explicit Bindings(Runtime& runtime, std::string owner);
     ~Bindings();
     Bindings(const Bindings&) = delete;
     Bindings& operator=(const Bindings&) = delete;
     Bindings(Bindings&&) noexcept;
     Bindings& operator=(Bindings&&) noexcept;
+
+    /** Captures sources on their owner without publishing or advancing publication cursors. */
+    [[nodiscard]] std::vector<CapturedSnapshot> capture_snapshots();
+    [[nodiscard]] ActionBindings capture_actions() const;
+    /**
+     * Attaches once, on the owner. Published revisions must follow capture order; sources added
+     * since capture remain unpublished. No callback is invoked by attaching.
+     */
+    void attach(Runtime& runtime, std::span<const SnapshotRevision> published = {},
+                ActionBindings actions = {});
 
     void on(std::string_view action_id, Handler handler);
 
@@ -259,7 +309,10 @@ class Bindings final {
         requires requires(const Model& value) { value.revision().value(); }
     void snapshot(std::string, const Model&&, Snapshot&&) = delete;
 
-    /** Publishes every source whose model revision changed and surfaces contained callback errors.
+    /**
+     * Adopts completed publications, then admits changed revisions without waiting. Pending
+     * revisions are not duplicated; terminal failures are surfaced and remain retryable with a
+     * fresh generation. Also rethrows contained owner callback errors.
      */
     void synchronize();
 

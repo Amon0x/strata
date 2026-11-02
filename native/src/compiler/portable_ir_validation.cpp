@@ -502,12 +502,12 @@ private:
             if (operation != "negate" && operation != "not") fail(context, "has unknown unary operator '" + operation + "'");
             validate_expression(required(expression, "operand"), Context(context, "/operand"));
         } else if (kind == "binary") {
-            static const std::set<std::string_view> operations = {
+            static constexpr std::string_view operations[] = {
                 "add", "subtract", "multiply", "divide", "modulo", "equal", "not_equal",
                 "less", "less_equal", "greater", "greater_equal", "and", "or", "coalesce",
             };
             const std::string_view operation = require_string(expression, "operator", context);
-            if (!operations.contains(operation)) fail(context, "has unknown binary operator '" + operation + "'");
+            if (!std::ranges::contains(operations, operation)) fail(context, "has unknown binary operator '" + operation + "'");
             validate_expression(required(expression, "left"), Context(context, "/left"));
             validate_expression(required(expression, "right"), Context(context, "/right"));
         } else if (kind == "conditional") {

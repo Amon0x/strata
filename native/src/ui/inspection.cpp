@@ -15,6 +15,8 @@
 #include <utility>
 #include <vector>
 
+#include "base/pending.hpp"
+#include "base/task_pool.hpp"
 #include "runtime/action.hpp"
 #include "runtime/expression.hpp"
 #include "ui/layout.hpp"
@@ -445,6 +447,43 @@ action_policy_name(const runtime::ActionDispatchPolicy policy) noexcept {
     return JsonValue(std::move(fields));
 }
 
+[[nodiscard]] const char* readiness_status(const base::PendingStatus status) noexcept {
+    switch (status) {
+    case base::PendingStatus::pending:
+        return "PENDING";
+    case base::PendingStatus::ready:
+        return "READY";
+    case base::PendingStatus::failed:
+        return "FAILED";
+    }
+    return "FAILED";
+}
+
+[[nodiscard]] JsonValue readiness(const Surface& surface, const RetainedNode& node) {
+    std::vector<JsonValue> resources;
+    const auto prepared = surface.preparation_readiness(node.identity());
+    const auto retained = node.preparation_readiness();
+    resources.reserve(node.description().readiness.size() + prepared.size() + retained.size());
+    const auto append = [&](const base::ReadinessRead& read, const char* const phase) {
+        resources.push_back(object({
+            {"id", JsonValue(std::to_string(read.resource.id()))},
+            {"kind", JsonValue(std::string(base::task_kind_name(read.resource.kind())))},
+            {"label", JsonValue(std::string(read.resource.label()))},
+            {"observed", JsonValue(readiness_status(read.observed))},
+            {"phase", JsonValue(phase)},
+            {"status", JsonValue(readiness_status(read.resource.status()))},
+        }));
+    };
+    for (const base::ReadinessRead& read : node.description().readiness)
+        append(read, "description");
+    for (const NodeReadinessRead& read : retained)
+        append(read.dependency, read.phase == ReadinessPhase::layout ? "layout"
+                                : read.phase == ReadinessPhase::frame ? "frame" : "paint");
+    for (const NodeReadinessRead& read : prepared)
+        append(read.dependency, "packet");
+    return array(std::move(resources));
+}
+
 /** `depth` limits nested children; std::numeric_limits<std::size_t>::max() inspects the subtree. */
 [[nodiscard]] JsonValue node_inspection(const Surface& surface, const RetainedNode& node,
                                         const std::size_t depth) {
@@ -461,7 +500,7 @@ action_policy_name(const runtime::ActionDispatchPolicy policy) noexcept {
     }
     DirtySet descendant_dirty;
     collect_descendant_dirty(node, descendant_dirty);
-    WidgetInspectionScope inspection(surface, node, *layout);
+    WidgetInspectionScope inspection(node, *layout, surface.layout(), surface.input());
     const WidgetLifecycle* lifecycle = surface.widget_registry().find(node.description().type);
     if (lifecycle != nullptr && lifecycle->inspection.derive != nullptr) {
         lifecycle->inspection.derive(inspection);
@@ -494,6 +533,7 @@ action_policy_name(const runtime::ActionDispatchPolicy policy) noexcept {
          node.description().key.has_value() ? JsonValue(*node.description().key) : JsonValue{}},
         {"layoutKind", JsonValue(std::string(layout_kind_name(layout->kind)))},
         {"motionChannels", motion_channels(surface, node, *layout)},
+        {"readiness", readiness(surface, node)},
         {"semantics", own_semantics(surface.semantics().find(node.identity()))},
         {"sourcePath", node.description().source_path.empty()
                            ? JsonValue{}

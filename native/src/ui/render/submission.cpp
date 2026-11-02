@@ -114,7 +114,7 @@ void retain_drawn_pages(PreparationCache& cache, const std::span<const CommandRa
     if (!cache.changed_draw_updates || !cache.plan_current) return false;
     const RenderCommandView& previous = cache.planned_commands.commands();
     const RenderCommandView& current = commands.commands();
-    if (commands.shares_storage(cache.planned_commands) || previous.size() != current.size() ||
+    if (previous.size() != current.size() ||
         cache.command_plans.size() != current.size() || cache.text.size() != current.size()) {
         return false;
     }
@@ -131,8 +131,20 @@ void retain_drawn_pages(PreparationCache& cache, const std::span<const CommandRa
     // resized clip) with everything up to its end. Either way only the changed draws are encoded.
     // Runs both streams read from one storage are equal unread: a reused subtree costs nothing.
     std::vector<CommandRange> ranges;
+    std::vector<std::size_t> changed = current.differences(previous);
+    bool resources_changed = false;
+    for (const std::size_t index : cache.resource_text) {
+        if (!std::ranges::all_of(cache.text[index]->readiness, &base::ReadinessRead::current)) {
+            changed.push_back(index);
+            resources_changed = true;
+        }
+    }
+    if (resources_changed) {
+        std::ranges::sort(changed);
+        changed.erase(std::ranges::unique(changed).begin(), changed.end());
+    }
     std::size_t covered = 0U;
-    for (const std::size_t index : current.differences(previous)) {
+    for (const std::size_t index : changed) {
         // Draw vocabulary can change without changing the scope seen by later commands.
         // Only changing a scope's kind makes its retained planner state unusable.
         if (current[index].index() != previous[index].index() &&

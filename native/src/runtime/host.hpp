@@ -168,7 +168,8 @@ public:
 
     explicit HostStore(Invalidation invalidation = {});
 
-    [[nodiscard]] bool adopt(std::shared_ptr<const HostSnapshot> snapshot);
+    /** An optional mirror is validated and reserved before either store publishes the snapshot. */
+    [[nodiscard]] bool adopt(std::shared_ptr<const HostSnapshot> snapshot, HostStore* mirror = nullptr);
     [[nodiscard]] const std::shared_ptr<const HostSnapshot>& snapshot() const noexcept;
     [[nodiscard]] std::optional<std::uint64_t> generation(std::string_view id) const noexcept;
     /** Immutable roots in adoption order; later snapshots shadow duplicate root names. */
@@ -186,6 +187,10 @@ public:
     [[nodiscard]] std::uint64_t invalidation_count() const noexcept;
 
 private:
+    struct Adoption;
+    [[nodiscard]] Adoption prepare_adoption(std::shared_ptr<const HostSnapshot> snapshot);
+    void commit_adoption(Adoption&& adoption) noexcept;
+
     std::shared_ptr<const HostSnapshot> snapshot_;
     std::map<std::string, std::shared_ptr<const HostSnapshot>, std::less<>> snapshots_;
     std::vector<std::string> adoption_order_;

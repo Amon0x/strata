@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/process_lifetime.hpp"
 #include "ui/behavior/input.hpp"
 #include "ui/behavior/registry.hpp"
 #include "ui/command.hpp"
@@ -448,11 +449,11 @@ std::optional<std::size_t> InputRouter::resolve_text_offset(const RetainedNode& 
     return text_offset_resolver_(node, *layout, text, position);
 }
 
-Point InputRouter::logical_pointer_position(const RetainedNode& node, Point position) const {
+Point InputPresentation::logical_pointer_position(const RetainedNode& node, Point position) const {
     return inverse_presentation_point(position, presentation_transform(node));
 }
 
-MotionTransform InputRouter::presentation_transform(const RetainedNode& node) const {
+MotionTransform InputPresentation::presentation_transform(const RetainedNode& node) const {
     if (tree_ == nullptr || layout_ == nullptr)
         return MotionTransform{};
     if (!preparing_pointer_geometry_)
@@ -476,11 +477,11 @@ MotionTransform InputRouter::presentation_transform(const RetainedNode& node) co
                : inherited;
 }
 
-Rect InputRouter::presented_bounds(const RetainedNode& node, const Rect bounds) const {
+Rect InputPresentation::presented_bounds(const RetainedNode& node, const Rect bounds) const {
     return transform_presentation_bounds(bounds, presentation_transform(node));
 }
 
-Rect InputRouter::relative_bounds(const RetainedNode& source, const RetainedNode& target,
+Rect InputPresentation::relative_bounds(const RetainedNode& source, const RetainedNode& target,
                                   const Rect bounds) const {
     if (&source == &target)
         return bounds;
@@ -492,7 +493,7 @@ Rect InputRouter::relative_bounds(const RetainedNode& source, const RetainedNode
         : Rect{};
 }
 
-std::optional<Rect> InputRouter::presented_clip(const RetainedNode& node) const {
+std::optional<Rect> InputPresentation::presented_clip(const RetainedNode& node) const {
     if (layout_ == nullptr)
         return std::nullopt;
     if (!preparing_pointer_geometry_)
@@ -553,13 +554,13 @@ void InputRouter::seed_pointer_text_navigation(const RetainedNode& node,
                                       });
 }
 
-bool InputRouter::static_text_node(const RetainedNode& node) const noexcept {
+bool InputPresentation::static_text_node(const RetainedNode& node) const noexcept {
     const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
     return lifecycle != nullptr &&
            lifecycle->input.text_edit_mode == WidgetTextEditMode::static_text;
 }
 
-bool InputRouter::static_text_selectable(const RetainedNode& node) const noexcept {
+bool InputPresentation::static_text_selectable(const RetainedNode& node) const noexcept {
     if (!static_text_node(node))
         return false;
     const runtime::Value* selectable = scalar_property(node, "selectable");
@@ -580,7 +581,7 @@ RetainedNode* InputRouter::selectable_static_text_owner(RetainedNode* hit) const
 }
 
 std::optional<std::string_view>
-InputRouter::static_text_value(const RetainedNode& node) const noexcept {
+InputPresentation::static_text_value(const RetainedNode& node) const noexcept {
     const runtime::Value* value = scalar_property(node, "text");
     if (value == nullptr || value->string() == nullptr)
         value = node.retained_value("$text");
@@ -590,14 +591,14 @@ InputRouter::static_text_value(const RetainedNode& node) const noexcept {
 }
 
 std::optional<std::string_view>
-InputRouter::static_text_container(const RetainedNode& node) const noexcept {
+InputPresentation::static_text_container(const RetainedNode& node) const noexcept {
     const runtime::Value* value = scalar_property(node, "selectionContainer");
     return value != nullptr && value->string() != nullptr && !value->string()->empty()
                ? std::optional<std::string_view>(*value->string())
                : std::nullopt;
 }
 
-std::vector<RetainedNode*> InputRouter::static_text_nodes(const std::string_view container) const {
+std::vector<RetainedNode*> InputPresentation::static_text_nodes(const std::string_view container) const {
     std::vector<RetainedNode*> result;
     if (tree_ == nullptr || tree_->root() == nullptr || container.empty())
         return result;
@@ -893,7 +894,7 @@ bool InputRouter::move_static_text_selection(RetainedNode& node, const std::stri
     return true;
 }
 
-MotionTransform InputRouter::placed_transform(const std::int32_t anchor,
+MotionTransform InputPresentation::placed_transform(const std::int32_t anchor,
                                                const MotionTransform relative) const noexcept {
     return anchor >= 0
         ? concatenate_presentation_transform(
@@ -901,11 +902,11 @@ MotionTransform InputRouter::placed_transform(const std::int32_t anchor,
         : relative;
 }
 
-MotionTransform InputRouter::entry_transform(const PointerHitEntry& entry) const noexcept {
+MotionTransform InputPresentation::entry_transform(const PointerHitEntry& entry) const noexcept {
     return placed_transform(entry.anchor, entry.relative);
 }
 
-std::optional<Rect> InputRouter::entry_clip(const PointerHitEntry& entry) const noexcept {
+std::optional<Rect> InputPresentation::entry_clip(const PointerHitEntry& entry) const noexcept {
     if (entry.anchor < 0)
         return entry.relative_clip;
     const PointerAnchor& anchor = pointer_anchors_[static_cast<std::size_t>(entry.anchor)];
@@ -917,7 +918,7 @@ std::optional<Rect> InputRouter::entry_clip(const PointerHitEntry& entry) const 
     return clip;
 }
 
-void InputRouter::prepare_pointer_geometry() const {
+void InputPresentation::prepare_pointer_geometry() const {
     if (tree_ == nullptr || tree_->root() == nullptr || layout_ == nullptr) {
         pointer_hit_entries_.clear();
         pointer_hit_index_.clear();
@@ -1138,7 +1139,8 @@ void InputRouter::prepare_pointer_geometry() const {
             }
         }
         const Rect bounds =
-            hit_bounds_resolver_ ? hit_bounds_resolver_(node, *record) : record->hit_bounds;
+            hit_bounds_resolver_ ? hit_bounds_resolver_(node, *record, *layout_, *this)
+                                : record->hit_bounds;
         pointer_hit_index_.insert_or_assign(node.identity(), pointer_hit_entries_.size());
         pointer_hit_entries_.push_back(PointerHitEntry{
             &node,
@@ -1177,7 +1179,7 @@ void InputRouter::prepare_pointer_geometry() const {
     ++pointer_geometry_rebuild_count_;
 }
 
-void InputRouter::index_pointer_geometry() const {
+void InputPresentation::index_pointer_geometry() const {
     pointer_hit_roots_.assign(pointer_anchors_.size() + 1U, PointerHitRoot{});
     for (const PointerHitEntry& entry : pointer_hit_entries_)
         ++pointer_hit_roots_[static_cast<std::size_t>(entry.anchor + 1)].end;
@@ -1247,7 +1249,7 @@ void InputRouter::index_pointer_geometry() const {
     }
 }
 
-void InputRouter::settle_pointer_geometry() const {
+void InputPresentation::settle_pointer_geometry() const {
     if (!pointer_geometry_ready_ || tree_ == nullptr || tree_->root() == nullptr ||
         layout_ == nullptr) {
         return;
@@ -1273,7 +1275,7 @@ void InputRouter::settle_pointer_geometry() const {
     }
 }
 
-bool InputRouter::place_moved_anchors() const {
+bool InputPresentation::place_moved_anchors() const {
     // Unchanged arranged geometry permits offset-only layout updates. Animation additionally
     // needs complete dirty history, so a newly presented non-anchor cannot be overlooked.
     const DirtyGenerationSnapshot dirty = tree_->dirty_generations();
@@ -1379,10 +1381,10 @@ bool InputRouter::place_moved_anchors() const {
 }
 
 const std::vector<WidgetSubtarget>&
-InputRouter::projected_subtargets(const RetainedNode& node) const {
-    static const std::vector<WidgetSubtarget> none;
+InputPresentation::projected_subtargets(const RetainedNode& node) const {
+    static const base::ProcessLifetime<std::vector<WidgetSubtarget>> none;
     if (tree_ == nullptr || layout_ == nullptr)
-        return none;
+        return none.get();
     prepare_pointer_geometry();
     const auto found = projected_subtargets_.find(node.identity());
     if (found != projected_subtargets_.end())
@@ -1393,7 +1395,7 @@ InputRouter::projected_subtargets(const RetainedNode& node) const {
     return projected_subtargets_.emplace(node.identity(), std::move(targets)).first->second;
 }
 
-std::vector<WidgetSubtarget> InputRouter::project_subtargets(const RetainedNode& node) const {
+std::vector<WidgetSubtarget> InputPresentation::project_subtargets(const RetainedNode& node) const {
     const WidgetLifecycle* const lifecycle = widgets_.find(node.description().type);
     if (lifecycle == nullptr || lifecycle->inspection.subtargets == nullptr || layout_ == nullptr)
         return {};
@@ -1415,7 +1417,7 @@ std::vector<WidgetSubtarget> InputRouter::project_subtargets(const RetainedNode&
     });
 }
 
-void InputRouter::prepare_detached_subtargets() const {
+void InputPresentation::prepare_detached_subtargets() const {
     prepare_pointer_geometry();
     if (!pointer_geometry_ready_ || detached_subtargets_ready_)
         return;
@@ -1450,7 +1452,7 @@ void InputRouter::prepare_detached_subtargets() const {
     detached_subtargets_ready_ = true;
 }
 
-bool InputRouter::inside_clips(const PointerHitEntry& entry, const Point position) const noexcept {
+bool InputPresentation::inside_clips(const PointerHitEntry& entry, const Point position) const noexcept {
     if (entry.clips == nullptr)
         return true;
     return std::ranges::all_of(*entry.clips, [&](const ClipOutline& clip) {
@@ -1464,7 +1466,7 @@ bool InputRouter::inside_clips(const PointerHitEntry& entry, const Point positio
     });
 }
 
-RetainedNode* InputRouter::hit_test(const Point position) const noexcept {
+RetainedNode* InputPresentation::hit_test(const Point position) const noexcept {
     prepare_pointer_geometry();
     std::size_t best = pointer_hit_entries_.size();
     for (std::size_t root_index = 0U; root_index < pointer_hit_roots_.size(); ++root_index) {
@@ -1513,11 +1515,11 @@ RetainedNode* InputRouter::hit_test(const Point position) const noexcept {
     return best < pointer_hit_entries_.size() ? pointer_hit_entries_[best].node : nullptr;
 }
 
-const RetainedNode* InputRouter::inspection_target(const Point position) const noexcept {
+const RetainedNode* InputPresentation::inspection_target(const Point position) const noexcept {
     return hit_test(position);
 }
 
-std::vector<WidgetSubtarget> InputRouter::subtargets(const std::uint64_t identity) const {
+std::vector<WidgetSubtarget> InputPresentation::subtargets(const std::uint64_t identity) const {
     if (tree_ == nullptr || layout_ == nullptr)
         return {};
     const RetainedNode* node = tree_->find_identity(identity);
@@ -1531,27 +1533,27 @@ std::vector<WidgetSubtarget> InputRouter::subtargets(const std::uint64_t identit
     return project_subtargets(*node);
 }
 
-bool InputRouter::subtarget_hovered(const std::uint64_t identity,
+bool InputPresentation::subtarget_hovered(const std::uint64_t identity,
                                     const std::string_view id) const noexcept {
     return hovered_subtarget_.has_value() && hovered_subtarget_->first == identity &&
            hovered_subtarget_->second == id;
 }
 
 std::optional<std::string_view>
-InputRouter::hovered_subtarget(const std::uint64_t identity) const noexcept {
+InputPresentation::hovered_subtarget(const std::uint64_t identity) const noexcept {
     if (!hovered_subtarget_.has_value() || hovered_subtarget_->first != identity)
         return std::nullopt;
     return std::string_view(hovered_subtarget_->second);
 }
 
-bool InputRouter::subtarget_active(const std::uint64_t identity,
+bool InputPresentation::subtarget_active(const std::uint64_t identity,
                                    const std::string_view id) const noexcept {
     return active_subtarget_.has_value() && active_subtarget_->first == identity &&
            active_subtarget_->second == id;
 }
 
 std::optional<WidgetSubtarget>
-InputRouter::hit_subtarget(const Point position, const RetainedNode* const ordinary_target) const {
+InputPresentation::hit_subtarget(const Point position, const RetainedNode* const ordinary_target) const {
     if (tree_ == nullptr || tree_->root() == nullptr || layout_ == nullptr)
         return std::nullopt;
     prepare_detached_subtargets();
@@ -1646,8 +1648,8 @@ void InputRouter::set_hovered_subtarget(const std::optional<WidgetSubtarget>& ta
         frame_invalidator_();
 }
 
-RetainedNode* InputRouter::subtarget_hover_target(const Point position, RetainedNode* const hit,
-                                                  std::optional<WidgetSubtarget>& subtarget) {
+RetainedNode* InputPresentation::subtarget_hover_target(
+    const Point position, RetainedNode* const hit, std::optional<WidgetSubtarget>& subtarget) const {
     subtarget = hit_subtarget(position, hit);
     if (!subtarget.has_value())
         return hit;
@@ -1658,6 +1660,20 @@ RetainedNode* InputRouter::subtarget_hover_target(const Point position, Retained
         return hit;
     }
     return owner != nullptr ? owner : hit;
+}
+
+InputPresentation::HoverTarget InputPresentation::resolve_hover(const Point position) const {
+    HoverTarget result;
+    result.node = subtarget_hover_target(
+        position, widget_native_input_owner(hit_test(position)), result.subtarget);
+    if (RetainedNode* modal = active_modal(); modal != nullptr) {
+        const bool above_modal = result.subtarget.has_value() && result.subtarget->detached &&
+                                 result.subtarget->owner_identity != modal->identity() &&
+                                 result.subtarget->z_index > detached_overlay_z_index(widgets_, *modal);
+        if (!above_modal && (result.node == nullptr || !descendant_of(*result.node, *modal)))
+            result.node = modal;
+    }
+    return result;
 }
 
 void InputRouter::refresh_hover() {
@@ -1675,18 +1691,9 @@ void InputRouter::refresh_hover() {
     if (last_hover_refresh_ == key)
         return;
     last_hover_refresh_ = key;
-    std::optional<WidgetSubtarget> subtarget;
-    RetainedNode* hover_target = subtarget_hover_target(
-        *hover_position_, widget_native_input_owner(hit_test(*hover_position_)), subtarget);
-    if (RetainedNode* modal = active_modal(); modal != nullptr) {
-        const bool above_modal = subtarget.has_value() && subtarget->detached &&
-                                 subtarget->owner_identity != modal->identity() &&
-                                 subtarget->z_index > detached_overlay_z_index(widgets_, *modal);
-        if (!above_modal && (hover_target == nullptr || !descendant_of(*hover_target, *modal)))
-            hover_target = modal;
-    }
-    set_hovered_subtarget(subtarget);
-    hover_route(hover_target);
+    const HoverTarget hovered = resolve_hover(*hover_position_);
+    set_hovered_subtarget(hovered.subtarget);
+    hover_route(hovered.node);
 }
 
 std::uint64_t InputRouter::modal_identity() const noexcept {

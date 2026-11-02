@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -10,6 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "base/pending.hpp"
 #include "font/opentype.hpp"
 #include "font/raster.hpp"
 
@@ -130,7 +132,8 @@ struct GlyphAtlasWarmupRequest final {
  */
 class GlyphAtlas final {
   public:
-    explicit GlyphAtlas(std::string_view owner_id, GlyphAtlasConfig config = {});
+    explicit GlyphAtlas(std::string_view owner_id, GlyphAtlasConfig config = {},
+                        base::TaskOwner* tasks = nullptr);
     ~GlyphAtlas();
 
     [[nodiscard]] const GlyphAtlasConfig& config() const noexcept {
@@ -158,7 +161,7 @@ class GlyphAtlas final {
     /** Seals the atlas against page recycling before atlas-backed geometry is published. */
     void end_frame_preparation() noexcept;
 
-    [[nodiscard]] std::optional<GlyphAtlasEntry>
+    [[nodiscard]] base::ResourceResult<GlyphAtlasEntry>
     request_coverage(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
                      double pixel_size, SubpixelPhase phase, std::uint32_t font_style_flags = 0U);
 
@@ -166,9 +169,10 @@ class GlyphAtlas final {
      * Requests an explicit raster mode; ordinary callers default to size-specific grayscale. An
      * MSDF glyph whose distance must reach `reach` layout pixels beyond its edge (text with an
      * outline, a glow or a shadow) rasterizes with a range and padding wide enough for it, as an
-     * entry of its own.
+     * entry of its own. A miss prepares without blocking when an asynchronous owner is supplied;
+     * pending and failed results are distinct from a ready glyph with no drawable bitmap.
      */
-    [[nodiscard]] std::optional<GlyphAtlasEntry>
+    [[nodiscard]] base::ResourceResult<GlyphAtlasEntry>
     request(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
             double pixel_size, SubpixelPhase coverage_phase, std::uint32_t font_style_flags = 0U,
             GlyphRasterMode mode = GlyphRasterMode::coverage, double reach = 0.0,
@@ -210,11 +214,13 @@ class GlyphAtlas final {
      */
     [[nodiscard]] GlyphAtlasEntry write_raster_slot(const RasterSlot& slot, RasterRequest request);
     /**
-     * Rasterizes and packs a unique request set before draw planning. Expensive cache misses run
-     * concurrently, while deterministic page allocation and host-operation construction remain
-     * serialized. Returns false if bounded capacity recycling moved the atlas generation.
+     * Prepares a unique request set, packing ready bitmaps in request order on the owner. Queued
+     * misses retain their inputs, not this atlas. Without a task owner preparation is deterministic.
+     * Returns false if bounded capacity recycling moved the atlas generation.
      */
     [[nodiscard]] bool warm(std::span<const GlyphAtlasWarmupRequest> requests);
+    /** Cancels preparation batches no current draw observes. */
+    void retain_preparations(std::span<const std::uint64_t> resources);
 
     /**
      * Stable view of pending host operations. The view remains valid until the atlas is mutated or
@@ -245,7 +251,7 @@ class GlyphAtlas final {
     [[nodiscard]] bool reclamation_pending() const noexcept;
     [[nodiscard]] bool frame_preparation_active() const noexcept;
     [[nodiscard]] std::uint64_t generation_recycle_count() const noexcept;
-    /** Glyphs rasterized on the CPU since the last call, and the time it took; then zero. */
+    /** CPU raster work adopted since the last call, then zero. Duration is worker time, not UI time. */
     struct RasterWork final {
         std::uint64_t glyphs = 0U;
         std::uint64_t nanoseconds = 0U;
@@ -256,6 +262,11 @@ class GlyphAtlas final {
     struct Key;
     struct Page;
     struct Allocation;
+    struct PreparationRequest;
+    struct Preparations;
+
+    [[nodiscard]] base::Readiness prepare_missing(std::vector<PreparationRequest>& requests,
+                                                  std::span<const std::size_t> missing);
 
     [[nodiscard]] std::optional<Allocation> allocate(std::uint32_t width, std::uint32_t height,
                                                      GlyphRasterMode mode);
@@ -271,7 +282,7 @@ class GlyphAtlas final {
                                             const RasterPlaneBounds& plane_bounds,
                                             double atlas_pixel_range, double layout_pixel_range,
                                             GlyphRasterMode mode) const;
-    [[nodiscard]] std::optional<GlyphAtlasEntry>
+    [[nodiscard]] base::ResourceResult<GlyphAtlasEntry>
     request_mode(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
                  double pixel_size, SubpixelPhase phase, GlyphRasterMode mode,
                  std::uint32_t font_style_flags, double reach = 0.0, bool unhinted = false);
@@ -291,6 +302,9 @@ class GlyphAtlas final {
 
     std::string owner_token_;
     GlyphAtlasConfig config_;
+    std::optional<base::TaskOwner> owned_tasks_;
+    base::TaskOwner* tasks_ = nullptr;
+    std::unique_ptr<Preparations> preparations_;
     double display_scale_ = 1.0;
     SubpixelOrder subpixel_order_ = SubpixelOrder::rgb;
     std::uint64_t generation_ = 1U;

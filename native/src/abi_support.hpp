@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -33,7 +34,9 @@ inline constexpr strata_capabilities capabilities =
     STRATA_CAPABILITY_SURFACE_EVENT_DRAIN | STRATA_CAPABILITY_DIAGNOSTIC_SNAPSHOTS |
     STRATA_CAPABILITY_PROFILER_SNAPSHOTS | STRATA_CAPABILITY_SURFACE_THEMES |
     STRATA_CAPABILITY_COMPILED_MODULE_ACTIVATION | STRATA_CAPABILITY_DURABLE_STATE |
-    STRATA_CAPABILITY_ASYNC_HOST_DATA;
+    STRATA_CAPABILITY_ASYNC_HOST_DATA | STRATA_CAPABILITY_TASK_EXECUTION |
+    STRATA_CAPABILITY_PREPARATION | STRATA_CAPABILITY_HOST_PUBLICATIONS |
+    STRATA_CAPABILITY_OWNED_RENDER_PACKETS;
 
 [[nodiscard]] inline strata_diagnostic_sink empty_sink() noexcept {
     return strata_diagnostic_sink{sizeof(strata_diagnostic_sink), nullptr, nullptr};
@@ -69,14 +72,24 @@ enum class Reentry : bool {
 class EntryGuard final {
   public:
     EntryGuard(const strata_runtime* const runtime, const Reentry reentry) noexcept
-        : runtime_(runtime) {
-        if (runtime_ == nullptr)
+        : EntryGuard(runtime, runtime != nullptr ? &runtime->active_thread : nullptr,
+                     runtime != nullptr ? &runtime->call_depth : nullptr, reentry) {}
+
+    /** Independent preparation endpoints use the same admission and wake-reentry policy. */
+    EntryGuard(const void* const owner, std::atomic<std::thread::id>* const active_thread,
+               std::uint32_t* const call_depth, const Reentry reentry) noexcept
+        : active_thread_(active_thread), call_depth_(call_depth) {
+        if (owner == nullptr)
             return;
+        if (WakeCallbackScope::contains(owner)) {
+            status_ = STRATA_STATUS_REENTRANT_CALL;
+            active_thread_ = nullptr;
+            return;
+        }
         const std::thread::id self = std::this_thread::get_id();
         std::thread::id idle{};
-        if (runtime_->active_thread.compare_exchange_strong(idle, self,
-                                                            std::memory_order_acq_rel)) {
-            runtime_->call_depth = 1U;
+        if (active_thread_->compare_exchange_strong(idle, self, std::memory_order_acq_rel)) {
+            *call_depth_ = 1U;
             return;
         }
         if (idle != self) {
@@ -84,18 +97,18 @@ class EntryGuard final {
         } else if (reentry == Reentry::rejected) {
             status_ = STRATA_STATUS_REENTRANT_CALL;
         } else {
-            ++runtime_->call_depth;
+            ++*call_depth_;
             return;
         }
-        runtime_ = nullptr;
+        active_thread_ = nullptr;
     }
 
     EntryGuard(const strata_surface* const surface, const Reentry reentry) noexcept
         : EntryGuard(surface != nullptr ? surface->owner : nullptr, reentry) {}
 
     ~EntryGuard() {
-        if (runtime_ != nullptr && --runtime_->call_depth == 0U)
-            runtime_->active_thread.store(std::thread::id{}, std::memory_order_release);
+        if (active_thread_ != nullptr && --*call_depth_ == 0U)
+            active_thread_->store(std::thread::id{}, std::memory_order_release);
     }
 
     EntryGuard(const EntryGuard&) = delete;
@@ -110,7 +123,8 @@ class EntryGuard final {
     }
 
   private:
-    const strata_runtime* runtime_;
+    std::atomic<std::thread::id>* active_thread_;
+    std::uint32_t* call_depth_;
     strata_status status_ = STRATA_STATUS_OK;
 };
 

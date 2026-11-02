@@ -8,6 +8,8 @@
 #include <variant>
 #include <vector>
 
+#include <strata/config.hpp>
+
 #include "data/json.hpp"
 #include "host/browser_model.hpp"
 
@@ -41,6 +43,9 @@ using Selector = host::Selector;
 struct AdvanceStep final {
     std::int64_t duration_nanoseconds = 0;
     std::uint32_t frames = 1U;
+};
+struct SettleStep final {
+    std::int64_t timeout_milliseconds = 5000;
 };
 struct CaptureStep final {
     std::string name;
@@ -81,7 +86,7 @@ struct PublishStep final {
 };
 
 using ScenarioStep = std::variant<AdvanceStep, CaptureStep, ClickStep, MoveStep, PointerDragStep,
-                                  ScrollStep, KeyStep, TextStep, ResizeStep, PublishStep>;
+                                  ScrollStep, KeyStep, TextStep, ResizeStep, PublishStep, SettleStep>;
 
 struct Scenario final {
     std::uint32_t version = 1U;
@@ -116,6 +121,7 @@ struct Scenario final {
     std::array<std::uint8_t, 4U> clear_color{9U, 11U, 15U, 255U};
     /** Writes the Surface's render packet stream to packets.strp for backend replay. */
     bool record_packets = false;
+    TaskExecution task_execution = TaskExecution::deterministic;
 };
 
 [[nodiscard]] Scenario load_scenario(const std::filesystem::path& path);

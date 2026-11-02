@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -188,34 +189,53 @@ struct Control final {
     std::optional<std::uint8_t> transparent;
 };
 
-} // namespace
+/** Keeps only the current compositing state, not the animation's decoded frame history. */
+struct GifDecoder final : FrameDecoder {
+    explicit GifDecoder(const std::span<const std::uint8_t> bytes)
+        : input(bytes), header(screen(input)), start(input),
+          canvas(static_cast<std::size_t>(header.dimensions.width) * header.dimensions.height * 4U) {}
 
-ImageDimensions inspect_gif(const std::span<const std::uint8_t> bytes) {
-    Cursor input(bytes);
-    return screen(input).dimensions;
-}
+    [[nodiscard]] ImageDimensions dimensions() const noexcept override { return header.dimensions; }
+    [[nodiscard]] std::uint32_t loop_count() const noexcept override { return plays; }
+    [[nodiscard]] bool next(FrameSink& sink) override;
+    void rewind() override {
+        input = start;
+        std::ranges::fill(canvas, std::uint8_t{0U});
+        saved.clear();
+        data.clear();
+        control = {};
+        plays = 1U;
+        ended = false;
+    }
 
-DecodedImage decode_gif(const std::span<const std::uint8_t> bytes, const std::uint32_t frame_limit,
-                        const ImageFrameConsumer* const consumer) {
-    Cursor input(bytes);
-    const Screen header = screen(input);
-    const std::uint32_t canvas_width = header.dimensions.width;
-    const std::uint32_t canvas_height = header.dimensions.height;
-    FrameSink sink(header.dimensions, frame_limit, "GIF", consumer);
-    std::vector<std::uint8_t> canvas(static_cast<std::size_t>(canvas_width) * canvas_height * 4U);
+    Cursor input;
+    const Screen header;
+    const Cursor start;
+    std::vector<std::uint8_t> canvas;
     std::vector<std::uint8_t> saved;
     std::vector<std::uint8_t> data;
     // No NETSCAPE block means the animation plays once.
-    std::uint32_t loop_count = 1U;
+    std::uint32_t plays = 1U;
     Control control;
-    while (sink.wants_more()) {
+    bool ended = false;
+};
+
+bool GifDecoder::next(FrameSink& sink) {
+    if (ended)
+        return false;
+    const std::uint32_t canvas_width = header.dimensions.width;
+    const std::uint32_t canvas_height = header.dimensions.height;
+    for (;;) {
         if (input.at_end()) {
             // Many GIFs omit the trailer; whatever frames came complete still count.
-            break;
+            ended = true;
+            return false;
         }
         const std::uint8_t introducer = input.u8();
-        if (introducer == 0x3BU)
-            break;
+        if (introducer == 0x3BU) {
+            ended = true;
+            return false;
+        }
         if (introducer == 0x21U) {
             const std::uint8_t label = input.u8();
             if (label == 0xF9U) {
@@ -245,7 +265,7 @@ DecodedImage decode_gif(const std::span<const std::uint8_t> bytes, const std::ui
                     data[0U] == 1U) {
                     const std::uint32_t repeats = static_cast<std::uint32_t>(data[1U]) |
                                                   static_cast<std::uint32_t>(data[2U]) << 8U;
-                    loop_count = repeats == 0U ? 0U : repeats + 1U;
+                    plays = repeats == 0U ? 0U : repeats + 1U;
                 }
             } else {
                 // Comments, plain text and unknown extensions.
@@ -325,12 +345,29 @@ DecodedImage decode_gif(const std::span<const std::uint8_t> bytes, const std::ui
             clear_rect(canvas, canvas_width, left, top, std::min(width, canvas_width - left),
                        std::min(height, canvas_height - top));
         } else if (control.disposal == 3U) {
-            canvas = saved;
+            canvas.swap(saved);
         }
         // A graphic control extension governs only the image that follows it.
         control = Control{};
+        return true;
     }
-    return sink.finish(loop_count);
+}
+
+} // namespace
+
+ImageDimensions inspect_gif(const std::span<const std::uint8_t> bytes) {
+    Cursor input(bytes);
+    return screen(input).dimensions;
+}
+
+std::unique_ptr<FrameDecoder> open_gif(const std::span<const std::uint8_t> bytes) {
+    return std::make_unique<GifDecoder>(bytes);
+}
+
+DecodedImage decode_gif(const std::span<const std::uint8_t> bytes, const std::uint32_t frame_limit,
+                        const ImageFrameConsumer* const consumer) {
+    GifDecoder decoder(bytes);
+    return decode_frames(decoder, frame_limit, "GIF", consumer);
 }
 
 } // namespace strata::resource::codec

@@ -243,7 +243,7 @@ struct Presenter::Impl final {
         options.time_seconds = static_cast<double>(time_nanoseconds) / 1'000'000'000.0;
         return PresentedFrame{
             frame.surface,
-            frame.packet_bytes,
+            frame.encoded.bytes().size(),
             renderer.render(layer_id, *frame.packet, target, options),
         };
     }

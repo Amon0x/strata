@@ -1,6 +1,7 @@
 #include "session.hpp"
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -191,6 +192,10 @@ struct Session::Impl final {
         event.y = y;
         event.timestamp_nanoseconds = time_nanoseconds_;
         return event;
+    }
+
+    void execute(const SettleStep& step) {
+        host_.settle(time_nanoseconds_, std::chrono::milliseconds(step.timeout_milliseconds));
     }
 
     void execute(const AdvanceStep& step) {

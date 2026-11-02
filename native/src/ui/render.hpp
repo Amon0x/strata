@@ -27,7 +27,7 @@ class SvgImageRegistry;
 
 namespace strata::ui {
 
-class InputRouter;
+class InputPresentation;
 class MotionRuntime;
 class TextEngine;
 class CommandIndex;
@@ -355,6 +355,8 @@ struct TextRunRenderCommand final {
     /** Conservative local-space bounds used to reject clipped runs before atlas warmup. */
     std::optional<Rect> cull_bounds = std::nullopt;
     TextEffects effects{};
+    /** Retained consumer for preparation inspection; zero for host-authored command streams. */
+    std::uint64_t node_identity = 0U;
     [[nodiscard]] friend bool operator==(const TextRunRenderCommand&,
                                          const TextRunRenderCommand&) = default;
 };
@@ -752,6 +754,8 @@ class RenderCommandBuffer final {
 
     void append(RenderCommand command);
     void append(const std::vector<RenderCommand>& commands);
+    /** Adopts a complete run without copying its commands or their path/glyph payloads. */
+    void append(std::vector<RenderCommand>&& commands);
     /** Appends a retained range directly, without allocating a temporary list of runs. */
     void append(const RenderCommandView& source, std::size_t begin, std::size_t end);
     void clear() noexcept;
@@ -761,6 +765,7 @@ class RenderCommandBuffer final {
     [[nodiscard]] std::size_t size() const noexcept {
         return view_.size();
     }
+    [[nodiscard]] bool empty() const noexcept { return view_.empty(); }
     /** Whether both buffers read the same runs: equal commands without comparing them. */
     [[nodiscard]] bool shares_storage(const RenderCommandBuffer& other) const noexcept {
         return view_.root_ == other.view_.root_ && view_.tail_ == other.view_.tail_;
@@ -818,7 +823,7 @@ class RenderEngine final {
     RenderEngine& operator=(const RenderEngine&) = delete;
 
     [[nodiscard]] RenderOperationCounters
-    render(const RetainedTree& tree, const LayoutResult& layout, const InputRouter& input,
+    render(const RetainedTree& tree, const LayoutResult& layout, const InputPresentation& input,
            const CommandIndex& commands, const WidgetRegistry& widgets,
            const BehaviorRegistry& behaviors, const MotionRuntime& motion, const TextEngine* text,
            const resource::SvgImageRegistry* svg_images, const MaterialRegistry& materials,

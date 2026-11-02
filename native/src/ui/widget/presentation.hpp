@@ -6,19 +6,20 @@
 #include <string_view>
 #include <vector>
 
+#include "base/pending.hpp"
 #include "ui/path.hpp"
 #include "ui/render.hpp"
 #include "ui/widget/registry.hpp"
 
 namespace strata::resource {
 class SvgImageRegistry;
-struct ImageAnimation;
+struct ImageView;
 }
 
 namespace strata::ui {
 
 class CommandIndex;
-class InputRouter;
+class InputPresentation;
 class MotionRuntime;
 struct MotionComputedValues;
 class TextEngine;
@@ -82,20 +83,22 @@ struct NodeVisualCache final {
 class WidgetRenderScope final {
   public:
     WidgetRenderScope(const RetainedNode& node, const LayoutRecord& layout,
-                      const LayoutResult& layout_result, const InputRouter& input,
+                      const LayoutResult& layout_result, const InputPresentation& input,
                       const CommandIndex& commands, const TextEngine* text,
                       const resource::SvgImageRegistry* svg_images, const MotionRuntime* motion,
                       double inherited_opacity, WidgetVisualProfile visual_profile,
-                      std::vector<RenderCommand>& output, bool apply_presentation_opacity = true);
+                      RenderCommandBuffer& output, bool apply_presentation_opacity = true);
 
     [[nodiscard]] const RetainedNode& node() const noexcept;
     [[nodiscard]] const LayoutRecord& layout() const noexcept;
     [[nodiscard]] const LayoutResult& layout_result() const noexcept;
-    [[nodiscard]] const InputRouter& input() const noexcept;
+    [[nodiscard]] const InputPresentation& input() const noexcept;
     [[nodiscard]] const CommandIndex& command_index() const noexcept;
     [[nodiscard]] const TextEngine* text_engine() const noexcept;
-    /** An image's natural size, when the surface knows the image. */
-    [[nodiscard]] std::optional<Size> image_size(std::string_view image) const;
+    /** Records a resource used by this cached paint operation without waiting for it. */
+    [[nodiscard]] base::PendingStatus observe(const base::Readiness& resource) const;
+    /** Coherent image metadata; records pending preparation and repeated metadata publication. */
+    [[nodiscard]] base::ResourceResult<resource::ImageView> image_resource(std::string_view image) const;
     [[nodiscard]] const MotionComputedValues* motion_values() const noexcept;
     [[nodiscard]] const WidgetVisualStyle& visual() const noexcept;
     /**
@@ -119,9 +122,6 @@ class WidgetRenderScope final {
     [[nodiscard]] double motion_progress(std::string_view id, double fallback = 0.0) const noexcept;
     /** The surface's images (and its Lottie library), when it has any. */
     [[nodiscard]] const resource::SvgImageRegistry* images() const noexcept;
-    /** How the image animates, or nothing for a still or unknown one. */
-    [[nodiscard]] const resource::ImageAnimation*
-    image_animation(std::string_view image) const noexcept;
 
     [[nodiscard]] const runtime::Value* property(std::string_view name) const noexcept;
     [[nodiscard]] const runtime::Value* style(std::string_view name) const noexcept;
@@ -200,6 +200,8 @@ class WidgetRenderScope final {
     void push_transform(const TransformPushRenderCommand& transform);
     void pop_transform();
     void append(RenderCommand command, double opacity = 1.0);
+    /** Retains a prepared immutable run; opacity is a scope rather than rewritten payloads. */
+    void append(const RenderCommandView& commands, double opacity = 1.0);
     void text(std::string_view value, Point origin, RenderColor color, double alignment_width = 0.0,
               WidgetTextAlignment horizontal_alignment = WidgetTextAlignment::start,
               double alignment_height = 0.0,
@@ -227,44 +229,44 @@ class WidgetRenderScope final {
     const RetainedNode& node_;
     const LayoutRecord& layout_;
     const LayoutResult& layout_result_;
-    const InputRouter& input_;
+    const InputPresentation& input_;
     const CommandIndex& commands_;
     const TextEngine* text_;
     const resource::SvgImageRegistry* svg_images_;
     const MotionRuntime* motion_;
     double inherited_opacity_ = 1.0;
     bool apply_presentation_opacity_ = true;
-    std::vector<RenderCommand>& output_;
+    RenderCommandBuffer& output_;
     WidgetVisualStyle visual_;
     bool enabled_ = true;
     bool discarded_ = false;
 };
 
-[[nodiscard]] std::vector<RenderCommand> build_widget_fragment(
+[[nodiscard]] RenderCommandBuffer build_widget_fragment(
     const WidgetRegistry& registry, const RetainedNode& node, const LayoutRecord& layout,
-    const LayoutResult& layout_result, const InputRouter& input, const CommandIndex& commands,
+    const LayoutResult& layout_result, const InputPresentation& input, const CommandIndex& commands,
     const TextEngine* text, const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion, double inherited_opacity, bool apply_presentation_opacity = true);
 
-[[nodiscard]] std::vector<RenderCommand>
+[[nodiscard]] RenderCommandBuffer
 build_widget_overlay(const WidgetRegistry& registry, const RetainedNode& node,
                      const LayoutRecord& layout, const LayoutResult& layout_result,
-                     const InputRouter& input, const CommandIndex& commands, const TextEngine* text,
+                     const InputPresentation& input, const CommandIndex& commands, const TextEngine* text,
                      const resource::SvgImageRegistry* svg_images, const MotionRuntime* motion,
                      double inherited_opacity, bool apply_presentation_opacity = true);
 
 void append_widget_foreground(const WidgetRegistry& registry, const RetainedNode& node,
                               const LayoutRecord& layout, const LayoutResult& layout_result,
-                              const InputRouter& input, const CommandIndex& commands,
+                              const InputPresentation& input, const CommandIndex& commands,
                               const TextEngine* text, const resource::SvgImageRegistry* svg_images,
                               const MotionRuntime* motion, double inherited_opacity,
-                              std::vector<RenderCommand>& output,
+                              RenderCommandBuffer& output,
                               bool apply_presentation_opacity = true);
 
 [[nodiscard]] std::optional<Rect>
 widget_descendant_clip(const WidgetRegistry& registry, const RetainedNode& node,
                        const LayoutRecord& layout, const LayoutResult& layout_result,
-                       const InputRouter& input, const CommandIndex& commands,
+                       const InputPresentation& input, const CommandIndex& commands,
                        const TextEngine* text, const resource::SvgImageRegistry* svg_images,
                        const MotionRuntime* motion, double inherited_opacity);
 
@@ -287,6 +289,6 @@ void register_collection_widget_presenters(WidgetRegistry& registry);
 /** Shared detached overlay hook for command-bound Button and IconButton. */
 void command_tooltip_overlay(WidgetRenderScope& scope);
 /** Whether the command tooltip of a control is ready to show. */
-[[nodiscard]] bool command_tooltip_shown(const RetainedNode& node, const InputRouter& input);
+[[nodiscard]] bool command_tooltip_shown(const RetainedNode& node, const InputPresentation& input);
 
 } // namespace strata::ui

@@ -4,7 +4,7 @@
   "window": {"width": 800, "height": 600},
   "validity": {"requireVisible": false, "requireForeground": false},
   "spikes": {"floorMillis": 1, "baselineMultiplier": 2, "maximumReported": 4},
-  "setup": [{"key": "f7"}, {"frames": 2}],
+  "setup": [{"key": "f7"}, {"settle": 0}],
   "phases": [
     {
       "name": "idle",

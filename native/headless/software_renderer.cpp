@@ -744,6 +744,14 @@ void SoftwareRenderer::set_clear_color(const std::array<std::uint8_t, 4U> rgba) 
 
 void SoftwareRenderer::declare_material(std::string_view, std::string_view) {}
 
+void SoftwareRenderer::release_programs(const std::string_view prefix) {
+    for (auto it = effects_.lower_bound(prefix);
+         it != effects_.end() && it->first.starts_with(prefix);)
+        it = effects_.erase(it);
+    std::erase_if(material_fallbacks_,
+                  [prefix](const std::string& id) { return id.starts_with(prefix); });
+}
+
 void SoftwareRenderer::declare_effect_pass(const std::string_view effect_id,
                                            const std::uint32_t index, const std::uint32_t kind,
                                            const double radius, const std::uint32_t downsample,

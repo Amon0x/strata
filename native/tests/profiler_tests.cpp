@@ -179,6 +179,96 @@ void snapshots_never_publish_an_open_frame() {
     require(profiler.snapshot().frame_index == 2U, "completed frame was not published");
 }
 
+void delayed_host_feedback_preserves_frame_identity() {
+    using namespace strata::runtime;
+    ProfilerConfig config;
+    config.spike_absolute_floor_nanos = 100;
+    config.spike_baseline_multiplier = 2.0;
+    config.spike_minimum_baseline_samples = 3U;
+    Profiler profiler(ProfilerScope::surface, "delayed-host", config, [] { return 0; });
+    for (std::uint64_t index = 1U; index <= 6U; ++index) {
+        auto frame = profiler.frame(index);
+        profiler.record(ProfilerCounter::draw_calls, index * 11U);
+        profiler.record(ProfilerCounter::render_commands, index * 10U);
+    }
+    HostFrameProfilerTelemetry feedback;
+    feedback.draw_calls = 7U;
+    feedback.submit_nanos = 20;
+    for (std::uint64_t index = 1U; index <= 3U; ++index) {
+        feedback.frame_index = index;
+        profiler.record_host_frame(feedback);
+    }
+    feedback.frame_index = 4U;
+    feedback.submit_nanos = 200;
+    profiler.record_host_frame(feedback);
+    const auto counter = [](const auto& counters, const ProfilerCounter identity) {
+        const auto found = std::ranges::find(counters, identity, &ProfilerCounterSnapshot::counter);
+        return found == counters.end() ? 0U : found->value;
+    };
+    const auto delayed = profiler.snapshot();
+    const auto& timing = section(delayed, "frame/host-submit");
+    require(delayed.frame_index == 6U && timing.last_sample_frame_index == 4U &&
+                timing.last_nanos == 0 && timing.average_nanos == 65 &&
+                counter(delayed.counters, ProfilerCounter::draw_calls) == 66U &&
+                counter(delayed.counters, ProfilerCounter::render_commands) == 60U,
+            "late host feedback overwrote current work or acquired the wrong frame identity");
+    const auto spike = std::ranges::find(delayed.spikes, std::string("frame/host-submit"),
+                                         &ProfilerSpikeSnapshot::section_path);
+    require(spike != delayed.spikes.end() && spike->frame_index == 4U &&
+                counter(spike->counters, ProfilerCounter::draw_calls) == 7U &&
+                counter(spike->counters, ProfilerCounter::render_commands) == 0U,
+            "late host spike inherited another frame's counter context");
+
+    feedback.frame_index = 6U;
+    feedback.draw_calls = 8U;
+    feedback.submit_nanos = 30;
+    profiler.record_host_frame(feedback);
+    feedback.frame_index = 5U;
+    feedback.draw_calls = 2U;
+    feedback.submit_nanos = 40;
+    profiler.record_host_frame(feedback);
+    const auto reordered = profiler.snapshot();
+    const auto& latest = section(reordered, "frame/host-submit");
+    require(latest.last_sample_frame_index == 6U && latest.last_nanos == 30 &&
+                latest.sample_count == 6U &&
+                counter(reordered.counters, ProfilerCounter::draw_calls) == 8U &&
+                counter(reordered.counters, ProfilerCounter::host_submissions) == 1U,
+            "out-of-order host feedback replaced a newer sample or its counters");
+    for (const std::uint64_t invalid : {0U, 7U}) {
+        feedback.frame_index = invalid;
+        bool rejected = false;
+        try {
+            profiler.record_host_frame(feedback);
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        require(rejected &&
+                    section(profiler.snapshot(), "frame/host-submit").sample_count == 6U,
+                "invalid host frame identity mutated retained measurements");
+    }
+    auto open = profiler.frame(7U);
+    feedback.frame_index = 7U;
+    bool rejected = false;
+    try {
+        profiler.record_host_frame(feedback);
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    require(rejected, "host feedback was accepted before its frame completed");
+    open.close();
+    profiler.set_capture_enabled(false);
+    {
+        auto uncaptured = profiler.frame(8U);
+    }
+    profiler.set_capture_enabled(true);
+    feedback.frame_index = 8U;
+    profiler.record_host_frame(feedback);
+    const auto resumed = profiler.snapshot();
+    require(resumed.frame_index == 7U &&
+                section(resumed, "frame/host-submit").sample_count == 6U,
+            "feedback crossing capture enablement fabricated an uncaptured frame");
+}
+
 } // namespace
 
 int strata_test_profiler() {
@@ -188,6 +278,7 @@ int strata_test_profiler() {
         bounded_drops_and_external_host_submission_are_visible();
         disabled_capture_is_independent_and_preserves_history();
         snapshots_never_publish_an_open_frame();
+        delayed_host_feedback_preserves_frame_identity();
         std::cout << "profiler tests passed\n";
         return 0;
     } catch (const std::exception& error) {

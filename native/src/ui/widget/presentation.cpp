@@ -9,6 +9,7 @@
 #include <ranges>
 #include <utility>
 
+#include "base/process_lifetime.hpp"
 #include "resource/svg_image.hpp"
 #include "ui/command.hpp"
 #include "ui/input.hpp"
@@ -195,8 +196,8 @@ struct TextDecoration final {
  * cannot drift from what the default theme materializes.
  */
 [[nodiscard]] const ThemeTokens& fallback_tokens() noexcept {
-    static const ThemeTokens tokens;
-    return tokens;
+    static const base::ProcessLifetime<ThemeTokens> tokens;
+    return tokens.get();
 }
 
 [[nodiscard]] std::optional<RenderBorder>
@@ -467,7 +468,7 @@ std::string widget_number_text(const double value) {
     return std::string(buffer.data(), result.ptr);
 }
 
-bool command_tooltip_shown(const RetainedNode& node, const InputRouter& input) {
+bool command_tooltip_shown(const RetainedNode& node, const InputPresentation& input) {
     return input.command_tooltip_ready(node.identity());
 }
 
@@ -501,12 +502,12 @@ void command_tooltip_overlay(WidgetRenderScope& scope) {
 }
 
 WidgetRenderScope::WidgetRenderScope(const RetainedNode& node, const LayoutRecord& layout,
-                                     const LayoutResult& layout_result, const InputRouter& input,
+                                     const LayoutResult& layout_result, const InputPresentation& input,
                                      const CommandIndex& commands, const TextEngine* text,
                                      const resource::SvgImageRegistry* svg_images,
                                      const MotionRuntime* motion, const double inherited_opacity,
                                      const WidgetVisualProfile visual_profile,
-                                     std::vector<RenderCommand>& output,
+                                     RenderCommandBuffer& output,
                                      const bool apply_presentation_opacity)
     : node_(node), layout_(layout), layout_result_(layout_result), input_(input),
       commands_(commands), text_(text), svg_images_(svg_images), motion_(motion),
@@ -539,7 +540,7 @@ const LayoutRecord& WidgetRenderScope::layout() const noexcept {
 const LayoutResult& WidgetRenderScope::layout_result() const noexcept {
     return layout_result_;
 }
-const InputRouter& WidgetRenderScope::input() const noexcept {
+const InputPresentation& WidgetRenderScope::input() const noexcept {
     return input_;
 }
 const CommandIndex& WidgetRenderScope::command_index() const noexcept {
@@ -547,6 +548,10 @@ const CommandIndex& WidgetRenderScope::command_index() const noexcept {
 }
 const TextEngine* WidgetRenderScope::text_engine() const noexcept {
     return text_;
+}
+base::PendingStatus WidgetRenderScope::observe(const base::Readiness& resource) const {
+    node_.observe_preparation(resource);
+    return resource.status();
 }
 const WidgetVisualStyle& WidgetRenderScope::visual() const noexcept {
     return visual_;
@@ -572,11 +577,6 @@ Rect WidgetRenderScope::root_bounds() const noexcept {
 }
 const resource::SvgImageRegistry* WidgetRenderScope::images() const noexcept {
     return svg_images_;
-}
-
-const resource::ImageAnimation*
-WidgetRenderScope::image_animation(const std::string_view image) const noexcept {
-    return svg_images_ != nullptr ? svg_images_->animation(image) : nullptr;
 }
 
 double WidgetRenderScope::motion_progress(const std::string_view id,
@@ -692,7 +692,7 @@ void WidgetRenderScope::rounded_rect(const Rect bounds, Paint fill,
     fill.multiply_alpha(alpha());
     if (border_value.has_value())
         border_value->paint = widget_opacity(std::move(border_value->paint), alpha());
-    output_.emplace_back(RoundedRectRenderCommand{
+    output_.append(RoundedRectRenderCommand{
         bounds,
         corners(radius),
         fill,
@@ -704,7 +704,7 @@ void WidgetRenderScope::rounded_rect(const Rect bounds, Paint fill,
 void WidgetRenderScope::border(const Rect bounds, RenderBorder border_value,
                                const std::optional<double> radius) {
     border_value.paint = widget_opacity(std::move(border_value.paint), alpha());
-    output_.emplace_back(BorderRenderCommand{
+    output_.append(BorderRenderCommand{
         bounds,
         border_value,
         corners(radius),
@@ -713,7 +713,7 @@ void WidgetRenderScope::border(const Rect bounds, RenderBorder border_value,
 
 void WidgetRenderScope::solid_rect(const Rect bounds, Paint fill) {
     fill.multiply_alpha(alpha());
-    output_.emplace_back(SolidRectRenderCommand{bounds, std::move(fill)});
+    output_.append(SolidRectRenderCommand{bounds, std::move(fill)});
 }
 
 void WidgetRenderScope::shape(const Rect bounds, PathShape value) {
@@ -721,7 +721,7 @@ void WidgetRenderScope::shape(const Rect bounds, PathShape value) {
         value.fill->multiply_alpha(alpha());
     if (value.stroke.has_value())
         value.stroke->multiply_alpha(alpha());
-    output_.emplace_back(PathRenderCommand{bounds, std::move(value)});
+    output_.append(PathRenderCommand{bounds, std::move(value)});
 }
 
 namespace {
@@ -896,7 +896,7 @@ void WidgetRenderScope::shapes(const Rect bounds, std::vector<PathShape> values)
     }
     PathShape first = std::move(values.front());
     values.erase(values.begin());
-    output_.emplace_back(PathRenderCommand{bounds, std::move(first), std::move(values)});
+    output_.append(PathRenderCommand{bounds, std::move(first), std::move(values)});
 }
 
 void WidgetRenderScope::art(const Rect bounds, ArtOutline outline, std::optional<Paint> fill,
@@ -919,27 +919,28 @@ void WidgetRenderScope::art(const Rect bounds, ArtOutline outline, std::optional
     }
     if (!shape.fill.has_value() && !shape.stroke.has_value())
         return;
-    output_.emplace_back(PathRenderCommand{bounds, std::move(shape), {}, std::move(outline)});
+    output_.append(PathRenderCommand{bounds, std::move(shape), {}, std::move(outline)});
 }
 
-std::optional<Size> WidgetRenderScope::image_size(const std::string_view image) const {
+base::ResourceResult<resource::ImageView>
+WidgetRenderScope::image_resource(const std::string_view image) const {
     if (svg_images_ == nullptr)
-        return std::nullopt;
-    const std::optional<resource::ImageDimensions> dimensions = svg_images_->dimensions(image);
-    if (!dimensions.has_value() || dimensions->width == 0U || dimensions->height == 0U)
-        return std::nullopt;
-    return Size{static_cast<double>(dimensions->width), static_cast<double>(dimensions->height)};
+        return {};
+    auto result = svg_images_->lookup(image);
+    static_cast<void>(observe(result.readiness));
+    return result;
 }
 
 void WidgetRenderScope::image(const Rect bounds, std::string image, RenderColor tint,
                               const TextureRegion source) {
-    if (svg_images_ != nullptr) {
-        if (const svg::Document* document = svg_images_->find(image); document != nullptr) {
-            append_svg_image(output_, *document, bounds, source, tint, alpha());
-            return;
-        }
+    const auto resource = image_resource(image);
+    if (!resource.value.has_value() && resource.status() != base::PendingStatus::ready)
+        return;
+    if (resource.value.has_value() && resource.value->document != nullptr) {
+        append_svg_image(output_, *resource.value->document, bounds, source, tint, alpha());
+        return;
     }
-    output_.emplace_back(ImageRenderCommand{
+    output_.append(ImageRenderCommand{
         bounds,
         std::move(image),
         source,
@@ -950,7 +951,7 @@ void WidgetRenderScope::image(const Rect bounds, std::string image, RenderColor 
 void WidgetRenderScope::nine_patch(const Rect bounds, std::string texture,
                                    const Edges source_insets, const Edges destination_insets,
                                    const TextureRegion source, RenderColor tint) {
-    output_.emplace_back(NinePatchRenderCommand{
+    output_.append(NinePatchRenderCommand{
         bounds,
         std::move(texture),
         source,
@@ -963,7 +964,7 @@ void WidgetRenderScope::nine_patch(const Rect bounds, std::string texture,
 void WidgetRenderScope::custom_mesh(const Rect bounds, std::string mesh, MeshGeometry geometry,
                                     std::optional<std::string> texture,
                                     std::optional<MaterialState> material) {
-    output_.emplace_back(CustomMeshRenderCommand{
+    output_.append(CustomMeshRenderCommand{
         bounds,
         std::move(mesh),
         std::move(geometry),
@@ -975,12 +976,12 @@ void WidgetRenderScope::custom_mesh(const Rect bounds, std::string mesh, MeshGeo
 
 void WidgetRenderScope::blur_region(const Rect bounds, const double radius,
                                     const std::size_t downsample) {
-    output_.emplace_back(BlurRegionRenderCommand{bounds, radius, downsample});
+    output_.append(BlurRegionRenderCommand{bounds, radius, downsample});
 }
 
 void WidgetRenderScope::shadow(const Rect bounds, const CornerRadii radii, RenderColor color,
                                const double radius, const double spread) {
-    output_.emplace_back(ShadowRenderCommand{
+    output_.append(ShadowRenderCommand{
         bounds,
         radii,
         widget_opacity(color, alpha()),
@@ -990,15 +991,15 @@ void WidgetRenderScope::shadow(const Rect bounds, const CornerRadii radii, Rende
 }
 
 void WidgetRenderScope::push_clip(const Rect bounds, const CornerRadii radii) {
-    output_.emplace_back(ClipPushRenderCommand{bounds, radii});
+    output_.append(ClipPushRenderCommand{bounds, radii});
 }
 
 void WidgetRenderScope::pop_clip() {
-    output_.emplace_back(ClipPopRenderCommand{});
+    output_.append(ClipPopRenderCommand{});
 }
 
 void WidgetRenderScope::push_transform(const double scale, const Point translation) {
-    output_.emplace_back(TransformPushRenderCommand{
+    output_.append(TransformPushRenderCommand{
         scale,
         0.0,
         translation.x,
@@ -1009,15 +1010,26 @@ void WidgetRenderScope::push_transform(const double scale, const Point translati
 }
 
 void WidgetRenderScope::push_transform(const TransformPushRenderCommand& transform) {
-    output_.emplace_back(transform);
+    output_.append(transform);
 }
 
 void WidgetRenderScope::pop_transform() {
-    output_.emplace_back(TransformPopRenderCommand{});
+    output_.append(TransformPopRenderCommand{});
 }
 
 void WidgetRenderScope::append(RenderCommand command, const double opacity) {
-    output_.push_back(render_command_with_opacity(std::move(command), alpha() * opacity));
+    output_.append(render_command_with_opacity(std::move(command), alpha() * opacity));
+}
+
+void WidgetRenderScope::append(const RenderCommandView& commands, const double opacity) {
+    if (commands.empty())
+        return;
+    const double combined = alpha() * opacity;
+    if (combined != 1.0)
+        output_.append(OpacityPushRenderCommand{combined});
+    output_.append(commands, 0U, commands.size());
+    if (combined != 1.0)
+        output_.append(OpacityPopRenderCommand{});
 }
 
 void WidgetRenderScope::text(const std::string_view value, const Point origin, RenderColor color,
@@ -1102,7 +1114,7 @@ void WidgetRenderScope::draw_text_layout(const TextLayout& layout_value, const P
             });
         }
         if (!glyphs.empty()) {
-            output_.emplace_back(TextRunRenderCommand{
+            output_.append(TextRunRenderCommand{
                 text_origin,
                 color,
                 resolved_run.pixel_size,
@@ -1111,6 +1123,7 @@ void WidgetRenderScope::draw_text_layout(const TextLayout& layout_value, const P
                 effects.distance() ? FontRasterization::msdf : resolved_run.font_rasterization,
                 text_cull_bounds,
                 effects,
+                node_.identity(),
             });
         }
         if (const TextDecoration decoration =
@@ -1120,7 +1133,7 @@ void WidgetRenderScope::draw_text_layout(const TextLayout& layout_value, const P
                 decoration.color.has_value() ? widget_opacity(*decoration.color, alpha()) : color;
             for (const Rect line :
                  decoration_lines(shaped, resolved_run, text_origin, x_offset, decoration)) {
-                output_.emplace_back(SolidRectRenderCommand{line, line_color});
+                output_.append(SolidRectRenderCommand{line, line_color});
             }
         }
     }
@@ -1186,13 +1199,15 @@ void WidgetRenderScope::rich_text(const Point origin, const RenderColor fallback
             });
         }
         if (!glyphs.empty()) {
-            output_.emplace_back(TextRunRenderCommand{
+            output_.append(TextRunRenderCommand{
                 origin,
                 color,
                 resolved_run.pixel_size,
                 std::move(glyphs),
                 resolved_run.font_rasterization,
                 text_cull_bounds,
+                {},
+                node_.identity(),
             });
         }
         if (const TextDecoration decoration =
@@ -1201,7 +1216,7 @@ void WidgetRenderScope::rich_text(const Point origin, const RenderColor fallback
             const RenderColor line_color =
                 decoration.color.has_value() ? widget_opacity(*decoration.color, alpha()) : color;
             for (const Rect line : decoration_lines(shaped, resolved_run, origin, 0.0, decoration))
-                output_.emplace_back(SolidRectRenderCommand{line, line_color});
+                output_.append(SolidRectRenderCommand{line, line_color});
         }
     }
 }
@@ -1262,17 +1277,19 @@ RenderColor WidgetRenderScope::palette(const std::string_view name,
     return color;
 }
 
-std::vector<RenderCommand>
+RenderCommandBuffer
 build_widget_fragment(const WidgetRegistry& registry, const RetainedNode& node,
                       const LayoutRecord& layout, const LayoutResult& layout_result,
-                      const InputRouter& input, const CommandIndex& commands,
+                      const InputPresentation& input, const CommandIndex& commands,
                       const TextEngine* text, const resource::SvgImageRegistry* svg_images,
                       const MotionRuntime* motion, const double inherited_opacity,
                       const bool apply_presentation_opacity) {
-    std::vector<RenderCommand> output;
+    PreparationReadScope preparation_reads(node, PreparationUse::content);
+    RenderCommandBuffer output;
     const WidgetLifecycle* lifecycle = registry.find(node.description().type);
     if (lifecycle == nullptr || !participates(*lifecycle, node) ||
         lifecycle->present.content == nullptr) {
+        preparation_reads.commit();
         return output;
     }
     WidgetRenderScope scope(node, layout, layout_result, input, commands, text, svg_images, motion,
@@ -1281,21 +1298,24 @@ build_widget_fragment(const WidgetRegistry& registry, const RetainedNode& node,
     lifecycle->present.content(scope);
     if (scope.discarded())
         output.clear();
+    preparation_reads.commit();
     return output;
 }
 
-std::vector<RenderCommand>
+RenderCommandBuffer
 build_widget_overlay(const WidgetRegistry& registry, const RetainedNode& node,
                      const LayoutRecord& layout, const LayoutResult& layout_result,
-                     const InputRouter& input, const CommandIndex& commands, const TextEngine* text,
+                     const InputPresentation& input, const CommandIndex& commands, const TextEngine* text,
                      const resource::SvgImageRegistry* svg_images, const MotionRuntime* motion,
                      const double inherited_opacity, const bool apply_presentation_opacity) {
-    std::vector<RenderCommand> output;
+    PreparationReadScope preparation_reads(node, PreparationUse::overlay);
+    RenderCommandBuffer output;
     const WidgetLifecycle* lifecycle = registry.find(node.description().type);
     if (lifecycle == nullptr || !participates(*lifecycle, node) ||
         lifecycle->present.overlay == nullptr ||
         (lifecycle->present.overlay_shown != nullptr &&
          !lifecycle->present.overlay_shown(node, input))) {
+        preparation_reads.commit();
         return output;
     }
     WidgetRenderScope scope(node, layout, layout_result, input, commands, text, svg_images, motion,
@@ -1304,45 +1324,57 @@ build_widget_overlay(const WidgetRegistry& registry, const RetainedNode& node,
     lifecycle->present.overlay(scope);
     if (scope.discarded())
         output.clear();
+    preparation_reads.commit();
     return output;
 }
 
 void append_widget_foreground(const WidgetRegistry& registry, const RetainedNode& node,
                               const LayoutRecord& layout, const LayoutResult& layout_result,
-                              const InputRouter& input, const CommandIndex& commands,
+                              const InputPresentation& input, const CommandIndex& commands,
                               const TextEngine* text, const resource::SvgImageRegistry* svg_images,
                               const MotionRuntime* motion, const double inherited_opacity,
-                              std::vector<RenderCommand>& output,
+                              RenderCommandBuffer& output,
                               const bool apply_presentation_opacity) {
+    PreparationReadScope preparation_reads(node, PreparationUse::foreground);
     const WidgetLifecycle* lifecycle = registry.find(node.description().type);
     if (lifecycle == nullptr || !participates(*lifecycle, node) ||
         lifecycle->present.foreground == nullptr) {
+        preparation_reads.commit();
         return;
     }
     WidgetRenderScope scope(node, layout, layout_result, input, commands, text, svg_images, motion,
                             inherited_opacity, lifecycle->present.visual, output,
                             apply_presentation_opacity);
     lifecycle->present.foreground(scope);
+    preparation_reads.commit();
 }
 
 std::optional<Rect>
 widget_descendant_clip(const WidgetRegistry& registry, const RetainedNode& node,
                        const LayoutRecord& layout, const LayoutResult& layout_result,
-                       const InputRouter& input, const CommandIndex& commands,
+                       const InputPresentation& input, const CommandIndex& commands,
                        const TextEngine* text, const resource::SvgImageRegistry* svg_images,
                        const MotionRuntime* motion, const double inherited_opacity) {
+    PreparationReadScope preparation_reads(node, PreparationUse::clip);
     const WidgetLifecycle* lifecycle = registry.find(node.description().type);
-    if (lifecycle == nullptr || !participates(*lifecycle, node))
-        return std::nullopt;
-    if (presentation_statics(node).content_motion_clip)
-        return layout.bounds;
-    if (lifecycle->present.descendant_clip == nullptr) {
+    if (lifecycle == nullptr || !participates(*lifecycle, node)) {
+        preparation_reads.commit();
         return std::nullopt;
     }
-    std::vector<RenderCommand> unused;
+    if (presentation_statics(node).content_motion_clip) {
+        preparation_reads.commit();
+        return layout.bounds;
+    }
+    if (lifecycle->present.descendant_clip == nullptr) {
+        preparation_reads.commit();
+        return std::nullopt;
+    }
+    RenderCommandBuffer unused;
     WidgetRenderScope scope(node, layout, layout_result, input, commands, text, svg_images, motion,
                             inherited_opacity, lifecycle->present.visual, unused);
-    return lifecycle->present.descendant_clip(scope);
+    const auto clip = lifecycle->present.descendant_clip(scope);
+    preparation_reads.commit();
+    return clip;
 }
 
 } // namespace strata::ui

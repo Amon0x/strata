@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <strata/host.hpp>
+#include <strata/presentation.hpp>
 #include <strata/render_packet.hpp>
 #include <strata/strata.hpp>
 
@@ -18,13 +19,17 @@
 
 namespace strata::host {
 
+class ResourceRoot;
+class SessionPreparation;
+struct SessionPrepareOptions;
+
 /** Capabilities every Session requires; installed adapters add their own. */
 inline constexpr strata_capabilities session_capabilities =
     STRATA_CAPABILITY_CORE_LIFECYCLE | STRATA_CAPABILITY_CALLER_CLOCK |
     STRATA_CAPABILITY_HOST_SNAPSHOTS | STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
     STRATA_CAPABILITY_COMPILER_ACTIVATION | STRATA_CAPABILITY_ACTION_DISPATCH |
     STRATA_CAPABILITY_RESOURCE_ADAPTER | STRATA_CAPABILITY_SURFACE_RUNTIME |
-    STRATA_CAPABILITY_SURFACE_RENDER_PACKET;
+    STRATA_CAPABILITY_SURFACE_RENDER_PACKET | STRATA_CAPABILITY_TASK_EXECUTION;
 
 /** What a host decides before a Session's runtime exists. */
 struct SessionOptions final {
@@ -49,10 +54,15 @@ struct SessionOptions final {
     std::function<void(const strata_diagnostic&)> on_diagnostic;
     /** Owner label of the Session's host bindings; empty uses the application id. */
     std::string bindings_owner;
+    TaskExecution task_execution = TaskExecution::asynchronous;
+    /** Thread-safe notification only; callback storage is owned by this Session. */
+    std::function<void()> frame_wake;
 };
 
 /**
- * Host services for the runtime. Callback owners must outlive the Session. Resources, clipboard,
+ * Host services for the runtime. Callback owners must outlive the Session. Resource reads may run
+ * on any serialized runtime owner thread; clipboard, IME, effects and async handlers stay on the
+ * UI owner. Resources, clipboard,
  * IME and effects are installed before the application is configured; durable state and async
  * host data, which belong to the configured application, after it.
  */
@@ -92,12 +102,14 @@ struct SessionSurface final {
  * One application runtime and its Surface, independent of window system and renderer. A Session
  * owns the runtime's caller clock and diagnostics, installs host adapters, configures the
  * application with its extension packages, activates source or compiled modules, creates the
- * Surface, frames it into decoded packets, records host-frame telemetry, and performs the ordered
+ * Surface, frames it into owned packets, and performs the ordered
  * release barrier. Hosts own windows, input translation and the backend that draws packets.
  */
 class Session final {
   public:
     Session(SessionOptions options, const SessionAdapters& adapters);
+    /** Prepares owned inputs through the engine ABI; no UI service or model callback runs there. */
+    [[nodiscard]] static SessionPreparation prepare(SessionPrepareOptions options);
     /** Abandons a Surface that was not closed; a closed Session releases nothing twice. */
     ~Session();
 
@@ -136,29 +148,78 @@ class Session final {
     /** Enqueues a batch atomically; throws unless every event was accepted. */
     void enqueue(std::span<const strata_input_event> events);
 
-    /** Synchronizes host bindings, frames the Surface at `time_nanoseconds`, decodes its packet. */
-    [[nodiscard]] SurfacePacketFrame frame(std::int64_t time_nanoseconds);
-    /** Publishes the backend's work for the packet the latest frame produced. */
-    void record_host_frame(const RenderPacket& packet, std::int64_t submit_nanoseconds = 0);
-    /**
-     * Publishes what the backend measured for the packet the latest frame produced: its texture
-     * traffic, blur passes and targets, and submit time. The packet supplies the draw, batch and
-     * vertex counts, so those fields of `backend` are ignored.
-     */
-    void record_host_frame(const RenderPacket& packet, const ProfilerHostFrame& backend);
+    /** Synchronizes bindings and publishes an owned packet; decoding belongs to the consumer. */
+    [[nodiscard]] SurfacePacketCommit frame(std::int64_t time_nanoseconds);
+    /** Prepares owned terminal bytes without waiting for their backend consumer. */
+    [[nodiscard]] EncodedRenderPacket prepare_release();
+    /** After successful consumer acknowledgement, closes the Surface on its runtime owner. */
+    void acknowledge_release();
 
     /**
      * The ordered release barrier: prepares the terminal packet, hands it to `consume`, which must
      * release the backend's resources before returning, acknowledges it and closes the Surface.
      */
-    void close_surface(const std::function<void(const RenderPacket&)>& consume);
+    void close_surface(const std::function<void(const EncodedRenderPacket&)>& consume);
     /** Closes the Surface as close_surface does, then the runtime. */
-    void close(const std::function<void(const RenderPacket&)>& consume);
+    void close(const std::function<void(const EncodedRenderPacket&)>& consume);
     /** Gives up the Surface without the barrier; the host discards its backend resources. */
     void abandon() noexcept;
 
   private:
+    friend class SessionPreparation;
     struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+enum class SessionModuleFormat { source, compiled };
+
+/** Owned preparation inputs. Optional readers must retain their inputs and be safe off-owner. */
+struct SessionPrepareOptions final {
+    SessionOptions session;
+    std::shared_ptr<ResourceRoot> resources;
+    /** Read on the worker; empty uses session.schemas. */
+    std::string schemas_resource;
+    std::string module_resource;
+    SessionModuleFormat module_format = SessionModuleFormat::source;
+    std::uint64_t generation = 1U;
+    std::int64_t time_nanoseconds = 0;
+    SessionSurface surface;
+    std::vector<CapturedSnapshot> snapshots;
+    ActionBindings actions;
+    /** Startup bytes only; the live write adapter is installed during adoption. */
+    std::function<std::optional<std::string>()> load_durable;
+    /** Backend source key, e.g. hlsl; empty omits program-source acquisition. */
+    std::string program_language;
+};
+
+/** A complete Session plus owned program declarations for the renderer's ordered installation. */
+struct PreparedSession final {
+    std::unique_ptr<Session> session;
+    std::vector<MaterialSource> materials;
+    std::vector<EffectSource> effects;
+    /** Accepted entry source for hosts which support source reload; empty for compiled modules. */
+    std::string source;
+};
+
+/** Owner-side ticket. Destruction cancels adoption and quiesces notifications without joining. */
+class SessionPreparation final {
+  public:
+    ~SessionPreparation();
+    SessionPreparation(SessionPreparation&&) noexcept;
+    SessionPreparation& operator=(SessionPreparation&&) noexcept;
+    SessionPreparation(const SessionPreparation&) = delete;
+    SessionPreparation& operator=(const SessionPreparation&) = delete;
+
+    /** Polls without waiting; terminal failure delivers buffered diagnostics and throws. */
+    [[nodiscard]] bool ready();
+    /** Installs UI-only adapters and captured binding cursors, then transfers the Session once. */
+    [[nodiscard]] PreparedSession take(const SessionAdapters& adapters,
+                                       std::unique_ptr<Bindings> bindings);
+
+  private:
+    friend class Session;
+    struct Impl;
+    explicit SessionPreparation(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;
 };
 

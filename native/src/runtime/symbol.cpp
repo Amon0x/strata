@@ -10,6 +10,8 @@
 #include <string>
 #include <unordered_map>
 
+#include "base/process_lifetime.hpp"
+
 namespace strata::runtime {
 namespace {
 
@@ -79,8 +81,9 @@ class SymbolTable final {
 };
 
 [[nodiscard]] SymbolTable& table() {
-    static SymbolTable instance;
-    return instance;
+    // Interned ids and borrowed names remain valid through detached preparation at process exit.
+    static base::ProcessLifetime<SymbolTable> instance;
+    return instance.get();
 }
 
 } // namespace

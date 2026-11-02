@@ -1,6 +1,7 @@
 #include <strata/render_packet.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -10,6 +11,7 @@
 #include <string_view>
 #include <utility>
 
+#include "base/task_pool.hpp"
 #include "compiler/module.hpp"
 #include "font/atlas.hpp"
 #include "resource/resource.hpp"
@@ -17,6 +19,7 @@
 #include "runtime/application.hpp"
 #include "runtime/profiler.hpp"
 #include "runtime/value.hpp"
+#include "ui/inspection.hpp"
 #include "ui/render.hpp"
 #include "ui/render/packet.hpp"
 #include "ui/render/surface_packets.hpp"
@@ -76,10 +79,11 @@ std::vector<std::uint8_t> encode(const strata::ui::RenderCommandBuffer& commands
             resources, strata::resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
     strata::font::GlyphAtlas atlas("effect-packet-test");
     strata::ui::HostRenderPacketCache cache;
-    return cache.encode(commands, 7U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0);
+    const auto encoded = cache.encode(commands, 7U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0);
+    return {encoded.bytes().begin(), encoded.bytes().end()};
 }
 
-std::uint32_t u32(const std::vector<std::uint8_t>& bytes, const std::size_t offset) {
+std::uint32_t u32(const std::span<const std::uint8_t> bytes, const std::size_t offset) {
     if (offset > bytes.size() || bytes.size() - offset < sizeof(std::uint32_t)) {
         throw std::runtime_error("packet fixture offset is outside the encoded bytes");
     }
@@ -302,8 +306,7 @@ void test_clips_keep_their_coordinate_owner(const std::filesystem::path& resourc
             outer.project_y = 0.0005 * step;
         }
         commands.set_groups({outer, ui::RenderGroup{.index = 2U, .parent = 1U, .translate_y = -20.0}});
-        const host::RenderPacket& packet = decoder.decode(
-            cache.encode(commands, frame, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0));
+        const host::RenderPacket& packet = decoder.decode(cache.encode(commands, frame, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0).bytes());
         const auto* draw = std::get_if<host::DrawBatch>(&packet.batches.at(0U));
         check(draw != nullptr && draw->rounded_clips.size() == 2U,
               "nested scroll clips lost the fixed viewport or moving content clip");
@@ -594,8 +597,9 @@ void test_incremental_geometry_patch_round_trip(const std::filesystem::path& res
         ui::Rect{10.0, 20.0, 100.0, 50.0},
         ui::RenderColor{30U, 80U, 140U, 255U},
     });
-    const std::vector<std::uint8_t> first_encoded =
+    const auto first_packet =
         cache.encode(commands, 1U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0);
+    const auto first_encoded = first_packet.bytes();
     const host::RenderPacket first = decoder.decode(first_encoded);
     check(first.full_geometry_payload && first.vertex_patches.empty(),
           "initial render packet was not a complete geometry epoch");
@@ -605,12 +609,13 @@ void test_incremental_geometry_patch_round_trip(const std::filesystem::path& res
         ui::Rect{14.0, 20.0, 100.0, 50.0},
         ui::RenderColor{30U, 80U, 140U, 255U},
     });
-    const std::vector<std::uint8_t> patch_encoded =
+    const auto patch_packet =
         cache.encode(commands, 2U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0);
+    const auto patch_encoded = patch_packet.bytes();
     check((u32(patch_encoded, 36U) & host::packet_flag_geometry_patches) != 0U &&
               patch_encoded.size() < first_encoded.size(),
           "small geometry change was encoded as another full packet");
-    std::vector<std::uint8_t> malformed = patch_encoded;
+    std::vector<std::uint8_t> malformed(patch_encoded.begin(), patch_encoded.end());
     malformed.push_back(0xFFU);
     bool rejected = false;
     try {
@@ -630,13 +635,70 @@ void test_incremental_geometry_patch_round_trip(const std::filesystem::path& res
               patched.geometry_dirty_regions.front().height == 50.0,
           "retained geometry patch did not reconstruct the changed submission");
 
-    const std::vector<std::uint8_t> reuse_encoded =
+    const auto reuse_packet =
         cache.encode(commands, 3U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0);
+    const auto reuse_encoded = reuse_packet.bytes();
     const host::RenderPacket reused = decoder.decode(reuse_encoded);
     check(u32(reuse_encoded, 36U) == 0U && reused.vertex_patches.empty() &&
               reused.geometry_dirty_regions.empty() && !reused.geometry_dirty_all &&
               reused.vertices == patched.vertices && reused.geometry_epoch == patched.geometry_epoch,
           "compact reuse did not retain the patched geometry epoch");
+    check(cache.reuse(4U) && cache.reuse(5U), "settled packet stream could not advance");
+    cache.clear();
+    host::RenderPacketDecoder retained_decoder;
+    const auto& retained_first = retained_decoder.decode(first_packet.bytes());
+    check(retained_first.frame_index == 1U && retained_first.vertices == first.vertices,
+          "a retained full packet changed after later publication and producer reset");
+    const auto& retained_patch = retained_decoder.decode(patch_packet.bytes());
+    check(retained_patch.frame_index == 2U && retained_patch.vertices == patched.vertices,
+          "a retained patch lost its geometry after producer reset");
+    const auto& retained_reuse = retained_decoder.decode(reuse_packet.bytes());
+    check(retained_reuse.frame_index == 3U && retained_reuse.vertices == patched.vertices &&
+              retained_reuse.resources.empty(),
+          "compact packet reuse rewrote a retained frame or repeated resource operations");
+}
+
+void test_failed_packet_keeps_retryable_resources(const std::filesystem::path& resources) {
+    using namespace strata;
+    const auto text = ui::TextEngine::load_control_font(
+        resources, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
+    font::GlyphAtlas atlas("retry-packet");
+    ui::HostRenderPacketCache cache;
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::SolidRectRenderCommand{
+        ui::Rect{0, 0, 40, 40}, ui::RenderColor{20U, 100U, 200U, 255U}});
+    const auto previous = cache.encode(commands, 1U, {}, atlas, *text, 1, 100, 100, 100, 100);
+    const auto& face = *text->font("strata:fonts/default-medium").value.value();
+    check(atlas.request_coverage("retry-font", face, face.glyph_id('A'), 16, {}).value.has_value(),
+          "retry fixture did not prepare a glyph");
+    const auto operations = atlas.pending_operations();
+    check(!operations.empty(), "retry fixture did not produce host resources");
+    const std::size_t operation_count = operations.size();
+    const std::string texture = operations.front().texture;
+    commands.set_groups({ui::RenderGroup{.index = 1U, .parent = 1U}});
+    bool rejected = false;
+    try {
+        static_cast<void>(cache.encode(commands, 2U, {}, atlas, *text, 1, 100, 100, 100, 100));
+    } catch (const std::logic_error&) {
+        rejected = true;
+    }
+    check(rejected && cache.packet().get() == previous.get() &&
+              atlas.pending_operations().size() == operation_count && !cache.reuse(3U),
+          "failed packet publication replaced its predecessor or drained pending resources");
+    commands.set_groups({});
+    host::RenderPacketDecoder decoder;
+    static_cast<void>(decoder.decode(previous.bytes()));
+    const auto& retried = decoder.decode(
+        cache.encode(commands, 4U, {}, atlas, *text, 1, 100, 100, 100, 100).bytes());
+    check(retried.full_geometry_payload && retried.resources.size() == operation_count &&
+              std::ranges::all_of(retried.resources, [&](const host::ResourceOperation& operation) {
+                  return operation.texture == texture;
+              }) && atlas.pending_operations().empty(),
+          "successful retry did not publish and commit every pending resource");
+    const auto& repeated = decoder.decode(
+        cache.encode(commands, 5U, {}, atlas, *text, 1, 100, 100, 100, 100).bytes());
+    check(repeated.resources.empty() && repeated.frame_index == 5U,
+          "a later packet repeated an already committed resource operation");
 }
 
 void test_effect_batch_change_invalidates_retained_samples(
@@ -661,9 +723,7 @@ void test_effect_batch_change_invalidates_retained_samples(
         ui::CornerRadii::all(9.0),
         effect(ui::EffectInput::backdrop),
     });
-    static_cast<void>(decoder.decode(cache.encode(
-        commands, 1U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0
-    )));
+    static_cast<void>(decoder.decode(cache.encode(commands, 1U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0).bytes()));
 
     ui::EffectState changed_effect = effect(ui::EffectInput::backdrop);
     changed_effect.opacity = 0.5;
@@ -677,9 +737,7 @@ void test_effect_batch_change_invalidates_retained_samples(
         ui::CornerRadii::all(9.0),
         std::move(changed_effect),
     });
-    const host::RenderPacket& changed = decoder.decode(cache.encode(
-        commands, 2U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0
-    ));
+    const host::RenderPacket& changed = decoder.decode(cache.encode(commands, 2U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0).bytes());
     check(
         !changed.full_geometry_payload && changed.geometry_dirty_all,
         "an effect-batch-only patch retained stale rate-limited samples"
@@ -894,6 +952,242 @@ void test_texture_changes_report_dirty_regions() {
           "a retained packet without resource changes reported dirty regions");
 }
 
+/** Ready glyphs invalidate cached draws even while their retained command storage is unchanged. */
+void test_pending_vectors_replan_unchanged_commands(const std::filesystem::path& resources) {
+    using namespace strata;
+    base::TaskOwner tasks(base::TaskExecution::asynchronous);
+    runtime::ApplicationContext application(
+        "pending-vectors", runtime::ApplicationBundle::create(), {}, &tasks);
+    const compiler::ModuleSource source{
+        "pending-vectors.strata",
+        "overlay Main { root Text(key: \"caption\", text: \"Pending vectors\") }",
+    };
+    const auto no_imports = [](const std::string_view,
+                                const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application.compile_and_activate(source, no_imports, 0U).activated(),
+          "pending vector fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 200;
+    environment.logical_width = 320.0;
+    environment.logical_height = 200.0;
+    environment.reduced_motion = true;
+    const auto text = ui::TextEngine::load_control_font(
+        resources, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
+    ui::Surface surface("pending-vectors", application, runtime::LayerRole::overlay, "Main",
+                        environment, text);
+    ui::SurfacePackets packets("strata:test/pending-vectors", {}, tasks);
+    const resource::RuntimeImageStore images;
+    host::RenderPacketDecoder decoder;
+    const auto frame = [&](const std::int64_t time) -> const host::RenderPacket& {
+        return decoder.decode(packets.encode(surface, surface.frame(time), images).bytes());
+    };
+    const host::RenderPacket& pending = frame(0);
+    check(tasks.pending() != 0U && pending.batches.empty() &&
+              packets.glyph_atlas().cached_glyph_count() == 0U,
+          "pending vectors blocked or fell through to synchronous glyph rasterization");
+    const data::JsonValue inspected = ui::inspect_node(surface, "caption", 0U);
+    const auto* readiness = inspected.find("readiness");
+    check(readiness != nullptr && readiness->array() != nullptr &&
+              std::ranges::any_of(*readiness->array(), [](const data::JsonValue& read) {
+                  return read.find("phase") != nullptr && read.find("kind") != nullptr &&
+                         read.find("status") != nullptr &&
+                         *read.find("phase")->string() == "packet" &&
+                         *read.find("kind")->string() == "vector_glyph" &&
+                         *read.find("status")->string() == "PENDING";
+              }),
+          "pending glyph preparation was not attached to its retained consumer in inspection");
+    const auto commands = surface.render_commands();
+    check(tasks.wait_for_completion(std::chrono::seconds(5)),
+          "vector preparation did not reach its owner mailbox");
+    static_cast<void>(frame(1));
+    check(surface.render_commands().shares_storage(commands),
+          "glyph adoption unnecessarily rebuilt its render commands");
+    check(tasks.pending() != 0U && tasks.wait_for_completion(std::chrono::seconds(5)),
+          "fitted vector preparation did not reach its owner mailbox");
+    const host::RenderPacket& ready = frame(2);
+    check(tasks.pending() == 0U && !ready.batches.empty() &&
+              packets.glyph_atlas().cached_glyph_count() == 0U,
+          "vector preparation failed to settle without a raster fallback");
+
+    runtime::ApplicationContext inline_application(
+        "inline-vectors", runtime::ApplicationBundle::create());
+    check(inline_application.compile_and_activate(source, no_imports, 0U).activated(),
+          "inline vector fixture did not activate");
+    ui::Surface inline_surface("inline-vectors", inline_application,
+                               runtime::LayerRole::overlay, "Main", environment, text);
+    ui::SurfacePackets inline_packets("strata:test/pending-vectors", {}, inline_application.tasks());
+    host::RenderPacketDecoder inline_decoder;
+    const auto& exact = inline_decoder.decode(inline_packets.encode(inline_surface, inline_surface.frame(0), images).bytes());
+    check(ready.vertices == exact.vertices && ready.indices == exact.indices &&
+              ready.batches.size() == exact.batches.size(),
+          "settled async vector geometry differs from inline preparation");
+    const std::uint64_t epoch = ready.geometry_epoch;
+    const auto& settled = frame(3);
+    check(settled.geometry_epoch == epoch && packets.unchanged(),
+          "a settled vector resource kept replanning identical text");
+
+    // Replacing a pending text draw by another draw kind drops its dependency, not its slot.
+    ui::VectorGlyphPool removed_vectors("strata:test/removed-vectors", &tasks);
+    font::GlyphAtlas removed_atlas("strata:test/removed-vectors");
+    ui::RenderSubmissionCache removed_cache;
+    removed_cache.set_vector_glyphs(&removed_vectors);
+    ui::RenderCommandBuffer replacement;
+    const auto logical = std::ranges::find_if(commands.commands(), [](const ui::RenderCommand& draw) {
+        return std::holds_alternative<ui::TextRunRenderCommand>(draw);
+    });
+    check(logical != commands.commands().end(), "vector fixture lost its text command");
+    replacement.append(*logical);
+    const ui::RenderSubmissionEnvironment submission_environment{
+        1.0, 320, 200, 320.0, 200.0,
+    };
+    const auto kind = static_cast<std::size_t>(base::TaskKind::vector_glyph);
+    const auto cancelled = tasks.statistics().kinds[kind].cancelled;
+    static_cast<void>(removed_cache.resolve(replacement, removed_atlas, *text,
+                                            submission_environment));
+    replacement.clear();
+    replacement.append(ui::SolidRectRenderCommand{
+        ui::Rect{0.0, 0.0, 320.0, 200.0}, ui::RenderColor{255U, 255U, 255U, 255U}});
+    check(removed_cache.resolve(replacement, removed_atlas, *text,
+                                submission_environment).planned_draws == 1U &&
+              removed_cache.readiness() == nullptr,
+          "a replacement draw retained the removed text's preparation");
+    check(tasks.wait_for_completion(std::chrono::seconds(5)),
+          "cancelled vector preparation did not reach its owner");
+    static_cast<void>(tasks.drain());
+    check(tasks.statistics().kinds[kind].cancelled == cancelled + 1U &&
+              !removed_cache.resources_changed(),
+          "removed text adopted stale vectors or invalidated its replacement");
+}
+
+/** Raster readiness replans immutable draws, preserves valid rescaled text, and cancels removed work. */
+void test_pending_rasters_replan_unchanged_commands(const std::filesystem::path& resources) {
+    using namespace strata;
+    const auto text = ui::TextEngine::load_control_font(
+        resources, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
+    for (const font::GlyphRasterMode mode : {font::GlyphRasterMode::coverage,
+                                            font::GlyphRasterMode::subpixel,
+                                            font::GlyphRasterMode::msdf}) {
+        base::TaskOwner tasks(base::TaskExecution::asynchronous);
+        font::GlyphAtlas atlas("pending-rasters", {}, &tasks);
+        ui::HostRenderPacketCache cache;
+        if (mode == font::GlyphRasterMode::subpixel)
+            cache.set_text_subpixel(font::SubpixelOrder::rgb);
+        ui::TextRunRenderCommand run;
+        run.origin = ui::Point{10.0, 40.0};
+        run.color = ui::RenderColor{240U, 240U, 240U, 255U};
+        run.pixel_size = 23.8125;
+        run.font_rasterization = mode == font::GlyphRasterMode::msdf
+                                    ? ui::FontRasterization::msdf
+                                    : ui::FontRasterization::grayscale;
+        run.node_identity = 42U;
+        std::vector<ui::LogicalGlyph> glyphs;
+        const ui::SharedFontId font_id("strata:fonts/default");
+        for (std::uint32_t code = 'A'; code <= 'H'; ++code) {
+            ui::LogicalGlyph glyph;
+            glyph.font_id = font_id;
+            glyph.glyph_id = text->font(font_id).value.value()->glyph_id(code);
+            glyph.code_point = code;
+            glyph.x = static_cast<double>(code - 'A') * 18.0;
+            glyph.advance = 18.0;
+            glyphs.push_back(std::move(glyph));
+        }
+        run.glyphs = std::move(glyphs);
+        ui::RenderCommandBuffer commands;
+        commands.append(ui::GroupPushRenderCommand{1U});
+        commands.append(run);
+        commands.append(ui::GroupPopRenderCommand{});
+        commands.set_groups({ui::RenderGroup{.index = 1U}});
+        const auto unchanged_commands = commands;
+        host::RenderPacketDecoder decoder;
+        std::uint64_t frame_index = 0U;
+        double display_scale = 1.0;
+        const auto frame = [&]() -> const host::RenderPacket& {
+            return decoder.decode(cache.encode(commands, ++frame_index, {}, atlas, *text,
+                                                display_scale, 640, 480, 640.0, 480.0).bytes());
+        };
+        check(frame().batches.empty() && atlas.cached_glyph_count() == 0U &&
+                  tasks.pending() == 1U && cache.readiness() != nullptr &&
+                  cache.readiness()->size() == 1U &&
+                  cache.readiness()->front().node_identity == 42U &&
+                  cache.readiness()->front().dependency.resource.kind() ==
+                      base::TaskKind::glyph_raster,
+              "a raster miss blocked, packed unpublished pixels, or lost its consumer");
+        check(tasks.wait_for_completion(std::chrono::seconds(5)) &&
+                  cache.readiness()->front().dependency.current() &&
+                  atlas.cached_glyph_count() == 0U,
+              "worker raster completion mutated owner-visible preparation before adoption");
+        static_cast<void>(tasks.drain());
+        const host::RenderPacket ready = frame();
+        check(ready.indices.size() == 8U * 6U && ready.batches.size() == 1U &&
+                  atlas.cached_glyph_count() == 8U && tasks.pending() == 0U &&
+                  commands.shares_storage(unchanged_commands),
+              "raster adoption did not restore the unchanged text run");
+        font::GlyphAtlas exact_atlas("pending-rasters");
+        ui::HostRenderPacketCache exact_cache;
+        if (mode == font::GlyphRasterMode::subpixel)
+            exact_cache.set_text_subpixel(font::SubpixelOrder::rgb);
+        host::RenderPacketDecoder exact_decoder;
+        const auto& exact = exact_decoder.decode(exact_cache.encode(commands, 1U, {}, exact_atlas, *text, 1.0, 640, 480, 640.0, 480.0).bytes());
+        check(ready.vertices == exact.vertices && ready.indices == exact.indices &&
+                  ready.batches.size() == exact.batches.size(),
+              "settled asynchronous raster geometry differs from deterministic preparation");
+        check(frame().geometry_epoch == ready.geometry_epoch && cache.reuse(++frame_index),
+              "settled rasters kept invalidating an unchanged packet");
+
+        if (mode == font::GlyphRasterMode::coverage) {
+            // A static transform requests its raster scale immediately, without the host's
+            // wall-clock debounce for animated presentation groups.
+            commands.clear();
+            commands.append(ui::TransformPushRenderCommand{1.625, 0.0, 0.0, 0.0, 1.625, 0.0});
+            commands.append(run);
+            commands.append(ui::TransformPopRenderCommand{});
+            const auto& held = frame();
+            check(tasks.pending() == 1U && held.indices == ready.indices &&
+                      atlas.cached_glyph_count() == 8U,
+                  "pending replacement rasters discarded valid resampled text");
+            check(tasks.wait_for_completion(std::chrono::seconds(5)),
+                  "replacement rasters did not finish");
+            static_cast<void>(tasks.drain());
+            check(frame().indices.size() == 8U * 6U && tasks.pending() == 0U,
+                  "replacement raster adoption lost glyphs");
+            const std::uint64_t old_generation = atlas.generation();
+            display_scale = 1.375;
+            check(frame().batches.empty() && atlas.generation() != old_generation &&
+                      tasks.pending() == 1U,
+                  "pending display-scale rasters reused coordinates from released atlas pages");
+            check(tasks.wait_for_completion(std::chrono::seconds(5)),
+                  "display-scale rasters did not finish");
+            static_cast<void>(tasks.drain());
+            check(frame().indices.size() == 8U * 6U && tasks.pending() == 0U,
+                  "display-scale adoption did not restore its glyphs");
+        }
+
+        run.pixel_size = 29.9375;
+        commands.clear();
+        commands.append(run);
+        static_cast<void>(frame());
+        check(tasks.pending() == 1U && tasks.wait_for_completion(std::chrono::seconds(5)),
+              "removed-raster fixture did not prepare its replacement");
+        commands.clear();
+        commands.append(ui::SolidRectRenderCommand{
+            ui::Rect{0.0, 0.0, 100.0, 80.0}, ui::RenderColor{255U, 0U, 0U, 255U}});
+        const auto& replacement = frame();
+        const auto* rectangle = replacement.batches.size() == 1U
+                                    ? std::get_if<host::DrawBatch>(&replacement.batches.front())
+                                    : nullptr;
+        check(rectangle != nullptr && rectangle->index_count == 6U &&
+                  !rectangle->texture.has_value() && cache.readiness() == nullptr,
+              "replacing pending text retained its glyph draws or dependencies");
+        static_cast<void>(tasks.drain());
+        const auto kind = static_cast<std::size_t>(base::TaskKind::glyph_raster);
+        check(tasks.statistics().kinds[kind].cancelled == 1U && cache.reuse(++frame_index),
+              "removed text adopted obsolete raster preparation");
+    }
+}
+
 /**
  * A Surface frame becomes a complete host packet in the core: text reaches the glyph atlas, a
  * settled frame re-sends the retained epoch, the profiler records the packet, and the terminal
@@ -924,12 +1218,12 @@ void test_surface_frames_encode_complete_packets(const std::filesystem::path& re
         ui::TextEngine::load_control_font(
             resources, resource::ResourceId::parse("assets/strata/fonts/medium.ttf")));
     surface.profiler().set_capture_enabled(true);
-    ui::SurfacePackets packets("strata:test/surface-packets", {});
+    ui::SurfacePackets packets("strata:test/surface-packets", {}, application.tasks());
     const resource::RuntimeImageStore images;
     host::RenderPacketDecoder decoder;
 
     const ui::SurfaceFrame first = surface.frame(1'000'000);
-    const host::RenderPacket& full = decoder.decode(packets.encode(surface, first, images));
+    const host::RenderPacket& full = decoder.decode(packets.encode(surface, first, images).bytes());
     check(full.frame_index == first.frame_index && full.full_geometry_payload &&
               !full.batches.empty() && !full.vertices.empty(),
           "the first Surface frame did not encode complete geometry");
@@ -959,12 +1253,12 @@ void test_surface_frames_encode_complete_packets(const std::filesystem::path& re
           "packet encoding was not recorded in the Surface profiler");
 
     const ui::SurfaceFrame settled = surface.frame(2'000'000);
-    const host::RenderPacket& reused = decoder.decode(packets.encode(surface, settled, images));
+    const host::RenderPacket& reused = decoder.decode(packets.encode(surface, settled, images).bytes());
     check(reused.frame_index == settled.frame_index && reused.geometry_epoch == epoch &&
               !reused.full_geometry_payload && packets.telemetry().geometry_reused,
           "a settled frame did not re-send the retained geometry epoch");
 
-    const host::RenderPacket& terminal = decoder.decode(packets.prepare_release(surface));
+    const host::RenderPacket& terminal = decoder.decode(packets.prepare_release(surface).bytes());
     check(packets.release_prepared(), "the terminal packet was not recorded as prepared");
     for (const std::string& resource : glyph_resources) {
         check(std::ranges::any_of(terminal.resources,
@@ -1091,8 +1385,7 @@ void test_decoder_assigns_effect_sample_revisions(const std::filesystem::path& r
         commands.append(ui::SolidRectRenderCommand{ui::Rect{200.0, 150.0, 10.0, 10.0}, far});
         commands.append(ui::SolidRectRenderCommand{ui::Rect{86.0, 50.0, 10.0, 10.0}, near});
         commands.append(ui::BackdropEffectRenderCommand{ui::Rect{50.0, 50.0, 30.0, 30.0}, {}, state});
-        const host::RenderPacket& packet = decoder.decode(
-            cache.encode(commands, ++frame, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0));
+        const host::RenderPacket& packet = decoder.decode(cache.encode(commands, ++frame, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0).bytes());
         for (const host::SubmissionBatch& batch : packet.batches) {
             if (const auto* effect_batch = std::get_if<host::EffectBatch>(&batch))
                 return std::pair{effect_batch->sample_revision, effect_batch->read_reach};
@@ -1132,10 +1425,13 @@ int strata_test_render_packet(const int argument_count, const char* const* const
         test_content_effect_depth_is_bounded(arguments[1]);
         test_repeated_epoch_rejects_batch_shape_changes(arguments[1]);
         test_incremental_geometry_patch_round_trip(arguments[1]);
+        test_failed_packet_keeps_retryable_resources(arguments[1]);
         test_effect_batch_change_invalidates_retained_samples(arguments[1]);
         test_effect_refresh_defaults_to_unbounded(arguments[1]);
         test_texture_changes_report_dirty_regions();
         test_surface_frames_encode_complete_packets(arguments[1]);
+        test_pending_vectors_replan_unchanged_commands(arguments[1]);
+        test_pending_rasters_replan_unchanged_commands(arguments[1]);
         test_blend_and_clip_coverage_are_resolved_in_the_core(arguments[1]);
         test_typed_draw_fields_are_validated(arguments[1]);
         test_decoder_assigns_effect_sample_revisions(arguments[1]);

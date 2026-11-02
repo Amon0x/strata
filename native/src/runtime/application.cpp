@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <ranges>
 #include <set>
@@ -165,10 +166,14 @@ const std::set<std::string, std::less<>>& ApplicationBundle::async_bindings() co
 ApplicationContext::ApplicationContext(
     std::string id,
     std::shared_ptr<const ApplicationBundle> bundle,
-    RuntimeServices::PublishedDiagnosticSink diagnostic_sink
+    RuntimeServices::PublishedDiagnosticSink diagnostic_sink,
+    base::TaskOwner* const task_owner,
+    std::function<void()> adopt_host_snapshots
 )
     : id_(std::move(id)),
       bundle_(std::move(bundle)),
+      tasks_(task_owner),
+      adopt_host_snapshots_(std::move(adopt_host_snapshots)),
       state_([this] { invalidate(); }),
       host_([this](const std::uint64_t) { invalidate(); }),
       layers_([this] { invalidate(); }),
@@ -202,13 +207,18 @@ ApplicationContext::ApplicationContext(
                   ++async_generation_,
                   value_to_json(roots)
               )));
-          }
+          },
+          [this] { tasks_->request_frame(); }
       ),
       profiler_(ProfilerScope::runtime, id_) {
     if (id_.empty() || !base::valid_utf8(id_)) {
         throw std::invalid_argument("application context id must be non-empty valid UTF-8");
     }
     if (bundle_ == nullptr) throw std::invalid_argument("application context bundle must not be null");
+    if (tasks_ == nullptr) {
+        owned_tasks_.emplace(base::TaskExecution::deterministic);
+        tasks_ = &*owned_tasks_;
+    }
     async_.initialize(bundle_->async_bindings());
 }
 

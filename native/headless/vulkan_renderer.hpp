@@ -25,6 +25,9 @@ class VulkanRenderer final : public CaptureRenderer {
     void declare_material(std::string_view id, std::string_view source) override {
         renderer_.declare_material(id, source);
     }
+    void release_programs(std::string_view prefix) override {
+        renderer_.release_programs(prefix);
+    }
     void declare_effect_pass(std::string_view id, std::uint32_t index, std::uint32_t kind,
                              double radius, std::uint32_t downsample, std::uint32_t rp,
                              std::uint32_t dp, std::string_view source) override {

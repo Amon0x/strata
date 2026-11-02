@@ -1,9 +1,13 @@
 // How far a change reaches: a write, a publish or a retained value describes again only the
 // instances that read it, and their callers take the new output without being described.
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <future>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -12,11 +16,22 @@
 #include <utility>
 #include <vector>
 
+#include "base/pending.hpp"
+#include "base/task_pool.hpp"
 #include "compiler/compile.hpp"
 #include "data/json.hpp"
+#include "resource/runtime_images.hpp"
+#include "resource/svg_image.hpp"
 #include "runtime/application.hpp"
+#include "runtime/profiler.hpp"
 #include "ui/description.hpp"
+#include "ui/inspection.hpp"
+#include "ui/surface.hpp"
+#include "ui/svg_image.hpp"
 #include "ui/tree.hpp"
+#include "ui/widget/description.hpp"
+#include "ui/widget/input.hpp"
+#include "ui/widget/presentation.hpp"
 
 namespace {
 
@@ -84,6 +99,20 @@ void write_state(runtime::ApplicationContext& application, const std::string_vie
                                         std::move(value)),
           "state '" + std::string(name) + "' did not change");
 }
+
+/** Counter handlers must exercise their real closures without reading state or calling a host. */
+class NoExternalScriptEffects final : public runtime::ScriptEffects {
+  public:
+    const runtime::Value* state(const runtime::LexicalStateBinding&) override {
+        throw std::logic_error("counter unexpectedly read retained state");
+    }
+    std::optional<std::string> commit(runtime::ScriptTransaction) override {
+        throw std::logic_error("counter unexpectedly committed retained state");
+    }
+    runtime::ScriptAnswer perform(const std::shared_ptr<const runtime::ActionValue>&) override {
+        throw std::logic_error("counter unexpectedly performed an action");
+    }
+};
 
 [[nodiscard]] std::shared_ptr<const runtime::ApplicationBundle>
 host_bundle(const std::string_view registry, const std::string_view host) {
@@ -522,6 +551,395 @@ overlay Filled {
           "table rows kept the content their caller no longer passes");
 }
 
+void test_readiness_reaches_cached_widgets_and_each_surface() {
+    for (const bool fail : {false, true}) {
+        base::TaskPool pool(1U);
+        base::TaskOwner owner(base::TaskExecution::asynchronous, {}, &pool);
+        // A broken promise also releases the worker if a frame assertion throws.
+        std::promise<void> release;
+        auto resource = base::Pending<std::string>::start(
+            owner, base::TaskKind::image, base::TaskPriority::frame_critical, "caption",
+            [ready = release.get_future().share(), fail](const base::TaskCancellation&) {
+                ready.wait();
+                if (fail)
+                    throw std::runtime_error("caption preparation failed");
+                return std::string("prepared");
+            });
+        runtime::ApplicationContext application(
+            "readiness", runtime::ApplicationBundle::create(), {}, &owner);
+        activate(application, "readiness", R"(
+component Reader() {
+  state count = 0;
+  Panel(key: "reader") {
+    Text(key: "dependent", text: "pending")
+    Text(key: "counter", text: format("{0}", count))
+  }
+}
+component Fixed() { Text(key: "fixed", text: "fixed") }
+overlay Main {
+  root Panel(key: "root") {
+    Reader()
+    Fixed()
+  }
+}
+)");
+        ui::WidgetRegistry widgets;
+        ui::WidgetDescribePhase phase = widgets.find("Text")->describe;
+        const ui::WidgetDescriptionHook original = phase.expand;
+        phase.expand = [original, resource](ui::WidgetDescriptionScope& scope) {
+            if (original != nullptr)
+                original(scope);
+            if (scope.description().key != "dependent")
+                return;
+            const base::PendingStatus status = scope.observe(resource.readiness());
+            const std::string value = status == base::PendingStatus::ready ? *resource.get()
+                                      : status == base::PendingStatus::failed ? "unavailable"
+                                                                            : "pending";
+            scope.description().properties.insert_or_assign(
+                "text", runtime::ExpressionValue(runtime::Value(value)));
+        };
+        widgets.register_describe_phase("Text", std::move(phase));
+        ui::DescriptionBuilder builder(application, widgets);
+        const auto first = builder.build(runtime::LayerRole::overlay, "Main");
+        const auto dependent = find(first.root, "dependent");
+        check(text(dependent) == "pending", "pending description exposed a worker's payload");
+        write_state(application, dependent->state_scope, "count", runtime::Value(1.0));
+        const auto counted = builder.build(runtime::LayerRole::overlay, "Main");
+        check(text(find(counted.root, "counter")) == "1" &&
+                  find(counted.root, "dependent") == dependent,
+              "an unrelated state write did not reuse the pending widget call");
+
+        ui::SurfaceEnvironment environment;
+        environment.framebuffer_width = 320;
+        environment.framebuffer_height = 180;
+        environment.logical_width = 320.0;
+        environment.logical_height = 180.0;
+        environment.reduced_motion = true;
+        ui::Surface left("readiness.left", application, runtime::LayerRole::overlay, "Main",
+                         environment, {}, widgets);
+        ui::Surface right("readiness.right", application, runtime::LayerRole::overlay, "Main",
+                          environment, {}, widgets);
+        static_cast<void>(left.frame(0));
+        static_cast<void>(right.frame(0));
+        const auto right_pending = right.tree().find_key("dependent")->shared_description();
+        release.set_value();
+        check(owner.wait_for_completion(std::chrono::seconds(5)) && resource.get() == nullptr &&
+                  !builder.readiness_changed(),
+              "worker completion published readiness without owner adoption");
+
+        static_cast<void>(left.frame(1));
+        const std::string expected = fail ? "unavailable" : "prepared";
+        check(text(left.tree().find_key("dependent")->shared_description()) == expected &&
+                  text(right.tree().find_key("dependent")->shared_description()) == "pending" &&
+                  builder.readiness_changed(),
+              "one Surface consumed another observer's resource transition");
+        const auto ready = builder.build(runtime::LayerRole::overlay, "Main");
+        check(text(find(ready.root, "dependent")) == expected &&
+                  ready.described_instances == 1U &&
+                  find(ready.root, "counter") == find(counted.root, "counter") &&
+                  find(ready.root, "fixed") == find(first.root, "fixed") &&
+                  !builder.readiness_changed(),
+              "resource adoption reused stale widget output or rebuilt unrelated descriptions");
+        static_cast<void>(right.frame(1));
+        check(text(right.tree().find_key("dependent")->shared_description()) == expected &&
+                  right_pending->readiness.front().observed == base::PendingStatus::pending,
+              "the second Surface missed readiness or mutated its prior description");
+        const data::JsonValue inspected = ui::inspect_node(right, "dependent", 0U);
+        const data::JsonValue* reads = inspected.find("readiness");
+        check(reads != nullptr && reads->array() != nullptr && reads->array()->size() == 1U,
+              "inspection omitted the node's resource dependency");
+        const auto& read = reads->array()->front();
+        check(read.find("label") != nullptr && read.find("status") != nullptr &&
+                  *read.find("label")->string() == "caption" &&
+                  *read.find("status")->string() == (fail ? "FAILED" : "READY"),
+              "inspection did not expose the adopted resource identity and terminal state");
+        const auto adoptions = [](const ui::Surface& surface) {
+            for (const auto& counter : surface.profiler().snapshot().counters) {
+                if (counter.counter == runtime::ProfilerCounter::tasks_adopted)
+                    return counter.value;
+            }
+            throw std::runtime_error("task adoption telemetry was not published");
+        };
+        check(adoptions(left) == 1U && adoptions(right) == 1U,
+              "one Surface profiler consumed the shared runtime's task accounting");
+        static_cast<void>(left.frame(2));
+        static_cast<void>(right.frame(2));
+        check(adoptions(left) == 0U && adoptions(right) == 0U,
+              "settled frames recounted a previous resource adoption");
+    }
+}
+
+void test_preparation_reaches_cached_paint_without_redescribing() {
+    base::TaskOwner owner(base::TaskExecution::asynchronous);
+    std::promise<void> release;
+    const auto resource = base::Pending<double>::start(
+        owner, base::TaskKind::image, base::TaskPriority::frame_critical, "paint-width",
+        [ready = release.get_future().share()](const base::TaskCancellation&) {
+            ready.wait();
+            return 72.0;
+        });
+    runtime::ApplicationContext application(
+        "paint-readiness", runtime::ApplicationBundle::create(), {}, &owner);
+    activate(application, "paint-readiness", R"(
+overlay Main {
+  root Panel(key: "root") {
+    Panel(key: "dependent", style: { width: 100, height: 40 })
+    Panel(key: "fixed", style: { width: 100, height: 40 })
+  }
+}
+)");
+    std::size_t dependent_paints = 0U;
+    std::size_t fixed_paints = 0U;
+    ui::WidgetRegistry widgets;
+    ui::WidgetPresentPhase phase = widgets.find("Panel")->present;
+    const auto original = phase.content;
+    phase.content = [original, resource, &dependent_paints, &fixed_paints](
+                        ui::WidgetRenderScope& scope) {
+        if (original != nullptr)
+            original(scope);
+        if (scope.node().description().key == "fixed")
+            ++fixed_paints;
+        if (scope.node().description().key != "dependent")
+            return;
+        ++dependent_paints;
+        const auto status = scope.observe(resource.readiness());
+        const auto& bounds = scope.layout().bounds;
+        scope.solid_rect(ui::Rect{bounds.x, bounds.y,
+                                  status == base::PendingStatus::ready ? *resource.get() : 12.0,
+                                  7.0},
+                         ui::RenderColor{19U, 31U, 47U, 255U});
+    };
+    widgets.register_present_phase("Panel", std::move(phase));
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 180;
+    environment.logical_width = 320.0;
+    environment.logical_height = 180.0;
+    environment.reduced_motion = true;
+    ui::Surface left("paint.left", application, runtime::LayerRole::overlay, "Main",
+                     environment, {}, widgets);
+    ui::Surface right("paint.right", application, runtime::LayerRole::overlay, "Main",
+                      environment, {}, widgets);
+    static_cast<void>(left.frame(0));
+    static_cast<void>(right.frame(0));
+    const auto left_description = left.tree().find_key("dependent")->shared_description();
+    const auto right_description = right.tree().find_key("dependent")->shared_description();
+    const std::size_t fixed_before = fixed_paints;
+    const std::size_t painted_before = dependent_paints;
+    const auto painted_width = [](const ui::Surface& surface) {
+        for (const auto& command : surface.render_commands().commands()) {
+            if (const auto* rect = std::get_if<ui::SolidRectRenderCommand>(&command);
+                rect != nullptr && rect->bounds.height == 7.0)
+                return rect->bounds.width;
+        }
+        throw std::runtime_error("prepared paint disappeared from its retained command stream");
+    };
+    check(painted_width(left) == 12.0 && painted_width(right) == 12.0,
+          "pending paint exposed unpublished resource data");
+    static_cast<void>(left.frame(0));
+    static_cast<void>(right.frame(0));
+    check(dependent_paints == painted_before,
+          "pending paint prevented retained fragment reuse");
+    release.set_value();
+    check(owner.wait_for_completion(std::chrono::seconds(5)),
+          "paint preparation did not complete");
+    static_cast<void>(left.frame(1));
+    static_cast<void>(right.frame(1));
+    check(painted_width(left) == 72.0 && painted_width(right) == 72.0 &&
+              fixed_paints == fixed_before &&
+              left.tree().find_key("dependent")->shared_description() == left_description &&
+              right.tree().find_key("dependent")->shared_description() == right_description,
+          "paint adoption missed a Surface, rebuilt unrelated paint, or redescribed its consumer");
+    check(dependent_paints == painted_before + 2U,
+          "cached paint did not independently observe the shared completion");
+    const auto inspected = ui::inspect_node(right, "dependent", 0U);
+    const auto* reads = inspected.find("readiness");
+    check(reads != nullptr && reads->array() != nullptr && reads->array()->size() == 1U &&
+              *reads->array()->front().find("phase")->string() == "paint",
+          "paint readiness was not exposed separately from packet preparation");
+}
+
+void test_runtime_image_metadata_reaches_cached_fit() {
+    base::TaskOwner owner(base::TaskExecution::deterministic);
+    resource::RuntimeImageStore images;
+    images.publish("fixed", {1U, 1U}, resource::TextureSampling::linear, {0U, 0U, 0U, 255U});
+    auto registry = std::make_shared<const resource::SvgImageRegistry>(
+        owner, std::vector<resource::ImageSource>{}, &ui::validate_svg_image_geometry, &images, nullptr);
+    runtime::ApplicationContext application(
+        "image-fit-readiness", runtime::ApplicationBundle::create(), {}, &owner);
+    activate(application, "image-fit-readiness", R"(
+overlay Main {
+  root Panel(layout: { kind: "ROW", width: 200, height: 100 }) {
+    Image(key: "photo", image: "photo", fit: "CONTAIN", layout: { width: 100, height: 100 })
+    Image(key: "fixed", image: "fixed", fit: "CONTAIN", layout: { width: 100, height: 100 })
+  }
+}
+)");
+    std::size_t photo_paints = 0U;
+    std::size_t fixed_paints = 0U;
+    ui::WidgetRegistry widgets;
+    auto phase = widgets.find("Image")->present;
+    const auto original = phase.content;
+    phase.content = [original, &photo_paints, &fixed_paints](ui::WidgetRenderScope& scope) {
+        if (scope.node().description().key == "photo")
+            ++photo_paints;
+        else
+            ++fixed_paints;
+        original(scope);
+    };
+    widgets.register_present_phase("Image", std::move(phase));
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 200;
+    environment.framebuffer_height = 100;
+    environment.logical_width = 200.0;
+    environment.logical_height = 100.0;
+    environment.reduced_motion = true;
+    ui::Surface left("fit.left", application, runtime::LayerRole::overlay, "Main",
+                     environment, {}, widgets, {}, nullptr, {}, {}, registry);
+    ui::Surface right("fit.right", application, runtime::LayerRole::overlay, "Main",
+                      environment, {}, widgets, {}, nullptr, {}, {}, registry);
+    for (int pass = 0; pass < 3; ++pass) {
+        static_cast<void>(left.frame(0));
+        static_cast<void>(right.frame(0));
+    }
+    const auto description = left.tree().find_key("photo")->shared_description();
+    const auto fixed_before = fixed_paints;
+    const auto fit = [](const ui::Surface& surface) {
+        for (const auto& command : surface.render_commands().commands()) {
+            if (const auto* image = std::get_if<ui::ImageRenderCommand>(&command);
+                image != nullptr && image->texture == "photo")
+                return ui::Size{image->bounds.width, image->bounds.height};
+        }
+        throw std::runtime_error("runtime image lost its retained symbolic draw");
+    };
+    const auto frame = [&](const std::int64_t now, const ui::Size expected) {
+        const auto a = left.frame(now);
+        const auto b = right.frame(now);
+        check(fit(left) == expected && fit(right) == expected &&
+                  a.operations.layout_measured_nodes == 0U && b.operations.layout_measured_nodes == 0U &&
+                  fixed_paints == fixed_before &&
+                  left.tree().find_key("photo")->shared_description() == description,
+              "image metadata missed a cached fit reader or invalidated unrelated layout/paint");
+    };
+    images.publish("photo", {2U, 1U}, resource::TextureSampling::linear,
+                   std::vector<std::uint8_t>(8U, 255U));
+    frame(1, {100.0, 50.0});
+    const auto painted = photo_paints;
+    images.publish("photo", {2U, 1U}, resource::TextureSampling::linear,
+                   std::vector<std::uint8_t>(8U, 0U));
+    frame(2, {100.0, 50.0});
+    check(photo_paints == painted, "pixel-only runtime publication rebuilt image geometry");
+    images.publish("photo", {1U, 2U}, resource::TextureSampling::linear,
+                   std::vector<std::uint8_t>(8U, 255U));
+    frame(3, {50.0, 100.0});
+    images.release("photo");
+    frame(4, {100.0, 100.0});
+    images.publish("photo", {2U, 1U}, resource::TextureSampling::linear,
+                   std::vector<std::uint8_t>(8U, 255U));
+    frame(5, {100.0, 50.0});
+}
+
+void test_preparation_restarts_cached_frame_hook() {
+    base::TaskOwner owner(base::TaskExecution::asynchronous);
+    std::promise<void> release;
+    const auto resource = base::Pending<double>::start(
+        owner, base::TaskKind::image, base::TaskPriority::frame_critical, "frame-width",
+        [ready = release.get_future().share()](const base::TaskCancellation&) {
+            ready.wait();
+            return 72.0;
+        });
+    runtime::ApplicationContext application(
+        "frame-readiness", runtime::ApplicationBundle::create(), {}, &owner);
+    activate(application, "frame-readiness", R"(
+overlay Main {
+  root Panel {
+    Panel(key: "dependent", layout: { width: 100, height: 40 })
+    Panel(key: "fixed", layout: { width: 100, height: 40 })
+  }
+}
+)");
+    std::size_t callbacks = 0U;
+    std::size_t fixed_callbacks = 0U;
+    ui::WidgetRegistry widgets;
+    widgets.register_frame_phase("Panel", ui::WidgetFramePhase{
+        [resource, &callbacks, &fixed_callbacks](ui::WidgetInputScope& scope,
+                                                const ui::WidgetFrameInfo& frame) {
+            if (scope.node().description().key == "fixed")
+                ++fixed_callbacks;
+            if (scope.node().description().key != "dependent")
+                return;
+            ++callbacks;
+            scope.node().observe_preparation(resource.readiness());
+            if (const auto* width = resource.get(); width != nullptr) {
+                check(frame.delta_nanos == 0, "waiting time leaked into a resumed frame hook");
+                scope.set_retained("prepared.width", runtime::Value(*width), ui::DirtyReason::paint);
+            }
+        }, true});
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 200;
+    environment.framebuffer_height = 100;
+    environment.logical_width = 200.0;
+    environment.logical_height = 100.0;
+    ui::Surface surface("frame.readiness", application, runtime::LayerRole::overlay, "Main",
+                        environment, {}, widgets);
+    for (int pass = 0; pass < 3; ++pass)
+        static_cast<void>(surface.frame(0));
+    const auto fixed_before = fixed_callbacks;
+    const auto description = surface.tree().find_key("dependent")->shared_description();
+    check(callbacks == 1U, "an unresolved frame resource either polled or never ran its first hook");
+    release.set_value();
+    check(owner.wait_for_completion(std::chrono::seconds(5)), "frame resource did not finish");
+    static_cast<void>(surface.frame(0));
+    const auto* width = surface.tree().find_key("dependent")->retained_value("prepared.width");
+    check(callbacks == 2U && fixed_callbacks == fixed_before &&
+              width != nullptr && width->number() != nullptr && *width->number() == 72.0 &&
+              surface.tree().find_key("dependent")->shared_description() == description,
+          "resource adoption did not restart only its frame consumer at the same owner timestamp");
+    static_cast<void>(surface.frame(0));
+    check(callbacks == 2U, "a terminal frame resource retained a perpetual callback");
+}
+
+void test_fresh_callbacks_keep_their_own_cells(const bool through_function) {
+    runtime::ApplicationContext application("callback-cells",
+                                             runtime::ApplicationBundle::create());
+    const std::string factory = through_function
+        ? "fn makeCounter() { var n = 0; fn step() { n += 1; return n; } "
+          "return () => step(); }\n"
+        : "fn makeCounter() { var n = 0; return () => { n += 1; return n; }; }\n";
+    activate(application, "callback-cells", factory + R"(
+overlay Main {
+  state tick = 0;
+  derived counter = makeCounter();
+  root Panel {
+    Text(key: "tick", text: format("{0}", tick))
+    Button(key: "counter", label: "Count", onClick: () => counter())
+  }
+}
+)");
+    ui::DescriptionBuilder builder(application);
+    const auto first = builder.build(runtime::LayerRole::overlay, "Main");
+    const auto previous = find(first.root, "counter");
+    check(first.diagnostics.empty() && previous != nullptr,
+          "callback cell fixture did not describe its first button");
+    check(previous->properties.at("onClick").action() != nullptr,
+          "callback cell fixture retained a function-valued property, not an action");
+    write_state(application, previous->state_scope, "tick", runtime::Value(1.0));
+    const auto second = builder.build(runtime::LayerRole::overlay, "Main");
+    check(first.diagnostics.empty() && second.diagnostics.empty(),
+          "callback cell fixture could not describe a fresh factory");
+    const auto old_handler = *previous->properties.at("onClick").action();
+    const auto new_handler = *find(second.root, "counter")->properties.at("onClick").action();
+    runtime::ExpressionRuntime expressions(application.host(),
+                                            application.bundle()->action_registry());
+    NoExternalScriptEffects effects;
+    const auto old_result = expressions.run_script(old_handler->script, {}, effects);
+    const auto new_result = expressions.run_script(new_handler->script, {}, effects);
+    check(old_result.kind == runtime::ScriptOutcome::Kind::finished &&
+              new_result.kind == runtime::ScriptOutcome::Kind::finished &&
+              old_result.value == runtime::Value(1.0) && new_result.value == runtime::Value(1.0),
+          "description reuse aliased fresh callbacks with equal-valued mutable captures");
+}
+
 void test_a_failed_build_changes_nothing_outside_the_builder() {
     const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("invalidation-pure", bundle);
@@ -581,6 +999,12 @@ int strata_test_description_invalidation() {
         test_a_retained_write_beside_a_repeater_describes_only_its_reader();
         test_a_slot_in_lazy_rows_takes_the_callers_content();
         test_a_slot_in_a_widgets_generated_rows_takes_the_callers_content();
+        test_readiness_reaches_cached_widgets_and_each_surface();
+        test_preparation_reaches_cached_paint_without_redescribing();
+        test_runtime_image_metadata_reaches_cached_fit();
+        test_preparation_restarts_cached_frame_hook();
+        test_fresh_callbacks_keep_their_own_cells(false);
+        test_fresh_callbacks_keep_their_own_cells(true);
         test_a_failed_build_changes_nothing_outside_the_builder();
         std::cout << "strata_description_invalidation_tests: OK\n";
         return 0;

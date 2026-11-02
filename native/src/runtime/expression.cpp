@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "base/process_lifetime.hpp"
 #include "runtime/formatting.hpp"
 
 namespace strata::runtime {
@@ -109,18 +110,13 @@ struct CivilDate final {
                                       const double offset_minutes,
                                       const std::vector<std::string>& month_names,
                                       const std::vector<std::string>& weekday_names) {
-    static const std::vector<std::string> english_months{
+    static constexpr std::string_view english_months[]{
         "January", "February", "March",     "April",   "May",      "June",
         "July",    "August",   "September", "October", "November", "December"};
-    static const std::vector<std::string> english_weekdays{
+    static constexpr std::string_view english_weekdays[]{
         "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-    // Authored names replace English only when complete: twelve months, seven days from Sunday.
-    const std::vector<std::string>& months =
-        month_names.size() == 12U ? month_names : english_months;
-    const std::vector<std::string>& weekdays =
-        weekday_names.size() == 7U ? weekday_names : english_weekdays;
     // Short names are a name's first three characters.
-    const auto short_name = [](const std::string& name) {
+    const auto short_name = [](const std::string_view name) {
         return name.substr(0U, utf8_offset(name, 3U));
     };
     // Bounded to years -9999..9999 so every field stays a sensible width.
@@ -143,6 +139,11 @@ struct CivilDate final {
     const auto millisecond = static_cast<int>(within % 1000);
     // 1970-01-01 was a Thursday; names are indexed from Sunday.
     const auto weekday = static_cast<std::size_t>(((days % 7) + 7 + 4) % 7);
+    // Authored names replace English only when complete: twelve months, seven days from Sunday.
+    const std::string_view month_name = month_names.size() == 12U
+        ? std::string_view(month_names[date.month - 1U]) : english_months[date.month - 1U];
+    const std::string_view weekday_name = weekday_names.size() == 7U
+        ? std::string_view(weekday_names[weekday]) : english_weekdays[weekday];
     const auto padded = [](const std::int64_t value, const std::size_t width) {
         std::string digits = std::to_string(value < 0 ? -value : value);
         if (digits.size() < width)
@@ -174,13 +175,13 @@ struct CivilDate final {
                                 : padded(date.year, run);
             break;
         case 'M':
-            result += run >= 4U   ? months[date.month - 1U]
-                      : run == 3U ? short_name(months[date.month - 1U])
+            result += run >= 4U   ? month_name
+                      : run == 3U ? short_name(month_name)
                                   : padded(date.month, run);
             break;
         case 'd': result += padded(date.day, run); break;
         case 'E':
-            result += run >= 4U ? weekdays[weekday] : short_name(weekdays[weekday]);
+            result += run >= 4U ? weekday_name : short_name(weekday_name);
             break;
         case 'H': result += padded(hour, run); break;
         case 'h': result += padded(hour % 12 == 0 ? 12 : hour % 12, run); break;
@@ -361,8 +362,20 @@ struct Names final {
         return true;
     // Only what the body reads can differ in effect: of a name it reads only fields of, those.
     for (const LexicalRead& read : left.program->captures(left.declaration())) {
-        const ExpressionValue* first_value = first.find(read.name);
-        const ExpressionValue* second_value = second.find(read.name);
+        const ScopeLookup first_read = first.lookup(read.name);
+        const ScopeLookup second_read = second.lookup(read.name);
+        const ExpressionValue* first_cell =
+            first_read.binding != nullptr ? first_read.binding->cell.get() : nullptr;
+        const ExpressionValue* second_cell =
+            second_read.binding != nullptr ? second_read.binding->cell.get() : nullptr;
+        // Equal values in different cells do not make stateful callbacks interchangeable.
+        if (first_cell != second_cell || first_read.group != second_read.group ||
+            first_read.function != second_read.function)
+            return false;
+        if (first_cell != nullptr)
+            continue;
+        const ExpressionValue* first_value = first_read.value;
+        const ExpressionValue* second_value = second_read.value;
         if ((first_value == nullptr) != (second_value == nullptr))
             return false;
         if (first_value == nullptr)
@@ -592,13 +605,13 @@ ExpressionScope::state_binding(const Symbol name) const noexcept {
 }
 
 const HostRoots& ExpressionScope::contextual_host_roots() const noexcept {
-    static const HostRoots none;
-    return contextual_host_roots_ != nullptr ? *contextual_host_roots_ : none;
+    static const base::ProcessLifetime<HostRoots> none;
+    return contextual_host_roots_ != nullptr ? *contextual_host_roots_ : none.get();
 }
 
 const std::string& ExpressionScope::component_path() const noexcept {
-    static const std::string none;
-    return component_path_ != nullptr ? *component_path_ : none;
+    static const base::ProcessLifetime<std::string> none;
+    return component_path_ != nullptr ? *component_path_ : none.get();
 }
 
 void ExpressionScope::push(ScopeFrame frame) {
@@ -699,15 +712,16 @@ bool same_action(const std::shared_ptr<const ActionValue>& left,
 }
 
 const std::shared_ptr<const ActionContract>& script_action_contract() {
-    static const std::shared_ptr<const ActionContract> contract =
-        std::make_shared<const ActionContract>(ActionContract{
+    static const base::ProcessLifetime<std::shared_ptr<const ActionContract>> contract([] {
+        return std::make_shared<const ActionContract>(ActionContract{
             "script.run",
             ValueSchema::any(),
             ActionDispatchPolicy::framework,
             "the event",
             "Runs a script handler with the event.",
         });
-    return contract;
+    });
+    return contract.get();
 }
 
 const Value* ScriptTransaction::written(const StateAddress& address) const noexcept {
@@ -813,9 +827,11 @@ ExpressionValue restore_expression_dependency(const ExpressionDependencyValue& v
 }
 
 const std::shared_ptr<const HostPathKey>& frame_time_path() {
-    static const std::shared_ptr<const HostPathKey> path = HostPathKey::make(
-        {HostPathSegment::named("strataFrame"), HostPathSegment::named("time")});
-    return path;
+    static const base::ProcessLifetime<std::shared_ptr<const HostPathKey>> path([] {
+        return HostPathKey::make(
+            {HostPathSegment::named("strataFrame"), HostPathSegment::named("time")});
+    });
+    return path.get();
 }
 
 Value frame_time_value(const std::int64_t nanos) {

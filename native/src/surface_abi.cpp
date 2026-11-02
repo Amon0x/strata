@@ -23,9 +23,8 @@
 #include "base/utf8.hpp"
 #include "core/diagnostics.hpp"
 #include "data/json.hpp"
-#include "font/opentype.hpp"
+#include "font/raster.hpp"
 #include "resource/image.hpp"
-#include "resource/image_stream.hpp"
 #include "resource/resource.hpp"
 #include "resource/svg_image.hpp"
 #include "ui/frame_snapshot.hpp"
@@ -35,6 +34,7 @@
 #include "ui/render/packet.hpp"
 #include "ui/surface.hpp"
 #include "ui/svg_image.hpp"
+#include "ui/text.hpp"
 
 static_assert(strata::ui::render_packet_version == STRATA_RENDER_PACKET_VERSION_CURRENT,
               "the core encodes the packet version the C ABI publishes");
@@ -343,119 +343,38 @@ image_bindings(const strata_surface_config& config) {
     return result;
 }
 
-struct MaterializedImages final {
-    std::vector<strata::resource::EncodedTextureResource> textures;
-    std::shared_ptr<const strata::resource::SvgImageRegistry> svg_images;
-    std::map<std::string, strata::resource::ImageAnimation, std::less<>> animations;
-};
-
-[[nodiscard]] MaterializedImages
+[[nodiscard]] std::shared_ptr<const strata::resource::SvgImageRegistry>
 image_resources(const ResourceLoader& resources,
                 const std::span<const strata_surface_image_binding> bindings,
                 const std::string_view host_resource_namespace,
-                const strata::resource::RuntimeImageStore* const runtime_images) {
+                const strata::resource::RuntimeImageStore* const runtime_images,
+                strata::base::TaskOwner& tasks) {
     if (host_resource_namespace.empty()) {
         throw std::invalid_argument("Surface host resource namespace must not be empty");
     }
-    MaterializedImages result;
-    result.textures.reserve(bindings.size());
-    std::vector<strata::resource::SvgImageResource> vectors;
-    vectors.reserve(bindings.size());
+    std::vector<strata::resource::ImageSource> sources;
+    sources.reserve(bindings.size());
     for (std::size_t index = 0U; index < bindings.size(); ++index) {
         const strata_surface_image_binding& binding = bindings[index];
         const strata_string_view resource_id{binding.resource_id.data(),
                                              binding.resource_id.size()};
-        strata::resource::ResourceBytes bytes = resources.load(resource_id);
-        // Raster formats are told apart by their signatures, so a file's name never decides how
-        // its bytes are read; whatever no raster decoder claims must be an SVG document.
-        if (const std::optional<strata::resource::ImageFormat> format =
-                strata::resource::sniff_image_format(bytes)) {
-            const strata::resource::ImageInfo info = strata::resource::inspect_image(bytes);
-            const std::string host_id =
-                std::string(host_resource_namespace) + "/static/" + std::to_string(index);
-            // A still image keeps its bytes until a frame draws it. An animation plays from its
-            // bytes as browsers play one, a worker decoding a few frames ahead while it shows:
-            // creating the Surface decodes no more than the two frames that tell the two apart,
-            // however long the animation runs.
-            if (*format != strata::resource::ImageFormat::jpeg) {
-                std::vector<strata::resource::ImageFrame> frames;
-                try {
-                    static_cast<void>(strata::resource::stream_image(
-                        bytes, [&frames](std::vector<std::uint8_t>& rgba,
-                                         const std::uint32_t delay_ms) {
-                            frames.push_back(
-                                strata::resource::ImageFrame{std::move(rgba), delay_ms});
-                            return frames.size() < 2U;
-                        }));
-                } catch (const std::exception&) {
-                    frames.clear();
-                }
-                if (frames.size() > 1U) {
-                    strata::resource::ImageFrame& first = frames.front();
-                    auto stream = std::make_shared<strata::resource::ImageStream>(
-                        std::vector<std::uint8_t>(bytes.begin(), bytes.end()), info.dimensions,
-                        first.rgba, first.delay_ms);
-                    result.textures.push_back(strata::resource::EncodedTextureResource{
-                        binding.id,
-                        host_id,
-                        image_sampling(binding.sampling),
-                        strata::resource::ImageEncoding::rgba8,
-                        info.dimensions,
-                        std::move(first.rgba),
-                        stream,
-                    });
-                    strata::resource::ImageAnimation animation;
-                    animation.stream = std::move(stream);
-                    result.animations.insert_or_assign(binding.id, std::move(animation));
-                    continue;
-                }
-            }
-            result.textures.push_back(strata::resource::EncodedTextureResource{
-                binding.id,
-                host_id,
-                image_sampling(binding.sampling),
-                strata::resource::image_encoding(*format),
-                info.dimensions,
-                std::move(bytes),
-            });
-            continue;
-        }
-        const std::string source(bytes.begin(), bytes.end());
-        if (!strata::base::valid_utf8(source)) {
-            throw std::invalid_argument("image resource '" + binding.resource_id +
-                                        "' is neither a PNG, JPEG, GIF or WebP image nor UTF-8 "
-                                        "SVG");
-        }
-        try {
-            strata::svg::Document document = strata::svg::parse(source);
-            strata::ui::validate_svg_image_geometry(document);
-            vectors.push_back(strata::resource::SvgImageResource{
-                binding.id,
-                std::move(document),
-            });
-        } catch (const strata::svg::ParseError& error) {
-            throw std::invalid_argument("SVG image resource '" + binding.resource_id +
-                                        "' is invalid at byte " +
-                                        std::to_string(error.byte_offset()) + ": " + error.what());
-        } catch (const std::invalid_argument& error) {
-            throw std::invalid_argument(
-                "SVG image resource '" + binding.resource_id +
-                "' exceeds the supported UI geometry budget: " + error.what());
-        }
+        sources.push_back(strata::resource::ImageSource{
+            binding.id,
+            std::string(host_resource_namespace) + "/static/" + std::to_string(index),
+            binding.resource_id,
+            image_sampling(binding.sampling),
+            resources.load(resource_id),
+        });
     }
-    std::map<std::string, strata::resource::ImageDimensions, std::less<>> rasters;
-    for (const strata::resource::EncodedTextureResource& texture : result.textures)
-        rasters.insert_or_assign(texture.logical_id, texture.dimensions);
     // Lottie animations are named by resource id where they are used, so they load through the
     // same adapter on first use rather than being declared up front.
     auto lottie = std::make_shared<const strata::resource::LottieLibrary>(
-        [resources](const std::string_view id) {
+        tasks, [resources](const std::string_view id) {
             return resources.load(strata_string_view{id.data(), id.size()});
         });
-    result.svg_images = std::make_shared<const strata::resource::SvgImageRegistry>(
-        std::move(vectors), std::move(rasters), runtime_images, std::move(result.animations),
-        std::move(lottie));
-    return result;
+    return std::make_shared<const strata::resource::SvgImageRegistry>(
+        tasks, std::move(sources), &strata::ui::validate_svg_image_geometry,
+        runtime_images, std::move(lottie));
 }
 
 [[nodiscard]] std::vector<strata_surface_font_binding>
@@ -487,24 +406,31 @@ font_bindings(const strata_surface_config& config) {
         }
         result.push_back(strata_surface_font_binding{std::move(id), std::move(resource_id)});
     }
+    for (const std::string_view required :
+         {"strata:fonts/default-medium", "strata:fonts/default"}) {
+        if (std::ranges::none_of(result, [required](const auto& font) {
+                return font.id == required;
+            })) {
+            throw std::invalid_argument(
+                "text font registry requires strata:fonts/default-medium and strata:fonts/default");
+        }
+    }
     return result;
 }
 
 [[nodiscard]] std::shared_ptr<const strata::ui::TextEngine>
 text_engine(const ResourceLoader& resources,
-            const std::span<const strata_surface_font_binding> bindings) {
+            const std::span<const strata_surface_font_binding> bindings,
+            strata::base::TaskOwner& tasks) {
     if (bindings.empty())
         return {};
-    strata::ui::TextEngine::FontRegistry fonts;
+    strata::ui::TextEngine::FontSources fonts;
     for (const strata_surface_font_binding& binding : bindings) {
         const strata_string_view resource_id{binding.resource_id.data(),
                                              binding.resource_id.size()};
-        auto parsed = strata::font::OpenTypeFont::parse(resources.load(resource_id));
-        if (!fonts.emplace(binding.id, std::move(parsed)).second) {
-            throw std::invalid_argument("Surface logical font ids must be unique");
-        }
+        fonts.emplace(binding.id, resources.load(resource_id));
     }
-    return std::make_shared<const strata::ui::TextEngine>(std::move(fonts));
+    return std::make_shared<const strata::ui::TextEngine>(std::move(fonts), tasks);
 }
 
 [[nodiscard]] strata::ui::KeyModifiers modifiers(const strata_key_modifiers value) {
@@ -732,17 +658,16 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
             std::string owned_resource_namespace = runtime->allocate_surface_resource_namespace();
             const ResourceLoader resources(*runtime);
             std::shared_ptr<const strata::ui::TextEngine> owned_text_engine =
-                text_engine(resources, owned_fonts);
-            MaterializedImages owned_images =
+                text_engine(resources, owned_fonts, runtime->core.tasks());
+            auto owned_images =
                 image_resources(resources, owned_image_bindings, owned_resource_namespace,
-                                &runtime->core.images());
+                                &runtime->core.images(), runtime->core.tasks());
             strata_surface* const created = std::construct_at(
                 static_cast<strata_surface*>(storage), allocator, runtime, std::move(id),
                 root_role(config->root_role), std::move(root_name),
                 std::move(owned_resource_namespace), environment(config->environment),
                 std::move(owned_fonts), std::move(owned_image_bindings),
-                std::move(owned_text_engine), std::move(owned_images.svg_images),
-                std::move(owned_images.textures), std::move(extensions.widgets),
+                std::move(owned_text_engine), std::move(owned_images), std::move(extensions.widgets),
                 std::move(extensions.behaviors));
             try {
                 runtime->surfaces.push_back(created);
@@ -762,25 +687,22 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
 }
 
 strata_result strata_surface_prepare_release_packet(strata_surface* const surface,
-                                                    const strata_bytes_sink* const sink) noexcept {
+                                                    strata_render_packet** const out_packet) noexcept {
+    if (out_packet != nullptr) *out_packet = nullptr;
     const EntryGuard entry(surface, Reentry::rejected);
     if (entry.refused())
         return entry.refusal();
-    if (surface == nullptr || surface->owner == nullptr)
+    if (surface == nullptr || surface->owner == nullptr || out_packet == nullptr)
         return invalid_argument();
-    if (sink == nullptr || !has_struct(sink) || sink->emit == nullptr) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
-                               "STRATA.ABI.INVALID_BYTES_SINK",
-                               "Preparing a Surface release packet requires a complete byte sink.");
-    }
     return surface_call(surface, AbiCall{"Surface release-packet preparation or delivery"}, [&] {
         if (!surface->packets.release_prepared()) {
             static_cast<void>(surface->packets.prepare_release(surface->core));
             surface->frame_json.clear();
             surface->frame_snapshot_available = false;
         }
-        const std::vector<std::uint8_t>& packet = surface->packets.packet();
-        sink->emit(sink->user_data, strata_bytes_view{packet.data(), packet.size()});
+        const auto& packet = surface->packets.packet();
+        strata::ui::EncodedPacket::retain(packet.get());
+        *out_packet = reinterpret_cast<strata_render_packet*>(packet.get());
         return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
@@ -811,7 +733,7 @@ strata_result strata_surface_release(strata_surface* const surface) noexcept {
     if (!surface->packets.release_prepared() || !surface->release_packet_consumed) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.SURFACE.RELEASE_BARRIER_INCOMPLETE",
-                               "Surface release requires a prepared, synchronously consumed, and "
+                               "Surface release requires a prepared, consumed, and "
                                "acknowledged terminal packet.");
     }
     strata::abi_detail::destroy_surface(surface, true);
@@ -1024,7 +946,7 @@ strata_result strata_surface_frame(strata_surface* const surface,
     out_info->struct_size = sizeof(strata_surface_frame_info);
     return surface_call(surface, AbiCall{"Surface framing", "STRATA.SURFACE.INVALID_FRAME"}, [&] {
         const strata::ui::SurfaceFrame frame = surface->core.frame(frame_time_nanoseconds);
-        const std::vector<std::uint8_t>& packet =
+        const strata::ui::EncodedPacket& packet =
             surface->packets.encode(surface->core, frame, surface->owner->core.images());
         // Canonical inspection JSON is expensive and optional; materialize it on first read.
         surface->frame_json.clear();
@@ -1040,7 +962,7 @@ strata_result strata_surface_frame(strata_surface* const surface,
                           static_cast<std::uint64_t>(surface->core.render_commands().size()),
                           surface->core.semantics().generation(),
                           static_cast<std::uint64_t>(surface->core.input().queued_event_count()),
-                          static_cast<std::uint64_t>(packet.size()),
+                          static_cast<std::uint64_t>(packet.bytes().size()),
                           static_cast<std::uint64_t>(frame.operations.described_nodes),
                           static_cast<std::uint64_t>(frame.operations.evaluated_expressions),
                           static_cast<std::uint64_t>(frame.operations.layout_measured_nodes),
@@ -1055,6 +977,9 @@ strata_result strata_surface_frame(strata_surface* const surface,
                                   surface->core.idle()
                               ? 1U
                               : 0U,
+                          surface->packets.telemetry().planned_draws,
+                          surface->packets.telemetry().batches,
+                          surface->packets.telemetry().vertices,
                       }));
         return strata::abi_detail::result(STRATA_STATUS_OK);
     });
@@ -1151,28 +1076,39 @@ strata_result strata_surface_drain_events_json(strata_surface* const surface,
     });
 }
 
-strata_result strata_surface_read_render_packet(const strata_surface* const surface,
-                                                const strata_bytes_sink* const sink) noexcept {
+strata_result strata_surface_acquire_render_packet(const strata_surface* const surface,
+                                                  strata_render_packet** const out_packet) noexcept {
+    if (out_packet != nullptr) *out_packet = nullptr;
     const EntryGuard entry(surface, Reentry::allowed);
     if (entry.refused())
         return entry.refusal();
-    if (surface == nullptr)
+    if (surface == nullptr || out_packet == nullptr)
         return invalid_argument();
-    if (sink == nullptr || !has_struct(sink) || sink->emit == nullptr) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
-                               "STRATA.ABI.INVALID_BYTES_SINK",
-                               "Reading a surface render packet requires a complete byte sink.");
-    }
-    const std::vector<std::uint8_t>& packet = surface->packets.packet();
-    if (packet.empty()) {
+    const auto& packet = surface->packets.packet();
+    if (packet.bytes().empty()) {
         return surface_failure(*surface, STRATA_STATUS_NOT_FOUND,
                                "STRATA.SURFACE.FRAME_UNAVAILABLE",
                                "Frame the surface before reading its render packet.");
     }
-    return surface_call(surface, AbiCall{"Surface render packet delivery"}, [&] {
-        sink->emit(sink->user_data, strata_bytes_view{packet.data(), packet.size()});
-        return strata::abi_detail::result(STRATA_STATUS_OK);
-    });
+    strata::ui::EncodedPacket::retain(packet.get());
+    *out_packet = reinterpret_cast<strata_render_packet*>(packet.get());
+    return strata::abi_detail::result(STRATA_STATUS_OK);
+}
+
+void strata_render_packet_retain(strata_render_packet* const packet) noexcept {
+    strata::ui::EncodedPacket::retain(
+        reinterpret_cast<strata::ui::EncodedPacket::Storage*>(packet));
+}
+
+void strata_render_packet_release(strata_render_packet* const packet) noexcept {
+    strata::ui::EncodedPacket::release(
+        reinterpret_cast<strata::ui::EncodedPacket::Storage*>(packet));
+}
+
+strata_bytes_view strata_render_packet_bytes(const strata_render_packet* const packet) noexcept {
+    const auto bytes = strata::ui::EncodedPacket::bytes(
+        reinterpret_cast<const strata::ui::EncodedPacket::Storage*>(packet));
+    return {bytes.data(), bytes.size()};
 }
 
 strata_result strata_surface_shows_image(const strata_surface* const surface,

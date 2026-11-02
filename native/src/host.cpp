@@ -1,15 +1,17 @@
 #include <strata/host.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <cmath>
-#include <iterator>
 #include <exception>
+#include <iterator>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
 
 #include "data/json.hpp"
+#include "host_json.hpp"
 
 namespace strata::host {
 namespace {
@@ -56,7 +58,9 @@ void append_compact(std::string& output, const Value& value) {
     }
 }
 
-[[nodiscard]] Value from_json_value(const data::JsonValue& value) {
+} // namespace
+
+Value from_json_value(const data::JsonValue& value) {
     if (value.is_null())
         return Value{};
     if (const bool* boolean = value.boolean(); boolean != nullptr)
@@ -80,6 +84,8 @@ void append_compact(std::string& output, const Value& value) {
     }
     return Value(std::move(result));
 }
+
+namespace {
 
 [[nodiscard]] std::string copied(const strata_string_view value) {
     return value.size == 0U ? std::string{} : std::string(value.data, value.size);
@@ -309,41 +315,167 @@ void Revision::changed() {
     ++value_;
 }
 
+namespace {
+
+/** Independent synchronized error storage; preparation endpoints never reach into owner maps. */
+class BindingFailures final {
+  public:
+    void capture(std::exception_ptr failure) noexcept {
+        try {
+            const std::scoped_lock lock(mutex_);
+            if (failure_ == nullptr)
+                failure_ = std::move(failure);
+        } catch (...) {
+        }
+    }
+
+    void rethrow() {
+        std::exception_ptr failure;
+        {
+            const std::scoped_lock lock(mutex_);
+            failure = std::exchange(failure_, nullptr);
+        }
+        if (failure != nullptr)
+            std::rethrow_exception(failure);
+    }
+
+  private:
+    std::mutex mutex_;
+    std::exception_ptr failure_;
+};
+
+struct ActionEndpoint;
+
+/** Only the owner retains the handler; weak preparation endpoints cannot destroy UI callbacks. */
+struct BindingAction final {
+    std::string id;
+    Bindings::Handler handler;
+    std::shared_ptr<ActionEndpoint> endpoint;
+    strata_action_registration* registration = nullptr;
+
+    ~BindingAction() {
+        if (registration != nullptr)
+            strata_action_registration_release(registration);
+    }
+};
+
+/** Immutable identity and weak dispatch target, enabled only by the serialized adopting owner. */
+struct ActionEndpoint final {
+    std::string id;
+    std::weak_ptr<BindingAction> target;
+    std::shared_ptr<BindingFailures> failures;
+    std::atomic_bool adopted{false};
+
+    static strata_action_handler_result invoke(void* const context,
+                                               const strata_action_call* const call) noexcept {
+        auto& endpoint = *static_cast<ActionEndpoint*>(context);
+        if (call == nullptr)
+            return STRATA_ACTION_HANDLER_IGNORED;
+        try {
+            if (!endpoint.adopted.load(std::memory_order_acquire))
+                throw std::logic_error("prepared host action dispatched before owner adoption");
+            const auto handler = endpoint.target.lock();
+            if (handler == nullptr)
+                throw std::logic_error("host action binding has retired");
+            const std::string payload_json = copied(call->payload_json);
+            const std::string event_json = copied(call->event_value_json);
+            const ActionEvent event{
+                copied(call->action_id),
+                Value::parse(payload_json.empty() ? std::string_view("null")
+                                                  : std::string_view(payload_json)),
+                copied(call->event_kind),
+                optional_copied(call->source_key),
+                Value::parse(event_json.empty() ? std::string_view("null")
+                                                : std::string_view(event_json)),
+            };
+            return encoded(handler->handler(event));
+        } catch (...) {
+            endpoint.failures->capture(std::current_exception());
+            return STRATA_ACTION_HANDLER_IGNORED;
+        }
+    }
+};
+
+std::shared_ptr<ActionEndpoint> action_endpoint(const std::shared_ptr<BindingAction>& action,
+                                                const std::shared_ptr<BindingFailures>& failures) {
+    auto endpoint = std::make_shared<ActionEndpoint>();
+    endpoint->id = action->id;
+    endpoint->target = action;
+    endpoint->failures = failures;
+    return endpoint;
+}
+
+void install_action(strata_runtime* const runtime, const std::string_view owner,
+                    ActionEndpoint& endpoint, strata_action_registration*& registration) {
+    const strata_action_handler_config config{
+        sizeof(strata_action_handler_config), strata::view(endpoint.id), strata::view(owner),
+        &endpoint, &ActionEndpoint::invoke,
+    };
+    require_ok(strata_runtime_register_action_handler(runtime, &config, &registration),
+               "typed host action registration");
+}
+
+} // namespace
+
+struct ActionBindings::Impl final {
+    struct Entry final {
+        std::shared_ptr<ActionEndpoint> endpoint;
+        strata_action_registration* registration = nullptr;
+    };
+
+    ~Impl() { release(); }
+
+    void release() noexcept {
+        for (Entry& entry : entries) {
+            if (entry.registration != nullptr)
+                strata_action_registration_release(std::exchange(entry.registration, nullptr));
+        }
+        runtime = nullptr;
+    }
+
+    std::string owner;
+    std::shared_ptr<BindingFailures> failures;
+    std::vector<Entry> entries;
+    strata_runtime* runtime = nullptr;
+};
+
+ActionBindings::ActionBindings() noexcept = default;
+ActionBindings::~ActionBindings() = default;
+ActionBindings::ActionBindings(ActionBindings&&) noexcept = default;
+ActionBindings& ActionBindings::operator=(ActionBindings&&) noexcept = default;
+
+bool ActionBindings::empty() const noexcept {
+    return impl_ == nullptr || impl_->entries.empty();
+}
+
+void ActionBindings::install(Runtime& runtime) {
+    if (empty())
+        return;
+    if (impl_->runtime != nullptr)
+        throw std::logic_error("captured actions are already installed");
+    try {
+        for (Impl::Entry& entry : impl_->entries) {
+            if (entry.endpoint->target.expired())
+                throw std::logic_error("captured host action owner has retired");
+            install_action(runtime.native_handle(), impl_->owner, *entry.endpoint, entry.registration);
+        }
+        impl_->runtime = runtime.native_handle();
+    } catch (...) {
+        impl_->release();
+        throw;
+    }
+}
+
+void ActionBindings::rethrow_failure() {
+    if (impl_ != nullptr)
+        impl_->failures->rethrow();
+}
+
 class Bindings::Impl final {
   public:
-    struct ActionSlot final {
-        Impl* bindings = nullptr;
-        Handler handler;
-        strata_action_registration* registration = nullptr;
-
-        ~ActionSlot() {
-            if (registration != nullptr)
-                strata_action_registration_release(registration);
-        }
-
-        static strata_action_handler_result invoke(void* const user_data,
-                                                   const strata_action_call* const call) noexcept {
-            auto& slot = *static_cast<ActionSlot*>(user_data);
-            if (call == nullptr)
-                return STRATA_ACTION_HANDLER_IGNORED;
-            try {
-                const std::string payload_json = copied(call->payload_json);
-                const std::string event_json = copied(call->event_value_json);
-                const ActionEvent event{
-                    copied(call->action_id),
-                    Value::parse(payload_json.empty() ? std::string_view("null")
-                                                      : std::string_view(payload_json)),
-                    copied(call->event_kind),
-                    optional_copied(call->source_key),
-                    Value::parse(event_json.empty() ? std::string_view("null")
-                                                    : std::string_view(event_json)),
-                };
-                return encoded(slot.handler(event));
-            } catch (...) {
-                slot.bindings->capture_failure(std::current_exception());
-                return STRATA_ACTION_HANDLER_IGNORED;
-            }
-        }
+    struct PendingRevision final {
+        std::uint64_t revision;
+        HostPublication publication;
     };
 
     struct SnapshotSlot final {
@@ -351,48 +483,139 @@ class Bindings::Impl final {
         RevisionSource revision;
         SnapshotSource source;
         std::optional<std::uint64_t> published_revision;
+        std::optional<std::uint64_t> observed_revision;
+        std::vector<PendingRevision> pending;
     };
 
-    Impl(std::shared_ptr<detail::RuntimeControl> runtime, std::string owner)
-        : runtime_(std::move(runtime)), owner_(std::move(owner)) {
-        if (runtime_ == nullptr || runtime_->value == nullptr)
-            throw std::invalid_argument("host bindings require a live runtime");
+    /** Consume every terminal receipt, including failures preceding a newer accepted revision. */
+    static void adopt_revisions(SnapshotSlot& slot) {
+        while (!slot.pending.empty()) {
+            const auto info = slot.pending.front().publication.info();
+            if (info.status == STRATA_HOST_PUBLICATION_PENDING) return;
+            PendingRevision completed = std::move(slot.pending.front());
+            slot.pending.erase(slot.pending.begin());
+            if (info.status == STRATA_HOST_PUBLICATION_ADOPTED) {
+                slot.published_revision = completed.revision;
+            } else if (info.status == STRATA_HOST_PUBLICATION_FAILED) {
+                throw AbiError(info.result,
+                               "host snapshot publication: " + std::string(info.message.data, info.message.size));
+            } else {
+                throw std::runtime_error("host snapshot publication was cancelled");
+            }
+        }
+    }
+
+    explicit Impl(std::string owner) : owner_(std::move(owner)) {
         if (owner_.empty())
             throw std::invalid_argument("host binding owner must not be empty");
     }
 
-    void capture_failure(std::exception_ptr failure) noexcept {
-        try {
-            const std::scoped_lock lock(failure_mutex_);
-            if (failure_ == nullptr)
-                failure_ = std::move(failure);
-        } catch (...) {
-        }
-    }
-
     void rethrow_failure() {
-        std::exception_ptr failure;
-        {
-            const std::scoped_lock lock(failure_mutex_);
-            failure = std::exchange(failure_, nullptr);
-        }
-        if (failure != nullptr)
-            std::rethrow_exception(failure);
+        failures_->rethrow();
     }
 
     std::shared_ptr<detail::RuntimeControl> runtime_;
     std::string owner_;
-    std::vector<std::unique_ptr<ActionSlot>> actions_;
+    std::vector<std::shared_ptr<BindingAction>> actions_;
     std::vector<SnapshotSlot> snapshots_;
-    std::mutex failure_mutex_;
-    std::exception_ptr failure_;
+    std::shared_ptr<BindingFailures> failures_ = std::make_shared<BindingFailures>();
 };
 
-Bindings::Bindings(Runtime& runtime, std::string owner)
-    : impl_(std::make_unique<Impl>(runtime.control_, std::move(owner))) {}
+Bindings::Bindings(std::string owner) : impl_(std::make_unique<Impl>(std::move(owner))) {}
+Bindings::Bindings(Runtime& runtime, std::string owner) : Bindings(std::move(owner)) {
+    attach(runtime);
+}
 Bindings::~Bindings() = default;
 Bindings::Bindings(Bindings&&) noexcept = default;
 Bindings& Bindings::operator=(Bindings&&) noexcept = default;
+
+std::vector<CapturedSnapshot> Bindings::capture_snapshots() {
+    if (impl_ == nullptr)
+        throw std::logic_error("cannot use moved host bindings");
+    impl_->rethrow_failure();
+    std::vector<CapturedSnapshot> result;
+    result.reserve(impl_->snapshots_.size());
+    for (const Impl::SnapshotSlot& slot : impl_->snapshots_) {
+        const std::uint64_t revision = slot.revision();
+        if (revision == 0U)
+            throw std::logic_error("host snapshot source revision must be nonzero");
+        result.push_back(CapturedSnapshot{{slot.id, revision}, slot.source()});
+    }
+    return result;
+}
+
+ActionBindings Bindings::capture_actions() const {
+    if (impl_ == nullptr || impl_->runtime_ != nullptr)
+        throw std::logic_error("only unattached owner bindings can prepare action availability");
+    ActionBindings result;
+    if (impl_->actions_.empty())
+        return result;
+    result.impl_ = std::make_unique<ActionBindings::Impl>();
+    result.impl_->owner = impl_->owner_;
+    result.impl_->failures = std::make_shared<BindingFailures>();
+    result.impl_->entries.reserve(impl_->actions_.size());
+    for (const auto& slot : impl_->actions_)
+        result.impl_->entries.push_back({action_endpoint(slot, result.impl_->failures), nullptr});
+    return result;
+}
+
+void Bindings::attach(Runtime& runtime, const std::span<const SnapshotRevision> published,
+                      ActionBindings actions) {
+    if (impl_ == nullptr || impl_->runtime_ != nullptr)
+        throw std::logic_error("host bindings must be unattached before adoption");
+    if (runtime.control_ == nullptr || runtime.control_->value == nullptr)
+        throw std::invalid_argument("host bindings require a live runtime");
+    const std::size_t installed = actions.empty() ? 0U : actions.impl_->entries.size();
+    if (installed != 0U) {
+        if (actions.impl_->runtime != runtime.control_->value || installed > impl_->actions_.size())
+            throw std::invalid_argument("captured actions belong to another runtime or owner");
+        for (std::size_t index = 0U; index < installed; ++index) {
+            if (actions.impl_->entries[index].endpoint->target.lock() != impl_->actions_[index])
+                throw std::invalid_argument("captured actions must return to their original bindings");
+        }
+        actions.rethrow_failure();
+    }
+    std::size_t cursor = 0U;
+    for (const Impl::SnapshotSlot& slot : impl_->snapshots_) {
+        if (cursor < published.size() && published[cursor].id == slot.id) {
+            if (published[cursor].revision == 0U)
+                throw std::invalid_argument("an adopted snapshot revision must be nonzero");
+            ++cursor;
+        }
+    }
+    if (cursor != published.size())
+        throw std::invalid_argument("adopted snapshot revisions must follow capture order");
+    const auto failures = installed != 0U ? actions.impl_->failures : impl_->failures_;
+    try {
+        for (std::size_t index = installed; index < impl_->actions_.size(); ++index) {
+            BindingAction& slot = *impl_->actions_[index];
+            slot.endpoint = action_endpoint(impl_->actions_[index], failures);
+            install_action(runtime.control_->value, impl_->owner_, *slot.endpoint, slot.registration);
+        }
+    } catch (...) {
+        for (const auto& slot : impl_->actions_) {
+            if (slot->registration != nullptr)
+                strata_action_registration_release(std::exchange(slot->registration, nullptr));
+        }
+        throw;
+    }
+    for (std::size_t index = 0U; index < installed; ++index) {
+        impl_->actions_[index]->endpoint = std::move(actions.impl_->entries[index].endpoint);
+        impl_->actions_[index]->registration =
+            std::exchange(actions.impl_->entries[index].registration, nullptr);
+    }
+    impl_->failures_ = failures;
+    impl_->runtime_ = runtime.control_;
+    for (const auto& slot : impl_->actions_)
+        slot->endpoint->adopted.store(true, std::memory_order_release);
+    cursor = 0U;
+    for (Impl::SnapshotSlot& slot : impl_->snapshots_) {
+        if (cursor < published.size() && published[cursor].id == slot.id) {
+            slot.published_revision = published[cursor++].revision;
+            slot.observed_revision = slot.published_revision;
+        }
+    }
+}
 
 void Bindings::on(const std::string_view action_id, Handler handler) {
     if (impl_ == nullptr)
@@ -400,19 +623,14 @@ void Bindings::on(const std::string_view action_id, Handler handler) {
     if (action_id.empty() || !handler) {
         throw std::invalid_argument("host action binding requires an id and handler");
     }
-    auto slot = std::make_unique<Impl::ActionSlot>();
-    slot->bindings = impl_.get();
+    auto slot = std::make_shared<BindingAction>();
+    slot->id = action_id;
     slot->handler = std::move(handler);
-    const strata_action_handler_config config{
-        sizeof(strata_action_handler_config),
-        strata::view(action_id),
-        strata::view(impl_->owner_),
-        slot.get(),
-        &Impl::ActionSlot::invoke,
-    };
-    require_ok(strata_runtime_register_action_handler(impl_->runtime_->value, &config,
-                                                      &slot->registration),
-               "typed host action registration");
+    if (impl_->runtime_ != nullptr) {
+        slot->endpoint = action_endpoint(slot, impl_->failures_);
+        install_action(impl_->runtime_->value, impl_->owner_, *slot->endpoint, slot->registration);
+        slot->endpoint->adopted.store(true, std::memory_order_release);
+    }
     impl_->actions_.push_back(std::move(slot));
 }
 
@@ -432,28 +650,36 @@ void Bindings::snapshot(std::string snapshot_id, RevisionSource revision, Snapsh
         std::move(revision),
         std::move(source),
         std::nullopt,
+        std::nullopt,
+        {},
     });
 }
 
 void Bindings::synchronize() {
     if (impl_ == nullptr)
         throw std::logic_error("cannot use moved host bindings");
+    if (impl_->runtime_ == nullptr)
+        throw std::logic_error("host bindings are not attached");
     impl_->rethrow_failure();
+    require_ok(strata_runtime_poll_host_snapshots(impl_->runtime_->value), "host snapshot adoption");
     for (Impl::SnapshotSlot& slot : impl_->snapshots_) {
+        Impl::adopt_revisions(slot);
         const std::uint64_t revision = slot.revision();
         if (revision == 0U) {
             throw std::logic_error("host snapshot source revision must be nonzero");
         }
-        if (slot.published_revision.has_value()) {
-            if (revision < *slot.published_revision) {
-                throw std::logic_error("host snapshot source revision moved backwards");
-            }
-            if (revision == *slot.published_revision)
-                continue;
-        }
+        if (slot.observed_revision.has_value() && revision < *slot.observed_revision)
+            throw std::logic_error("host snapshot source revision moved backwards");
+        slot.observed_revision = revision;
+        if (slot.published_revision == revision ||
+            (!slot.pending.empty() && slot.pending.back().revision == revision))
+            continue;
         const std::string json = slot.source().json();
-        static_cast<void>(detail::publish_host_snapshot(impl_->runtime_, slot.id, json));
-        slot.published_revision = revision;
+        if (slot.pending.size() == slot.pending.capacity())
+            slot.pending.reserve(std::max<std::size_t>(2U, slot.pending.size() * 2U));
+        slot.pending.push_back(Impl::PendingRevision{
+            revision, detail::publish_host_snapshot(impl_->runtime_, slot.id, json)});
+        Impl::adopt_revisions(slot);
     }
 }
 

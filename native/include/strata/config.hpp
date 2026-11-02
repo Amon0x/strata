@@ -38,7 +38,15 @@ inline constexpr strata_capabilities portable_host_capabilities =
     STRATA_CAPABILITY_PROFILER_SNAPSHOTS |
     STRATA_CAPABILITY_SURFACE_THEMES |
     STRATA_CAPABILITY_DURABLE_STATE |
-    STRATA_CAPABILITY_ASYNC_HOST_DATA;
+    STRATA_CAPABILITY_ASYNC_HOST_DATA |
+    STRATA_CAPABILITY_TASK_EXECUTION |
+    STRATA_CAPABILITY_HOST_PUBLICATIONS |
+    STRATA_CAPABILITY_OWNED_RENDER_PACKETS;
+
+enum class TaskExecution : std::uint32_t {
+    asynchronous = STRATA_TASK_EXECUTION_ASYNCHRONOUS,
+    deterministic = STRATA_TASK_EXECUTION_DETERMINISTIC,
+};
 
 struct RuntimeOptions final {
     strata_capabilities required_capabilities = portable_host_capabilities;
@@ -51,6 +59,9 @@ struct RuntimeOptions final {
     std::function<void(const Diagnostic&)> diagnostic{};
     /** Optional low-level allocator escape hatch; its callbacks must outlive Runtime. */
     strata_allocator allocator{};
+    TaskExecution task_execution = TaskExecution::asynchronous;
+    /** Thread-safe non-blocking host notification; must not enter or destroy this Runtime. */
+    std::function<void()> frame_wake{};
 };
 
 struct ApplicationOptions final {

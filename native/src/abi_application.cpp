@@ -23,6 +23,11 @@
 
 using namespace strata::abi_detail;
 
+/** The receipt retains terminal information, never the runtime or its task endpoint. */
+struct strata_host_publication final {
+    std::shared_ptr<strata::core::HostPublication> value;
+};
+
 namespace {
 
 [[nodiscard]] bool valid_json_sink(const strata_value_json_sink* const sink) noexcept {
@@ -112,8 +117,13 @@ strata_result strata_runtime_publish_host_snapshot(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
-    if (snapshot == nullptr || !has_struct(snapshot) ||
-        !valid_view(snapshot->id, false) || !valid_view(snapshot->values_json, false)) {
+    const auto config = read_struct(snapshot);
+    if (config && config->out_publication != nullptr)
+        *config->out_publication = nullptr;
+    if (!config || config->reserved != 0U ||
+        (config->execution != STRATA_HOST_SNAPSHOT_EXECUTION_RUNTIME &&
+         config->execution != STRATA_HOST_SNAPSHOT_EXECUTION_INLINE) ||
+        !valid_view(config->id, false) || !valid_view(config->values_json, false)) {
         return runtime_failure(
             *runtime,
             STRATA_STATUS_INVALID_ARGUMENT,
@@ -127,23 +137,57 @@ strata_result strata_runtime_publish_host_snapshot(
         "STRATA.HOST.INVALID_JSON",
     };
     return runtime_call(runtime, call, [&] {
-        const std::string json_text = copied_string(snapshot->values_json);
-        const strata::data::JsonValue values = strata::data::parse_json(json_text);
-        if (values.object() == nullptr) {
-            return runtime_failure(
-                *runtime,
-                STRATA_STATUS_INVALID_ARGUMENT,
-                "STRATA.HOST.INVALID_ROOTS",
-                "Host snapshot values must be one JSON object."
-            );
+        auto handle = config->out_publication != nullptr
+            ? std::make_unique<strata_host_publication>() : nullptr;
+        const auto publication = runtime->core.publish_host_snapshot(
+            copied_string(config->id), config->generation, copied_string(config->values_json),
+            config->execution == STRATA_HOST_SNAPSHOT_EXECUTION_INLINE);
+        const auto outcome = publication->result();
+        if (handle != nullptr) {
+            handle->value = publication;
+            *config->out_publication = handle.release();
         }
-        static_cast<void>(runtime->core.publish_host_snapshot(
-            copied_string(snapshot->id),
-            snapshot->generation,
-            values
-        ));
+        return strata::abi_detail::result(static_cast<strata_status>(outcome.status),
+                                          outcome.diagnostic_id);
+    });
+}
+
+strata_result strata_runtime_poll_host_snapshots(strata_runtime* const runtime) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused()) return entry.refusal();
+    return runtime_call(runtime, AbiCall{"Host snapshot adoption"}, [&] {
+        runtime->core.poll_host_snapshots();
         return strata::abi_detail::result(STRATA_STATUS_OK);
     });
+}
+
+strata_result strata_host_publication_get_info(
+    const strata_host_publication* const publication,
+    strata_host_publication_info* const out_info) noexcept {
+    if (publication == nullptr || !has_struct(out_info)) return invalid_argument();
+    const auto status = publication->value->status();
+    strata::base::Result outcome;
+    std::string_view message;
+    if (status != strata::core::HostPublicationStatus::pending) {
+        outcome = publication->value->result();
+        message = publication->value->message();
+    }
+    static_cast<void>(write_struct(out_info, strata_host_publication_info{
+        sizeof(strata_host_publication_info), static_cast<strata_host_publication_status>(status),
+        0U, publication->value->generation(),
+        strata::abi_detail::result(static_cast<strata_status>(outcome.status), outcome.diagnostic_id),
+        strata_string_view{message.data(), message.size()}}));
+    return strata::abi_detail::result(STRATA_STATUS_OK);
+}
+
+strata_result strata_host_publication_cancel(strata_host_publication* const publication) noexcept {
+    if (publication == nullptr) return invalid_argument();
+    publication->value->cancel();
+    return strata::abi_detail::result(STRATA_STATUS_OK);
+}
+
+void strata_host_publication_release(strata_host_publication* const publication) noexcept {
+    delete publication;
 }
 
 strata_result strata_runtime_publish_image(
@@ -241,6 +285,20 @@ strata_result strata_runtime_get_host_snapshot_generation(
     return strata::abi_detail::result(
         generation.has_value() ? STRATA_STATUS_OK : STRATA_STATUS_NOT_FOUND
     );
+}
+
+strata_result strata_runtime_get_host_snapshot_accepted_generation(
+    const strata_runtime* const runtime, const strata_string_view id,
+    std::uint64_t* const out_generation) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused()) return entry.refusal();
+    if (runtime == nullptr || out_generation == nullptr || !valid_view(id, false))
+        return invalid_argument();
+    const auto generation = runtime->core.accepted_host_snapshot_generation(
+        std::string_view(id.data, id.size));
+    *out_generation = generation.value_or(0U);
+    return strata::abi_detail::result(
+        generation.has_value() ? STRATA_STATUS_OK : STRATA_STATUS_NOT_FOUND);
 }
 
 strata_result strata_runtime_read_diagnostics(

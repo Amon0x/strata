@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/process_lifetime.hpp"
 #include "compiler/builtin_catalog_internal.hpp"
 
 namespace strata::compiler {
@@ -397,7 +398,8 @@ std::vector<DeclaredParameter> composed_widget_parameters(const BuiltinCatalog& 
 }
 
 const BuiltinCatalog& builtin_catalog() {
-    static const BuiltinCatalog catalog = [] {
+    // Detached activation can outlive caller teardown and the main thread's static destruction.
+    static const base::ProcessLifetime<BuiltinCatalog> catalog([] {
         BuiltinCatalog result;
         add_builtin_types(result);
         add_builtin_properties(result);
@@ -410,8 +412,8 @@ const BuiltinCatalog& builtin_catalog() {
         std::ranges::sort(result.widgets, {}, &DeclaredWidget::name);
         validate_catalog(result);
         return result;
-    }();
-    return catalog;
+    });
+    return catalog.get();
 }
 
 const DeclaredWidget* find_builtin_widget(const std::string_view name) {

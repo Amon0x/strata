@@ -110,9 +110,8 @@ class PlatformServices final {
      * Callable from any thread: sockets and watchers report from their own.
      */
     void post_event(std::string client, std::string channel, std::string data_json);
-    /** Answers request `request` of `client` with `json`, at the next pump. Callable from any
-     * thread. */
-    void answer(std::string client, std::uint64_t request, std::string json);
+    /** Answers the original requesting client lifetime, at the next pump. Callable from any thread. */
+    void answer(const WindowRequest& request, std::string json);
     /** The windows documents asked to open, or to close by id, since the last call. */
     [[nodiscard]] std::vector<WindowRequest> take_window_requests();
     /** The system's look as last read; it changes when the user changes it. */
@@ -121,11 +120,13 @@ class PlatformServices final {
     [[nodiscard]] bool take_appearance_changed() noexcept;
     /** Whether a `node.capture` waits for the next presented frame's pixels (frame_presented). */
     [[nodiscard]] bool wants_frame() const noexcept;
+    /** Seals current capture requests to this presentation request; later requests wait separately. */
+    void frame_requested(std::uint64_t request);
     /**
-     * The pixels of the frame just presented (straight RGBA8 rows, top first): the captures that
-     * waited for it are cut from it and written; their answers come at the next pump.
+     * Completes the sealed presentation request with straight RGBA8 rows, top first. Only its
+     * still-live clients are answered; a later capture never consumes an earlier frame.
      */
-    void frame_presented(std::uint32_t width, std::uint32_t height,
+    void frame_presented(std::uint64_t request, std::uint32_t width, std::uint32_t height,
                          std::span<const std::uint8_t> rgba);
     /** The JSON a platform event input carries: {"channel", "data"}. */
     [[nodiscard]] static std::string event_json(const PlatformAnswer& event);

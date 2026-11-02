@@ -28,6 +28,7 @@
 #include "blur_pass.hpp"
 #include "clip_mask.hpp"
 #include "effect_pass.hpp"
+#include "gpu/frame_inputs.hpp"
 #include "gpu/groups.hpp"
 #include "shaders.hpp"
 #include "texture_store.hpp"
@@ -393,13 +394,12 @@ struct RenderContext::Impl final {
                                    std::string(shaders::material_prelude) +
                                    std::string(hlsl_source) + std::string(shaders::pixel_output) +
                                    std::string(shaders::material_entry);
-        auto [program, inserted] = material_programs.try_emplace(source);
-        if (inserted) {
-            program->second.live = hlsl_source.find("materialTime") != std::string_view::npos ||
-                                   hlsl_source.find("frameSeconds") != std::string_view::npos ||
-                                   hlsl_source.find("framePointer") != std::string_view::npos;
+        const auto position = material_programs.lower_bound(source);
+        if (position == material_programs.end() || position->first != source) {
+            MaterialProgram compiled;
+            compiled.live = gpu::uses_frame_inputs(hlsl_source);
             if (asynchronous_shader_compilation) {
-                program->second.pending = std::async(
+                compiled.pending = std::async(
                     std::launch::async,
                     [source] {
                         return compile_shader(source, "main", "ps_5_0");
@@ -413,11 +413,13 @@ struct RenderContext::Impl final {
                         bytecode->GetBufferPointer(),
                         bytecode->GetBufferSize(),
                         nullptr,
-                        &program->second.shader
+                        &compiled.shader
                     ),
                     "D3D11 material pixel shader creation"
                 );
             }
+            // A failed compile must not leave an empty entry that a retry treats as usable.
+            material_programs.emplace_hint(position, source, std::move(compiled));
         }
         material_sources.insert_or_assign(std::string(id), std::string(hlsl_source));
         material_program_ids.insert_or_assign(std::string(id), source);
@@ -509,9 +511,13 @@ struct RenderContext::Impl final {
             if (const auto id = material_program_ids.find(materials[index]);
                 id != material_program_ids.end()) {
                 if (const auto program = material_programs.find(id->second);
-                    program != material_programs.end() && program->second.shader != nullptr) {
-                    selected = program->second.shader.Get();
-                    layer_live_materials[index] = program->second.live;
+                    program != material_programs.end()) {
+                    if (program->second.shader != nullptr)
+                        selected = program->second.shader.Get();
+                    // The fallback must keep framing until compilation can be adopted, even for
+                    // a static shader: no new UI packet is required to make that program ready.
+                    layer_live_materials[index] =
+                        program->second.live || program->second.pending.valid();
                 }
             }
             layer_shaders.push_back(selected);
@@ -611,23 +617,23 @@ struct RenderContext::Impl final {
     [[nodiscard]] RenderLayerTelemetry render_layer(const std::string_view id,
                                                     const RenderPacket& packet) {
         consume_resources(packet);
-        textures->run_live(current_frame_seconds);
+        const bool live_art = textures->run_live(current_frame_seconds);
         if (target == nullptr)
             throw std::logic_error("D3D11 render target is not configured");
         RenderLayerTelemetry telemetry;
+        telemetry.live = live_art;
         drew_live_material = false;
         GeometryBuffers& retained = geometry[std::string(id)];
         if (!retained.epoch.has_value() || *retained.epoch != packet.geometry_epoch) {
             const std::size_t index_bytes = packet.indices.size() * sizeof(std::uint32_t);
             ensure_geometry_buffers(retained, packet.vertices.size(), index_bytes);
-            // Patches describe the step from the previous epoch only. After a skipped epoch (a
-            // frame that failed after the decoder had applied it) the buffer is older than that,
-            // so it is replaced from the decoder's complete geometry instead.
+            // Patches describe only the immediately preceding epoch. A compact successor can
+            // also replace an undrawn update; without its patches, upload the complete geometry.
             const bool incremental = retained.epoch.has_value() &&
                                      *retained.epoch + 1U == packet.geometry_epoch &&
-                                     !packet.full_geometry_payload;
-            if (incremental &&
-                (!packet.vertex_patches.empty() || !packet.index_patches.empty())) {
+                                     !packet.full_geometry_payload &&
+                                     (!packet.vertex_patches.empty() || !packet.index_patches.empty());
+            if (incremental) {
                 patch_geometry(
                     retained.vertices[retained.active].Get(),
                     packet.vertex_patches
@@ -636,7 +642,7 @@ struct RenderContext::Impl final {
                     retained.indices[retained.active].Get(),
                     packet.index_patches
                 );
-            } else if (!incremental) {
+            } else {
                 const std::size_t next = retained.epoch.has_value()
                     ? (retained.active + 1U) % GeometryBuffers::ring_size
                     : retained.active;
@@ -685,6 +691,7 @@ struct RenderContext::Impl final {
         ID3D11Texture2D* active_texture = target_texture.Get();
         ID3D11RenderTargetView* active_target = target.Get();
         const auto add_effect_telemetry = [&telemetry](const EffectPassTelemetry& measured) {
+            telemetry.live = telemetry.live || measured.live;
             telemetry.effect_passes += measured.passes;
             telemetry.effect_target_width =
                 std::max(telemetry.effect_target_width, measured.target_width);
@@ -754,7 +761,7 @@ struct RenderContext::Impl final {
         if (!content_layers.empty()) {
             throw std::logic_error("D3D11 content effect stack is unbalanced");
         }
-        telemetry.live = drew_live_material;
+        telemetry.live = telemetry.live || drew_live_material;
         return telemetry;
     }
 
@@ -904,6 +911,17 @@ void RenderContext::release_target() {
 void RenderContext::declare_material(const std::string_view id,
                                      const std::string_view hlsl_source) {
     impl_->declare_material(id, hlsl_source);
+}
+
+void RenderContext::release_programs(const std::string_view prefix) {
+    for (auto it = impl_->material_sources.lower_bound(prefix);
+         it != impl_->material_sources.end() && it->first.starts_with(prefix);) {
+        impl_->material_program_ids.erase(it->first);
+        it = impl_->material_sources.erase(it);
+    }
+    std::erase_if(impl_->effect_pass_declarations,
+                  [prefix](const auto& entry) { return entry.first.first.starts_with(prefix); });
+    impl_->effects->release_programs(prefix);
 }
 
 void RenderContext::declare_effect_pass(const std::string_view effect_id, const std::uint32_t index,

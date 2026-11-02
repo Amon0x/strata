@@ -137,7 +137,7 @@ void SemanticsEngine::append_children(
 bool SemanticsEngine::update(
     const RetainedTree& tree,
     const CommandIndex& commands,
-    const InputRouter& input,
+    const InputPresentation& input,
     const std::string_view surface_id
 ) {
     static_cast<void>(surface_id);

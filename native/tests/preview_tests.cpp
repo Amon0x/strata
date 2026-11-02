@@ -5,7 +5,6 @@
 #include "preview/services.hpp"
 #include <SDL.h>
 #include <cmath>
-#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -50,7 +49,7 @@ void translation() {
     check(result && result->key_action == KeyAction::release, "key release translation failed");
     event = {};
     event.type = SDL_TEXTEDITING;
-    std::strcpy(event.edit.text, "aé界");
+    SDL_strlcpy(event.edit.text, "aé界", sizeof(event.edit.text));
     event.edit.start = 1;
     event.edit.length = 2;
     result = preview::translate_input(event, 1, {}, 0);
@@ -63,6 +62,28 @@ void translation() {
     result = preview::translate_input(event, 1, {20, 30}, 0);
     check(result && result->delta.y == -10 && result->position.y == 30,
           "precise wheel direction or pointer anchoring failed");
+}
+void ime_ownership() {
+    preview::Services current;
+    preview::Services candidate(false);
+    const auto old_ime = current.ime();
+    const auto new_ime = candidate.ime();
+    check(old_ime.set_active(old_ime.user_data, 1U) == STRATA_STATUS_OK &&
+              SDL_IsTextInputActive() == SDL_TRUE,
+          "current Session did not start text input");
+    check(new_ime.set_active(new_ime.user_data, 0U) == STRATA_STATUS_OK &&
+              SDL_IsTextInputActive() == SDL_TRUE,
+          "staged Session stopped current text input");
+    check(new_ime.set_active(new_ime.user_data, 1U) == STRATA_STATUS_OK,
+          "staged text input request failed");
+    current.set_ime_owner(false);
+    candidate.set_ime_owner(true);
+    check(SDL_IsTextInputActive() == SDL_TRUE, "promotion lost staged text input");
+    check(old_ime.set_active(old_ime.user_data, 0U) == STRATA_STATUS_OK &&
+              SDL_IsTextInputActive() == SDL_TRUE,
+          "retiring Session stopped its successor's text input");
+    candidate.set_ime_owner(false);
+    check(SDL_IsTextInputActive() == SDL_FALSE, "closing IME owner left text input active");
 }
 void application(const std::filesystem::path& resources) {
     auto scenario =
@@ -151,7 +172,7 @@ void application(const std::filesystem::path& resources) {
     key(SDLK_a, KMOD_CTRL);
     SDL_Event text{};
     text.type = SDL_TEXTINPUT;
-    std::strcpy(text.text.text, "Linux ✓");
+    SDL_strlcpy(text.text.text, "Linux ✓", sizeof(text.text.text));
     send(text);
     check(state("name").string() && *state("name").string() == "Linux ✓",
           "UTF-8 text input did not replace selected text");
@@ -176,8 +197,10 @@ int main(int argc, char** argv) {
     try {
         if (argc != 2)
             throw std::invalid_argument("expected resource root");
+        SDL_SetMainReady();
         check(SDL_Init(SDL_INIT_VIDEO) == 0, "SDL initialization failed");
         translation();
+        ime_ownership();
         application(argv[1]);
         SDL_Quit();
         std::cout << "strata_preview_tests: OK\n";

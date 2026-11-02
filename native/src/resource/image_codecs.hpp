@@ -4,6 +4,7 @@
 // reports malformed input as std::invalid_argument prefixed with its format's name.
 
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -47,6 +48,24 @@ class FrameSink final {
 };
 
 /**
+ * An exclusive container/compositing cursor. Each next call emits one frame or reports end of
+ * pass; no sink is retained. The encoded span must outlive the cursor. Rewind reuses its storage.
+ */
+class FrameDecoder {
+  public:
+    virtual ~FrameDecoder() = default;
+    [[nodiscard]] virtual ImageDimensions dimensions() const noexcept = 0;
+    [[nodiscard]] virtual bool next(FrameSink& sink) = 0;
+    [[nodiscard]] virtual std::uint32_t loop_count() const noexcept = 0;
+    virtual void rewind() = 0;
+};
+
+/** Synchronous collection/streaming share the same frame cursor and budget checks. */
+[[nodiscard]] DecodedImage decode_frames(FrameDecoder& decoder, std::uint32_t frame_limit,
+                                          const char* format,
+                                          const ImageFrameConsumer* consumer = nullptr);
+
+/**
  * Source-over of one straight-alpha RGBA8 pixel onto another, in libwebp's integer arithmetic
  * (BlendPixelNonPremult): a transparent source leaves the destination untouched and an opaque one
  * replaces it, exactly, as every animated format's "over" blend requires.
@@ -59,6 +78,7 @@ void clear_rect(std::vector<std::uint8_t>& canvas, std::uint32_t canvas_width, s
 
 // PNG and APNG (png_decode.cpp).
 [[nodiscard]] ImageDimensions inspect_png(std::span<const std::uint8_t> bytes);
+[[nodiscard]] std::unique_ptr<FrameDecoder> open_png(std::span<const std::uint8_t> bytes);
 [[nodiscard]] DecodedImage decode_png(std::span<const std::uint8_t> bytes,
                                       std::uint32_t frame_limit,
                                       const ImageFrameConsumer* consumer = nullptr);
@@ -69,12 +89,14 @@ void clear_rect(std::vector<std::uint8_t>& canvas, std::uint32_t canvas_width, s
 
 // GIF (gif_decode.cpp).
 [[nodiscard]] ImageDimensions inspect_gif(std::span<const std::uint8_t> bytes);
+[[nodiscard]] std::unique_ptr<FrameDecoder> open_gif(std::span<const std::uint8_t> bytes);
 [[nodiscard]] DecodedImage decode_gif(std::span<const std::uint8_t> bytes,
                                       std::uint32_t frame_limit,
                                       const ImageFrameConsumer* consumer = nullptr);
 
 // WebP container, VP8L and ALPH (webp_decode.cpp).
 [[nodiscard]] ImageDimensions inspect_webp(std::span<const std::uint8_t> bytes);
+[[nodiscard]] std::unique_ptr<FrameDecoder> open_webp(std::span<const std::uint8_t> bytes);
 [[nodiscard]] DecodedImage decode_webp(std::span<const std::uint8_t> bytes,
                                        std::uint32_t frame_limit,
                                        const ImageFrameConsumer* consumer = nullptr);

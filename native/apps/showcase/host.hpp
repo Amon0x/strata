@@ -74,6 +74,7 @@ struct HostOptions final {
     bool vsync = true;
     bool performance_hud = true;
     bool profile_sampling = true;
+    host::PresentationExecution presentation = host::PresentationExecution::threaded;
 };
 
 /** One isolated public-ABI runtime/surface bound to one native desktop window. */
@@ -108,8 +109,11 @@ public:
     /** The pointer shape the interactive layer asks for; nullopt when no layer is live. */
     [[nodiscard]] std::optional<std::uint32_t> pointer_cursor() noexcept;
     void frame();
+    /** Nonblocking ordered shutdown; destroy the HWND only after this returns true. */
+    [[nodiscard]] bool close();
     /** The last frame drew and presented the window: something it shows changed. */
     [[nodiscard]] bool presented() const noexcept;
+    [[nodiscard]] std::uint64_t present_count() const noexcept;
     /**
      * Nothing is left to do until input or a host change: every shown layer is idle and nothing
      * on screen animates by itself. The loop may wait for input instead of framing.
@@ -128,14 +132,16 @@ public:
     [[nodiscard]] double scale() const noexcept;
     [[nodiscard]] const DesktopFrameSample& last_frame_sample() const noexcept;
     [[nodiscard]] DesktopHostInfo performance_info() const;
-    /** The next frame's pixels, read from the swap chain (Renderer::capture_next_frame). */
-    void capture_next_frame() noexcept;
-    [[nodiscard]] std::optional<FrameCapture> take_capture();
+    /** Requests pixels at or beyond the next UI commit; take_capture polls without waiting. */
+    void capture_next_frame();
+    [[nodiscard]] std::optional<host::PresentationCapture> take_capture();
     /** Canonical active showcase frame used only to resolve scripted interaction targets. */
     [[nodiscard]] std::string performance_frame_json();
+    /** Whether a shown layer still awaits its initial Session, not later animation work. */
+    [[nodiscard]] bool has_pending_preparation() const noexcept;
     [[nodiscard]] bool smoke_ready() const noexcept;
-    [[nodiscard]] std::uint64_t smoke_fingerprint() const noexcept;
-    [[nodiscard]] bool smoke_identity_bound() const noexcept;
+    [[nodiscard]] std::uint64_t smoke_fingerprint() const;
+    [[nodiscard]] bool smoke_identity_bound() const;
     /** Starts a fresh host timing window for a programmatic profile scenario. */
     void reset_profile();
     /** Captures and formats the profiler without opening or automating the debug overlay. */

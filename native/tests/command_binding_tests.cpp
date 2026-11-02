@@ -1,16 +1,19 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "compiler/source.hpp"
 #include "data/json.hpp"
 #include "resource/resource.hpp"
 #include "runtime/application.hpp"
+#include "runtime/durability.hpp"
 #include "ui/surface.hpp"
 #include "ui/text.hpp"
 #include "ui/widget/presentation.hpp"
@@ -62,7 +65,7 @@ void check(const bool condition, const std::string_view message) {
 ) {
     const strata::ui::LayoutRecord* layout = surface.layout().find(node.identity());
     check(layout != nullptr, "command-bound control was not laid out");
-    const std::vector<strata::ui::RenderCommand> fragment = strata::ui::build_widget_fragment(
+    const strata::ui::RenderCommandBuffer fragment = strata::ui::build_widget_fragment(
         surface.widget_registry(),
         node,
         *layout,
@@ -74,7 +77,7 @@ void check(const bool condition, const std::string_view message) {
         &surface.motion(),
         1.0
     );
-    for (const strata::ui::RenderCommand& command : fragment) {
+    for (const strata::ui::RenderCommand& command : fragment.commands()) {
         if (const auto* rectangle = std::get_if<strata::ui::RoundedRectRenderCommand>(&command);
             rectangle != nullptr) {
             return rectangle->fill.representative().alpha;

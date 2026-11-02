@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <numbers>
 #include <cmath>
 #include <cstdint>
@@ -25,6 +26,7 @@
 #include "ui/command.hpp"
 #include "ui/input.hpp"
 #include "ui/layout.hpp"
+#include "ui/motion.hpp"
 #include "ui/notification.hpp"
 #include "ui/semantics.hpp"
 #include "ui/status.hpp"
@@ -36,6 +38,7 @@
 #include "ui/widget/color_picker_model.hpp"
 #include "ui/widget/date_picker_model.hpp"
 #include "ui/widget/editor_geometry.hpp"
+#include "ui/widget/input.hpp"
 #include "ui/widget/markdown_model.hpp"
 #include "ui/widget/range_slider_model.hpp"
 #include "ui/widget/registry.hpp"
@@ -128,7 +131,8 @@ class InputFixture final {
     InputFixture(std::shared_ptr<const runtime::ApplicationBundle> bundle,
                  const std::filesystem::path& resources)
         : bundle_(std::move(bundle)), application_("interaction-residual", bundle_),
-          text_(ui::TextEngine::load_default_fonts(resources)), commands_(widgets_),
+          text_(ui::TextEngine::load_default_fonts(resources)),
+          commands_(widgets_),
           input_(
               "interaction-residual", "interaction-residual/host-owner", application_, widgets_,
               behaviors_, status_, notifications_, {},
@@ -244,6 +248,8 @@ class InputFixture final {
         const ui::RetainedNode* retained = tree_.find_key(key);
         return retained != nullptr && input_.focused(retained->identity());
     }
+
+    [[nodiscard]] runtime::ApplicationContext& application() noexcept { return application_; }
 
     [[nodiscard]] std::shared_ptr<const runtime::ActionValue>
     notification_action(std::string message) const {

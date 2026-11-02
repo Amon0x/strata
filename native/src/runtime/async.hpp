@@ -45,11 +45,14 @@ public:
     using BindingValidator = std::function<bool(std::string_view)>;
     using ResultNormalizer = std::function<std::optional<Value>(std::string_view, const Value&)>;
     using Publisher = std::function<void(const Value& roots)>;
+    /** Concurrent mailbox notifications only; never adopts state or throws. */
+    using Wake = std::function<void()>;
 
     AsyncDataService(
         BindingValidator validator = {},
         ResultNormalizer result_normalizer = {},
-        Publisher publisher = {}
+        Publisher publisher = {},
+        Wake wake = {}
     );
     ~AsyncDataService();
 
@@ -107,6 +110,7 @@ private:
     [[nodiscard]] Binding* active(std::uint64_t request_id) noexcept;
     void cancel_binding(Binding& binding);
     void drain_completions();
+    void post_completion(Completion completion);
     void publish();
     [[nodiscard]] static Value value(const Binding& binding);
 
@@ -114,6 +118,7 @@ private:
     BindingValidator validator_;
     ResultNormalizer result_normalizer_;
     Publisher publisher_;
+    Wake wake_;
     AsyncHostAdapter adapter_;
     std::uint64_t next_request_id_ = 1U;
     std::mutex completion_mutex_;

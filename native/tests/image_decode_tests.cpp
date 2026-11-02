@@ -3,23 +3,36 @@
 // says how to compare them.
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
+#include "base/pending.hpp"
+#include "compiler/source.hpp"
 #include "resource/image.hpp"
+#include "resource/image_stream.hpp"
+#include "runtime/application.hpp"
 #include "ui/render/submission.hpp"
 #include "ui/render/surface_textures.hpp"
+#include "ui/surface.hpp"
+#include "ui/svg_image.hpp"
+#include "ui/widget/presentation.hpp"
 
 namespace {
 
@@ -282,44 +295,6 @@ void test_apng_still_compatibility(const std::filesystem::path& root) {
     check(still[3U] == 255U, "the APNG default image lost its opaque background");
 }
 
-void test_surface_textures_decode_every_format(const std::filesystem::path& root) {
-    // A Surface's static images reach the host as RGBA8 decoded by the core, whatever their format.
-    std::vector<strata::resource::EncodedTextureResource> textures;
-    std::vector<std::vector<std::uint8_t>> expected;
-    for (const std::string_view name : {"jpeg_progressive_420.jpg", "gif_handmade.gif",
-                                        "apng_blend_dispose.png", "webp_lossy_alpha.webp"}) {
-        std::vector<std::uint8_t> bytes = read_file(root / std::string(name));
-        const strata::resource::ImageInfo info = strata::resource::inspect_image(bytes);
-        expected.push_back(decode_image(bytes, 1U).frames.front().rgba);
-        textures.push_back(strata::resource::EncodedTextureResource{
-            std::string(name),
-            "fixture/static/" + std::string(name),
-            strata::resource::TextureSampling::linear,
-            strata::resource::image_encoding(info.format),
-            info.dimensions,
-            std::move(bytes),
-        });
-    }
-    strata::ui::SurfaceTextures surface_textures("fixture", textures);
-    strata::ui::RenderSubmission submission;
-    for (const strata::resource::EncodedTextureResource& texture : textures) {
-        strata::ui::SubmissionBatch batch;
-        batch.texture = texture.host_id;
-        submission.batches.push_back(batch);
-    }
-    surface_textures.plan(submission, true);
-    check(surface_textures.uploads().size() == textures.size(),
-          "a Surface did not upload every encoded image");
-    for (const strata::ui::TextureUpload& upload : surface_textures.uploads()) {
-        const auto index = static_cast<std::size_t>(
-            std::ranges::find(textures, upload.descriptor->logical_id,
-                              &strata::resource::EncodedTextureResource::logical_id) -
-            textures.begin());
-        check(index < textures.size() && std::ranges::equal(upload.bytes, expected[index]),
-              "a Surface uploaded other pixels than the image's first frame");
-    }
-}
-
 } // namespace
 
 // Streaming hands over exactly the frames decode_image keeps, in order, and stops when asked.
@@ -347,7 +322,347 @@ void test_streamed_frames(const std::filesystem::path& root, const std::vector<F
                 [&taken](std::vector<std::uint8_t>&, std::uint32_t) { return ++taken < 1U; }));
             check(taken == 1U, fixture.name + ": streaming went on after it was told to stop");
         }
+        std::optional<strata::resource::ImageDecoder> initial(std::in_place, bytes);
+        const auto first = initial->next();
+        check(first.has_value() && first->rgba == kept.frames.front().rgba,
+              fixture.name + ": resumable decoding lost its first frame");
+        strata::resource::ImageDecoder resumed(std::move(*initial));
+        initial.reset();
+        for (std::size_t index = 1U; index < kept.frames.size(); ++index) {
+            const auto frame = resumed.next();
+            check(frame.has_value() && frame->rgba == kept.frames[index].rgba &&
+                      frame->delay_ms == kept.frames[index].delay_ms,
+                  fixture.name + ": transferred continuation restarted or lost compositing state");
+        }
+        check(!resumed.next().has_value() && resumed.loop_count() == kept.loop_count,
+              fixture.name + ": resumable decoding lost its terminal frame/loop metadata");
+        resumed.rewind();
+        for (const auto& expected : kept.frames) {
+            const auto frame = resumed.next();
+            check(frame.has_value() && frame->rgba == expected.rgba &&
+                      frame->delay_ms == expected.delay_ms,
+                  fixture.name + ": rewind retained disposal/parser state from the preceding play");
+        }
+        check(!resumed.next().has_value(), fixture.name + ": rewind duplicated the final frame");
     }
+}
+
+void test_resumable_animation_bounds() {
+    using strata::resource::ImageDecoder;
+    const std::uint32_t count = strata::resource::maximum_image_frames + 1U;
+    ImageDecoder long_animation(tiny_animated_gif(count));
+    for (std::uint32_t index = 0U; index < count; ++index) {
+        const auto frame = long_animation.next();
+        const auto value = static_cast<std::uint8_t>(index % 2U == 0U ? 0U : 255U);
+        check(frame.has_value() &&
+                  frame->rgba == std::vector<std::uint8_t>{value, value, value, 255U},
+              "a resumable animation accumulated a collection budget or repeated a frame");
+    }
+    check(!long_animation.next().has_value(), "resumable animation did not reach its trailer");
+    auto damaged = tiny_animated_gif(1U);
+    damaged.back() = 0x2CU; // Another image descriptor, truncated before its dimensions.
+    ImageDecoder partial(std::move(damaged));
+    const auto first = partial.next();
+    check(first.has_value() && first->rgba == std::vector<std::uint8_t>{0U, 0U, 0U, 255U},
+          "a malformed later frame suppressed the valid prefix");
+    bool rejected = false;
+    try {
+        static_cast<void>(partial.next());
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    check(rejected && first->rgba == std::vector<std::uint8_t>{0U, 0U, 0U, 255U},
+          "a malformed continuation was accepted or modified an earlier decoded frame");
+}
+
+/** Pool queue capacity and playback time are independent; neither can block a decoder worker. */
+void test_image_stream_playback(const std::filesystem::path& root) {
+    using namespace strata;
+    for (const std::string_view name :
+         {"gif_handmade.gif", "apng_blend_dispose.png", "webp_anim_handmade.webp",
+          "webp_anim_lossless.webp"}) {
+        const auto bytes = read_file(root / name);
+        const auto expected = decode_image(bytes);
+        base::TaskOwner tasks(base::TaskExecution::deterministic);
+        resource::ImageStream stream(resource::prepare_image(bytes), tasks, std::string(name));
+        std::int64_t now = 1'000'000'000;
+        const auto initial_revision = stream.revision();
+        stream.advance(now);
+        check(stream.revision() == initial_revision &&
+                  std::ranges::equal(stream.pixels(), expected.frames.front().rgba),
+              "starting a stream decoded or published its first frame twice");
+        const auto plays = expected.loop_count == 0U ? 2U : expected.loop_count;
+        for (std::uint32_t play = 0U; play < plays; ++play) {
+            for (const auto& frame : expected.frames) {
+                stream.advance(now);
+                check(std::ranges::equal(stream.pixels(), frame.rgba),
+                      std::string(name) + ": owner-clock playback lost a frame or disposal state");
+                const auto revision = stream.revision();
+                const std::int64_t delay =
+                    static_cast<std::int64_t>(frame.delay_ms < 20U ? 100U : frame.delay_ms) *
+                    1'000'000;
+                stream.advance(now + delay - 1);
+                check(stream.revision() == revision,
+                      "prefetch completion shortened a displayed frame's requested duration");
+                now += delay;
+            }
+        }
+        if (expected.loop_count != 0U) {
+            stream.advance(now);
+            const auto revision = stream.revision();
+            stream.advance(now + 1'000'000'000);
+            check(stream.finished() && stream.revision() == revision &&
+                      std::ranges::equal(stream.pixels(), expected.frames.back().rgba),
+                  "finite image playback did not freeze on its final canvas");
+        }
+    }
+
+    base::TaskPool pool(1U);
+    base::TaskOwner tasks(base::TaskExecution::asynchronous, {}, &pool);
+    resource::ImageStream full(resource::prepare_image(tiny_animated_gif(2000U)), tasks, "full");
+    full.advance(0);
+    while (tasks.pending() != 0U) {
+        check(tasks.wait_for_completion(std::chrono::seconds(5)), "image lookahead did not finish");
+        static_cast<void>(tasks.drain());
+    }
+    const auto independent = base::Pending<DecodedImage>::start(
+        tasks, base::TaskKind::image, base::TaskPriority::idle, "independent-image",
+        [bytes = tiny_animated_gif(1U)](const base::TaskCancellation&) {
+            return decode_image(bytes);
+        });
+    check(tasks.wait_for_completion(std::chrono::seconds(5)),
+          "a full image lookahead queue parked the only pool worker");
+    static_cast<void>(tasks.drain());
+    check(independent.get() != nullptr &&
+              independent.get()->frames.front().rgba == std::vector<std::uint8_t>{0U, 0U, 0U, 255U},
+          "a full animation queue blocked unrelated image preparation");
+    full.advance(250'000'000);
+    check(std::ranges::equal(full.pixels(), std::array<std::uint8_t, 4U>{0U, 0U, 0U, 255U}),
+          "lookahead replayed the first frame instead of continuing from the prepared second frame");
+    while (tasks.pending() != 0U) {
+        check(tasks.wait_for_completion(std::chrono::seconds(5)), "image refill did not finish");
+        static_cast<void>(tasks.drain());
+    }
+
+    std::promise<void> release;
+    auto entered = std::make_shared<std::promise<void>>();
+    auto started = entered->get_future();
+    static_cast<void>(tasks.post(
+        base::TaskKind::other, base::TaskPriority::frame_critical,
+        [entered, gate = release.get_future().share()](const base::TaskCancellation&) {
+            entered->set_value();
+            gate.wait();
+        }, [](const base::TaskOutcome&) {}));
+    check(started.wait_for(std::chrono::seconds(5)) == std::future_status::ready,
+          "decoder starvation fixture did not occupy its worker");
+    resource::ImageStream delayed(resource::prepare_image(tiny_animated_gif(8U)), tasks, "delayed");
+    delayed.advance(0);
+    delayed.advance(250'000'000);
+    check(std::ranges::equal(delayed.pixels(),
+                            std::array<std::uint8_t, 4U>{255U, 255U, 255U, 255U}),
+          "a starved decoder did not hold its last valid canvas");
+    {
+        resource::ImageStream removed(
+            resource::prepare_image(tiny_animated_gif(8U)), tasks, "removed");
+        removed.advance(0);
+    }
+    release.set_value();
+    while (tasks.pending() != 0U) {
+        check(tasks.wait_for_completion(std::chrono::seconds(5)),
+              "a removed stream or resumed decoder prevented settling");
+        static_cast<void>(tasks.drain());
+    }
+    delayed.advance(275'000'000);
+    check(std::ranges::equal(delayed.pixels(), std::array<std::uint8_t, 4U>{0U, 0U, 0U, 255U}),
+          "the owner frame callback did not adopt the expired canvas");
+    delayed.advance(374'999'999);
+    check(std::ranges::equal(delayed.pixels(), std::array<std::uint8_t, 4U>{0U, 0U, 0U, 255U}),
+          "late decoder adoption shortened the next frame to catch up");
+    delayed.advance(375'000'000);
+    check(std::ranges::equal(delayed.pixels(),
+                            std::array<std::uint8_t, 4U>{255U, 255U, 255U, 255U}) &&
+              tasks.statistics().kinds[static_cast<std::size_t>(base::TaskKind::image)].cancelled != 0U,
+          "resumed playback lost its deadline or a retired stream remained eligible for adoption");
+
+    std::size_t failures = 0U;
+    base::TaskOwner inline_tasks(base::TaskExecution::deterministic, {}, nullptr,
+        [&failures](const base::TaskKind kind, const std::exception_ptr& error) {
+            check(kind == base::TaskKind::image && error != nullptr,
+                  "image continuation failure lost its owner diagnostic");
+            ++failures;
+        });
+    auto damaged = tiny_animated_gif(3U);
+    damaged.back() = 0x2CU;
+    resource::ImageStream partial(resource::prepare_image(std::move(damaged)), inline_tasks, "partial");
+    partial.advance(0);
+    partial.advance(100'000'000);
+    check(std::ranges::equal(partial.pixels(),
+                            std::array<std::uint8_t, 4U>{255U, 255U, 255U, 255U}),
+          "a later decoding failure discarded an already prepared frame");
+    partial.advance(200'000'000);
+    partial.advance(300'000'000);
+    check(failures == 1U && partial.finished() &&
+              std::ranges::equal(partial.pixels(), std::array<std::uint8_t, 4U>{0U, 0U, 0U, 255U}),
+          "a failed slice lost its valid prefix or failed to freeze on the last good frame");
+}
+
+/** Pending bindings reserve their ids; only complete resources enter packet texture residency. */
+void test_image_preparation() {
+    using namespace strata;
+    base::TaskPool pool(1U);
+    std::size_t failures = 0U;
+    base::TaskOwner tasks(base::TaskExecution::asynchronous, {}, &pool,
+        [&failures](const base::TaskKind kind, const std::exception_ptr& error) {
+            check(kind == base::TaskKind::image && error != nullptr,
+                  "image preparation lost its diagnostic category");
+            ++failures;
+        });
+    std::promise<void> release;
+    static_cast<void>(tasks.post(
+        base::TaskKind::other, base::TaskPriority::frame_critical,
+        [gate = release.get_future().share()](const base::TaskCancellation&) { gate.wait(); },
+        [](const base::TaskOutcome&) {}));
+    resource::RuntimeImageStore runtime;
+    for (const std::string id : {"photo", "vector", "broken"})
+        runtime.publish(id, {1U, 1U}, resource::TextureSampling::linear, {255U, 0U, 0U, 255U});
+    const std::string svg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"100\">"
+        "<path d=\"M0 0 L200 0 L200 100 Z\" fill=\"red\"/></svg>";
+    std::vector<resource::ImageSource> sources;
+    sources.push_back({"photo", "fixture/photo", "photo.gif",
+                       resource::TextureSampling::linear, tiny_animated_gif(1U)});
+    sources.push_back({"vector", "fixture/vector", "vector.svg",
+                       resource::TextureSampling::linear, {svg.begin(), svg.end()}});
+    sources.push_back({"broken", "fixture/broken", "broken.svg",
+                       resource::TextureSampling::linear, {'<', 's', 'v', 'g', '>'}});
+    resource::SvgImageRegistry registry(tasks, std::move(sources),
+                                        &ui::validate_svg_image_geometry, &runtime, {});
+    const auto pending = registry.lookup("photo");
+    check(pending.status() == base::PendingStatus::pending && !pending.value.has_value(),
+          "a pending static binding exposed same-id runtime pixels or partial dimensions");
+    ui::SurfaceTextures textures("fixture", {});
+    static_cast<void>(textures.sync(runtime, &registry));
+    check(textures.descriptors().empty(),
+          "pending declared bindings fell through to runtime texture descriptors");
+    base::Readiness removed;
+    {
+        std::vector<resource::ImageSource> retired{
+            {"retired", "fixture/retired", "retired.gif",
+             resource::TextureSampling::linear, tiny_animated_gif(1U)}};
+        resource::SvgImageRegistry closing(tasks, std::move(retired),
+                                           &ui::validate_svg_image_geometry, &runtime, {});
+        removed = closing.lookup("retired").readiness;
+    }
+    release.set_value();
+    while (tasks.pending() != 0U) {
+        check(tasks.wait_for_completion(std::chrono::seconds(5)), "image preparation did not settle");
+        static_cast<void>(tasks.drain());
+    }
+    const auto photo = registry.lookup("photo");
+    const auto vector = registry.lookup("vector");
+    const auto broken = registry.lookup("broken");
+    check(photo.value.has_value() && photo.value->dimensions == ImageDimensions{1U, 1U} &&
+              photo.value->stream == nullptr && photo.status() == base::PendingStatus::ready &&
+              vector.value.has_value() && vector.value->document != nullptr &&
+              vector.value->dimensions == ImageDimensions{200U, 100U},
+          "image adoption did not publish usable content and natural dimensions together");
+    check(failures == 1U && !broken.value.has_value() &&
+              broken.status() == base::PendingStatus::failed &&
+              removed.status() == base::PendingStatus::failed,
+          "a failed or retired image remained pending or adopted after cancellation");
+    static_cast<void>(textures.sync(runtime, &registry));
+    check(textures.descriptors().size() == 1U &&
+              textures.descriptors().front().logical_id == "photo" &&
+              textures.descriptors().front().encoding == resource::ImageEncoding::rgba8,
+          "failed/vector bindings exposed host pixels or unprepared bytes reached residency");
+    ui::RenderSubmission submission;
+    ui::SubmissionBatch batch;
+    batch.texture = "fixture/photo";
+    submission.batches.push_back(std::move(batch));
+    textures.plan(submission, true);
+    check(textures.uploads().size() == 1U &&
+              std::ranges::equal(textures.uploads().front().bytes,
+                                std::array<std::uint8_t, 4U>{0U, 0U, 0U, 255U}),
+          "static adoption uploaded the shadowed runtime canvas instead of prepared pixels");
+    textures.commit();
+
+    const auto read = [&registry](const std::string_view id) {
+        const auto image = registry.lookup(id);
+        return base::ReadinessRead{image.readiness, image.status()};
+    };
+    auto observed = read("dynamic");
+    const auto unrelated = read("unrelated");
+    runtime.publish("dynamic", {2U, 1U}, resource::TextureSampling::linear,
+                    std::vector<std::uint8_t>(8U, 255U));
+    registry.sync_metadata();
+    check(!observed.current() && unrelated.current() &&
+              registry.lookup("dynamic").value->dimensions == ImageDimensions{2U, 1U},
+          "runtime image appearance did not invalidate only its own metadata readers");
+    observed = read("dynamic");
+    runtime.publish("dynamic", {2U, 1U}, resource::TextureSampling::linear,
+                    std::vector<std::uint8_t>(8U, 0U));
+    registry.sync_metadata();
+    check(observed.current(), "a pixel-only update invalidated natural-size consumers");
+    runtime.publish("dynamic", {1U, 2U}, resource::TextureSampling::linear,
+                    std::vector<std::uint8_t>(8U, 255U));
+    registry.sync_metadata();
+    check(!observed.current(), "dimension replacement retained a stale metadata observation");
+    observed = read("dynamic");
+    runtime.release("dynamic");
+    registry.sync_metadata();
+    check(!observed.current() && !registry.lookup("dynamic").value.has_value(),
+          "runtime release retained its previous natural dimensions");
+    observed = read("dynamic");
+    runtime.publish("dynamic", {1U, 1U}, resource::TextureSampling::linear, {0U, 0U, 0U, 255U});
+    registry.sync_metadata();
+    check(!observed.current() && unrelated.current(),
+          "a released image could not invalidate readers when published again");
+}
+
+/** Playback advances from the frame phase that owns the clock, never from paint. */
+void test_image_paint_preserves_playback() {
+    using namespace strata;
+    base::TaskOwner tasks(base::TaskExecution::deterministic);
+    auto images = std::make_shared<const resource::SvgImageRegistry>(
+        tasks,
+        std::vector<resource::ImageSource>{
+            {"animation", "fixture/animation", "animation.gif",
+             resource::TextureSampling::linear, tiny_animated_gif(8U)}},
+        &ui::validate_svg_image_geometry, nullptr, nullptr);
+    const auto ready = images->lookup("animation");
+    check(ready.value.has_value() && ready.value->stream != nullptr,
+          "image paint fixture did not prepare its animation");
+    resource::ImageStream& stream = *ready.value->stream;
+    runtime::ApplicationContext application("image-paint", runtime::ApplicationBundle::create());
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application.compile_and_activate(compiler::ModuleSource{"image-paint.strata", R"(
+overlay Picture {
+  root Image(key: "animation", image: "animation", layout: { width: 32, height: 32 })
+}
+)"}, no_imports, 0U).activated(), "image paint fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 32;
+    environment.framebuffer_height = 32;
+    environment.logical_width = 32.0;
+    environment.logical_height = 32.0;
+    ui::Surface surface("image-paint", application, runtime::LayerRole::overlay, "Picture",
+                        environment, {}, ui::WidgetRegistry{}, ui::BehaviorRegistry{}, nullptr,
+                        ui::Theme{}, {}, images);
+    static_cast<void>(surface.frame(0));
+    const auto revision = stream.revision();
+    check(std::ranges::equal(stream.pixels(), std::array<std::uint8_t, 4U>{0U, 0U, 0U, 255U}),
+          "initial image publication did not display its first canvas");
+    surface.input().publish_frame_time(100'000'000);
+    check(stream.revision() == revision &&
+              std::ranges::equal(stream.pixels(), std::array<std::uint8_t, 4U>{0U, 0U, 0U, 255U}),
+          "publishing a frame time alone advanced the image's playback");
+    static_cast<void>(surface.frame(100'000'000));
+    check(std::ranges::equal(stream.pixels(),
+                            std::array<std::uint8_t, 4U>{255U, 255U, 255U, 255U}),
+          "image playback did not start at its first visible frame");
 }
 
 int strata_test_image_decode(const int argument_count, const char* const* const arguments) {
@@ -360,8 +675,11 @@ int strata_test_image_decode(const int argument_count, const char* const* const 
         test_damaged_fixtures(root, fixtures);
         test_bounds();
         test_apng_still_compatibility(root);
-        test_surface_textures_decode_every_format(root);
         test_streamed_frames(root, fixtures);
+        test_resumable_animation_bounds();
+        test_image_stream_playback(root);
+        test_image_preparation();
+        test_image_paint_preserves_playback();
     } catch (const std::exception& error) {
         std::cerr << "strata_image_decode_tests: " << error.what() << '\n';
         return 1;

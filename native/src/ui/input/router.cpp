@@ -91,6 +91,16 @@ void InputProcessingConfig::validate() const {
     }
 }
 
+InputPresentation::InputPresentation(
+    const WidgetRegistry& widgets, const BehaviorRegistry& behaviors,
+    StatusFeedbackService& status_feedback, NotificationService& notifications,
+    HitBoundsResolver hit_bounds_resolver, TextWidthResolver text_width_resolver,
+    TextLayoutResolver text_layout_resolver)
+    : widgets_(widgets), behaviors_(behaviors), status_feedback_(status_feedback),
+      notifications_(notifications), hit_bounds_resolver_(std::move(hit_bounds_resolver)),
+      text_width_resolver_(std::move(text_width_resolver)),
+      text_layout_resolver_(std::move(text_layout_resolver)) {}
+
 InputRouter::InputRouter(
     std::string public_surface_id, std::string host_service_owner,
     runtime::ApplicationContext& application, const WidgetRegistry& widgets,
@@ -102,23 +112,23 @@ InputRouter::InputRouter(
     InputProcessingConfig input_config, runtime::HostServices* const host_services,
     TextLayoutResolver text_layout_resolver, ScrollMutationObserver scroll_mutation_observer,
     FrameInvalidator frame_invalidator)
-    : public_surface_id_(std::move(public_surface_id)),
+    : InputPresentation(widgets, behaviors, status_feedback, notifications,
+                         std::move(hit_bounds_resolver), std::move(text_width_resolver),
+                         std::move(text_layout_resolver)),
+      public_surface_id_(std::move(public_surface_id)),
       host_service_owner_(host_service_owner.empty() ? public_surface_id_
                                                      : std::move(host_service_owner)),
-      application_(application), widgets_(widgets), behaviors_(behaviors),
-      status_feedback_(status_feedback), notifications_(notifications),
+      application_(application),
       surface_framework_executor_(std::move(surface_framework_executor)),
       description_invalidator_(std::move(description_invalidator)),
       frame_invalidator_(std::move(frame_invalidator)),
-      hit_bounds_resolver_(std::move(hit_bounds_resolver)),
       text_offset_resolver_(std::move(text_offset_resolver)),
-      text_width_resolver_(std::move(text_width_resolver)),
-      text_layout_resolver_(std::move(text_layout_resolver)),
       ime_cursor_rect_resolver_(std::move(ime_cursor_rect_resolver)),
       drag_preview_resolver_(std::move(drag_preview_resolver)),
       scroll_mutation_observer_(std::move(scroll_mutation_observer)),
       input_config_(std::move(input_config)),
       host_services_(host_services != nullptr ? host_services : &fallback_host_services_) {
+    input_owner_ = this;
     if (public_surface_id_.empty()) {
         throw std::invalid_argument("input router public surface id must not be empty");
     }
@@ -132,12 +142,12 @@ InputRouter::~InputRouter() {
     host_services_->request_ime(host_service_owner_, std::nullopt);
 }
 
-bool InputRouter::node_participates(const RetainedNode& node) const noexcept {
+bool InputPresentation::node_participates(const RetainedNode& node) const noexcept {
     const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
     return lifecycle == nullptr || !lifecycle->participates || lifecycle->participates(node);
 }
 
-bool InputRouter::node_input_enabled(const RetainedNode& node) const noexcept {
+bool InputPresentation::node_input_enabled(const RetainedNode& node) const noexcept {
     if (!node_participates(node))
         return false;
     const runtime::Value* enabled = scalar_property(node, "enabled");
@@ -159,7 +169,7 @@ bool InputRouter::node_input_enabled(const RetainedNode& node) const noexcept {
     return motion_input_eligible(node);
 }
 
-bool InputRouter::command_tooltip_candidate(const std::uint64_t identity) const noexcept {
+bool InputPresentation::command_tooltip_candidate(const std::uint64_t identity) const noexcept {
     if (tree_ == nullptr || commands_ == nullptr)
         return false;
     const RetainedNode* node = tree_->find_identity(identity);
@@ -223,7 +233,7 @@ void InputRouter::restart_hover_disclosures(const bool hide) {
         frame_invalidator_();
 }
 
-bool InputRouter::hover_disclosure(const RetainedNode& node) const noexcept {
+bool InputPresentation::hover_disclosure(const RetainedNode& node) const noexcept {
     const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
     return lifecycle != nullptr && lifecycle->input.hover_disclosure;
 }
@@ -309,15 +319,20 @@ void InputRouter::update_tooltip_disclosures() {
 }
 
 void InputRouter::synchronize_authored_presentations() {
+    if (project_authored_presentations() && description_invalidator_)
+        description_invalidator_(nullptr, {});
+}
+
+bool InputPresentation::project_authored_presentations() {
     if (tree_ == nullptr || tree_->root() == nullptr)
-        return;
+        return false;
     AuthoredPresentationInputs& last = authored_presentation_inputs_;
     if (last.tree == tree_ && last.generation == tree_->generation() &&
         last.structure_generation == tree_->structure_generation() && last.focused == focused_ &&
         last.focus_visible == focus_highlight_visible_ && last.active == active_ &&
         last.hovered == hovered_) {
         last.render_generation = tree_->render_change_generation();
-        return;
+        return false;
     }
     std::set<std::uint64_t> changed_nodes;
     const auto has_presentation = [this](const RetainedNode& node) {
@@ -394,11 +409,10 @@ void InputRouter::synchronize_authored_presentations() {
             invalidated;
     }
     last.render_generation = tree_->render_change_generation();
-    if (invalidated && description_invalidator_)
-        description_invalidator_(nullptr, {});
+    return invalidated;
 }
 
-bool InputRouter::focusable(const RetainedNode& node) const noexcept {
+bool InputPresentation::focusable(const RetainedNode& node) const noexcept {
     if (!node_input_enabled(node))
         return false;
     const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
@@ -427,7 +441,7 @@ bool InputRouter::focusable(const RetainedNode& node) const noexcept {
     return focusable;
 }
 
-bool InputRouter::tabbable(const RetainedNode& node) const noexcept {
+bool InputPresentation::tabbable(const RetainedNode& node) const noexcept {
     if (!focusable(node))
         return false;
     const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
@@ -565,24 +579,11 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
         focused_.reset();
     }
     pending_focus_.reset();
-    const auto retain = [&tree](std::optional<std::uint64_t>& identity) {
-        if (identity.has_value() && tree.find_identity(*identity) == nullptr)
-            identity.reset();
-    };
-    retain(active_);
-    if (hovered_subtarget_.has_value() &&
-        tree.find_identity(hovered_subtarget_->first) == nullptr) {
+    if (prune_presentation()) {
         if (hovered_notification_id_.has_value()) {
             static_cast<void>(notifications_.pause(*hovered_notification_id_, false));
             hovered_notification_id_.reset();
         }
-        hovered_subtarget_.reset();
-        hovered_subtarget_kind_.reset();
-    }
-    if (hover_target_.has_value() && tree.find_identity(*hover_target_) == nullptr)
-        hover_target_.reset();
-    if (active_subtarget_.has_value() && tree.find_identity(active_subtarget_->first) == nullptr) {
-        active_subtarget_.reset();
     }
     if (scrollbar_drag_.has_value() && tree.find_identity(scrollbar_drag_->identity) == nullptr) {
         scrollbar_drag_.reset();
@@ -606,14 +607,8 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
         last_text_click_.reset();
         text_click_count_ = 0U;
     }
-    std::erase_if(hovered_, [&tree](const std::uint64_t identity) {
-        return tree.find_identity(identity) == nullptr;
-    });
     std::erase_if(hover_started_nanos_, [&tree](const auto& entry) {
         return tree.find_identity(entry.first) == nullptr;
-    });
-    std::erase_if(matured_command_tooltips_, [&tree](const std::uint64_t identity) {
-        return tree.find_identity(identity) == nullptr;
     });
     std::erase_if(editors_, [&tree](const auto& entry) {
         return tree.find_identity(entry.first) == nullptr;
@@ -621,33 +616,6 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
     std::erase_if(text_navigation_, [&tree](const auto& entry) {
         return tree.find_identity(entry.first) == nullptr;
     });
-    std::erase_if(static_text_ranges_, [this, &tree](const auto& entry) {
-        const RetainedNode* node = tree.find_identity(entry.first);
-        return node == nullptr || !static_text_selectable(*node);
-    });
-    for (auto& [identity, range] : static_text_ranges_) {
-        const RetainedNode* node = tree.find_identity(identity);
-        const std::optional<std::string_view> text =
-            node != nullptr ? static_text_value(*node) : std::nullopt;
-        if (!text.has_value())
-            continue;
-        const auto clamp_boundary = [&text](std::size_t offset) {
-            offset = std::min(offset, text->size());
-            while (offset > 0U && offset < text->size() &&
-                   (static_cast<unsigned char>((*text)[offset]) & 0xC0U) == 0x80U) {
-                --offset;
-            }
-            return offset;
-        };
-        const StaticTextRange clamped{
-            clamp_boundary(range.anchor),
-            clamp_boundary(range.focus),
-        };
-        if (range.anchor != clamped.anchor || range.focus != clamped.focus) {
-            range = clamped;
-            static_cast<void>(tree.mark(identity, DirtyReason::input));
-        }
-    }
     for (const std::string_view type : widgets_.text_editable_types()) {
         const std::vector<RetainedNode*>* editable_nodes = tree.find_type(type);
         if (editable_nodes == nullptr)
@@ -662,27 +630,15 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
                 editors_.erase(node->identity());
                 continue;
             }
-            const runtime::Value* controlled = nullptr;
+            const runtime::Value* const controlled =
+                editor_controlled_value(*node, lifecycle->input.text_edit_mode);
             std::string numeric_text;
             std::string_view next;
-            if (lifecycle->input.text_edit_mode == WidgetTextEditMode::numeric) {
-                controlled = scalar_property(*node, "value");
-                if (controlled == nullptr || controlled->number() == nullptr) {
-                    controlled = node->retained_value("$value");
-                }
-                if (controlled == nullptr || controlled->number() == nullptr) {
-                    controlled = scalar_property(*node, "defaultValue");
-                }
-                if (controlled != nullptr && controlled->number() != nullptr) {
+            if (controlled != nullptr) {
+                if (controlled->number() != nullptr) {
                     numeric_text = runtime::display_string(*controlled);
                     next = numeric_text;
-                }
-            } else {
-                controlled = scalar_property(*node, "text");
-                if (controlled == nullptr || controlled->string() == nullptr) {
-                    controlled = node->retained_value("$text");
-                }
-                if (controlled != nullptr && controlled->string() != nullptr) {
+                } else if (controlled->string() != nullptr) {
                     next = *controlled->string();
                 }
             }
@@ -690,8 +646,7 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
             TextEditorMutation mutation;
             if (!inserted)
                 mutation = editor->second.reconcile_controlled(next);
-            const runtime::Value* read_only = scalar_property(*node, "readOnly");
-            if (read_only != nullptr && read_only->boolean() != nullptr && *read_only->boolean()) {
+            if (editor_read_only(*node)) {
                 mutation = mutation + editor->second.cancel_preedit();
             }
             if (mutation.changed()) {
@@ -729,11 +684,61 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
     return result;
 }
 
+bool InputPresentation::prune_presentation() {
+    if (tree_ == nullptr)
+        return false;
+    const auto absent = [this](const std::uint64_t identity) {
+        return tree_->find_identity(identity) == nullptr;
+    };
+    if (active_.has_value() && absent(*active_))
+        active_.reset();
+    const bool removed_subtarget =
+        hovered_subtarget_.has_value() && absent(hovered_subtarget_->first);
+    if (removed_subtarget) {
+        hovered_subtarget_.reset();
+        hovered_subtarget_kind_.reset();
+    }
+    if (hover_target_.has_value() && absent(*hover_target_))
+        hover_target_.reset();
+    if (active_subtarget_.has_value() && absent(active_subtarget_->first))
+        active_subtarget_.reset();
+    std::erase_if(hovered_, absent);
+    std::erase_if(matured_command_tooltips_, absent);
+    std::erase_if(static_text_ranges_, [this](const auto& entry) {
+        const RetainedNode* node = tree_->find_identity(entry.first);
+        return node == nullptr || !static_text_selectable(*node);
+    });
+    for (auto& [identity, range] : static_text_ranges_) {
+        const RetainedNode* node = tree_->find_identity(identity);
+        const auto text = node != nullptr ? static_text_value(*node) : std::nullopt;
+        if (!text.has_value())
+            continue;
+        const auto clamp_boundary = [&text](std::size_t offset) {
+            offset = std::min(offset, text->size());
+            while (offset > 0U && offset < text->size() &&
+                   (static_cast<unsigned char>((*text)[offset]) & 0xC0U) == 0x80U)
+                --offset;
+            return offset;
+        };
+        const StaticTextRange clamped{clamp_boundary(range.anchor), clamp_boundary(range.focus)};
+        if (range.anchor != clamped.anchor || range.focus != clamped.focus) {
+            range = clamped;
+            static_cast<void>(tree_->mark(identity, DirtyReason::input));
+        }
+    }
+    return removed_subtarget;
+}
+
 InputOperationResult InputRouter::after_layout() {
     InputOperationResult result;
+    after_layout(result);
+    return result;
+}
+
+void InputRouter::after_layout(InputOperationResult& result) {
     if (tree_ == nullptr || layout_ == nullptr) {
         host_services_->request_ime(host_service_owner_, std::nullopt);
-        return result;
+        return;
     }
     for (auto& [pointer_id, session] : drag_sessions_) {
         static_cast<void>(pointer_id);
@@ -866,7 +871,6 @@ InputOperationResult InputRouter::after_layout() {
         }
     }
     host_services_->request_ime(host_service_owner_, ime_cursor);
-    return result;
 }
 
 void InputRouter::publish_layout(const LayoutResult& layout) noexcept {
@@ -885,18 +889,33 @@ void InputRouter::publish_reduced_motion(const bool reduced_motion) noexcept {
     reduced_motion_ = reduced_motion;
 }
 
-bool InputRouter::request_widget_frame(const RetainedNode& node, const WidgetFrameCost cost) {
+bool InputRouter::request_widget_frame(const RetainedNode& node,
+                                       const std::optional<WidgetFrameCost> cost) {
+    return schedule_widget_frame(node, cost, false);
+}
+
+bool InputRouter::resume_widget_frame(const RetainedNode& node,
+                                      const std::optional<WidgetFrameCost> cost) {
+    return schedule_widget_frame(node, cost, true);
+}
+
+bool InputRouter::schedule_widget_frame(const RetainedNode& node,
+                                        const std::optional<WidgetFrameCost> cost,
+                                        const bool allow_same_time) {
     const WidgetLifecycle* const lifecycle = widgets_.find(node.description().type);
     if (node.lifecycle() != RetainedLifecycle::attached || !node_participates(node) ||
         lifecycle == nullptr || lifecycle->frame.advance == nullptr) {
         return false;
     }
+    const WidgetFrameCost requested_cost = cost.value_or(lifecycle->frame.initial_cost);
     auto [request, inserted] =
-        requested_widget_frames_.try_emplace(node.identity(), RequestedWidgetFrame{cost, true});
+        requested_widget_frames_.try_emplace(node.identity(), RequestedWidgetFrame{requested_cost, true});
     if (!inserted) {
-        request->second.cost = cost;
+        request->second.cost = requested_cost;
         request->second.pending = true;
     }
+    if (allow_same_time)
+        request->second.allow_same_time = true;
     widget_frame_times_.try_emplace(node.identity(), frame_time_nanos_);
     if (frame_invalidator_)
         frame_invalidator_();
@@ -928,20 +947,22 @@ bool InputRouter::watched_frames_pending() const {
 }
 
 void InputRouter::request_watched_widget_frames() {
-    if (tree_ == nullptr || layout_ == nullptr || !watched_frames_pending())
+    if (tree_ == nullptr || !watched_frames_pending())
         return;
     const std::vector<std::string_view>& types = watched_frame_types();
-    // A node not laid out yet (attached this frame) cannot run its hook: the generation is offered
-    // again next frame, when it can.
+    // Geometry-dependent hooks wait for layout. Resource clocks can start on attachment, so
+    // first-frame paint and speculative paint never have to advance shared playback.
     bool offered = true;
     for (RetainedNode* const node : tree_->nodes_of_types(types)) {
         if (node->lifecycle() != RetainedLifecycle::attached || !node_participates(*node))
             continue;
-        if (layout_->find(node->identity()) == nullptr) {
+        const WidgetLifecycle* const lifecycle = widgets_.find(node->description().type);
+        if ((lifecycle == nullptr || lifecycle->frame.initial_cost != WidgetFrameCost::resource) &&
+            (layout_ == nullptr || layout_->find(node->identity()) == nullptr)) {
             offered = false;
             continue;
         }
-        static_cast<void>(request_widget_frame(*node, WidgetFrameCost::paint));
+        static_cast<void>(resume_widget_frame(*node));
     }
     // A node laid out a frame later is offered then; one never laid out (hidden in a collapsed
     // branch) is not waited for long, so it cannot keep frames coming.
@@ -1008,9 +1029,7 @@ void InputRouter::set_focus_visibility(const bool visible) {
 
 void InputRouter::focus(const RetainedNode& node, const std::string_view reason,
                         InputOperationResult& result, const bool reveal) {
-    if (inside_native_presentation(node))
-        return;
-    if (!within_focus_containment(node))
+    if (!focus_request_allowed(node))
         return;
     if (focused_ == node.identity())
         return;
@@ -1182,7 +1201,7 @@ InputRouter::activation_action(const RetainedNode& node, const std::string_view 
     });
 }
 
-std::optional<std::string_view> InputRouter::focused_key() const noexcept {
+std::optional<std::string_view> InputPresentation::focused_key() const noexcept {
     if (!focused_.has_value() || tree_ == nullptr)
         return std::nullopt;
     const RetainedNode* node = tree_->find_identity(*focused_);
@@ -1191,13 +1210,13 @@ std::optional<std::string_view> InputRouter::focused_key() const noexcept {
                : std::nullopt;
 }
 
-RetainedNode* InputRouter::focus_boundary() const noexcept {
+RetainedNode* InputPresentation::focus_boundary() const noexcept {
     return focus_containment_key_.has_value() && tree_ != nullptr
                ? tree_->find_key(*focus_containment_key_)
                : nullptr;
 }
 
-bool InputRouter::within_focus_containment(const RetainedNode& node) const noexcept {
+bool InputPresentation::within_focus_containment(const RetainedNode& node) const noexcept {
     if (!focus_containment_key_.has_value())
         return true;
     const RetainedNode* boundary = focus_boundary();
@@ -1243,17 +1262,17 @@ bool InputRouter::set_focus_containment(const std::optional<std::string_view> ke
     return true;
 }
 
-bool InputRouter::focus_contained() const noexcept {
+bool InputPresentation::focus_contained() const noexcept {
     return focus_containment_key_.has_value() && focus_boundary() != nullptr;
 }
 
-bool InputRouter::focused(const std::uint64_t identity) const noexcept {
+bool InputPresentation::focused(const std::uint64_t identity) const noexcept {
     return focused_ == identity;
 }
-std::optional<std::uint64_t> InputRouter::focused_identity() const noexcept {
+std::optional<std::uint64_t> InputPresentation::focused_identity() const noexcept {
     return focused_;
 }
-bool InputRouter::focus_indicated() const noexcept {
+bool InputPresentation::focus_indicated() const noexcept {
     if (!focus_highlight_visible_ || !focused_.has_value())
         return false;
     if (!focused_by_pointer_ || tree_ == nullptr)
@@ -1261,31 +1280,47 @@ bool InputRouter::focus_indicated() const noexcept {
     const RetainedNode* node = tree_->find_identity(*focused_);
     return node == nullptr || !static_text_selectable(*node);
 }
-bool InputRouter::focus_visible(const std::uint64_t identity) const noexcept {
+bool InputPresentation::focus_visible(const std::uint64_t identity) const noexcept {
     return focused_ == identity && focus_indicated();
 }
-bool InputRouter::hovered(const std::uint64_t identity) const noexcept {
+bool InputPresentation::hovered(const std::uint64_t identity) const noexcept {
     return hovered_.contains(identity);
 }
-bool InputRouter::command_tooltip_ready(const std::uint64_t identity) const noexcept {
+bool InputPresentation::command_tooltip_ready(const std::uint64_t identity) const noexcept {
     return hovered_.contains(identity) && matured_command_tooltips_.contains(identity) &&
            command_tooltip_candidate(identity);
 }
-bool InputRouter::active(const std::uint64_t identity) const noexcept {
+bool InputPresentation::active(const std::uint64_t identity) const noexcept {
     return active_ == identity;
 }
 
-const std::string* InputRouter::edited_text(const std::uint64_t identity) const noexcept {
-    const auto found = editors_.find(identity);
-    return found != editors_.end() ? &found->second.text() : nullptr;
+const TextEditor* InputRouter::find_editor(const std::uint64_t identity) const noexcept {
+    const auto editor = editors_.find(identity);
+    return editor != editors_.end() ? &editor->second : nullptr;
+}
+
+TextEditor* InputRouter::find_editor(const std::uint64_t identity) noexcept {
+    return const_cast<TextEditor*>(std::as_const(*this).find_editor(identity));
+}
+
+const std::string* InputPresentation::edited_text(const std::uint64_t identity) const noexcept {
+    if (input_owner_ != nullptr) {
+        if (const TextEditor* editor = input_owner_->find_editor(identity); editor != nullptr)
+            return &editor->text();
+    }
+    return nullptr;
 }
 
 std::optional<TextEditorSnapshot>
-InputRouter::editor_snapshot(const std::uint64_t identity) const noexcept {
-    const auto found = editors_.find(identity);
-    if (found == editors_.end())
+InputPresentation::editor_snapshot(const std::uint64_t identity) const noexcept {
+    std::optional<EditorSnapshot> observed;
+    if (input_owner_ != nullptr) {
+        if (const TextEditor* editor = input_owner_->find_editor(identity); editor != nullptr)
+            observed = editor->snapshot();
+    }
+    if (!observed.has_value())
         return std::nullopt;
-    const EditorSnapshot snapshot = found->second.snapshot();
+    const EditorSnapshot& snapshot = *observed;
     return TextEditorSnapshot{
         snapshot.text,
         snapshot.caret,
@@ -1298,7 +1333,7 @@ InputRouter::editor_snapshot(const std::uint64_t identity) const noexcept {
 }
 
 std::optional<StaticTextSelectionSnapshot>
-InputRouter::static_text_selection_snapshot(const std::uint64_t identity) const noexcept {
+InputPresentation::static_text_selection_snapshot(const std::uint64_t identity) const noexcept {
     const auto range = static_text_ranges_.find(identity);
     const RetainedNode* node = range != static_text_ranges_.end() && tree_ != nullptr
                                    ? tree_->find_identity(identity)
@@ -1323,14 +1358,21 @@ std::vector<std::string> InputRouter::pending_navigation_targets() const {
     return result;
 }
 
-const StatusFeedbackService& InputRouter::status_feedback() const noexcept {
+const StatusFeedbackService& InputPresentation::status_feedback() const noexcept {
     return status_feedback_;
 }
 
 NotificationService& InputRouter::notifications() noexcept {
     return notifications_;
 }
-const NotificationService& InputRouter::notifications() const noexcept {
+const NotificationService& InputPresentation::notifications() const noexcept {
     return notifications_;
+}
+
+bool InputPresentation::pointer_held() const noexcept {
+    return input_owner_ != nullptr
+               ? !input_owner_->pressed_pointer_targets_.empty() ||
+                     !input_owner_->drag_sessions_.empty() || input_owner_->scrollbar_drag_.has_value()
+               : false;
 }
 } // namespace strata::ui

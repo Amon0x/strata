@@ -7,6 +7,7 @@
 #include <string_view>
 #include <utility>
 
+#include "base/process_lifetime.hpp"
 #include "ui/command.hpp"
 #include "ui/input.hpp"
 #include "ui/notification.hpp"
@@ -91,7 +92,7 @@ using Targets = std::vector<WidgetSubtarget>;
     const RetainedNode& node,
     const std::string_view key,
     const LayoutResult& layout,
-    const InputRouter& input
+    const InputPresentation& input
 ) noexcept {
     const RetainedNode* child = descendant_key(node, key);
     const LayoutRecord* record = child != nullptr ? layout.find(child->identity()) : nullptr;
@@ -668,10 +669,10 @@ Targets tooltip(const WidgetSubtargetContext& context) {
         }
         return result;
     }
-    static const WidgetTextLayoutResolver no_layout;
+    static const base::ProcessLifetime<WidgetTextLayoutResolver> no_layout;
     const std::optional<TooltipProjection> projection = project_tooltip(
         node, context.layout, context.input,
-        context.text_layout != nullptr ? *context.text_layout : no_layout
+        context.text_layout != nullptr ? *context.text_layout : no_layout.get()
     );
     if (projection.has_value()) {
         result.push_back(WidgetSubtarget{
@@ -738,10 +739,10 @@ Targets toast_region(const WidgetSubtargetContext& context) {
     Targets result;
     if (context.notifications == nullptr) return result;
     const RetainedNode& node = context.node;
-    static const WidgetTextLayoutResolver no_layout;
+    static const base::ProcessLifetime<WidgetTextLayoutResolver> no_layout;
     const ToastProjection projection = project_toasts(
         node, context.layout, *context.notifications,
-        context.text_layout != nullptr ? *context.text_layout : no_layout
+        context.text_layout != nullptr ? *context.text_layout : no_layout.get()
     );
     for (std::size_t index = 0U; index < projection.cards.size(); ++index) {
         const ToastCardModel& card = projection.cards[index];

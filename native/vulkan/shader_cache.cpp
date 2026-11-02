@@ -31,9 +31,17 @@
 namespace strata::vulkan {
 namespace {
 
-/** Process-wide configuration is synchronized; compiles own their captured path. */
-std::mutex cache_mutex;
-std::filesystem::path cache_directory;
+/** Compilers copy configuration under the lock; admission survives detached work at process exit. */
+struct CacheSettings final {
+    std::mutex mutex;
+    std::filesystem::path directory;
+};
+
+[[nodiscard]] CacheSettings& cache_settings() {
+    static CacheSettings& settings = *new CacheSettings;
+    return settings;
+}
+
 std::atomic<std::uint64_t> partial_serial{0U};
 constexpr std::uint64_t hash_seed = 14695981039346656037ULL;
 constexpr std::size_t maximum_bytes = 16U * 1024U * 1024U;
@@ -103,8 +111,9 @@ bool matches(std::ifstream& input, std::string_view expected) {
 } // namespace
 
 void set_shader_cache_directory(std::filesystem::path directory) {
-    const std::lock_guard lock(cache_mutex);
-    cache_directory = std::move(directory);
+    auto& settings = cache_settings();
+    const std::lock_guard lock(settings.mutex);
+    settings.directory = std::move(directory);
 }
 
 namespace detail {
@@ -115,8 +124,9 @@ ShaderCacheEntry::ShaderCacheEntry(const std::string_view source, const std::str
     : key_{source, entry, name} {
     std::filesystem::path directory;
     {
-        const std::lock_guard lock(cache_mutex);
-        directory = cache_directory;
+        auto& settings = cache_settings();
+        const std::lock_guard lock(settings.mutex);
+        directory = settings.directory;
     }
     if (directory.empty())
         return;

@@ -162,9 +162,17 @@ void replay_recorded_stream(const std::vector<headless::RecordedPacket>& stream,
                 lane->width = frame.framebuffer_width;
                 lane->height = frame.framebuffer_height;
             }
-            const host::RenderPacket& packet = lane->decoder.decode(frame.bytes);
+            const host::RenderPacket& packet = lane->decoder.decode(frame.bytes());
             comparable = comparable && portable(packet);
             lane->renderer->render(packet, frame.time_nanoseconds);
+            if (portable(packet) && !packet.resources.empty()) {
+                const auto pixels = lane->renderer->pixels();
+                const std::vector<std::uint8_t> accepted(pixels.begin(), pixels.end());
+                lane->decoder.acknowledge_draw();
+                lane->renderer->render(packet, frame.time_nanoseconds);
+                check(std::ranges::equal(accepted, lane->renderer->pixels()),
+                      name + ": retained presentation changed pixels after resource consumption");
+            }
         }
         if (!comparable)
             continue;

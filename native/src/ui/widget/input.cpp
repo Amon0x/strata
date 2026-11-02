@@ -28,7 +28,9 @@ WidgetInputScope::WidgetInputScope(
     const PointerInputEvent* const pointer, RetainedNode* const pointer_target,
     const std::size_t click_count, std::optional<WidgetSubtarget> subtarget,
     const std::string_view input_text, InputDispatchContext* const dispatch) noexcept
-    : router_(router), node_(node), result_(result), key_(key), modifiers_(modifiers),
+    : router_(router), node_(node), result_(result),
+      presentation_(router), tree_(presentation_.tree_),
+      key_(key), modifiers_(modifiers),
       pointer_(pointer), pointer_target_(pointer_target), click_count_(click_count),
       subtarget_(std::move(subtarget)), input_text_(input_text), dispatch_(dispatch) {}
 
@@ -51,13 +53,13 @@ const PointerInputEvent* WidgetInputScope::pointer() const noexcept {
     return pointer_;
 }
 Point WidgetInputScope::local_position(const Point surface_position) const {
-    return router_.logical_pointer_position(node_, surface_position);
+    return presentation_.logical_pointer_position(node_, surface_position);
 }
 Point WidgetInputScope::local_position(const RetainedNode& node, const Point surface_position) const {
-    return router_.logical_pointer_position(node, surface_position);
+    return presentation_.logical_pointer_position(node, surface_position);
 }
-const InputRouter& WidgetInputScope::input() const noexcept {
-    return router_;
+const InputPresentation& WidgetInputScope::input() const noexcept {
+    return presentation_;
 }
 const ScrollInputEvent* WidgetInputScope::scroll() const noexcept {
     return dispatch_ != nullptr ? dispatch_->scroll() : nullptr;
@@ -121,14 +123,14 @@ bool WidgetInputScope::cancel_gesture() noexcept {
     return dispatch_ != nullptr && dispatch_->cancel_gesture();
 }
 std::vector<WidgetSubtarget> WidgetInputScope::subtargets() const {
-    return router_.subtargets(node_.identity());
+    return presentation_.subtargets(node_.identity());
 }
 std::int64_t WidgetInputScope::frame_time_nanos() const noexcept {
-    return router_.frame_time_nanos_;
+    return presentation_.frame_time_nanos();
 }
 
 std::optional<WidgetDragInteraction> WidgetInputScope::active_drag() const {
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return std::nullopt;
     for (const auto& [pointer_id, session] : router_.drag_sessions_) {
         static_cast<void>(pointer_id);
@@ -136,10 +138,10 @@ std::optional<WidgetDragInteraction> WidgetInputScope::active_drag() const {
             !session.operation.has_value()) {
             continue;
         }
-        const RetainedNode* target = router_.tree_->find_identity(*session.target_identity);
+        const RetainedNode* target = tree_->find_identity(*session.target_identity);
         if (target == nullptr || !InputRouter::descendant_of(*target, node_))
             continue;
-        const RetainedNode* source = router_.tree_->find_identity(session.source_identity);
+        const RetainedNode* source = tree_->find_identity(session.source_identity);
         return WidgetDragInteraction{
             source != nullptr ? source->description().key : std::nullopt,
             target->description().key,
@@ -152,22 +154,22 @@ std::optional<WidgetDragInteraction> WidgetInputScope::active_drag() const {
 }
 
 const LayoutRecord* WidgetInputScope::layout() const noexcept {
-    return router_.layout_ != nullptr ? router_.layout_->find(node_.identity()) : nullptr;
+    return presentation_.layout_result() != nullptr ? presentation_.layout_result()->find(node_.identity()) : nullptr;
 }
 
 const LayoutRecord* WidgetInputScope::layout(const RetainedNode& node) const noexcept {
-    return router_.layout_ != nullptr ? router_.layout_->find(node.identity()) : nullptr;
+    return presentation_.layout_result() != nullptr ? presentation_.layout_result()->find(node.identity()) : nullptr;
 }
 
 const LayoutResult* WidgetInputScope::layout_result() const noexcept {
-    return router_.layout_;
+    return presentation_.layout_result();
 }
 double WidgetInputScope::scale() const noexcept {
-    return router_.layout_ != nullptr ? router_.layout_->scale : 1.0;
+    return presentation_.layout_result() != nullptr ? presentation_.layout_result()->scale : 1.0;
 }
 
 const CommandIndex* WidgetInputScope::command_index() const noexcept {
-    return router_.commands_;
+    return presentation_.command_index();
 }
 
 NotificationService& WidgetInputScope::notifications() noexcept {
@@ -175,7 +177,7 @@ NotificationService& WidgetInputScope::notifications() noexcept {
 }
 
 const resource::SvgImageRegistry* WidgetInputScope::images() const noexcept {
-    return router_.images();
+    return presentation_.images();
 }
 
 void WidgetInputScope::synchronize_modal_focus() {
@@ -269,7 +271,7 @@ bool WidgetInputScope::scroll_by(const double delta_x, const double delta_y) {
 }
 
 const std::string* WidgetInputScope::editor_text() const noexcept {
-    return router_.edited_text(node_.identity());
+    return presentation_.edited_text(node_.identity());
 }
 
 bool WidgetInputScope::insert_editor_text(const std::string_view value) {
@@ -287,11 +289,12 @@ void WidgetInputScope::synchronize_editor_text(const std::string_view value,
 
 void WidgetInputScope::set_retained(const std::string_view name, runtime::Value value,
                                     const DirtyReason reason) {
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return;
     const bool changed =
-        router_.tree_->set_retained_value(node_.identity(), name, std::move(value), reason);
-    if (changed && (reason == DirtyReason::structure || reason == DirtyReason::properties) &&
+        tree_->set_retained_value(node_.identity(), name, std::move(value), reason);
+    if (changed && tree_ == router_.tree_ &&
+        (reason == DirtyReason::structure || reason == DirtyReason::properties) &&
         router_.description_invalidator_) {
         router_.description_invalidator_(&node_, name);
     }
@@ -299,8 +302,8 @@ void WidgetInputScope::set_retained(const std::string_view name, runtime::Value 
 
 bool WidgetInputScope::exchange_retained(const std::string_view name, runtime::Value value,
                                          const DirtyReason reason) {
-    return router_.tree_ != nullptr &&
-           router_.tree_->set_retained_value(node_.identity(), name, std::move(value), reason);
+    return tree_ != nullptr &&
+           tree_->set_retained_value(node_.identity(), name, std::move(value), reason);
 }
 
 std::span<const std::byte>
@@ -310,30 +313,30 @@ WidgetInputScope::retained_bytes(const std::string_view name) const noexcept {
 
 void WidgetInputScope::set_retained_bytes(std::string name, const std::span<const std::byte> value,
                                           const DirtyReason reason) {
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return;
     static_cast<void>(
-        router_.tree_->set_retained_bytes(node_.identity(), std::move(name), value, reason));
+        tree_->set_retained_bytes(node_.identity(), std::move(name), value, reason));
 }
 
 void WidgetInputScope::set_input_bytes(std::string name, const std::span<const std::byte> value) {
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return;
-    static_cast<void>(router_.tree_->set_input_bytes(node_.identity(), std::move(name), value));
+    static_cast<void>(tree_->set_input_bytes(node_.identity(), std::move(name), value));
 }
 bool WidgetInputScope::set_target_paint_bytes(const std::string_view target_key,
                                               const std::string_view name,
                                               const std::span<const std::byte> value) {
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return false;
-    RetainedNode* const target = router_.tree_->find_key(target_key);
+    RetainedNode* const target = tree_->find_key(target_key);
     const WidgetLifecycle* const lifecycle =
         target != nullptr ? router_.widgets_.find(target->description().type) : nullptr;
     if (lifecycle == nullptr || std::ranges::find(lifecycle->extension_paint_fields, name) ==
                                     lifecycle->extension_paint_fields.end()) {
         return false;
     }
-    const bool changed = router_.tree_->set_retained_bytes(target->identity(), std::string(name),
+    const bool changed = tree_->set_retained_bytes(target->identity(), std::string(name),
                                                            value, DirtyReason::paint);
     if (changed && router_.frame_invalidator_)
         router_.frame_invalidator_();
@@ -341,40 +344,40 @@ bool WidgetInputScope::set_target_paint_bytes(const std::string_view target_key,
 }
 
 void WidgetInputScope::set_presentation(std::string name, runtime::Value value) {
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return;
     const bool changed =
-        router_.tree_->set_presentation_value(node_.identity(), std::move(name), std::move(value));
+        tree_->set_presentation_value(node_.identity(), std::move(name), std::move(value));
     if (changed && router_.frame_invalidator_)
         router_.frame_invalidator_();
 }
 void WidgetInputScope::set_paint(const std::string_view name, runtime::Value value) {
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return;
-    const bool changed = router_.tree_->set_paint_value(node_.identity(), name, std::move(value));
+    const bool changed = tree_->set_paint_value(node_.identity(), name, std::move(value));
     if (changed && router_.frame_invalidator_)
         router_.frame_invalidator_();
 }
 
 void WidgetInputScope::set_input(const std::string_view name, runtime::Value value) {
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return;
-    static_cast<void>(router_.tree_->set_input_value(node_.identity(), name, std::move(value)));
+    static_cast<void>(tree_->set_input_value(node_.identity(), name, std::move(value)));
 }
 
 void WidgetInputScope::invalidate(const DirtyReason reason) {
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return;
-    static_cast<void>(router_.tree_->mark(node_.identity(), reason));
+    static_cast<void>(tree_->mark(node_.identity(), reason));
     if (router_.frame_invalidator_)
         router_.frame_invalidator_();
 }
 
 void WidgetInputScope::invalidate_children(const DirtyReason reason) {
-    if (router_.tree_ == nullptr)
+    if (tree_ == nullptr)
         return;
     for (const auto& child : node_.children())
-        static_cast<void>(router_.tree_->mark(child->identity(), reason));
+        static_cast<void>(tree_->mark(child->identity(), reason));
     if (router_.frame_invalidator_)
         router_.frame_invalidator_();
 }

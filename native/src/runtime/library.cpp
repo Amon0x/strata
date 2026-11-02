@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/process_lifetime.hpp"
 #include "compiler/builtin_catalog.hpp"
 #include "data/json.hpp"
 #include "runtime/expression.hpp"
@@ -19,22 +20,24 @@ using Fields = std::vector<std::pair<std::string, Value>>;
 
 [[nodiscard]] const std::vector<compiler::DeclaredParameter>* library_parameters(
     const std::string_view name) {
-    static const std::map<std::string, const compiler::DeclaredHelper*, std::less<>> helpers = [] {
+    static const base::ProcessLifetime<
+        std::map<std::string, const compiler::DeclaredHelper*, std::less<>>> storage([] {
         std::map<std::string, const compiler::DeclaredHelper*, std::less<>> result;
         for (const compiler::DeclaredHelper& helper : compiler::builtin_catalog().helpers) {
             if (helper.evaluator == compiler::HelperEvaluator::library)
                 result.emplace(helper.name, &helper);
         }
         return result;
-    }();
+    });
+    const auto& helpers = storage.get();
     const auto found = helpers.find(name);
     return found != helpers.end() ? &found->second->parameters : nullptr;
 }
 
 [[nodiscard]] const Value& data(const ExpressionValue& value) {
-    static const Value null;
+    static const base::ProcessLifetime<Value> null;
     const Value* result = value.data_value();
-    return result != nullptr ? *result : null;
+    return result != nullptr ? *result : null.get();
 }
 
 [[nodiscard]] double number(const Value& value, const double fallback = 0.0) {

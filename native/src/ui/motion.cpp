@@ -26,7 +26,7 @@ namespace {
 [[nodiscard]] bool trigger_active(
     const MotionTrigger trigger,
     const RetainedNode& node,
-    const InputRouter& input
+    const InputPresentation& input
 ) noexcept {
     switch (trigger) {
     case MotionTrigger::enter: return node.lifecycle() == RetainedLifecycle::attached;
@@ -51,7 +51,7 @@ namespace {
 [[nodiscard]] bool channel_active(
     const motion_detail::TimelineBinding& channel,
     const RetainedNode& node,
-    const InputRouter& input
+    const InputPresentation& input
 ) noexcept {
     if (channel.state_target.has_value()) return *channel.state_target;
     switch (*channel.interaction) {
@@ -106,7 +106,7 @@ namespace {
 MotionFrameCounters MotionRuntime::advance(
     RetainedTree& tree,
     const std::shared_ptr<const runtime::RuntimeUnit>& unit,
-    const InputRouter& input,
+    const InputPresentation& input,
     const std::int64_t frame_time_nanos,
     const bool reduced_motion
 ) {
@@ -116,7 +116,7 @@ MotionFrameCounters MotionRuntime::advance(
 MotionFrameCounters MotionRuntime::discover(
     RetainedTree& tree,
     const std::shared_ptr<const runtime::RuntimeUnit>& unit,
-    const InputRouter& input,
+    const InputPresentation& input,
     const std::int64_t frame_time_nanos,
     const bool reduced_motion
 ) {
@@ -126,7 +126,7 @@ MotionFrameCounters MotionRuntime::discover(
 MotionFrameCounters MotionRuntime::evaluate(
     RetainedTree& tree,
     const std::shared_ptr<const runtime::RuntimeUnit>& unit,
-    const InputRouter& input,
+    const InputPresentation& input,
     const std::int64_t frame_time_nanos,
     const bool reduced_motion,
     const bool advance_active_players

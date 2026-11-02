@@ -21,7 +21,7 @@ struct ReorderInsertion final {
 [[nodiscard]] inline ReorderInsertion resolve_reorder_insertion(
     const RetainedNode& container,
     const LayoutResult& layout,
-    const InputRouter& input,
+    const InputPresentation& input,
     const Point position,
     const bool horizontal
 ) {

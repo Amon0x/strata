@@ -19,6 +19,7 @@ include(CMakePackageConfigHelpers)
 include(CTest)
 include(FetchContent)
 include(cmake/StrataModule.cmake)
+find_package(Threads REQUIRED)
 
 option(STRATA_BUILD_VULKAN "Build the Vulkan packet renderer and HLSL compiler" OFF)
 option(STRATA_TEST_VULKAN "Run GPU tests requiring a Vulkan driver and validation layers" OFF)
@@ -40,11 +41,6 @@ option(
 )
 option(STRATA_ENABLE_PCH "Precompile stable standard-library headers for large targets" ON)
 option(STRATA_ENABLE_TRACY "Enable local Tracy instrumentation" OFF)
-option(
-    STRATA_ENABLE_THREAD_SAFE_STATICS
-    "Use compiler-managed thread-safe initialization for function-local statics"
-    ON
-)
 
 set(STRATA_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(STRATA_RESOURCE_ROOT "${STRATA_REPOSITORY_ROOT}/src/main/resources")
@@ -142,12 +138,10 @@ function(strata_target_defaults target)
                 $<$<COMPILE_LANGUAGE:CXX>:/permissive->
                 $<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>
                 $<$<COMPILE_LANGUAGE:CXX>:/Zc:preprocessor>
+                $<$<COMPILE_LANGUAGE:CXX>:/Zc:threadSafeInit>
                 $<$<BOOL:${STRATA_WARNINGS_AS_ERRORS}>:/WX>
                 $<$<BOOL:${STRATA_ENABLE_STATIC_ANALYSIS}>:/analyze>
         )
-        if(NOT STRATA_ENABLE_THREAD_SAFE_STATICS)
-            target_compile_options(${target} PRIVATE /Zc:threadSafeInit-)
-        endif()
         if(STRATA_ENABLE_ASAN)
             target_compile_options(${target} PRIVATE /fsanitize=address)
             # With the Visual Studio generator MSVC's compiler embeds the ASAN linker
@@ -284,7 +278,7 @@ endfunction()
 # UTF-8, allocation, identities, status, diagnostics vocabulary and the strict JSON model. Every
 # consumer, including the installed C++ host facade, links this archive instead of compiling the
 # sources again.
-strata_add_layer(strata_base DIRECTORIES base data)
+strata_add_layer(strata_base DIRECTORIES base data PUBLIC Threads::Threads)
 add_library(strata_internal_data ALIAS strata_base)
 set_target_properties(strata_base PROPERTIES EXPORT_NAME base)
 
@@ -355,6 +349,7 @@ target_compile_features(strata_vector_text INTERFACE cxx_std_23)
 add_library(
     strata_render_host
     STATIC
+        host/presentation.cpp
         host/render_packet.cpp
         host/surface_stream.cpp
 )
@@ -371,7 +366,7 @@ set_target_properties(
         EXPORT_NAME render_host
         POSITION_INDEPENDENT_CODE ON
 )
-target_link_libraries(strata_render_host PUBLIC Strata::raster)
+target_link_libraries(strata_render_host PUBLIC Strata::raster Threads::Threads)
 strata_target_defaults(strata_render_host)
 
 # Extension loading, module and resource paths, and system fonts for every native host. The
@@ -435,6 +430,7 @@ set(
     src/abi_extension.cpp
     src/abi_application.cpp
     src/abi_services.cpp
+    src/preparation_abi.cpp
     src/profiler_abi.cpp
     src/scale_abi.cpp
     src/state_abi.cpp
@@ -592,6 +588,7 @@ if(STRATA_BUILD_VULKAN)
     find_package(Vulkan 1.1 REQUIRED)
     include(cmake/StrataShaderc.cmake)
     add_library(strata_vulkan STATIC
+        vulkan/presentation.cpp
         vulkan/preparation.cpp
         vulkan/renderer.cpp
         vulkan/device.cpp
@@ -758,6 +755,14 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         strata_target_defaults(strata_window_input_tests)
         add_test(NAME strata.desktop.window_input COMMAND strata_window_input_tests)
 
+        add_executable(strata_platform_tests tests/platform_tests.cpp)
+        target_include_directories(
+            strata_platform_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop
+        )
+        target_link_libraries(strata_platform_tests PRIVATE strata_desktop_host)
+        strata_target_defaults(strata_platform_tests)
+        add_test(NAME strata.desktop.platform COMMAND strata_platform_tests)
+
         # HTTP against a server of its own on the loopback, files in a folder of its own: the
         # platform services that need no window.
         add_executable(
@@ -913,6 +918,9 @@ if(STRATA_BUILD_PREVIEW)
     add_library(strata_preview_input STATIC preview/input.cpp preview/services.cpp)
     target_link_libraries(strata_preview_input PUBLIC SDL2::SDL2 Strata::c)
     target_include_directories(strata_preview_input PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/preview)
+    if(WIN32)
+        target_compile_definitions(strata_preview_input PUBLIC SDL_MAIN_HANDLED)
+    endif()
     strata_target_defaults(strata_preview_input)
     add_executable(strata_preview preview/main.cpp desktop/launch_manifest.cpp)
     target_link_libraries(strata_preview PRIVATE strata_preview_input strata_headless_host)
@@ -920,12 +928,21 @@ if(STRATA_BUILD_PREVIEW)
     target_compile_definitions(strata_preview PRIVATE STRATA_PREVIEW_RESOURCES="${STRATA_RESOURCE_ROOT}")
     if(STRATA_BUILD_VULKAN)
         target_compile_definitions(strata_preview PRIVATE STRATA_HAS_VULKAN)
+        target_sources(strata_preview PRIVATE preview/vulkan.cpp)
+        target_link_libraries(strata_preview PRIVATE Strata::vulkan)
     endif()
     strata_target_defaults(strata_preview)
     if(UNIX AND NOT APPLE)
         set_target_properties(strata_preview PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
     endif()
     install(TARGETS strata_preview RUNTIME DESTINATION bin)
+    if(WIN32)
+        add_custom_command(TARGET strata_preview POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:strata_preview> $<TARGET_FILE_DIR:strata_preview>
+            COMMAND_EXPAND_LISTS)
+        install(FILES $<TARGET_FILE:SDL2::SDL2> DESTINATION bin)
+    endif()
     if(STRATA_BUILD_TESTS)
         add_executable(strata_preview_tests tests/preview_tests.cpp)
         target_link_libraries(strata_preview_tests PRIVATE strata_preview_input strata_headless_host)
@@ -1401,6 +1418,19 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     )
 
     if(TARGET strata_headless_host)
+        add_executable(strata_presentation_tests tests/presentation_tests.cpp)
+        target_link_libraries(strata_presentation_tests PRIVATE strata_headless_host)
+        strata_target_defaults(strata_presentation_tests)
+        add_test(NAME strata.presentation COMMAND strata_presentation_tests)
+        if(WIN32)
+            add_test(NAME strata.presentation.d3d11 COMMAND strata_presentation_tests d3d11)
+            set_tests_properties(strata.presentation.d3d11 PROPERTIES LABELS "gpu;d3d11")
+        endif()
+        if(STRATA_BUILD_VULKAN)
+            add_test(NAME strata.presentation.vulkan COMMAND strata_presentation_tests vulkan)
+            set_tests_properties(strata.presentation.vulkan PROPERTIES LABELS "gpu;vulkan")
+        endif()
+
         add_executable(strata_effect_refresh_tests tests/effect_refresh_tests.cpp)
         target_link_libraries(strata_effect_refresh_tests PRIVATE strata_headless_host)
         target_include_directories(

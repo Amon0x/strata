@@ -31,8 +31,8 @@ The preset also builds the [SDL interactive preview](linux-preview.md). Set
 ## Ownership and submission
 
 The host owns the instance, physical device, device, graphics queue, target image/view, and window.
-Strata creates no swapchain, changes no window state, and performs no presentation. Device handles
-must remain valid until the presenter is destroyed. Calls are owner-thread serialized, including
+The low-level `Renderer`/`Presenter` creates no swapchain, changes no window state, and performs no
+presentation. Device handles must remain valid until the presenter is destroyed. Calls are owner-thread serialized, including
 all other access to the borrowed queue.
 
 Create the device with `VkPhysicalDeviceFeatures::dualSrcBlend` where it is supported and say so
@@ -55,8 +55,10 @@ alive until its own later submission has completed (a host that defers destructi
 most engines do, already satisfies this). `release_target()` waits for all Strata frames before
 freeing target-sized intermediates; destruction of the renderer or presenter waits for every frame.
 Resources Strata replaces while frames are in flight are retired with the newest frame that may
-read them and destroyed only after its fence. This is not an API for recording into a host command
-buffer.
+read them and destroyed only after its fence. This includes pipelines removed by material or
+effect-program replacement: declaring a replacement does not destroy pipelines still referenced
+by submitted draws and does not wait for those draws. This is not an API for recording into a host
+command buffer.
 
 Targets must be single-sampled 2D color images with color-attachment, transfer-source, and
 transfer-destination usage. Supported formats are RGBA8 UNORM, BGRA8 UNORM, and RGBA16F. Supply the
@@ -98,6 +100,27 @@ vertex/index patches follow the same packet contract as D3D11. Layer release dro
 geometry and effects. Resource-only terminal packets need no render target. If a submission fails,
 recreate the renderer and streams: resource mutations from a failed frame must not be replayed as
 though they completed.
+
+## Owned window presentation
+
+`<strata/vulkan_presentation.hpp>` provides `create_window_driver(WindowSurface, WindowOptions)`
+for `host::Presentation`. Unlike the borrowed-target API, this driver owns the instance, device,
+swap chain, acquisition/submission synchronization and presentation on the presentation owner.
+Supply owned instance-extension names and a surface-creation callback. A window API requiring its
+main thread must marshal that callback there, as the SDL preview does; keep servicing that handoff
+and keep the window alive until presentation shutdown completes.
+
+The capped path uses FIFO. Uncapped operation prefers immediate, then mailbox, then FIFO, and reports
+the actual mode. Swap-chain images retain their presentation-wait semaphores until reacquisition;
+frame fences alone do not prove that presentation consumed a semaphore. Zero-size, unavailable or
+outdated targets preserve pending commits and captures for retry. Ordinary frames do not read back
+pixels; explicit capture requests do.
+
+Each presentation stream scopes its authored material/effect names and retires those declarations
+with its terminal packet. A replacement scene cannot alter another stream's shaders while it is
+being prepared. The built-in unified material remains reserved. Low-level callers still supply
+their own shader identities; `Renderer::release_programs(prefix)` removes a consumer namespace and
+fence-retires pipelines no longer referenced by any declaration.
 
 ## Shaders and fidelity
 

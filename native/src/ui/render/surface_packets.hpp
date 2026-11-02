@@ -28,7 +28,8 @@ class SurfacePackets final {
      * `static_textures` are the Surface's own encoded images.
      */
     SurfacePackets(std::string resource_namespace,
-                   std::vector<resource::EncodedTextureResource> static_textures);
+                   std::vector<resource::TextureResource> static_textures,
+                   base::TaskOwner& tasks);
     SurfacePackets(const SurfacePackets&) = delete;
     SurfacePackets& operator=(const SurfacePackets&) = delete;
 
@@ -37,17 +38,17 @@ class SurfacePackets final {
      * texture change re-sends the retained geometry epoch instead of encoding it again. Packet size,
      * batch breaks, cache hits and encode timings are recorded in the Surface's profiler.
      */
-    const std::vector<std::uint8_t>& encode(Surface& surface, const SurfaceFrame& frame,
+    const EncodedPacket& encode(Surface& surface, const SurfaceFrame& frame,
                                             const resource::RuntimeImageStore& images);
     /**
      * Prepares the terminal packet releasing the glyph atlas and every texture the host holds, and
      * cancels the Surface's interactions. Repeating it returns the same packet.
      */
-    const std::vector<std::uint8_t>& prepare_release(Surface& surface);
+    const EncodedPacket& prepare_release(Surface& surface);
 
     [[nodiscard]] bool release_prepared() const noexcept { return release_prepared_; }
     /** The latest packet; empty until the first frame. */
-    [[nodiscard]] const std::vector<std::uint8_t>& packet() const noexcept;
+    [[nodiscard]] const EncodedPacket& packet() const noexcept;
     [[nodiscard]] const HostRenderPacketTelemetry& telemetry() const noexcept;
     [[nodiscard]] const font::GlyphAtlas& glyph_atlas() const noexcept { return glyph_atlas_; }
     /** The last encode re-sent the retained frame: nothing a host draws changed. */

@@ -102,6 +102,8 @@ public:
 private:
     InputRouter& router_;
     RetainedNode& node_;
+    const InputPresentation& presentation_ = router_;
+    RetainedTree* tree_ = presentation_.tree_;
     const DescriptionBehavior& attachment_;
     const PointerInputEvent* event_ = nullptr;
     std::string_view key_;

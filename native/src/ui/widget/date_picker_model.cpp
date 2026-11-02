@@ -104,7 +104,7 @@ void date_picker_overlay(WidgetRenderScope& scope) {
     present_calendar_month(scope, calendar_state(scope.node()), popup.month);
 }
 
-[[nodiscard]] bool date_picker_overlay_shown(const RetainedNode& node, const InputRouter&) {
+[[nodiscard]] bool date_picker_overlay_shown(const RetainedNode& node, const InputPresentation&) {
     return expanded(node);
 }
 

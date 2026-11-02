@@ -84,18 +84,35 @@ std::string ResourceRoot::read_text(const std::filesystem::path& relative) const
     return std::string(bytes.begin(), bytes.end());
 }
 
+strata_resource_adapter ResourceRoot::adapter() noexcept {
+    return strata_resource_adapter{
+        sizeof(strata_resource_adapter), this,
+        [](void* const context, const strata_string_view id, strata_bytes_view* const output) noexcept {
+            if (context == nullptr || output == nullptr || (id.data == nullptr && id.size != 0U))
+                return STRATA_STATUS_INVALID_ARGUMENT;
+            return static_cast<ResourceRoot*>(context)->load(
+                std::string_view(id.data != nullptr ? id.data : "", id.size), *output);
+        },
+    };
+}
+
 strata_status ResourceRoot::load(const std::string_view id, strata_bytes_view& output) noexcept {
     output = strata_bytes_view{nullptr, 0U};
     try {
-        auto found = cache_.find(id);
-        if (found == cache_.end()) {
-            std::optional<std::vector<std::uint8_t>> bytes = read_system_font(id);
-            if (!bytes.has_value())
-                bytes = read(utf8_path(id));
-            if (bytes->empty())
-                return STRATA_STATUS_NOT_FOUND;
-            found = cache_.emplace(std::string(id), std::move(*bytes)).first;
+        {
+            const std::scoped_lock lock(cache_mutex_);
+            if (const auto found = cache_.find(id); found != cache_.end()) {
+                output = strata_bytes_view{found->second.data(), found->second.size()};
+                return STRATA_STATUS_OK;
+            }
         }
+        std::optional<std::vector<std::uint8_t>> bytes = read_system_font(id);
+        if (!bytes.has_value())
+            bytes = read(utf8_path(id));
+        if (bytes->empty())
+            return STRATA_STATUS_NOT_FOUND;
+        const std::scoped_lock lock(cache_mutex_);
+        const auto found = cache_.try_emplace(std::string(id), std::move(*bytes)).first;
         output = strata_bytes_view{found->second.data(), found->second.size()};
         return STRATA_STATUS_OK;
     } catch (const std::bad_alloc&) {

@@ -14,14 +14,14 @@
 
 namespace strata::ui {
 
-class InputRouter;
+class InputPresentation;
 class NotificationService;
 
 /** Mutable typed semantic projection owned for the duration of one node derivation. */
 class WidgetSemanticsScope final {
   public:
     WidgetSemanticsScope(const RetainedNode& node, const CommandIndex* commands,
-                         const InputRouter* input, std::string default_role);
+                         const InputPresentation* input, std::string default_role);
 
     [[nodiscard]] const RetainedNode& node() const noexcept;
     [[nodiscard]] const CommandIndex* command_index() const noexcept;
@@ -83,7 +83,7 @@ class WidgetSemanticsScope final {
   private:
     const RetainedNode& node_;
     const CommandIndex* commands_;
-    const InputRouter* input_;
+    const InputPresentation* input_;
     const runtime::Value* explicit_semantics_ = nullptr;
     std::string role_;
     std::string name_;

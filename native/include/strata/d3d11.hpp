@@ -85,8 +85,9 @@ struct RenderLayerTelemetry final {
      */
     std::uint64_t gpu_nanos = 0U;
     /**
-     * The layer drew a material that changes on its own, reading the frame time or the pointer:
-     * drawing it again shows something new even when its packet did not change.
+     * The layer needs further frames without a new packet: a visible material reads time or the
+     * pointer, or its asynchronous shader still needs adoption. A static shader stops this once
+     * it is ready.
      */
     bool live = false;
 };

@@ -19,6 +19,41 @@
 
 namespace strata {
 class Surface;
+
+/** Immutable encoded stream ownership; compact geometry and resource operations remain ordered. */
+class EncodedRenderPacket final {
+  public:
+    EncodedRenderPacket() noexcept = default;
+    explicit EncodedRenderPacket(strata_render_packet* owned) noexcept : value_(owned) {}
+    EncodedRenderPacket(const EncodedRenderPacket& other) noexcept : value_(other.value_) {
+        strata_render_packet_retain(value_);
+    }
+    EncodedRenderPacket& operator=(const EncodedRenderPacket& other) noexcept {
+        strata_render_packet_retain(other.value_);
+        strata_render_packet_release(value_);
+        value_ = other.value_;
+        return *this;
+    }
+    EncodedRenderPacket(EncodedRenderPacket&& other) noexcept
+        : value_(std::exchange(other.value_, nullptr)) {}
+    EncodedRenderPacket& operator=(EncodedRenderPacket&& other) noexcept {
+        if (this != &other) {
+            strata_render_packet_release(value_);
+            value_ = std::exchange(other.value_, nullptr);
+        }
+        return *this;
+    }
+    ~EncodedRenderPacket() { strata_render_packet_release(value_); }
+    [[nodiscard]] std::span<const std::uint8_t> bytes() const noexcept {
+        const strata_bytes_view view = strata_render_packet_bytes(value_);
+        return {view.data, view.size};
+    }
+    [[nodiscard]] strata_render_packet* native_handle() const noexcept { return value_; }
+    [[nodiscard]] explicit operator bool() const noexcept { return value_ != nullptr; }
+
+  private:
+    strata_render_packet* value_ = nullptr;
+};
 }
 
 namespace strata::host {
@@ -487,7 +522,19 @@ using TextureSizes = std::map<std::string, std::array<std::uint32_t, 2U>, std::l
  */
 class RenderPacketDecoder final {
   public:
-    [[nodiscard]] const RenderPacket& decode(std::span<const std::uint8_t> bytes);
+    /**
+     * A nonempty prefix binds authored programs to one consumer namespace; the built-in unified
+     * material keeps its identity. Use the same prefix until reset(), including terminal packets.
+     */
+    [[nodiscard]] const RenderPacket& decode(std::span<const std::uint8_t> bytes,
+                                              std::string_view program_prefix = {});
+    /**
+     * Drops one-shot jobs after successful backend consumption, leaving the borrowed draw plan
+     * available for independent presentation. This does not acknowledge a Surface's terminal.
+     */
+    void acknowledge_resources() noexcept;
+    /** After a successful draw, also retires transient geometry uploads for repeated presentation. */
+    void acknowledge_draw() noexcept;
     void reset() noexcept;
 
   private:
@@ -511,12 +558,20 @@ class RenderPacketDecoder final {
     void assign_sample_revisions(RenderPacket& packet);
 };
 
+struct SurfacePacketCommit final {
+    strata_surface_frame_info surface{};
+    EncodedRenderPacket encoded;
+};
+
+/** Owner-side framing and acquisition only; no decoder or GPU state belongs on this path. */
+[[nodiscard]] SurfacePacketCommit frame_surface(strata_surface* surface,
+                                                 std::int64_t time_nanoseconds);
+
 struct SurfacePacketFrame final {
     strata_surface_frame_info surface{};
+    /** Borrowed only until this stream decodes again; never transfer this pointer to a worker. */
     const RenderPacket* packet = nullptr;
-    std::size_t packet_bytes = 0U;
-    /** The framed packet as read, valid until the stream frames again (for recording). */
-    std::span<const std::uint8_t> bytes;
+    EncodedRenderPacket encoded;
 };
 
 /**
@@ -545,7 +600,6 @@ class SurfacePacketStream final {
   private:
     strata_surface* surface_ = nullptr;
     RenderPacketDecoder decoder_;
-    std::vector<std::uint8_t> bytes_;
 };
 
 } // namespace strata::host

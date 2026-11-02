@@ -228,15 +228,52 @@ struct Host::Impl final {
         std::string id;
         /** Declared first so it outlives the Session, whose runtime holds it as its async host. */
         std::unique_ptr<AsyncBridge> async;
+        std::unique_ptr<host::Bindings> pending_bindings;
+        std::optional<host::SessionPrepareOptions> setup;
+        std::optional<host::SessionPreparation> preparation;
         std::unique_ptr<host::Session> session;
+        host::PresentationStream render_stream = 0U;
+        std::optional<host::PresentationReceipt> programs;
+        std::optional<host::PresentationReceipt> release;
+        host::PresentationLayerTiming rendering;
+        std::uint64_t submitted_frame = 0U;
+        std::int64_t submit_nanos = 0;
+        bool drew = false;
+        std::uint64_t prepared_environment = 0U;
+        bool profiler_capture = false;
 
+        [[nodiscard]] bool exists() const noexcept {
+            return session != nullptr || preparation.has_value() || setup.has_value();
+        }
         [[nodiscard]] bool live() const noexcept {
-            return session != nullptr && session->has_surface();
+            return session != nullptr && session->has_surface() && !release.has_value();
         }
         [[nodiscard]] strata::Surface& surface() { return session->surface(); }
         [[nodiscard]] strata::Runtime& runtime() { return session->runtime(); }
-        [[nodiscard]] strata::host::Bindings& bindings() { return session->bindings(); }
+        [[nodiscard]] strata::host::Bindings& bindings() {
+            return session != nullptr ? session->bindings() : *pending_bindings;
+        }
     };
+
+    struct SmokeIdentity final {
+        std::uint64_t fingerprint;
+        bool bound;
+    };
+
+    /** Isolation inspection is demanded by smoke callers, never charged to an ordinary frame. */
+    [[nodiscard]] const SmokeIdentity& smoke_identity() {
+        if (!captured_smoke_identity.has_value()) {
+            if (!showcase.live() && !debug.live())
+                throw std::logic_error("isolation inspection requires a framed application");
+            Layer& layer = showcase.live() ? showcase : debug;
+            const std::string frame = layer.surface().frame_json();
+            captured_smoke_identity = SmokeIdentity{
+                fingerprint(std::span(frame)),
+                &layer != &showcase || frame.find(instance_label) != std::string::npos,
+            };
+        }
+        return *captured_smoke_identity;
+    }
 
     /**
      * The window's host. Another window of the same application (window.open) shares its model
@@ -249,10 +286,12 @@ struct Host::Impl final {
           platform(
               window, [this](const std::string_view id) { return services.bytes(id); },
               [this](const std::string_view id) { return services.path(id).wstring(); }),
-          renderer(window, options.vsync), instance_label(std::move(instance_label)),
+          renderer(create_presentation(window, options.vsync, true, options.presentation)),
+          instance_label(std::move(instance_label)),
           shared_model(model != nullptr ? std::move(model)
                                         : std::make_shared<ShowcaseModel>(this->instance_label)),
-          showcase_model(*shared_model), window_id(std::move(window_id)), vsync(options.vsync) {
+          showcase_model(*shared_model), window_id(std::move(window_id)), vsync(options.vsync),
+          presentation_execution(options.presentation) {
         if (this->instance_label.empty()) {
             throw std::invalid_argument("desktop instance label must not be empty");
         }
@@ -266,12 +305,12 @@ struct Host::Impl final {
             framebuffer_width, framebuffer_height, dpi_scale
         );
         services.set_surface_scale(display_scale);
-        renderer.resize(
+        renderer->resize({
             framebuffer_width,
             framebuffer_height,
             logical_width(),
             logical_height()
-        );
+        });
         // Files dragged in from the shell go to the layer that takes input, in logical units.
         platform.accept_files([this](const std::uint32_t kind, const double x, const double y,
                                      const std::string& paths) { files(kind, x, y, paths); });
@@ -312,14 +351,21 @@ struct Host::Impl final {
     }
 
     ~Impl() noexcept {
-        close_session(hub);
-        close_session(performance_hud);
-        close_session(debug);
-        close_session(settings);
-        close_session(control_deck);
-        close_session(tuning_panel);
-        close_session(effect_gallery);
-        close_session(showcase);
+        try {
+            while (!close())
+                dispatch_presentation_shutdown_messages();
+        } catch (...) {
+            for (Layer* const layer : layers()) {
+                layer->preparation.reset();
+                if (layer->session != nullptr)
+                    layer->session->abandon();
+                layer->session.reset();
+                layer->async.reset();
+            }
+            renderer->stop();
+            while (!renderer->stopped())
+                dispatch_presentation_shutdown_messages();
+        }
         try {
             // Paths that still fail were already reported by the writer.
             static_cast<void>(durable_writer.flush());
@@ -609,34 +655,22 @@ struct Host::Impl final {
         }
     }
 
-    void publish(Layer& layer, const std::string_view id, const std::string& json) {
-        static_cast<void>(layer.runtime().publish_host_snapshot(id, json));
+    void publish(Layer& layer, const std::string_view id, host::Value value) {
+        if (layer.setup.has_value()) {
+            layer.setup->snapshots.push_back({{std::string(id), 0U}, std::move(value)});
+        } else {
+            static_cast<void>(layer.runtime().publish_host_snapshot(id, value.json()));
+        }
     }
 
     /**
-     * Compiles every material the application declares an HLSL stage for. The declaration is the
-     * same backend-neutral one every host reads, so adding a backend adds a source key, not a
-     * second contract.
+     * Installs complete worker-owned declarations. Resource reads never enter the adoption frame;
+     * GPU creation remains with the renderer owner.
      */
-    void declare_materials(const strata::Runtime& runtime) {
-        for (const strata::MaterialDeclaration& declaration :
-             runtime.material_declarations("hlsl")) {
-            if (declaration.source.empty()) continue;
-            renderer.declare_material(declaration.id, services.text(declaration.source));
-        }
-        for (const strata::EffectPassDeclaration& pass :
-             runtime.effect_pass_declarations("hlsl")) {
-            renderer.declare_effect_pass(
-                pass.effect_id,
-                pass.index,
-                static_cast<std::uint32_t>(pass.kind),
-                pass.radius,
-                pass.downsample,
-                pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
-                pass.downsample_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
-                pass.source.empty() ? std::string{} : services.text(pass.source)
-            );
-        }
+    void declare_materials(Layer& layer, host::PreparedSession& prepared) {
+        layer.render_stream = renderer->attach(layer.id);
+        layer.programs = renderer->declare_programs(
+            layer.render_stream, {std::move(prepared.materials), std::move(prepared.effects)});
     }
 
     [[nodiscard]] Layer create_session(
@@ -648,35 +682,67 @@ struct Host::Impl final {
         result.id = std::move(id);
         result.async = std::make_unique<AsyncBridge>(AsyncBridge{this, {}});
 
-        host::SessionOptions options;
+        result.setup.emplace();
+        host::SessionPrepareOptions& setup = *result.setup;
+        setup.resources = services.resources();
+        setup.schemas_resource = std::string(schemas_resource);
+        setup.program_language = "hlsl";
+        const std::filesystem::path path = durable_path(result.id);
+        setup.load_durable = [path, pending = durable_writer.pending(path)]() -> std::optional<std::string> {
+            if (pending.has_value())
+                return pending;
+            if (!std::filesystem::is_regular_file(path))
+                return std::nullopt;
+            std::ifstream input(path, std::ios::binary);
+            if (!input.is_open())
+                throw std::runtime_error("could not open prepared durable state");
+            std::string bytes{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+            if (input.bad())
+                throw std::runtime_error("could not read prepared durable state");
+            return bytes;
+        };
+        host::SessionOptions& options = setup.session;
         options.application_id = result.id;
         options.stable_identity_seed = 0x5354524154414445ULL;
+        options.frame_wake = [target = window] {
+            if (!PostMessageW(target, WM_NULL, 0U, 0))
+                throw std::runtime_error("could not wake the showcase window");
+        };
         // The bundled applications activate their checked-in compiled artifacts.
         options.capabilities = STRATA_CAPABILITY_COMPILED_MODULE_ACTIVATION;
-        options.schemas = services.text(schemas_resource);
-        options.read_text = [this](const std::string_view resource) {
-            return services.text(resource);
-        };
         options.on_diagnostic = &Impl::diagnostic;
         options.bindings_owner = "strata.desktop." + result.id;
+        result.pending_bindings = std::make_unique<host::Bindings>(options.bindings_owner);
+        return result;
+    }
+
+    void adopt_prepared(Layer& layer) {
+        if (!layer.preparation.has_value() || !layer.preparation->ready())
+            return;
         host::SessionAdapters adapters;
-        adapters.resources = services.resource_adapter();
         adapters.clipboard = services.clipboard_adapter();
-        adapters.ime = services.ime_adapter(result.id);
-        adapters.effects = platform.effect_adapter(result.id);
+        adapters.ime = services.ime_adapter(layer.id);
+        adapters.effects = platform.effect_adapter(layer.id);
         adapters.durable_store = strata_durable_store_adapter{
             sizeof(strata_durable_store_adapter), this, &Impl::durable_load, &Impl::durable_write,
         };
         adapters.async_host = strata_async_host_adapter{
             sizeof(strata_async_host_adapter),
-            result.async.get(),
+            layer.async.get(),
             &Impl::async_begin,
             &Impl::async_cancel,
         };
-        result.session = std::make_unique<host::Session>(std::move(options), adapters);
-        result.session->set_time(frame_time);
-        declare_materials(result.runtime());
-        return result;
+        host::PreparedSession prepared =
+            layer.preparation->take(adapters, std::move(layer.pending_bindings));
+        layer.session = std::move(prepared.session);
+        layer.preparation.reset();
+        if (layer.prepared_environment != environment_generation &&
+            !layer.session->adopt_environment(environment())) {
+            throw std::runtime_error("prepared overlay environment generation was rejected");
+        }
+        if (layer.profiler_capture)
+            layer.surface().set_profiler_capture(true);
+        declare_materials(layer, prepared);
     }
 
     void activate(
@@ -691,12 +757,21 @@ struct Host::Impl final {
         std::string artifact_resource(source_resource);
         artifact_resource.resize(artifact_resource.size() - std::string_view(".strata").size());
         artifact_resource += ".compiled.bin";
-        const std::vector<std::uint8_t> artifact = services.bytes(artifact_resource);
-        if (layer.session->activate_compiled(artifact, 1U).status != STRATA_ACTIVATION_ACTIVATED) {
-            throw std::runtime_error("desktop compiled Strata module did not activate");
+        host::SessionPrepareOptions& setup = *layer.setup;
+        setup.module_resource = std::move(artifact_resource);
+        setup.module_format = host::SessionModuleFormat::compiled;
+        setup.time_nanoseconds = frame_time;
+        auto captured_snapshots = layer.bindings().capture_snapshots();
+        if (setup.snapshots.empty()) {
+            setup.snapshots = std::move(captured_snapshots);
+        } else {
+            // Value's map moves may throw on MSVC; growing this vector would deep-copy earlier roots.
+            setup.snapshots.reserve(setup.snapshots.size() + captured_snapshots.size());
+            for (host::CapturedSnapshot& snapshot : captured_snapshots)
+                setup.snapshots.push_back(std::move(snapshot));
         }
-
-        host::SessionSurface surface;
+        setup.actions = layer.bindings().capture_actions();
+        host::SessionSurface& surface = setup.surface;
         surface.id = layer.id;
         surface.root_role = STRATA_SURFACE_ROOT_OVERLAY;
         surface.root_name = std::string(root_name);
@@ -707,7 +782,9 @@ struct Host::Impl final {
             {"strata:fonts/mono", "assets/strata/fonts/mono.ttf"},
         };
         surface.images = std::move(images);
-        layer.session->create_surface(surface);
+        layer.prepared_environment = surface.environment.generation;
+        layer.preparation.emplace(host::Session::prepare(std::move(setup)));
+        layer.setup.reset();
     }
 
     void create_settings() {
@@ -752,7 +829,6 @@ struct Host::Impl final {
                 );
             }
         );
-        settings.bindings().synchronize();
         activate(
             settings,
             "assets/strata/ui/settings_app.strata",
@@ -797,7 +873,6 @@ struct Host::Impl final {
             [this] { return showcase_model.demo_revision().value(); },
             [this] { return showcase_model.demo_snapshot(); }
         );
-        layer.bindings().synchronize();
     }
 
     void create_demo_surface(
@@ -826,10 +901,7 @@ struct Host::Impl final {
 
     void create_showcase() {
         create_demo_surface(showcase, "demo.desktop", "MainShowcase");
-        strata::require_ok(
-            strata_surface_set_profiler_capture(showcase.surface().native_handle(), 1U),
-            "desktop showcase profiler capture"
-        );
+        showcase.profiler_capture = true;
     }
 
     void create_effect_gallery() {
@@ -841,7 +913,7 @@ struct Host::Impl final {
     }
 
     void create_control_deck() {
-        if (control_deck.live()) return;
+        if (control_deck.exists()) return;
         control_deck = create_session(
             "control-deck.desktop",
             "assets/strata/ui/control_deck.schemas.json"
@@ -854,7 +926,7 @@ struct Host::Impl final {
     }
 
     void create_tuning_panel() {
-        if (tuning_panel.live()) return;
+        if (tuning_panel.exists()) return;
         tuning_panel = create_session(
             "tuning-panel.desktop",
             "assets/strata/ui/tuning_panel.schemas.json"
@@ -977,7 +1049,7 @@ struct Host::Impl final {
         return result;
     }
 
-    [[nodiscard]] std::string debug_json() const {
+    [[nodiscard]] host::Value debug_snapshot() const {
         const ProfileSnapshot profile_snapshot = merged_profile_snapshot();
         const std::array<TimingSummary, host_timing_count> host_timings =
             merged_host_timings();
@@ -1067,7 +1139,7 @@ struct Host::Impl final {
             .motions = {},
             .semantics = {},
             .collections = {},
-        }).json();
+        });
     }
 
     [[nodiscard]] std::string debug_export_text() const {
@@ -1111,7 +1183,7 @@ struct Host::Impl final {
     }
 
     void create_debug() {
-        if (debug.live()) return;
+        if (debug.exists()) return;
         debug = create_session(
             "profiler.desktop", "assets/strata/ui/debug_overlay.schemas.json"
         );
@@ -1146,7 +1218,7 @@ struct Host::Impl final {
                 return strata::host::ActionResult::handled;
             }
         );
-        publish(debug, "profiler.desktop", debug_json());
+        publish(debug, "profiler.desktop", debug_snapshot());
         activate(
             debug,
             "assets/strata/ui/debug_overlay.strata",
@@ -1154,7 +1226,7 @@ struct Host::Impl final {
         );
     }
 
-    [[nodiscard]] std::string performance_json() const {
+    [[nodiscard]] host::Value performance_snapshot() const {
         std::uint64_t recent_frames = 0U;
         std::uint64_t recent_total_nanos = 0U;
         if (!frame_buckets.empty()) {
@@ -1202,11 +1274,11 @@ struct Host::Impl final {
                 .native_millis = decimal(native_millis),
                 .samples = std::move(samples),
             }
-        ).json();
+        );
     }
 
     /** Hub view over the surfaces this host owns, in the shape the hub module declares. */
-    [[nodiscard]] std::string hub_json() const {
+    [[nodiscard]] host::Value hub_snapshot() const {
         const double millis = static_cast<double>(host_total_timings.last()) / 1'000'000.0;
         std::ostringstream summary;
         summary << std::fixed << std::setprecision(1) << millis << " ms  ·  "
@@ -1284,7 +1356,7 @@ struct Host::Impl final {
             .frame_scale = frame_scale.str(),
             .status = std::move(status),
             .surfaces = std::move(surfaces),
-        }).json();
+        });
     }
 
     void launch_from_hub(const std::string_view target) {
@@ -1311,7 +1383,7 @@ struct Host::Impl final {
     }
 
     void create_hub() {
-        if (hub.live()) return;
+        if (hub.exists()) return;
         hub = create_session("hub.desktop", "assets/strata/ui/strata_hub.schemas.json");
         hub.bindings().on(
             contracts::strata_hub::HubLaunchAction::id,
@@ -1322,7 +1394,7 @@ struct Host::Impl final {
                 return strata::host::ActionResult::handled;
             }
         );
-        publish(hub, "hub.desktop", hub_json());
+        publish(hub, "hub.desktop", hub_snapshot());
         activate(
             hub,
             "assets/strata/ui/strata_hub.strata",
@@ -1335,7 +1407,7 @@ struct Host::Impl final {
     }
 
     void toggle_hub() {
-        if (!hub_enabled && !hub.live()) {
+        if (!hub_enabled && !hub.exists()) {
             initialize_overlay([this] { create_hub(); });
         }
         hub_enabled = !hub_enabled;
@@ -1345,11 +1417,11 @@ struct Host::Impl final {
     }
 
     void create_performance_hud() {
-        if (performance_hud.live()) return;
+        if (performance_hud.exists()) return;
         performance_hud = create_session(
             "performance.desktop", "assets/strata/ui/performance_hud.schemas.json"
         );
-        publish(performance_hud, "performance.desktop", performance_json());
+        publish(performance_hud, "performance.desktop", performance_snapshot());
         activate(
             performance_hud,
             "assets/strata/ui/performance_hud.strata",
@@ -1387,20 +1459,43 @@ struct Host::Impl final {
         last_native_nanos = native_nanos;
     }
 
-    void close_session(Layer& layer) noexcept {
-        if (layer.session == nullptr) return;
-        // Its requests in flight, sockets, watches and sounds go with it.
-        platform.close_client(layer.id);
-        try {
-            layer.session->close([this](const RenderPacket& terminal) {
-                renderer.consume_resources(terminal);
-            });
-        } catch (...) {
-            layer.session->abandon();
+    [[nodiscard]] bool close_session(Layer& layer) {
+        layer.preparation.reset();
+        layer.setup.reset();
+        layer.pending_bindings.reset();
+        if (layer.session == nullptr) {
+            layer.async.reset();
+            return true;
         }
+        if (!layer.release.has_value()) {
+            platform.close_client(layer.id);
+            layer.programs.reset();
+            layer.release = renderer->retire(layer.render_stream, layer.session->prepare_release());
+        }
+        if (!layer.release->ready())
+            return false;
+        layer.release->get();
+        layer.session->acknowledge_release();
+        layer.session->close({});
         layer.session.reset();
+        layer.release.reset();
         layer.async.reset();
-        renderer.release_layer(layer.id);
+        return true;
+    }
+
+    [[nodiscard]] bool close() {
+        closing = true;
+        pending_pointer_move.reset();
+        platform_capture.reset();
+        host_capture.reset();
+        bool complete = true;
+        for (Layer* const layer : layers())
+            complete = close_session(*layer) && complete;
+        renderer->rethrow_failure();
+        if (!complete)
+            return false;
+        renderer->stop();
+        return renderer->stopped();
     }
 
     template <typename Create>
@@ -1415,7 +1510,7 @@ struct Host::Impl final {
     }
 
     void toggle_settings() {
-        if (!settings_enabled && !settings.live()) {
+        if (!settings_enabled && !settings.exists()) {
             initialize_overlay([this] { create_settings(); });
         }
         settings_enabled = !settings_enabled;
@@ -1427,7 +1522,7 @@ struct Host::Impl final {
     }
 
     void toggle_effect_gallery() {
-        if (!effect_gallery_enabled && !effect_gallery.live()) {
+        if (!effect_gallery_enabled && !effect_gallery.exists()) {
             initialize_overlay([this] { create_effect_gallery(); });
         }
         effect_gallery_enabled = !effect_gallery_enabled;
@@ -1439,7 +1534,7 @@ struct Host::Impl final {
     }
 
     void toggle_control_deck() {
-        if (!control_deck_enabled && !control_deck.live()) {
+        if (!control_deck_enabled && !control_deck.exists()) {
             initialize_overlay([this] { create_control_deck(); });
         }
         control_deck_enabled = !control_deck_enabled;
@@ -1451,7 +1546,7 @@ struct Host::Impl final {
     }
 
     void toggle_tuning_panel() {
-        if (!tuning_panel_enabled && !tuning_panel.live()) {
+        if (!tuning_panel_enabled && !tuning_panel.exists()) {
             initialize_overlay([this] { create_tuning_panel(); });
         }
         tuning_panel_enabled = !tuning_panel_enabled;
@@ -1463,28 +1558,30 @@ struct Host::Impl final {
     }
 
     void toggle_showcase() {
-        if (!showcase_enabled && !showcase.live()) {
-            initialize_overlay([this] { create_showcase(); });
-        }
         if (showcase_enabled) {
             showcase_enabled = false;
-            showcase_closing = true;
+            showcase_closing = showcase.live();
             showcase_hidden_at = now();
             showcase_model.surface_visible(false);
-            showcase.bindings().synchronize();
-            static_cast<void>(strata_surface_cancel_interactions(showcase.surface().native_handle()));
+            if (showcase.live()) {
+                showcase.bindings().synchronize();
+                static_cast<void>(strata_surface_cancel_interactions(showcase.surface().native_handle()));
+            }
             return;
         }
         showcase_enabled = true;
         showcase_closing = false;
         showcase_model.surface_visible(true);
-        showcase.bindings().synchronize();
+        if (!showcase.exists())
+            initialize_overlay([this] { create_showcase(); });
+        if (showcase.live())
+            showcase.bindings().synchronize();
     }
 
     void cycle_debug(const bool reverse) {
         if (!debug_enabled) {
             debug_mode = reverse ? debug_modes.back() : debug_modes.front();
-            if (!debug.live()) {
+            if (!debug.exists()) {
                 initialize_overlay([this] { create_debug(); });
             }
             debug_enabled = true;
@@ -1512,7 +1609,7 @@ struct Host::Impl final {
     void toggle_performance_hud() {
         performance_hud_enabled = !performance_hud_enabled;
         if (performance_hud_enabled) {
-            if (!performance_hud.live()) {
+            if (!performance_hud.exists()) {
                 initialize_overlay([this] { create_performance_hud(); });
             }
             performance_snapshot_dirty = true;
@@ -1551,12 +1648,12 @@ struct Host::Impl final {
         const std::uint32_t next_height,
         const double next_scale
     ) {
-        if (next_width == 0U || next_height == 0U || next_scale <= 0.0) return;
+        if (closing || next_width == 0U || next_height == 0U || next_scale <= 0.0) return;
         framebuffer_width = next_width;
         framebuffer_height = next_height;
         display_scale = desktop_display_scale(next_width, next_height, next_scale);
         services.set_surface_scale(display_scale);
-        renderer.resize(next_width, next_height, logical_width(), logical_height());
+        renderer->resize({next_width, next_height, logical_width(), logical_height()});
         ++environment_generation;
         const strata_surface_environment next = environment();
         for (Layer* const layer : layers()) {
@@ -1567,6 +1664,8 @@ struct Host::Impl final {
     }
 
     void enqueue(strata_input_event event, const std::string_view input_text = {}) {
+        if (closing)
+            return;
         Layer* const layer = interactive_layer();
         if (layer == nullptr || !layer->live()) return;
         event.struct_size = sizeof(event);
@@ -1586,24 +1685,23 @@ struct Host::Impl final {
     }
 
     struct LayerFrame final {
-        /** Framing the Session: the core frame, packet read and decode. */
+        /** Framing the Session and acquiring its immutable encoded commit. */
         std::int64_t core_nanos = 0;
         /** Drawing the packet into the layer and collecting its backdrop probes. */
         std::int64_t submit_nanos = 0;
-        bool drew = false;
     };
 
     /** One layer's Session framed this host frame, before anything is drawn. */
     struct FramedLayer final {
         Layer* layer = nullptr;
-        host::SurfacePacketFrame framed;
+        host::SurfacePacketCommit framed;
         std::int64_t core_nanos = 0;
     };
 
-    /** Frames one layer's Session: its core frame, packet read and decode. */
+    /** Frames one layer's Session without entering its GPU consumer. */
     [[nodiscard]] FramedLayer frame_session(Layer& layer) {
         const auto started = std::chrono::steady_clock::now();
-        host::SurfacePacketFrame framed = layer.session->frame(frame_time);
+        host::SurfacePacketCommit framed = layer.session->frame(frame_time);
         return FramedLayer{
             &layer,
             std::move(framed),
@@ -1616,16 +1714,15 @@ struct Host::Impl final {
     /** Fills the performance sample with what framing a layer reported. */
     static void sample_framing(const FramedLayer& framed, DesktopFrameSample& sample) {
         const strata_surface_frame_info& info = framed.framed.surface;
-        const RenderPacket& packet = *framed.framed.packet;
         sample.frame_index = info.frame_index;
         sample.frame_time_nanos = info.frame_time_nanoseconds;
         sample.input_events = info.processed_input_event_count;
         sample.emitted_events = info.emitted_event_count;
         sample.render_commands = info.render_command_count;
         sample.packet_bytes = info.render_packet_size;
-        sample.draw_calls = packet.planned_draw_count;
-        sample.batches = packet.batches.size();
-        sample.vertices = packet.vertices.size() / host::packet_vertex_bytes;
+        sample.draw_calls = info.planned_draw_count;
+        sample.batches = info.planned_batch_count;
+        sample.vertices = info.planned_vertex_count;
         sample.work = DesktopFrameWork{
             info.described_node_count,         info.evaluated_expression_count,
             info.layout_measured_node_count,   info.layout_arranged_node_count,
@@ -1635,47 +1732,57 @@ struct Host::Impl final {
         };
     }
 
-    /** Draws a framed layer's packet into the layer and publishes the work. */
-    [[nodiscard]] LayerFrame draw_layer(const FramedLayer& framed, DesktopFrameSample* const sample) {
-        Layer& layer = *framed.layer;
-        const RenderPacket& packet = *framed.framed.packet;
-        const auto submit_started = std::chrono::steady_clock::now();
-        const RenderLayerTelemetry rendered = renderer.render_layer(layer.id, packet);
-        const std::vector<strata_backdrop_sample> backdrop =
-            renderer.take_backdrop_samples(layer.id);
-        if (!backdrop.empty())
-            layer.surface().report_backdrop(backdrop);
-        const auto finished = std::chrono::steady_clock::now();
-        const strata_surface_frame_info& info = framed.framed.surface;
-        const LayerFrame result{
-            framed.core_nanos,
-            std::chrono::duration_cast<std::chrono::nanoseconds>(finished - submit_started).count(),
-            info.render_command_count > 0U && packet.planned_draw_count > 0U,
-        };
-        drew_live_material = drew_live_material || rendered.live;
-        if (sample != nullptr) {
-            sample->blur_passes = rendered.blur_passes;
-            sample->gpu_nanos = static_cast<std::int64_t>(rendered.gpu_nanos);
+    /** Adopts owned feedback only on the runtime owner, correlated with each producing frame. */
+    void adopt_rendering() {
+        renderer->rethrow_failure();
+        for (Layer* const layer : layers()) {
+            if (layer->programs.has_value() && layer->programs->ready()) {
+                layer->programs->get();
+                layer->programs.reset();
+            }
         }
-        ProfilerHostFrame backend;
-        backend.blur_passes = rendered.blur_passes;
-        backend.blur_target_width = rendered.blur_target_width;
-        backend.blur_target_height = rendered.blur_target_height;
-        backend.blur_nanoseconds = rendered.blur_nanos;
-        backend.submit_nanoseconds = result.submit_nanos;
-        layer.session->record_host_frame(packet, backend);
-        return result;
+        renderer->take_frames(rendered);
+        for (host::PresentationFrame& frame : rendered) {
+            last_frame_presented = last_frame_presented || frame.presented;
+            if (frame.drawn) {
+                drew_live_material = false;
+                present_timings.add(frame.present_nanos);
+                last_present_nanos = frame.present_nanos;
+            }
+            for (const host::PresentationLayerFeedback& feedback : frame.layers) {
+                for (Layer* const layer : layers()) {
+                    if (!layer->live() || layer->render_stream != feedback.stream)
+                        continue;
+                    if (!feedback.backdrop.empty())
+                        layer->surface().report_backdrop(feedback.backdrop);
+                    layer->surface().record_host_frame(feedback.profiler);
+                    if (!frame.drawn)
+                        continue;
+                    layer->submitted_frame = feedback.profiler.frame_index;
+                    layer->submit_nanos = feedback.profiler.submit_nanoseconds;
+                    layer->rendering = feedback.rendering;
+                    layer->drew = feedback.profiler.draw_calls > 0U;
+                    last_frame_had_draws = last_frame_had_draws || layer->drew;
+                    drew_live_material = drew_live_material || feedback.rendering.live;
+                    if (layer == &showcase) showcase_submit_timings.add(layer->submit_nanos);
+                    if (layer == &tuning_panel) tuning_submit_timings.add(layer->submit_nanos);
+                    if (layer == &debug) debug_submit_timings.add(layer->submit_nanos);
+                    if (layer == &performance_hud) performance_submit_timings.add(layer->submit_nanos);
+                }
+            }
+            deliver_capture(frame);
+        }
     }
 
     /** The topmost open layer, which receives input and is the one performance samples describe. */
     [[nodiscard]] Layer* interactive_layer() noexcept {
-        return hub_enabled ? &hub
-            : debug_enabled ? &debug
-            : settings_enabled ? &settings
-            : tuning_panel_enabled ? &tuning_panel
-            : control_deck_enabled ? &control_deck
-            : effect_gallery_enabled ? &effect_gallery
-            : showcase_enabled ? &showcase
+        return hub_enabled && hub.live() ? &hub
+            : debug_enabled && debug.live() ? &debug
+            : settings_enabled && settings.live() ? &settings
+            : tuning_panel_enabled && tuning_panel.live() ? &tuning_panel
+            : control_deck_enabled && control_deck.live() ? &control_deck
+            : effect_gallery_enabled && effect_gallery.live() ? &effect_gallery
+            : showcase_enabled && showcase.live() ? &showcase
             : nullptr;
     }
 
@@ -1754,7 +1861,7 @@ struct Host::Impl final {
                 }
             }
         }
-        renderer.set_transparent(platform.transparent());
+        renderer->set_transparent(platform.transparent());
         // The user changed the system's theme or accent: every layer's env follows.
         if (platform.take_appearance_changed()) {
             ++environment_generation;
@@ -1765,29 +1872,44 @@ struct Host::Impl final {
             }
         }
         // A node capture reads this frame's pixels once it is presented.
-        if (platform.wants_frame()) {
-            platform_capture = true;
-            renderer.capture_next_frame();
+        if (platform.wants_frame() && !platform_capture.has_value()) {
+            platform_capture = renderer->capture_next_frame();
+            platform.frame_requested(*platform_capture);
         }
     }
 
-    /** Hands the frame just presented to the node captures waiting for it. */
-    void deliver_platform_capture() {
-        if (!platform_capture)
+    /** Capture identities survive render backlog, unrelated frames and client retirement. */
+    void deliver_capture(host::PresentationFrame& frame) {
+        if (!frame.capture.has_value())
             return;
-        platform_capture = false;
-        std::optional<FrameCapture> captured = renderer.take_capture();
-        if (!captured.has_value())
-            return;
-        platform.frame_presented(captured->width, captured->height, captured->rgba);
-        // A capture the host asked for itself (a performance scenario) is the same frame.
-        if (host_capture)
-            held_capture = std::move(captured);
+        const auto includes = [&frame](const std::optional<std::uint64_t> request) {
+            return request.has_value() &&
+                   std::ranges::find(frame.capture_requests, *request) != frame.capture_requests.end();
+        };
+        if (includes(platform_capture)) {
+            platform.frame_presented(*platform_capture, frame.capture->width, frame.capture->height,
+                                      frame.capture->rgba);
+            platform_capture.reset();
+        }
+        if (includes(host_capture)) {
+            host_capture.reset();
+            held_capture = std::move(frame.capture);
+        }
     }
 
     void frame() {
+        if (closing) {
+            static_cast<void>(close());
+            return;
+        }
         const auto host_frame_started = std::chrono::steady_clock::now();
         clock.begin_frame();
+        last_frame_presented = false;
+        last_frame_had_draws = false;
+        last_present_nanos = 0;
+        adopt_rendering();
+        for (Layer* const layer : layers())
+            adopt_prepared(*layer);
         answer_platform_requests();
         Layer* const interactive = interactive_layer();
         std::int64_t tooling_nanos = 0;
@@ -1810,15 +1932,16 @@ struct Host::Impl final {
         }
         for (Layer* const layer : layers()) advance_async(*layer);
         const auto tooling_update_started = std::chrono::steady_clock::now();
-        if (debug_enabled && (debug_snapshot_dirty || frame_time >= next_debug_snapshot)) {
+        if (debug_enabled && debug.live() &&
+            (debug_snapshot_dirty || frame_time >= next_debug_snapshot)) {
             debug_snapshot_dirty = false;
-            publish(debug, "profiler.desktop", debug_json());
+            publish(debug, "profiler.desktop", debug_snapshot());
             next_debug_snapshot = frame_time + 100'000'000;
         }
-        if (performance_hud_enabled &&
+        if (performance_hud_enabled && performance_hud.live() &&
             (performance_snapshot_dirty || frame_time >= next_performance_snapshot)) {
             performance_snapshot_dirty = false;
-            publish(performance_hud, "performance.desktop", performance_json());
+            publish(performance_hud, "performance.desktop", performance_snapshot());
             next_performance_snapshot = frame_time + 100'000'000;
         }
         const std::int64_t tooling_update_nanos =
@@ -1826,49 +1949,51 @@ struct Host::Impl final {
                 std::chrono::steady_clock::now() - tooling_update_started
             ).count();
         tooling_nanos += tooling_update_nanos;
-        bool had_draws = false;
         LayerFrame active;
         LayerFrame showcase_frame;
         LayerFrame tuning_frame;
         LayerFrame debug_frame;
         LayerFrame performance_frame;
         DesktopFrameSample sample;
-        // Every shown layer is framed first; the window is drawn only when what it shows changed:
-        // a packet that is not a re-send, a layer shown or hidden, a live material, a capture.
+        // One commit publishes the whole visible stack; its GPU owner may skip intermediate
+        // drawing, but must decode every packet and consume every resource operation.
         std::vector<FramedLayer> framed_layers;
-        std::vector<std::string> drawn_ids;
-        bool changed = rendered_frames == 0U || drew_live_material || platform_capture || host_capture;
+        host::PresentationCommit commit;
+        framed_layers.reserve(layers().size());
+        commit.layers.reserve(layers().size());
+        commit.order.reserve(layers().size());
         bool idle = true;
         for (Layer* const layer : layers()) {
             if (!shown(*layer) || !layer->live()) continue;
             framed_layers.push_back(frame_session(*layer));
-            const strata_surface_frame_info& info = framed_layers.back().framed.surface;
-            changed = changed || info.unchanged == 0U;
+            FramedLayer& framed = framed_layers.back();
+            const strata_surface_frame_info& info = framed.framed.surface;
             idle = idle && info.idle != 0U;
-            drawn_ids.push_back(layer->id);
-            if (layer == interactive) sample_framing(framed_layers.back(), sample);
+            commit.order.push_back(layer->render_stream);
+            commit.layers.push_back(
+                {layer->render_stream, std::move(framed.framed.encoded), info.unchanged != 0U});
+            if (layer == interactive) sample_framing(framed, sample);
         }
-        changed = changed || drawn_ids != last_drawn_ids;
-        last_frame_idle = idle && !drew_live_material;
-        if (changed) {
-            drew_live_material = false;
-            renderer.begin_frame();
-        }
+        commit.animate = !idle;
+        const std::uint64_t submitted = renderer->commit(std::move(commit));
+        adopt_rendering();
+        last_frame_idle = idle &&
+            (presentation_execution == host::PresentationExecution::threaded || !drew_live_material);
+        const bool changed = std::ranges::any_of(rendered, [submitted](const auto& value) {
+            return value.sequence == submitted && value.drawn;
+        });
         for (const FramedLayer& framed : framed_layers) {
             Layer* const layer = framed.layer;
-            const LayerFrame result = changed
-                ? draw_layer(framed, layer == interactive ? &sample : nullptr)
-                : LayerFrame{framed.core_nanos, 0, false};
-            had_draws = result.drew || had_draws;
-            if (layer == interactive) active = result;
+            const bool consumed = layer->submitted_frame == framed.framed.surface.frame_index;
+            const LayerFrame result{
+                framed.core_nanos, consumed ? layer->submit_nanos : 0};
+            if (layer == interactive) {
+                active = result;
+                sample.blur_passes = consumed ? layer->rendering.blur_passes : 0U;
+                sample.gpu_nanos = static_cast<std::int64_t>(layer->rendering.gpu_nanos);
+            }
             if (layer == &showcase) {
                 showcase_frame = result;
-                if (rendered_frames == 0U) {
-                    const std::string canonical_frame = showcase.surface().frame_json();
-                    first_render_fingerprint = fingerprint(std::span(canonical_frame));
-                    first_frame_contains_instance =
-                        canonical_frame.find(instance_label) != std::string::npos;
-                }
                 if (!showcase_enabled &&
                     frame_time - showcase_hidden_at >= showcase_transition_nanos) {
                     showcase_closing = false;
@@ -1883,15 +2008,7 @@ struct Host::Impl final {
                 tooling_nanos += result.core_nanos + result.submit_nanos;
             }
         }
-        const auto present_started = std::chrono::steady_clock::now();
-        const bool presented = changed && renderer.end_frame();
-        if (changed)
-            last_drawn_ids = std::move(drawn_ids);
-        last_frame_presented = presented;
-        deliver_platform_capture();
-        const std::int64_t present_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - present_started
-        ).count();
+        const std::int64_t present_nanos = last_present_nanos;
         const std::int64_t total_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - host_frame_started
         ).count();
@@ -1900,16 +2017,11 @@ struct Host::Impl final {
         frame_history.push_back(static_cast<double>(total_nanos) / 1'000'000.0);
         while (frame_history.size() > 48U) frame_history.pop_front();
         showcase_core_timings.add(showcase_frame.core_nanos);
-        showcase_submit_timings.add(showcase_frame.submit_nanos);
         tuning_core_timings.add(tuning_frame.core_nanos);
-        tuning_submit_timings.add(tuning_frame.submit_nanos);
         tooling_timings.add(tooling_nanos);
-        present_timings.add(present_nanos);
         tooling_update_timings.add(tooling_update_nanos);
         debug_core_timings.add(debug_frame.core_nanos);
-        debug_submit_timings.add(debug_frame.submit_nanos);
         performance_core_timings.add(performance_frame.core_nanos);
-        performance_submit_timings.add(performance_frame.submit_nanos);
         if (profile_sampling_enabled && frame_time >= next_profile_capture) {
             capture_profile_snapshot();
             next_profile_capture = frame_time + 100'000'000;
@@ -1919,29 +2031,24 @@ struct Host::Impl final {
             total_nanos,
             active.core_nanos
         );
-        if (rendered_frames == 0U && !showcase_enabled && debug.live()) {
-            const std::string canonical_frame = debug.surface().frame_json();
-            first_render_fingerprint = fingerprint(std::span(canonical_frame));
-            first_frame_contains_instance = true;
-        }
         sample.total_nanos = total_nanos;
         sample.core_nanos = active.core_nanos;
         sample.submit_nanos = active.submit_nanos;
         sample.tooling_nanos = tooling_nanos;
         sample.present_nanos = present_nanos;
-        sample.had_draws = had_draws;
-        sample.presented = presented;
+        sample.had_draws = last_frame_had_draws;
+        sample.presented = last_frame_presented;
         sample.unchanged = !changed;
         last_performance_sample = sample;
         ++rendered_frames;
-        last_frame_had_draws = had_draws;
     }
 
     HWND window = nullptr;
     std::filesystem::path resource_root;
     HostServices services;
     PlatformServices platform;
-    Renderer renderer;
+    std::unique_ptr<host::Presentation, PresentationDeleter> renderer;
+    std::vector<host::PresentationFrame> rendered;
     std::string instance_label;
     /** Shared with the other windows this one opened, or that opened it. */
     std::shared_ptr<ShowcaseModel> shared_model;
@@ -1949,10 +2056,12 @@ struct Host::Impl final {
     /** Empty for the first window; else the id window.open gave this one. */
     std::string window_id;
     bool vsync = true;
+    host::PresentationExecution presentation_execution = host::PresentationExecution::threaded;
+    bool closing = false;
     /** A node capture waits for this frame; a capture the host asked for may share it. */
-    bool platform_capture = false;
-    bool host_capture = false;
-    std::optional<FrameCapture> held_capture;
+    std::optional<std::uint64_t> platform_capture;
+    std::optional<std::uint64_t> host_capture;
+    std::optional<host::PresentationCapture> held_capture;
     desktop::DurableWriter durable_writer{&report_durable_failure};
     std::string durable_read_buffer;
     Layer showcase;
@@ -1986,6 +2095,7 @@ struct Host::Impl final {
     std::int64_t frame_time = 0;
     std::int64_t last_total_nanos = 0;
     std::int64_t last_native_nanos = 0;
+    std::int64_t last_present_nanos = 0;
     std::int64_t next_debug_snapshot = 0;
     std::int64_t next_performance_snapshot = 0;
     std::int64_t next_profile_capture = 0;
@@ -1994,7 +2104,7 @@ struct Host::Impl final {
     std::uint64_t rendered_frames = 0U;
     std::uint64_t settings_save_count = 0U;
     strata::host::Revision settings_revision;
-    std::uint64_t first_render_fingerprint = 0U;
+    std::optional<SmokeIdentity> captured_smoke_identity;
     std::uint32_t framebuffer_width = 1U;
     std::uint32_t framebuffer_height = 1U;
     double display_scale = 1.0;
@@ -2018,9 +2128,6 @@ struct Host::Impl final {
     bool last_frame_idle = false;
     /** A drawn material reads the time or the pointer: the next frame draws again. */
     bool drew_live_material = false;
-    /** The layers the window showed when it was last drawn. */
-    std::vector<std::string> last_drawn_ids;
-    bool first_frame_contains_instance = false;
     static constexpr std::int64_t showcase_transition_nanos = 180'000'000;
     static constexpr std::array debug_modes{
         contracts::debug_overlay::StrataDebugSelectModeActionMode::diagnostics,
@@ -2050,13 +2157,14 @@ std::vector<WindowRequest> Host::take_window_requests() {
 }
 
 void Host::answer_window_request(const WindowRequest& request, std::string json) {
-    impl_->platform.answer(request.client, request.request, std::move(json));
+    impl_->platform.answer(request, std::move(json));
 }
 
 std::unique_ptr<Host> Host::open_window(HWND window, const WindowRequest& request) {
     return std::unique_ptr<Host>(new Host(std::make_unique<Impl>(
         window, impl_->resource_root, impl_->instance_label,
-        HostOptions{.vsync = impl_->vsync, .performance_hud = false, .profile_sampling = false},
+        HostOptions{.vsync = impl_->vsync, .performance_hud = false, .profile_sampling = false,
+                    .presentation = impl_->presentation_execution},
         impl_->shared_model, request.id, request.root)));
 }
 
@@ -2093,7 +2201,9 @@ void Host::pointer(
     event.x = x / impl_->display_scale;
     event.y = y / impl_->display_scale;
     // Materials follow the pointer on the GPU (materialPointer), with no frame of the interface.
-    impl_->renderer.set_pointer(kind == STRATA_INPUT_POINTER_CANCEL
+    if (impl_->closing)
+        return;
+    impl_->renderer->set_pointer(kind == STRATA_INPUT_POINTER_CANCEL
                                     ? std::nullopt
                                     : std::optional(std::array<double, 2U>{x, y}));
     if (kind == STRATA_INPUT_POINTER_MOVE) {
@@ -2179,7 +2289,11 @@ void Host::cancel_interactions() noexcept {
 
 void Host::frame() { impl_->frame(); }
 
+bool Host::close() { return impl_->close(); }
+
 bool Host::presented() const noexcept { return impl_->last_frame_presented; }
+
+std::uint64_t Host::present_count() const noexcept { return impl_->renderer->present_count(); }
 
 bool Host::idle() const noexcept { return impl_->last_frame_idle; }
 
@@ -2199,20 +2313,19 @@ const DesktopFrameSample& Host::last_frame_sample() const noexcept {
     return impl_->last_performance_sample;
 }
 
-void Host::capture_next_frame() noexcept {
-    impl_->host_capture = true;
-    impl_->renderer.capture_next_frame();
+void Host::capture_next_frame() {
+    impl_->held_capture.reset();
+    impl_->host_capture = impl_->renderer->capture_next_frame();
 }
 
-std::optional<FrameCapture> Host::take_capture() {
-    impl_->host_capture = false;
-    if (impl_->held_capture.has_value())
-        return std::exchange(impl_->held_capture, std::nullopt);
-    return impl_->renderer.take_capture();
+std::optional<host::PresentationCapture> Host::take_capture() {
+    if (!impl_->closing)
+        impl_->adopt_rendering();
+    return std::exchange(impl_->held_capture, std::nullopt);
 }
 
 DesktopHostInfo Host::performance_info() const {
-    const RendererInfo renderer = impl_->renderer.info();
+    const host::PresentationInfo renderer = impl_->renderer->info();
     return DesktopHostInfo{
         renderer.adapter,
         renderer.driver_version,
@@ -2224,7 +2337,7 @@ DesktopHostInfo Host::performance_info() const {
         impl_->logical_width(),
         impl_->logical_height(),
         impl_->display_scale,
-        renderer.vsync,
+        impl_->vsync,
     };
 }
 
@@ -2238,16 +2351,25 @@ std::string Host::performance_frame_json() {
     return layer->surface().frame_json();
 }
 
+bool Host::has_pending_preparation() const noexcept {
+    for (auto* const layer : impl_->layers()) {
+        if (impl_->shown(*layer) && (layer->setup.has_value() || layer->preparation.has_value()))
+            return true;
+    }
+    return false;
+}
+
 bool Host::smoke_ready() const noexcept {
-    return impl_->rendered_frames >= 2U && impl_->last_frame_had_draws;
+    return (!impl_->showcase_enabled || impl_->showcase.live()) &&
+           impl_->rendered_frames >= 2U && impl_->last_frame_had_draws;
 }
 
-std::uint64_t Host::smoke_fingerprint() const noexcept {
-    return impl_->first_render_fingerprint;
+std::uint64_t Host::smoke_fingerprint() const {
+    return impl_->smoke_identity().fingerprint;
 }
 
-bool Host::smoke_identity_bound() const noexcept {
-    return impl_->first_frame_contains_instance;
+bool Host::smoke_identity_bound() const {
+    return impl_->smoke_identity().bound;
 }
 
 void Host::reset_profile() {

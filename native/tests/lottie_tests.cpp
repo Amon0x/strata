@@ -3,6 +3,7 @@
 // sweep masks and mattes resolve through) and the render commands a frame becomes.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -14,9 +15,11 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <variant>
 #include <vector>
 
+#include "font/system_fonts.hpp"
 #include "resource/lottie.hpp"
 #include "ui/lottie/geometry.hpp"
 #include "ui/lottie/scene.hpp"
@@ -360,7 +363,9 @@ void test_frames(const std::filesystem::path& resources) {
         "shapes":[{"ty":"rc","p":{"a":0,"k":[0,0]},"s":{"a":0,"k":[20,10]},"r":{"a":0,"k":0}},
                   {"ty":"fl","c":{"a":0,"k":[1,0,0,1]},"o":{"a":0,"k":50}}]}])"));
     std::vector<ui::RenderCommand> commands;
-    geo::append_frame(commands, plain, 30.0, ui::Rect{0.0, 0.0, 400.0, 200.0},
+    const geo::Scene plain_scene(std::make_shared<const model::Animation>(plain),
+                                 font::system_font_catalog());
+    plain_scene.append_frame(commands, 30.0, ui::Rect{0.0, 0.0, 400.0, 200.0},
                       ui::Rect{0.0, 0.0, 400.0, 200.0});
     check(count_paths(commands) == 1U, "one fill draws one path");
     const auto transform = std::ranges::find_if(commands, [](const ui::RenderCommand& command) {
@@ -388,7 +393,9 @@ void test_frames(const std::filesystem::path& resources) {
         "shapes":[{"ty":"rc","p":{"a":0,"k":[50,50]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0}},
                   {"ty":"fl","c":{"a":0,"k":[1,1,1,1]},"o":{"a":0,"k":100}}]}])"));
     commands.clear();
-    geo::append_frame(commands, masked, 0.0, ui::Rect{0.0, 0.0, 200.0, 100.0},
+    const geo::Scene masked_scene(std::make_shared<const model::Animation>(masked),
+                                  font::system_font_catalog());
+    masked_scene.append_frame(commands, 0.0, ui::Rect{0.0, 0.0, 200.0, 100.0},
                       ui::Rect{0.0, 0.0, 200.0, 100.0});
     std::vector<std::uint8_t> alphas;
     for (const ui::RenderCommand& command : commands) {
@@ -406,7 +413,8 @@ void test_frames(const std::filesystem::path& resources) {
           "segments map positions to frames, backwards too");
 
     // Every sample animation loads (its images decoded) and draws its frames.
-    const resource::LottieLibrary library([&resources](const std::string_view id) {
+    base::TaskOwner tasks(base::TaskExecution::deterministic);
+    const resource::LottieLibrary library(tasks, [&resources](const std::string_view id) {
         std::ifstream input(resources / std::filesystem::path(std::string(id)), std::ios::binary);
         if (!input.good())
             throw std::invalid_argument("missing resource");
@@ -415,12 +423,20 @@ void test_frames(const std::filesystem::path& resources) {
     for (const char* const name : {"spinner", "success", "like", "toggle", "reveal", "badge",
                                    "blend", "feather", "matte", "type", "photo", "effects"}) {
         const std::string id = std::string("assets/strata/lottie/") + name + ".json";
-        const std::shared_ptr<const model::Animation> sample = library.find(id);
+        const std::shared_ptr<const model::Animation> sample = library.find(id).value.value_or(nullptr);
         check(sample != nullptr, "a sample animation does not load: " + library.error(id));
+        const geo::Scene scene(sample, font::system_font_catalog());
+        if (std::string_view(name) == "type") {
+            commands.clear();
+            scene.append_frame(commands, 0.0, ui::Rect{0.0, 0.0, 300.0, 300.0},
+                                ui::Rect{0.0, 0.0, 300.0, 300.0});
+            check(count_paths(commands) == 13U,
+                  "a prepared scene omitted the six filled/stroked title glyphs before font prefetch");
+        }
         std::size_t drawn = 0U;
         for (double frame = sample->in_frame; frame < sample->out_frame; frame += 7.0) {
             commands.clear();
-            geo::append_frame(commands, *sample, frame, ui::Rect{0.0, 0.0, 300.0, 300.0},
+            scene.append_frame(commands, frame, ui::Rect{0.0, 0.0, 300.0, 300.0},
                               ui::Rect{0.0, 0.0, 300.0, 300.0});
             drawn += count_paths(commands) +
                      static_cast<std::size_t>(
@@ -432,6 +448,99 @@ void test_frames(const std::filesystem::path& resources) {
     }
     check(library.images().size() == 2U && library.image_generation() == 2U,
           "the photo sample's embedded and file images are decoded once");
+}
+
+void test_preparation(const std::filesystem::path& resources) {
+    const auto caller = std::this_thread::get_id();
+    std::ifstream image(resources / "assets/strata/lottie/images/sunset.png", std::ios::binary);
+    const std::vector<std::uint8_t> pixels(std::istreambuf_iterator<char>(image), {});
+    check(!pixels.empty(), "the Lottie preparation image fixture is missing");
+    const std::string source = document("[]", R"([
+        {"id":"good","w":0,"h":1,"u":"///images","p":"sunset.png"},
+        {"id":"absent","w":2,"h":2,"u":"images","p":"missing.png"},
+        {"id":"broken","w":2,"h":2,"e":1,"p":"data:image/png;base64,iVBORw0KGgo="}
+    ])");
+    std::vector<std::string> reads;
+    std::size_t failures = 0U;
+    base::TaskPool pool(1U);
+    base::TaskOwner tasks(base::TaskExecution::asynchronous, {}, &pool,
+                          [&](const base::TaskKind kind, const std::exception_ptr&) {
+                              check(std::this_thread::get_id() == caller &&
+                                        kind == base::TaskKind::lottie,
+                                    "Lottie diagnostics escaped their serialized owner");
+                              ++failures;
+                          });
+    const auto loader = [&](const std::string_view id) {
+        check(std::this_thread::get_id() == caller, "a worker invoked the borrowed resource loader");
+        reads.emplace_back(id);
+        if (id == "scene/main.json" || id == "scene/removed.json")
+            return std::vector<std::uint8_t>(source.begin(), source.end());
+        if (id == "scene/images/sunset.png")
+            return pixels;
+        if (id == "bad.json")
+            return std::vector<std::uint8_t>{'{'};
+        throw std::invalid_argument("missing Lottie resource");
+    };
+    resource::LottieLibrary library(tasks, loader);
+    const auto initial = library.find("scene/main.json");
+    check(initial.status() == base::PendingStatus::pending && !initial.value.has_value() &&
+              reads == std::vector<std::string>{"scene/main.json"},
+          "Lottie exposed an incomplete document or acquired assets before discovery");
+    check(tasks.wait_for_completion(std::chrono::seconds(5)), "Lottie discovery did not finish");
+    check(!library.find("scene/main.json").value.has_value(),
+          "worker discovery published before owner adoption");
+    static_cast<void>(tasks.drain());
+    const auto decoding = library.find("scene/main.json");
+    check(decoding.status() == base::PendingStatus::pending && !decoding.value.has_value() &&
+              library.images().empty() &&
+              reads == std::vector<std::string>{"scene/main.json", "scene/images/sunset.png",
+                                                 "scene/images/missing.png"},
+          "Lottie asset acquisition or atomic publication violated its staged contract");
+    check(tasks.wait_for_completion(std::chrono::seconds(5)), "Lottie image decode did not finish");
+    static_cast<void>(tasks.drain());
+    const auto ready = library.find("scene/main.json");
+    check(ready.status() == base::PendingStatus::ready && ready.value.has_value(),
+          "Lottie asset failure discarded its usable composition");
+    const auto& animation = **ready.value;
+    const auto textures = library.images();
+    check(textures.size() == 1U && textures[0]->id == "lottie:scene/main.json#good" &&
+              textures[0]->pixels.size() ==
+                  static_cast<std::size_t>(textures[0]->dimensions.width) *
+                      textures[0]->dimensions.height * 4U &&
+              animation.images[0].texture == textures[0]->id &&
+              animation.images[0].width == textures[0]->dimensions.width &&
+              animation.images[0].height == textures[0]->dimensions.height &&
+              animation.images[1].texture.empty() && animation.images[2].texture.empty() &&
+              failures == 0U,
+          "Lottie did not publish ready pixels, coherent natural dimensions and blank failed layers");
+    check(library.find("scene/main.json").value == ready.value && reads.size() == 3U,
+          "a ready Lottie document was prepared again");
+
+    const auto malformed = library.find("bad.json");
+    check(tasks.wait_for_completion(std::chrono::seconds(5)), "malformed Lottie did not finish");
+    static_cast<void>(tasks.drain());
+    check(malformed.status() == base::PendingStatus::failed &&
+              library.error("bad.json").find("bad.json:") == 0U && failures == 1U,
+          "Lottie parse failure was not terminal and reported on the owner");
+    const auto missing = library.find("missing.json");
+    check(missing.status() == base::PendingStatus::failed && tasks.pending() == 0U &&
+              missing.readiness.failure().error != nullptr && failures == 2U,
+          "a known resource acquisition failure queued work or lost its diagnostic");
+    check(library.find("missing.json").readiness == missing.readiness &&
+              library.find("bad.json").readiness == malformed.readiness && reads.size() == 5U,
+          "terminal Lottie failure retried resource acquisition");
+
+    base::Readiness retired;
+    {
+        resource::LottieLibrary removed(tasks, loader);
+        retired = removed.find("scene/removed.json").readiness;
+        check(tasks.wait_for_completion(std::chrono::seconds(5)),
+              "removed Lottie discovery did not finish");
+    }
+    static_cast<void>(tasks.drain());
+    check(retired.status() == base::PendingStatus::failed && retired.failure().cancelled &&
+              reads.size() == 6U && failures == 2U,
+          "retired Lottie discovery adopted into a destroyed owner or read external assets");
 }
 
 /** The content effects (isolated layers) a frame opens, in order. */
@@ -498,7 +607,9 @@ void test_layers() {
     // at its opacity carrying its blur (in widget pixels), and its feathered mask a
     // destination-in layer blurred by its feather.
     std::vector<ui::RenderCommand> commands;
-    geo::append_frame(commands, animation, 0.0, ui::Rect{0.0, 0.0, 400.0, 200.0},
+    const geo::Scene prepared(std::make_shared<const model::Animation>(animation),
+                              font::system_font_catalog());
+    prepared.append_frame(commands, 0.0, ui::Rect{0.0, 0.0, 400.0, 200.0},
                       ui::Rect{0.0, 0.0, 400.0, 200.0});
     const std::vector<ui::EffectState> opened = layers(commands);
     check(opened.size() >= 3U && opened[0].composite == ui::LayerComposite::source_over,
@@ -525,7 +636,9 @@ void test_layers() {
             document(R"([{"ty":4,"ind":1,"ip":0,"op":60,"st":0,"ks":{"o":{"a":0,"k":50}},)" +
                      shapes + "}]"));
         std::vector<ui::RenderCommand> output;
-        geo::append_frame(output, faded, 0.0, ui::Rect{0.0, 0.0, 200.0, 100.0},
+        const geo::Scene scene(std::make_shared<const model::Animation>(faded),
+                               font::system_font_catalog());
+        scene.append_frame(output, 0.0, ui::Rect{0.0, 0.0, 200.0, 100.0},
                           ui::Rect{0.0, 0.0, 200.0, 100.0});
         return layers(output).size();
     };
@@ -559,7 +672,9 @@ void test_layers() {
         R"([{"ty":0,"ind":1,"refId":"p1","w":200,"h":100,"ip":0,"op":60,"st":0,"bm":2,"ks":{}}])",
         assets + "]"));
     commands.clear();
-    geo::append_frame(commands, deep, 0.0, ui::Rect{0.0, 0.0, 200.0, 100.0},
+    const geo::Scene deep_scene(std::make_shared<const model::Animation>(deep),
+                                font::system_font_catalog());
+    deep_scene.append_frame(commands, 0.0, ui::Rect{0.0, 0.0, 200.0, 100.0},
                       ui::Rect{0.0, 0.0, 200.0, 100.0});
     const std::vector<ui::EffectState> deep_layers = layers(commands);
     check(layer_depth(commands) >= 13U,
@@ -592,6 +707,7 @@ int strata_test_lottie(const int argument_count, const char* const* const argume
         test_keyframes();
         test_geometry();
         test_frames(arguments[1]);
+        test_preparation(arguments[1]);
         test_layers();
         std::cout << "strata_lottie_tests: OK\n";
         return 0;

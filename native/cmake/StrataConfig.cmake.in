@@ -1,6 +1,7 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+find_dependency(Threads)
 if(@STRATA_BUILD_VULKAN@)
     find_dependency(Vulkan 1.1)
     include("${CMAKE_CURRENT_LIST_DIR}/StrataShaderc.cmake")

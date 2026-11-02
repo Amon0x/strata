@@ -204,7 +204,9 @@ strata_result strata_surface_record_host_frame(
     if (surface == nullptr || telemetry == nullptr ||
         !has_struct(telemetry) ||
         telemetry->version != STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT ||
-        telemetry->reserved != 0U || telemetry->submit_nanos < 0) {
+        telemetry->reserved != 0U || telemetry->submit_nanos < 0 ||
+        telemetry->frame_index == 0U ||
+        telemetry->frame_index > surface->core.last_frame().frame_index) {
         return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     if (surface->packets.release_prepared()) {
@@ -212,6 +214,7 @@ strata_result strata_surface_record_host_frame(
     }
     return strata::abi_detail::guarded([&] {
         surface->core.profiler().record_host_frame(strata::runtime::HostFrameProfilerTelemetry{
+            telemetry->frame_index,
             telemetry->draw_calls,
             telemetry->batches,
             telemetry->vertices,

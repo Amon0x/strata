@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -27,8 +28,9 @@ class ResourceNotFound final : public std::runtime_error {
  * links and junctions and must still lie inside the root's own resolved location, so a link inside
  * the root cannot reach outside it. `system-font:` ids resolve installed fonts instead.
  *
- * Successful loads are cached for the adapter's borrowed-bytes contract; failures are not, so a
- * file that appears later loads on the next request.
+ * Concurrent reads publish immutable cached bytes under a short lock. I/O stays outside the lock;
+ * a concurrent cold miss may read twice rather than block a frame behind another reader. Successful
+ * loads retain their borrowed bytes until this root is destroyed; failures are not cached.
  */
 class ResourceRoot final {
   public:
@@ -51,10 +53,13 @@ class ResourceRoot final {
      * file is SERVICE_UNAVAILABLE. The returned bytes stay valid until the root is destroyed.
      */
     [[nodiscard]] strata_status load(std::string_view id, strata_bytes_view& output) noexcept;
+    /** Any-thread adapter; callers retain this root for the adapter's entire lifetime. */
+    [[nodiscard]] strata_resource_adapter adapter() noexcept;
 
   private:
     std::filesystem::path root_;
     std::filesystem::path resolved_root_;
+    std::mutex cache_mutex_;
     std::map<std::string, std::vector<std::uint8_t>, std::less<>> cache_;
 };
 

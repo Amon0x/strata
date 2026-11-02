@@ -1,8 +1,11 @@
 #include "resource/image_stream.hpp"
 
 #include <algorithm>
-#include <exception>
+#include <array>
+#include <cstddef>
+#include <limits>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 
 namespace strata::resource {
@@ -16,102 +19,196 @@ constexpr std::size_t frames_ahead = 3U;
     return static_cast<std::int64_t>(delay_ms < 20U ? 100U : delay_ms) * 1'000'000;
 }
 
+[[nodiscard]] std::int64_t deadline(const std::int64_t start, const std::int64_t duration) noexcept {
+    const auto maximum = std::numeric_limits<std::int64_t>::max();
+    return start > maximum - duration ? maximum : start + duration;
+}
+
 } // namespace
 
-ImageStream::ImageStream(std::vector<std::uint8_t> encoded, const ImageDimensions canvas,
-                         std::vector<std::uint8_t> first_frame, const std::uint32_t first_delay_ms)
-    : encoded_(std::move(encoded)), canvas_(canvas), current_(std::move(first_frame)) {
-    frame_end_ = shown_delay(first_delay_ms);
+ImagePreparation prepare_image(std::vector<std::uint8_t> encoded) {
+    ImageDecoder decoder(std::move(encoded));
+    ImagePreparation result;
+    result.dimensions = decoder.dimensions();
+    result.first = std::move(decoder.next().value());
+    result.second = decoder.next();
+    if (result.second.has_value())
+        result.continuation.emplace(std::move(decoder));
+    return result;
 }
+
+/** Serialized player state; jobs own only Batch, and completion holds a weak adoption endpoint. */
+struct ImageStream::State final : std::enable_shared_from_this<State> {
+    struct Frame final {
+        std::vector<std::uint8_t> rgba;
+        std::int64_t delay_nanos = 0;
+    };
+    struct Continuation final {
+        ImageDecoder decoder;
+        std::uint64_t completed_plays = 0U;
+    };
+    struct Batch final {
+        std::optional<Continuation> continuation;
+        std::array<Frame, frames_ahead> frames;
+        std::size_t count = 0U;
+        bool ended = false;
+    };
+
+    State(ImagePreparation prepared, base::TaskOwner& tasks, std::string name)
+        : owner(tasks), label(std::move(name)), canvas(prepared.dimensions),
+          current(std::move(prepared.first.rgba)), frame_end(shown_delay(prepared.first.delay_ms)) {
+        if (!prepared.second.has_value() || !prepared.continuation.has_value())
+            throw std::invalid_argument("image stream requires an animation continuation");
+        continuation.emplace(Continuation{std::move(*prepared.continuation)});
+        ready[0U] = Frame{std::move(prepared.second->rgba), shown_delay(prepared.second->delay_ms)};
+        ready_count = 1U;
+    }
+
+    void consume() {
+        while (!finished && elapsed >= frame_end &&
+               frame_end != std::numeric_limits<std::int64_t>::max()) {
+            if (ready_count == 0U) {
+                finished = ended;
+                stalled = !ended;
+                return;
+            }
+            Frame next = std::move(ready[ready_first]);
+            ready_first = (ready_first + 1U) % frames_ahead;
+            --ready_count;
+            current = std::move(next.rgba);
+            ++revision;
+            frame_end = deadline(stalled ? std::max(frame_end, elapsed) : frame_end,
+                                 next.delay_nanos);
+            stalled = false;
+        }
+    }
+
+    void refill() {
+        if (in_flight || ended || ready_count == frames_ahead)
+            return;
+        const std::size_t slots = frames_ahead - ready_count;
+        auto batch = std::make_shared<Batch>();
+        batch->continuation = std::move(continuation);
+        continuation.reset();
+        in_flight = true;
+        try {
+            auto task = base::Pending<void>::start(
+                owner, base::TaskKind::image, base::TaskPriority::frame_critical, label,
+                [batch, slots](const base::TaskCancellation& cancellation) {
+                    try {
+                        while (batch->count < slots) {
+                            if (cancellation.cancelled()) {
+                                batch->continuation.reset();
+                                return;
+                            }
+                            auto& cursor = *batch->continuation;
+                            auto frame = cursor.decoder.next();
+                            if (!frame.has_value()) {
+                                ++cursor.completed_plays;
+                                const auto plays = cursor.decoder.loop_count();
+                                if (plays != 0U && cursor.completed_plays >= plays) {
+                                    batch->ended = true;
+                                    batch->continuation.reset();
+                                    return;
+                                }
+                                cursor.decoder.rewind();
+                                continue;
+                            }
+                            batch->frames[batch->count++] =
+                                Frame{std::move(frame->rgba), shown_delay(frame->delay_ms)};
+                        }
+                    } catch (...) {
+                        batch->continuation.reset();
+                        throw;
+                    }
+                },
+                [weak = weak_from_this(), batch](const base::TaskOutcome& outcome) {
+                    const auto player = weak.lock();
+                    if (player == nullptr)
+                        return;
+                    player->in_flight = false;
+                    player->continuation = std::move(batch->continuation);
+                    player->ended = batch->ended || outcome.error != nullptr;
+                    for (std::size_t index = 0U; index < batch->count; ++index) {
+                        const auto slot = (player->ready_first + player->ready_count) % frames_ahead;
+                        player->ready[slot] = std::move(batch->frames[index]);
+                        ++player->ready_count;
+                    }
+                });
+            if (in_flight)
+                pending = std::move(task);
+        } catch (...) {
+            continuation = std::move(batch->continuation);
+            in_flight = false;
+            throw;
+        }
+    }
+
+    void service() {
+        // Completion only publishes frames. Playback deadlines always use this owner's new clock.
+        consume();
+        refill();
+        consume();
+    }
+
+    base::TaskOwner& owner;
+    const std::string label;
+    const ImageDimensions canvas;
+    std::optional<Continuation> continuation;
+    std::array<Frame, frames_ahead> ready;
+    std::size_t ready_first = 0U;
+    std::size_t ready_count = 0U;
+    base::Pending<void> pending;
+    bool in_flight = false;
+    bool ended = false;
+    std::vector<std::uint8_t> current;
+    std::uint64_t revision = 1U;
+    bool started = false;
+    bool finished = false;
+    bool stalled = false;
+    std::int64_t started_at = 0;
+    std::int64_t elapsed = 0;
+    std::int64_t frame_end = 0;
+};
+
+ImageStream::ImageStream(ImagePreparation preparation, base::TaskOwner& tasks, std::string label)
+    : state_(std::make_shared<State>(std::move(preparation), tasks, std::move(label))) {}
 
 ImageStream::~ImageStream() {
-    stop_worker();
+    state_->pending.cancel();
 }
 
-void ImageStream::stop_worker() noexcept {
-    if (!worker_.joinable())
-        return;
-    worker_.request_stop();
-    space_.notify_all();
-    worker_.join();
+void ImageStream::advance(const std::int64_t frame_time_nanos) {
+    if (frame_time_nanos < 0)
+        throw std::invalid_argument("image playback requires a non-negative owner timestamp");
+    auto& player = *state_;
+    if (!player.started) {
+        player.started = true;
+        player.started_at = frame_time_nanos;
+    }
+    if (frame_time_nanos >= player.started_at)
+        player.elapsed = std::max(player.elapsed, frame_time_nanos - player.started_at);
+    player.service();
 }
 
-void ImageStream::decode_pass(const std::stop_token stop) {
-    try {
-        const std::uint32_t loops = stream_image(
-            encoded_, [this, &stop](std::vector<std::uint8_t>& rgba, const std::uint32_t delay_ms) {
-                std::unique_lock lock(mutex_);
-                space_.wait(lock, stop, [this] { return ready_.size() < frames_ahead; });
-                if (stop.stop_requested())
-                    return false;
-                ready_.push_back(Frame{std::move(rgba), shown_delay(delay_ms)});
-                return true;
-            });
-        const std::scoped_lock lock(mutex_);
-        loop_count_ = loops;
-        pass_done_ = true;
-    } catch (const std::exception&) {
-        const std::scoped_lock lock(mutex_);
-        pass_failed_ = true;
-        pass_done_ = true;
-    }
+std::span<const std::uint8_t> ImageStream::pixels() const noexcept {
+    return state_->current;
 }
 
-void ImageStream::start_play() {
-    stop_worker();
-    {
-        const std::scoped_lock lock(mutex_);
-        ready_.clear();
-        pass_done_ = false;
-    }
-    worker_ = std::jthread([this](const std::stop_token stop) { decode_pass(stop); });
+std::uint64_t ImageStream::revision() const noexcept {
+    return state_->revision;
 }
 
-void ImageStream::advance() {
-    const auto now = std::chrono::steady_clock::now();
-    if (!started_) {
-        started_ = true;
-        started_at_ = now;
-        frame_end_ = 0;
-        start_play();
-    }
-    const std::int64_t elapsed_nanos =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(now - started_at_).count();
-    while (!finished_ && elapsed_nanos >= frame_end_) {
-        std::optional<Frame> next;
-        bool play_over = false;
-        bool failed = false;
-        std::uint32_t loops = 0U;
-        {
-            const std::scoped_lock lock(mutex_);
-            if (!ready_.empty()) {
-                next = std::move(ready_.front());
-                ready_.pop_front();
-            } else if (pass_done_) {
-                play_over = true;
-                failed = pass_failed_;
-                loops = loop_count_;
-            }
-        }
-        if (next.has_value()) {
-            space_.notify_all();
-            current_ = std::move(next->rgba);
-            ++revision_;
-            // A decoder that fell behind does not make the next frames rush to catch up.
-            frame_end_ =
-                std::max(frame_end_, elapsed_nanos - next->delay_nanos) + next->delay_nanos;
-            continue;
-        }
-        if (!play_over)
-            break; // The decoder is behind: this frame stays a little longer.
-        ++plays_;
-        if (failed || (loops != 0U && plays_ >= loops)) {
-            finished_ = true; // The last frame stays.
-            break;
-        }
-        start_play();
-        break;
-    }
+ImageDimensions ImageStream::dimensions() const noexcept {
+    return state_->canvas;
+}
+
+bool ImageStream::finished() const noexcept {
+    return state_->finished;
+}
+
+base::Readiness ImageStream::readiness() const noexcept {
+    return state_->pending.readiness();
 }
 
 } // namespace strata::resource

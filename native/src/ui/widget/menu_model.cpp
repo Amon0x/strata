@@ -145,7 +145,7 @@ namespace {
 [[nodiscard]] Rect menu_anchor(
     const RetainedNode& node,
     const LayoutRecord& record,
-    const InputRouter& input,
+    const InputPresentation& input,
     const bool context
 ) {
     const Rect bounds = input.presented_bounds(node, record.bounds);
@@ -176,7 +176,7 @@ namespace {
 [[nodiscard]] std::optional<Rect> authored_panel_bounds(
     const RetainedNode& node,
     const LayoutResult& layout,
-    const InputRouter& input,
+    const InputPresentation& input,
     const std::string_view menu_key,
     const std::size_t level
 ) noexcept {
@@ -259,7 +259,7 @@ std::vector<MenuItemModel> parse_menu_items(
 MenuProjection project_menu(
     const RetainedNode& node,
     const LayoutResult& layout,
-    const InputRouter& input,
+    const InputPresentation& input,
     const CommandIndex* commands
 ) {
     MenuProjection result;

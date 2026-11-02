@@ -21,9 +21,13 @@ namespace strata::desktop {
 struct PerformanceFramesStep final {
     std::uint32_t count = 1U;
 };
+/** Measures every host frame across a wall-time interval, including asynchronous adoption. */
+struct PerformanceDurationStep final {
+    std::uint32_t milliseconds = 1U;
+};
 /**
- * Frames, unmeasured, until this much wall time has passed: lets transitions started by the steps
- * before it finish, however fast uncapped frames run.
+ * Frames, unmeasured, until this much wall time has passed and shown Sessions have been adopted.
+ * Zero waits only for initial preparation; animated resources do not extend the wait.
  */
 struct PerformanceSettleStep final {
     std::uint32_t milliseconds = 0U;
@@ -76,7 +80,7 @@ struct PerformanceCaptureStep final {
 };
 
 using PerformanceStep =
-    std::variant<PerformanceFramesStep, PerformanceSettleStep, PerformanceClickStep,
+    std::variant<PerformanceFramesStep, PerformanceDurationStep, PerformanceSettleStep, PerformanceClickStep,
                  PerformanceMoveStep, PerformanceDragStep, PerformanceScrollStep,
                  PerformanceKeyStep, PerformanceCaptureStep, PerformanceFilesStep,
                  PerformanceGestureStep>;

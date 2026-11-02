@@ -21,6 +21,7 @@
 #include <strata/diagnostic.hpp>
 #include <strata/input.hpp>
 #include <strata/profiler.hpp>
+#include <strata/render_packet.hpp>
 #include <strata/strata.h>
 #include <strata/widget_api.h>
 
@@ -81,6 +82,35 @@ inline void require_ok(const strata_result result, const std::string_view operat
     if (result.status != STRATA_STATUS_OK)
         throw AbiError(result, operation);
 }
+
+enum class HostSnapshotExecution { runtime, inline_execution };
+
+/** An admission receipt, not runtime ownership. Releasing it leaves accepted publication intact. */
+class HostPublication final {
+  public:
+    explicit HostPublication(strata_host_publication* value = nullptr) noexcept : value_(value) {}
+    ~HostPublication() { strata_host_publication_release(value_); }
+    HostPublication(const HostPublication&) = delete;
+    HostPublication& operator=(const HostPublication&) = delete;
+    HostPublication(HostPublication&& other) noexcept : value_(std::exchange(other.value_, nullptr)) {}
+    HostPublication& operator=(HostPublication&& other) noexcept {
+        if (this != &other) {
+            strata_host_publication_release(value_);
+            value_ = std::exchange(other.value_, nullptr);
+        }
+        return *this;
+    }
+    [[nodiscard]] strata_host_publication_info info() const {
+        strata_host_publication_info result{};
+        result.struct_size = sizeof(result);
+        require_ok(strata_host_publication_get_info(value_, &result), "host publication observation");
+        return result;
+    }
+    void cancel() { require_ok(strata_host_publication_cancel(value_), "host publication cancellation"); }
+
+  private:
+    strata_host_publication* value_;
+};
 
 /** The widget function table of the linked library, for hosts loading extension packages. */
 [[nodiscard]] inline const strata_widget_api* widget_api() {
@@ -418,6 +448,16 @@ inline std::int64_t runtime_clock(void* const user_data) noexcept {
     }
 }
 
+inline strata_status runtime_wake(void* const user_data) noexcept {
+    const auto& callbacks = *static_cast<RuntimeCallbacks*>(user_data);
+    try {
+        callbacks.options.frame_wake();
+        return STRATA_STATUS_OK;
+    } catch (...) {
+        return STRATA_STATUS_INTERNAL_ERROR;
+    }
+}
+
 inline void runtime_diagnostic(void* const user_data,
                                const strata_diagnostic* const diagnostic) noexcept {
     auto& callbacks = *static_cast<RuntimeCallbacks*>(user_data);
@@ -740,19 +780,20 @@ inline void clear_retained_diagnostics(RuntimeControl* const control) noexcept {
 }
 
 /**
- * Publishes one host snapshot with the next generation. Like every runtime call it follows the
+ * Admits one host snapshot with the next accepted generation. Like every runtime call it follows the
  * threading contract in strata.h: the host serializes calls into one runtime, and a publication
  * from inside a callback or racing another thread fails with an AbiError instead of entering the
  * single-threaded host store. The generation counter therefore needs no lock of its own.
  */
-[[nodiscard]] inline std::uint64_t
+[[nodiscard]] inline HostPublication
 publish_host_snapshot(const std::shared_ptr<RuntimeControl>& control, const std::string_view id,
-                      const std::string_view value_json) {
+                      const std::string_view value_json,
+                      const HostSnapshotExecution execution = HostSnapshotExecution::runtime) {
     if (control == nullptr || control->value == nullptr) {
         throw std::logic_error("host snapshot publication requires a live runtime");
     }
     std::uint64_t retained_generation = 0U;
-    const strata_result retained = strata_runtime_get_host_snapshot_generation(
+    const strata_result retained = strata_runtime_get_host_snapshot_accepted_generation(
         control->value, strata_string_view{id.data(), id.size()}, &retained_generation);
     if (retained.status != STRATA_STATUS_NOT_FOUND) {
         if (retained.status != STRATA_STATUS_OK) {
@@ -769,19 +810,26 @@ publish_host_snapshot(const std::shared_ptr<RuntimeControl>& control, const std:
     if (generation == 0U || generation == std::numeric_limits<std::uint64_t>::max()) {
         throw std::overflow_error("host snapshot generation exhausted");
     }
+    strata_host_publication* receipt = nullptr;
     const strata_host_snapshot_config snapshot{
         sizeof(strata_host_snapshot_config),
         strata_string_view{id.data(), id.size()},
         generation,
         strata_string_view{value_json.data(), value_json.size()},
+        execution == HostSnapshotExecution::inline_execution
+            ? STRATA_HOST_SNAPSHOT_EXECUTION_INLINE : STRATA_HOST_SNAPSHOT_EXECUTION_RUNTIME,
+        0U,
+        &receipt,
     };
     const strata_result published = strata_runtime_publish_host_snapshot(control->value, &snapshot);
+    HostPublication publication(receipt);
+    if (receipt != nullptr)
+        control->next_host_snapshot_generation = generation + 1U;
     if (published.status != STRATA_STATUS_OK) {
         throw AbiError(published, "host snapshot publication",
                        find_diagnostic(control.get(), published.diagnostic_id));
     }
-    control->next_host_snapshot_generation = generation + 1U;
-    return generation;
+    return publication;
 }
 
 struct ByteCapture final {
@@ -996,6 +1044,12 @@ class Runtime final {
             callbacks.get(),
             &detail::runtime_diagnostic,
         };
+        config.task_execution = static_cast<strata_task_execution>(callbacks->options.task_execution);
+        if (callbacks->options.frame_wake) {
+            config.frame_wake = strata_frame_wake_adapter{
+                sizeof(strata_frame_wake_adapter), callbacks.get(), &detail::runtime_wake,
+            };
+        }
         strata_runtime* value = nullptr;
         const strata_result created = strata_runtime_create(&config, &value);
         if (created.status != STRATA_STATUS_OK) {
@@ -1058,6 +1112,18 @@ class Runtime final {
     }
     [[nodiscard]] bool live() const noexcept {
         return native_handle() != nullptr;
+    }
+
+    /** May overlap owner calls, but the facade must not be moved or closed concurrently. */
+    void request_frame() const {
+        require(strata_runtime_request_frame(native_handle()), "runtime frame request");
+    }
+
+    [[nodiscard]] strata_runtime_task_info task_info() const {
+        strata_runtime_task_info info{};
+        info.struct_size = sizeof(info);
+        require(strata_runtime_get_task_info(native_handle(), &info), "runtime task info");
+        return info;
     }
 
     [[nodiscard]] std::uint64_t next_identity() {
@@ -1479,10 +1545,16 @@ class Runtime final {
                 "async failure publication");
     }
 
-    /** Publishes one immutable host root with a runtime-owned monotonic generation. */
-    [[nodiscard]] std::uint64_t publish_host_snapshot(const std::string_view id,
-                                                      const std::string_view value_json) {
-        return detail::publish_host_snapshot(control_, id, value_json);
+    /** Accepts owned JSON; the receipt distinguishes pending work from adopted or failed values. */
+    [[nodiscard]] HostPublication publish_host_snapshot(
+        const std::string_view id, const std::string_view value_json,
+        const HostSnapshotExecution execution = HostSnapshotExecution::runtime) {
+        return detail::publish_host_snapshot(control_, id, value_json, execution);
+    }
+
+    /** Standalone runtimes adopt completed publications here; Surfaces also adopt at frame start. */
+    void poll_host_snapshots() {
+        require(strata_runtime_poll_host_snapshots(native_handle()), "host snapshot adoption");
     }
 
     /**
@@ -1824,36 +1896,22 @@ class Surface final {
         return std::move(capture.value);
     }
 
-    [[nodiscard]] std::vector<std::uint8_t> render_packet() const {
-        detail::ByteCapture capture;
-        const strata_bytes_sink sink{
-            sizeof(strata_bytes_sink),
-            &capture,
-            &detail::capture_bytes,
-        };
-        require(strata_surface_read_render_packet(value_, &sink), "render packet read");
-        if (capture.failed)
-            throw std::bad_alloc();
-        return std::move(capture.value);
+    [[nodiscard]] EncodedRenderPacket render_packet() const {
+        strata_render_packet* packet = nullptr;
+        require(strata_surface_acquire_render_packet(value_, &packet), "render packet acquisition");
+        return EncodedRenderPacket(packet);
     }
 
     /**
-     * Enters terminal two-phase teardown and copies the resource-only release packet. Submit the
+     * Enters terminal two-phase teardown and acquires the resource-only release packet. Submit the
      * packet while the host GPU owner is alive, then acknowledge_release_packet() and close().
-     * Copying this packet does not acknowledge host consumption. Repeated calls are idempotent.
+     * Acquiring it does not acknowledge host consumption. Repeated calls retain the same packet.
      */
-    [[nodiscard]] std::vector<std::uint8_t> prepare_release_packet() {
-        detail::ByteCapture capture;
-        const strata_bytes_sink sink{
-            sizeof(strata_bytes_sink),
-            &capture,
-            &detail::capture_bytes,
-        };
-        require(strata_surface_prepare_release_packet(value_, &sink),
+    [[nodiscard]] EncodedRenderPacket prepare_release_packet() {
+        strata_render_packet* packet = nullptr;
+        require(strata_surface_prepare_release_packet(value_, &packet),
                 "surface release packet preparation");
-        if (capture.failed)
-            throw std::bad_alloc();
-        return std::move(capture.value);
+        return EncodedRenderPacket(packet);
     }
 
     void acknowledge_release_packet() {

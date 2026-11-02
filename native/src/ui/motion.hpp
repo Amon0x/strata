@@ -14,13 +14,9 @@
 #include "ui/tree.hpp"
 
 namespace strata::runtime { class RuntimeUnit; }
-namespace strata::resource {
-class SvgImageRegistry;
-}
-
 namespace strata::ui {
 
-class InputRouter;
+class InputPresentation;
 struct LayoutResult;
 
 struct DisclosureMotionSpec final {
@@ -77,13 +73,8 @@ struct MotionMoveOrigin final {
  * Surface-owned typed motion graph. Portable declarations are compiled once per active unit;
  * retained players are keyed by node identity and channel id, making retargeting interruptible.
  */
-/** The timeline an animated Image plays on; its progress picks the frame. */
-inline constexpr std::string_view image_playback_timeline = "strata.image.playback";
-
 class MotionRuntime final {
 public:
-  /** The Surface's images: an Image showing an animated one plays it. */
-  void set_images(const resource::SvgImageRegistry* images) noexcept;
   MotionRuntime();
   ~MotionRuntime();
   MotionRuntime(const MotionRuntime&) = delete;
@@ -119,7 +110,7 @@ public:
 
   [[nodiscard]] MotionFrameCounters advance(RetainedTree& tree,
                                             const std::shared_ptr<const runtime::RuntimeUnit>& unit,
-                                            const InputRouter& input, std::int64_t frame_time_nanos,
+                                            const InputPresentation& input, std::int64_t frame_time_nanos,
                                             bool reduced_motion);
   /**
    * Initializes or retargets only nodes whose retained dirty generation was not sampled yet.
@@ -127,7 +118,7 @@ public:
    */
   [[nodiscard]] MotionFrameCounters
   discover(RetainedTree& tree, const std::shared_ptr<const runtime::RuntimeUnit>& unit,
-           const InputRouter& input, std::int64_t frame_time_nanos, bool reduced_motion);
+           const InputPresentation& input, std::int64_t frame_time_nanos, bool reduced_motion);
   [[nodiscard]] const MotionComputedValues* computed_values(std::uint64_t identity) const noexcept;
   [[nodiscard]] const std::vector<MotionInspectionChannel>*
   inspection_channels(std::uint64_t identity) const noexcept;
@@ -149,7 +140,7 @@ private:
     [[nodiscard]] MotionFrameCounters evaluate(
         RetainedTree& tree,
         const std::shared_ptr<const runtime::RuntimeUnit>& unit,
-        const InputRouter& input,
+        const InputPresentation& input,
         std::int64_t frame_time_nanos,
         bool reduced_motion,
         bool advance_active_players

@@ -207,6 +207,14 @@ void D3D11Renderer::declare_material(const std::string_view id, const std::strin
     impl_->declare_material(id, source);
 }
 
+void D3D11Renderer::release_programs(const std::string_view prefix) {
+    impl_->renderer->release_programs(prefix);
+    std::erase_if(impl_->declared_materials,
+                  [prefix](const std::string& id) { return id.starts_with(prefix); });
+    std::erase_if(impl_->material_fallbacks,
+                  [prefix](const std::string& id) { return id.starts_with(prefix); });
+}
+
 void D3D11Renderer::declare_effect_pass(const std::string_view effect_id, const std::uint32_t index,
                                         const std::uint32_t kind, const double radius,
                                         const std::uint32_t downsample,

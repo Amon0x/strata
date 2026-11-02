@@ -62,12 +62,14 @@ class Reader final {
         return value != 0U;
     }
 
-    [[nodiscard]] std::string text() {
+    [[nodiscard]] std::string_view text_view() {
         const std::span<const std::uint8_t> value = raw(count());
         if (value.empty())
             return {};
-        return std::string(reinterpret_cast<const char*>(value.data()), value.size());
+        return {reinterpret_cast<const char*>(value.data()), value.size()};
     }
+
+    [[nodiscard]] std::string text() { return std::string(text_view()); }
 
     [[nodiscard]] std::uint32_t count() {
         constexpr std::uint32_t maximum = 64U * 1'024U * 1'024U;
@@ -616,15 +618,22 @@ void append_texture_regions(const RenderPacket& packet,
 }
 
 /** A table of distinct, non-empty ids that batches name by u16 index. */
-[[nodiscard]] std::vector<std::string> id_table(Reader& input, const std::string_view label) {
+[[nodiscard]] std::vector<std::string> id_table(Reader& input, const std::string_view label,
+                                               const std::string_view program_prefix) {
     const std::uint32_t count = input.count();
     if (count > std::numeric_limits<std::uint16_t>::max())
         throw std::invalid_argument("render " + std::string(label) + " table exceeds u16 indices");
     std::vector<std::string> result;
     result.reserve(input.plausible(count, 5U));
     for (std::uint32_t index = 0U; index < count; ++index) {
-        std::string id = input.text();
-        if (id.empty() || std::ranges::find(result, id) != result.end()) {
+        const std::string_view authored = input.text_view();
+        const std::string_view prefix = label == "material" && authored == "strata:unified_ui"
+                                          ? std::string_view{} : program_prefix;
+        std::string id;
+        id.reserve(prefix.size() + authored.size());
+        id.append(prefix);
+        id.append(authored);
+        if (authored.empty() || std::ranges::find(result, id) != result.end()) {
             throw std::invalid_argument("render " + std::string(label) +
                                         " table holds an empty or repeated id");
         }
@@ -894,7 +903,8 @@ private:
 
 } // namespace
 
-const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8_t> bytes) {
+const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8_t> bytes,
+                                                const std::string_view program_prefix) {
     Reader input(bytes);
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
@@ -1038,8 +1048,8 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             }
         }
     }
-    result.materials = id_table(input, "material");
-    result.effects = id_table(input, "effect");
+    result.materials = id_table(input, "material", program_prefix);
+    result.effects = id_table(input, "effect", program_prefix);
     result.batches.clear();
     result.batches.reserve(input.plausible(batch_count, 8U));
     for (std::uint32_t index = 0U; index < batch_count; ++index) {
@@ -1289,6 +1299,20 @@ void RenderPacketDecoder::assign_sample_revisions(RenderPacket& packet) {
         next.insert_or_assign(key, EffectSample{std::move(signature), id, effect->sample_revision});
     }
     effect_samples_.swap(next);
+}
+
+void RenderPacketDecoder::acknowledge_resources() noexcept {
+    if (retained_.has_value())
+        retained_->resources.clear();
+}
+
+void RenderPacketDecoder::acknowledge_draw() noexcept {
+    if (!retained_.has_value())
+        return;
+    retained_->resources.clear();
+    retained_->full_geometry_payload = false;
+    retained_->vertex_patches.clear();
+    retained_->index_patches.clear();
 }
 
 void RenderPacketDecoder::reset() noexcept {

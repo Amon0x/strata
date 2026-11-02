@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "resource/image.hpp"
-#include "resource/lottie.hpp"
 #include "resource/runtime_images.hpp"
+#include "resource/svg_image.hpp"
 
 namespace strata::ui {
 
@@ -25,7 +25,7 @@ struct TextureUpload final {
 };
 
 /**
- * Every raster texture a Surface can draw: its static encoded images and the Runtime's published
+ * Every raster texture a Surface can draw: its prepared images and the Runtime's published
  * images. Planning resolves ids against the whole table; a texture reaches the host only when a
  * planned batch samples it, again only when its image is replaced, and is released from the host
  * when its image is. A static image shadows a runtime image with the same id.
@@ -33,14 +33,14 @@ struct TextureUpload final {
 class SurfaceTextures final {
   public:
     SurfaceTextures(std::string host_namespace,
-                    std::vector<resource::EncodedTextureResource> static_textures);
+                    std::vector<resource::TextureResource> static_textures);
 
     /**
-     * Adopts the runtime's images, and the images its Lottie animations decoded as they loaded;
+     * Adopts ready static resources, runtime images and prepared Lottie assets;
      * true while the next packet must carry texture changes.
      */
     bool sync(const resource::RuntimeImageStore& images,
-              const resource::LottieLibrary* lottie = nullptr);
+              const resource::SvgImageRegistry* registry = nullptr);
     [[nodiscard]] std::span<const resource::TextureResourceDescriptor> descriptors() const noexcept {
         return descriptors_;
     }
@@ -60,14 +60,14 @@ class SurfaceTextures final {
     struct Source final {
         std::span<const std::uint8_t> bytes;
         std::uint64_t revision = 0U;
-        /** The bytes are an encoded image the core decodes when it uploads them, not RGBA8 rows. */
-        bool encoded = false;
+        const resource::ImageStream* stream = nullptr;
     };
-    void rebuild();
+    void rebuild(const resource::SvgImageRegistry* registry = nullptr);
     void upload(std::size_t index);
 
     std::string host_namespace_;
-    std::vector<resource::EncodedTextureResource> static_;
+    std::vector<resource::TextureResource> static_;
+    std::vector<std::shared_ptr<const resource::TextureResource>> prepared_;
     /** Keeps the published pixels alive while they are planned for upload. */
     std::vector<std::shared_ptr<const resource::RuntimeImage>> runtime_;
     std::vector<resource::TextureResourceDescriptor> descriptors_;
@@ -77,11 +77,10 @@ class SurfaceTextures final {
     /** Host id -> revision the host holds. */
     std::map<std::string, std::uint64_t, std::less<>> resident_;
     std::vector<TextureUpload> uploads_;
-    /** RGBA8 decoded for this packet's uploads; dropped once the packet has copied it. */
-    std::vector<std::vector<std::uint8_t>> decoded_;
     std::vector<std::string> releases_;
     std::uint64_t store_generation_ = 0U;
     std::uint64_t lottie_generation_ = 0U;
+    std::uint64_t prepared_generation_ = 0U;
     bool synced_ = false;
     bool changed_ = false;
 };

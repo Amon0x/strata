@@ -1,11 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <string_view>
 #include <string>
@@ -187,6 +189,7 @@ struct PreparedTextCacheEntry final {
     /** Device pixels a logical pixel of its vector glyphs is laid out at (0: not upright). */
     double vector_scale = 0.0;
     std::vector<PreparedTextPtr> groups;
+    std::vector<base::ReadinessRead> readiness{};
 };
 
 struct EncodedDrawCacheEntry final {
@@ -294,6 +297,22 @@ struct CommandPlan final {
 
 struct PreparationCache final {
     std::vector<std::optional<PreparedTextCacheEntry>> text;
+    /** Only draws that observed preparation; stable ready draws incur no readiness scan. */
+    std::set<std::size_t> resource_text;
+    void set_text(const std::size_t index, std::optional<PreparedTextCacheEntry> entry) {
+        text[index] = std::move(entry);
+        if (text[index].has_value() && !text[index]->readiness.empty())
+            resource_text.insert(index);
+        else
+            resource_text.erase(index);
+    }
+    [[nodiscard]] bool resources_changed() const noexcept {
+        for (const std::size_t index : resource_text) {
+            if (!std::ranges::all_of(text[index]->readiness, &base::ReadinessRead::current))
+                return true;
+        }
+        return false;
+    }
     std::vector<PreparedTextCacheEntry> detached_text;
     std::vector<std::optional<EncodedDrawCacheEntry>> geometry;
     std::vector<EncodedDrawCacheEntry> detached_geometry;
@@ -356,6 +375,7 @@ struct PreparationCache final {
     std::size_t changed_draw_update_count = 0U;
     void clear() noexcept {
         text.clear();
+        resource_text.clear();
         detached_text.clear();
         geometry.clear();
         detached_geometry.clear();

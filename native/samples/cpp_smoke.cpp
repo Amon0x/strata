@@ -34,6 +34,7 @@ int main() {
 
         strata::Surface surface = [&] {
             strata::RuntimeOptions runtime_options;
+            runtime_options.task_execution = strata::TaskExecution::deterministic;
             runtime_options.clock = [&now] { return now; };
             strata::Runtime runtime(std::move(runtime_options));
             runtime.configure_application(strata::ApplicationOptions{
@@ -79,18 +80,18 @@ int main() {
             throw std::runtime_error("installed C++ input facade rejected pointer input");
         }
         const strata_surface_frame_info frame = surface.frame(now);
-        const std::vector<std::uint8_t> packet = surface.render_packet();
+        const strata::EncodedRenderPacket packet = surface.render_packet();
         strata::host::RenderPacketDecoder decoder;
-        const strata::host::RenderPacket& decoded = decoder.decode(packet);
+        const strata::host::RenderPacket& decoded = decoder.decode(packet.bytes());
         const std::string json = surface.frame_json();
-        if (frame.frame_index != 1U || frame.render_command_count == 0U || packet.size() < 12U ||
+        if (frame.frame_index != 1U || frame.render_command_count == 0U || packet.bytes().size() < 12U ||
             decoded.frame_index != frame.frame_index || decoded.batches.empty() ||
             json.find("embedded.panel") == std::string::npos) {
             throw std::runtime_error("installed C++ frame or packet was invalid");
         }
-        const std::vector<std::uint8_t> release_packet = surface.prepare_release_packet();
-        static_cast<void>(decoder.decode(release_packet));
-        if (release_packet.size() < 12U) {
+        const strata::EncodedRenderPacket release_packet = surface.prepare_release_packet();
+        static_cast<void>(decoder.decode(release_packet.bytes()));
+        if (release_packet.bytes().size() < 12U) {
             throw std::runtime_error("installed C++ release packet was invalid");
         }
         surface.acknowledge_release_packet();

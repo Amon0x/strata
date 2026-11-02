@@ -8,7 +8,6 @@
 #include <memory>
 #include <optional>
 #include <set>
-#include <unordered_map>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -19,6 +18,7 @@
 #include "runtime/expression.hpp"
 #include "runtime/host_services.hpp"
 #include "ui/input/editor.hpp"
+#include "ui/input/presentation.hpp"
 #include "ui/layout.hpp"
 #include "ui/notification.hpp"
 #include "ui/render.hpp"
@@ -28,6 +28,10 @@
 
 namespace strata::resource {
 class SvgImageRegistry;
+}
+
+namespace strata::ui::lottie {
+class SceneCache;
 }
 
 namespace strata::ui {
@@ -83,32 +87,6 @@ struct KeyModifiers final {
 
 enum class PointerEventType { move, press, release, cancel };
 
-/**
- * The pointer shape a host shows over the surface. The values match the public
- * `STRATA_POINTER_CURSOR_*` constants.
- */
-enum class PointerCursor : std::uint8_t {
-    standard,
-    pointer,
-    text,
-    grab,
-    grabbing,
-    move,
-    not_allowed,
-    resize_ew,
-    resize_ns,
-    resize_nesw,
-    resize_nwse,
-    crosshair,
-    wait,
-    progress,
-    help,
-    none,
-};
-
-/** The authored `cursor` style value for a shape, and back. */
-[[nodiscard]] std::string_view pointer_cursor_name(PointerCursor cursor) noexcept;
-[[nodiscard]] std::optional<PointerCursor> pointer_cursor_from_name(std::string_view name) noexcept;
 enum class KeyEventType { press, release, repeat };
 
 struct PointerInputEvent final {
@@ -297,48 +275,15 @@ struct InputProcessingConfig final {
     void validate() const;
 };
 
-struct TextEditorSnapshot final {
-    std::string_view text;
-    std::size_t caret = 0U;
-    std::size_t selection_start = 0U;
-    std::size_t selection_end = 0U;
-    std::optional<std::string_view> preedit;
-    std::size_t preedit_selection_start = 0U;
-    std::size_t preedit_selection_end = 0U;
-};
-
-/** Read-only selection projected by selectable Text/RichText; never an editable draft or IME. */
-struct StaticTextSelectionSnapshot final {
-    std::string_view text;
-    std::size_t caret = 0U;
-    std::size_t selection_start = 0U;
-    std::size_t selection_end = 0U;
-};
-
-struct DragPreviewPresentation final {
-    Point position;
-    Rect source_bounds;
-    const std::vector<RenderCommand>* commands = nullptr;
-    bool accepted = false;
-};
-
-struct DropTargetPresentation final {
-    Point position;
-    std::string_view placement;
-};
-
 /** Retained-identity input/focus router shared by deterministic and platform event adapters. */
-class InputRouter final {
+class InputRouter final : public InputPresentation {
   public:
     using SurfaceFrameworkExecutor =
         std::function<runtime::ActionDispatchOutcome(const runtime::Action&)>;
     using DescriptionInvalidator = std::function<void(const RetainedNode*, std::string_view)>;
     using FrameInvalidator = std::function<void()>;
-    using HitBoundsResolver = std::function<Rect(const RetainedNode&, const LayoutRecord&)>;
     using TextOffsetResolver = std::function<std::optional<std::size_t>(
         const RetainedNode&, const LayoutRecord&, std::string_view, Point)>;
-    using TextWidthResolver = WidgetTextWidthResolver;
-    using TextLayoutResolver = WidgetTextLayoutResolver;
     using ImeCursorRectResolver = std::function<std::optional<runtime::HostServiceRect>(
         const RetainedNode&, const LayoutRecord&, const TextEditorSnapshot&)>;
     using DragPreviewResolver = std::function<std::vector<RenderCommand>(const RetainedNode&)>;
@@ -361,7 +306,6 @@ class InputRouter final {
                 ScrollMutationObserver scroll_mutation_observer = {},
                 FrameInvalidator frame_invalidator = {});
     ~InputRouter();
-
     /** Captures interaction sources before a reconciliation may detach their identities. */
     void begin_tree_update();
     [[nodiscard]] InputOperationResult
@@ -376,11 +320,16 @@ class InputRouter final {
     void publish_reduced_motion(bool reduced_motion) noexcept;
     /** The surface's images, for widgets whose frame hooks play a resource. */
     void publish_images(const resource::SvgImageRegistry* images) noexcept;
-    [[nodiscard]] const resource::SvgImageRegistry* images() const noexcept {
-        return images_;
+    /** Surface-owned scene service shared by frame hooks and cached paint. */
+    void publish_lottie_scenes(lottie::SceneCache& scenes) noexcept {
+        lottie_scenes_ = &scenes;
     }
     /** Schedules one widget-owned frame callback; the callback must explicitly request another. */
-    [[nodiscard]] bool request_widget_frame(const RetainedNode& node, WidgetFrameCost cost);
+    [[nodiscard]] bool request_widget_frame(
+        const RetainedNode& node, std::optional<WidgetFrameCost> cost = std::nullopt);
+    /** Reoffers a hook after owner publication, even if this timestamp was already advanced. */
+    [[nodiscard]] bool resume_widget_frame(
+        const RetainedNode& node, std::optional<WidgetFrameCost> cost = std::nullopt);
     void cancel_widget_frame(std::uint64_t identity) noexcept;
     /** Invalidates cached platform geometry while retaining logical focus/editor state. */
     void invalidate_host_geometry() noexcept;
@@ -428,7 +377,6 @@ class InputRouter final {
     [[nodiscard]] std::vector<runtime::RuntimeDiagnostic> take_diagnostics();
     void clear_diagnostics() noexcept;
 
-    [[nodiscard]] std::optional<std::string_view> focused_key() const noexcept;
     /**
      * Applies one host backdrop report to the node that owns `probe`: resolves the luma against
      * the node's `strata.backdrop` thresholds and, when the light/dark reading changes, retains it
@@ -454,77 +402,6 @@ class InputRouter final {
     /** Constrains all focus acquisition and traversal to one retained subtree; null clears it. */
     [[nodiscard]] bool set_focus_containment(std::optional<std::string_view> key,
                                              InputOperationResult& result);
-    [[nodiscard]] bool focus_contained() const noexcept;
-    /** Semantic focus remains active even when pointer modality suppresses its visual indicator. */
-    [[nodiscard]] bool focused(std::uint64_t identity) const noexcept;
-    [[nodiscard]] std::optional<std::uint64_t> focused_identity() const noexcept;
-    /** True only for the focused node while keyboard/spatial focus indication is active. */
-    [[nodiscard]] bool focus_visible(std::uint64_t identity) const noexcept;
-    /**
-     * Whether the focused node shows that it has focus: while keys were used last, unless it is
-     * selectable text clicked into, which is a place to select and copy rather than a stop the
-     * keyboard reached (a browser does not focus text at all).
-     */
-    [[nodiscard]] bool focus_indicated() const noexcept;
-    [[nodiscard]] bool hovered(std::uint64_t identity) const noexcept;
-    /**
-     * The pointer shape for where the pointer rests: grabbing during a drag; else the nearest
-     * authored `cursor` on the hovered node or an ancestor; else a text beam over an editor, a hand
-     * over a link, and the grab or move shape over drag sources and movable boxes.
-     */
-    [[nodiscard]] PointerCursor cursor() const;
-    /** A press, drag or scrollbar drag is in progress: the user still holds what they move. */
-    [[nodiscard]] bool pointer_held() const noexcept {
-        return !pressed_pointer_targets_.empty() || !drag_sessions_.empty() ||
-               scrollbar_drag_.has_value();
-    }
-    /** True after a stationary command-bound hover crosses its one-shot disclosure deadline. */
-    [[nodiscard]] bool command_tooltip_ready(std::uint64_t identity) const noexcept;
-    [[nodiscard]] bool active(std::uint64_t identity) const noexcept;
-    [[nodiscard]] std::vector<WidgetSubtarget> subtargets(std::uint64_t identity) const;
-    /**
-     * The node's subtargets as hit testing projects them, kept until the tree, layout or
-     * notifications change. Per-frame consumers (editor geometry, IME placement) use these.
-     */
-    [[nodiscard]] const std::vector<WidgetSubtarget>&
-    projected_subtargets(const RetainedNode& node) const;
-    [[nodiscard]] const WidgetRegistry& widget_registry() const noexcept { return widgets_; }
-    /**
-     * The transform the node is presented with, from the same pass that places hit regions
-     * (portal roots start a fresh plane, as they render). Identity without motion.
-     */
-    [[nodiscard]] MotionTransform presentation_transform(const RetainedNode& node) const;
-    /** Node-local bounds where the node's presentation draws them. */
-    [[nodiscard]] Rect presented_bounds(const RetainedNode& node, Rect bounds) const;
-    /** Places one node's geometry in another node's drawing space without changing ownership. */
-    [[nodiscard]] Rect relative_bounds(const RetainedNode& source, const RetainedNode& target,
-                                       Rect bounds) const;
-    /** Effective rectangular clipping in surface coordinates, respecting coordinate roots. */
-    [[nodiscard]] std::optional<Rect> presented_clip(const RetainedNode& node) const;
-    /** Runs the node's lifecycle `inspection.subtargets` hook afresh, uncached. */
-    [[nodiscard]] std::vector<WidgetSubtarget> project_subtargets(const RetainedNode& node) const;
-    [[nodiscard]] bool subtarget_hovered(std::uint64_t identity,
-                                         std::string_view id) const noexcept;
-    /** The id of the node's subtarget under the pointer, if one of its subtargets is. */
-    [[nodiscard]] std::optional<std::string_view>
-    hovered_subtarget(std::uint64_t identity) const noexcept;
-    [[nodiscard]] bool subtarget_active(std::uint64_t identity, std::string_view id) const noexcept;
-    [[nodiscard]] std::optional<DragPreviewPresentation>
-    drag_preview(std::uint64_t identity) const noexcept;
-    [[nodiscard]] std::optional<DropTargetPresentation>
-    drop_target(std::uint64_t identity) const noexcept;
-    [[nodiscard]] const std::string* edited_text(std::uint64_t identity) const noexcept;
-    [[nodiscard]] std::optional<TextEditorSnapshot>
-    editor_snapshot(std::uint64_t identity) const noexcept;
-    /**
-     * How far an editable widget's text is scrolled inside its viewport; zero when it fits. The
-     * focused editor follows its caret, multi-line editors also follow the wheel, and single-line
-     * editors show their start while unfocused. Presentation, hit testing, caret navigation and
-     * IME placement all apply this same offset.
-     */
-    [[nodiscard]] Point editor_scroll(std::uint64_t identity) const noexcept;
-    [[nodiscard]] std::optional<StaticTextSelectionSnapshot>
-    static_text_selection_snapshot(std::uint64_t identity) const noexcept;
     [[nodiscard]] std::vector<std::string> pending_navigation_targets() const;
     /** A `scroll.to` that eases: the surface runs it as a scroll animation. */
     struct ScrollAnimationIntent final {
@@ -536,36 +413,26 @@ class InputRouter final {
     };
     /** The eased `scroll.to` actions run since the last call, in order. */
     [[nodiscard]] std::vector<ScrollAnimationIntent> take_scroll_animations();
-    [[nodiscard]] const StatusFeedbackService& status_feedback() const noexcept;
+    using InputPresentation::notifications;
     [[nodiscard]] NotificationService& notifications() noexcept;
-    [[nodiscard]] const NotificationService& notifications() const noexcept;
-    /** Raw topmost retained hit used by the surface-owned inspector. */
-    [[nodiscard]] const RetainedNode* inspection_target(Point position) const noexcept;
-    [[nodiscard]] std::optional<Point> scroll_offset(std::string_view key) const noexcept;
-    [[nodiscard]] std::optional<Point> constrained_scroll_target(std::string_view key,
-                                                                 Point target) const noexcept;
     [[nodiscard]] bool scroll_to(std::string_view key, Point target, InputOperationResult& result);
 
   private:
     friend class BehaviorInputScope;
     friend class InputDispatchContext;
+    friend class InputPresentation;
     friend class WidgetInputScope;
 
     struct DragSession;
-    struct DragTarget;
+    [[nodiscard]] TextEditor* find_editor(std::uint64_t identity) noexcept;
+    [[nodiscard]] const TextEditor* find_editor(std::uint64_t identity) const noexcept;
+    void after_layout(InputOperationResult& result);
 
-    [[nodiscard]] bool node_participates(const RetainedNode& node) const noexcept;
-    [[nodiscard]] bool node_input_enabled(const RetainedNode& node) const noexcept;
-    [[nodiscard]] bool command_tooltip_candidate(std::uint64_t identity) const noexcept;
     [[nodiscard]] bool tooltip_engaged(const RetainedNode& node) const noexcept;
-    /** Whether the node's lifecycle discloses it on hover after a delay. */
-    [[nodiscard]] bool hover_disclosure(const RetainedNode& node) const noexcept;
     [[nodiscard]] bool tooltip_disclosures_need_frame() const noexcept;
     void update_tooltip_disclosures();
     void restart_hover_disclosures(bool hide);
     void synchronize_authored_presentations();
-    [[nodiscard]] bool focusable(const RetainedNode& node) const noexcept;
-    [[nodiscard]] bool tabbable(const RetainedNode& node) const noexcept;
     [[nodiscard]] RetainedNode* focusable_ancestor(RetainedNode* node) const noexcept;
     [[nodiscard]] RetainedNode* pointer_focusable_ancestor(RetainedNode* node) const noexcept;
     void apply_pointer_focus_default(const PointerInputEvent& event, RetainedNode* pointer_target,
@@ -573,8 +440,6 @@ class InputRouter final {
                                      InputOperationResult& result);
     [[nodiscard]] bool passive_pointer_path(const RetainedNode& owner,
                                             const RetainedNode* pointer_target) const noexcept;
-    [[nodiscard]] RetainedNode* focus_boundary() const noexcept;
-    [[nodiscard]] bool within_focus_containment(const RetainedNode& node) const noexcept;
     void dismiss_transient_popups(const RetainedNode* target, InputOperationResult& result,
                                   bool include_modal = true, bool restore_modal_focus = true);
     void restore_popup_focus(const RetainedNode& popup, InputOperationResult& result);
@@ -589,12 +454,6 @@ class InputRouter final {
     void hover_route(const RetainedNode* target);
     /** Runs the `onHover` actions of the nodes hover entered (true) or left (false) since. */
     void dispatch_hover(InputOperationResult& result);
-    /**
-     * The hovered node for a hit at `hit`: the owner of the subtarget hit there, which `subtarget`
-     * receives, unless that is a scrim behind the hit.
-     */
-    [[nodiscard]] RetainedNode* subtarget_hover_target(Point position, RetainedNode* hit,
-                                                       std::optional<WidgetSubtarget>& subtarget);
     /**
      * Hovers what is now under a still pointer: content moves beneath it when it scrolls,
      * animates or opens a popup, without any pointer event to say so.
@@ -678,116 +537,7 @@ class InputRouter final {
     [[nodiscard]] bool route_command_shortcut(std::string_view key, KeyModifiers modifiers,
                                               KeyEventType type, bool editing_owns_key,
                                               InputOperationResult& result);
-    [[nodiscard]] RetainedNode* active_modal() const;
-    [[nodiscard]] static bool descendant_of(const RetainedNode& node,
-                                            const RetainedNode& ancestor) noexcept;
-    [[nodiscard]] static const DescriptionBehavior* behavior(const RetainedNode& node,
-                                                             std::string_view id) noexcept;
     [[nodiscard]] static RetainedNode* drag_source_ancestor(RetainedNode* node) noexcept;
-    /** An ancestor's clip shape, as outlines over its layout bounds (see clip_outlines). */
-    struct ClipOutline final {
-        std::uint64_t node = 0U;
-        std::vector<std::vector<Point>> outlines;
-    };
-    struct PointerHitEntry final {
-        RetainedNode* node = nullptr;
-        /** Bounds in the anchor's space; scrolling never rewrites descendant entries. */
-        Rect bounds;
-        /** Hit bounds before the node's relative transform, for exact rotated-shape tests. */
-        Rect local_bounds;
-        /** The anchor it is placed within (see PointerAnchor), or none. */
-        std::int32_t anchor = -1;
-        /** It is that anchor's own node: only the clips around the anchor apply to it. */
-        bool anchor_root = false;
-        /** Its transform, and its ancestors' clips, within the anchor. */
-        MotionTransform relative;
-        std::optional<Rect> relative_clip;
-        /**
-         * Its `hitShape` as outlines in the same space as `local_bounds`: a point hits the node
-         * only inside them (even-odd), so a slice of a ring is not hit in the box around it.
-         */
-        std::vector<std::vector<Point>> shape;
-        /**
-         * The clip shapes of the nodes it is drawn within: as clip-path does, they cut what is
-         * hit below them too. Each is tested under its node's current presentation transform.
-         */
-        std::shared_ptr<const std::vector<ClipOutline>> clips;
-    };
-    /**
-     * A presentation group's root as hit testing sees it. Entries within it are kept relative to
-     * it, so a frame that only moves anchors (scroll, pan, zoom or animation) inverts the
-     * pointer into that space instead of rewriting descendants. Its transform and clips are kept
-     * within its parent anchor (on the surface for one at the top).
-     */
-    struct PointerAnchor final {
-        std::uint64_t identity = 0U;
-        std::int32_t parent = -1;
-        /** What it is presented under within its parent, and its own presentation. */
-        MotionTransform base;
-        MotionTransform local;
-        /** The clips around it within its parent, and its own, which clip what is within it. */
-        std::optional<Rect> clip;
-        std::optional<Rect> own_clip;
-        /** Composed on the surface: its transform, the clips around it, and with its own. */
-        MotionTransform world;
-        std::optional<Rect> world_clip;
-        std::optional<Rect> world_inner_clip;
-        /** The opacity it inherits; a fully faded anchor's content has no entries at all. */
-        double inherited_opacity = 1.0;
-        bool visible = true;
-        /** The scroll view's content, distinct from its stationary viewport and chrome. */
-        bool scroll_content = false;
-    };
-    /** A placed node's transform within its anchor, composed only when queried. */
-    struct PointerPlacement final {
-        std::int32_t anchor = -1;
-        MotionTransform relative;
-    };
-    /** A broad-phase region in one anchor's space; first_entry preserves painter-order priority. */
-    struct PointerHitBranch final {
-        Rect bounds;
-        std::size_t first_entry = 0U;
-        std::size_t begin = 0U;
-        std::size_t end = 0U;
-        /** Zero for a leaf; otherwise the left branch immediately follows this one. */
-        std::size_t right = 0U;
-        /** Overflowing projected regions keep exact linear hit tests instead of invalid sorting. */
-        bool bounded = true;
-    };
-    struct PointerHitRoot final {
-        std::size_t begin = 0U;
-        std::size_t end = 0U;
-        std::size_t branch = 0U;
-    };
-    [[nodiscard]] MotionTransform placed_transform(std::int32_t anchor,
-                                                    MotionTransform relative) const noexcept;
-    [[nodiscard]] MotionTransform entry_transform(const PointerHitEntry& entry) const noexcept;
-    [[nodiscard]] std::optional<Rect> entry_clip(const PointerHitEntry& entry) const noexcept;
-    /**
-     * Updates anchor transforms when arranged geometry is unchanged and every presentation
-     * change belongs to an existing anchor; else false, and the geometry is built again.
-     */
-    [[nodiscard]] bool place_moved_anchors() const;
-
-  public:
-    /**
-     * Brings pointer geometry up to this frame while the frame's dirty marks still say what
-     * changed: a frame that only moved anchors places their entries now, so the next frame's first
-     * hit test does not build the geometry again for want of knowing what moved. Geometry nothing
-     * has built yet stays unbuilt.
-     */
-    void settle_pointer_geometry() const;
-
-  private:
-    void prepare_pointer_geometry() const;
-    /** Rebuilt with arranged geometry, never just because an anchor moved. */
-    void index_pointer_geometry() const;
-    void prepare_detached_subtargets() const;
-    [[nodiscard]] RetainedNode* hit_test(Point position) const noexcept;
-    /** Whether `position` is inside the clip shapes of the nodes `entry` is drawn within. */
-    [[nodiscard]] bool inside_clips(const PointerHitEntry& entry, Point position) const noexcept;
-    [[nodiscard]] std::optional<WidgetSubtarget>
-    hit_subtarget(Point position, const RetainedNode* ordinary_target) const;
     void set_hovered_subtarget(const std::optional<WidgetSubtarget>& target);
     [[nodiscard]] RetainedNode* interactive_ancestor(RetainedNode* node) const noexcept;
     [[nodiscard]] InputDispatchState
@@ -834,16 +584,15 @@ class InputRouter final {
     [[nodiscard]] bool route_pointer_drag(const PointerInputEvent& event,
                                           InputOperationResult& result);
     [[nodiscard]] bool cancel_active_drag(InputOperationResult& result);
-    [[nodiscard]] DragTarget resolve_drag_target(const DragSession& session, Point position) const;
     [[nodiscard]] DragTarget retained_drag_target(const DragSession& session) const;
-    [[nodiscard]] static std::vector<std::string>
-    drag_operations(const runtime::Value* value, std::vector<std::string> fallback);
     void synchronize_drag_target(DragSession& session, Point position, bool emit_move,
                                  InputOperationResult& result);
     void emit_drag_lifecycle(DragSession& session, std::string_view phase, const DragTarget& target,
                              Point position, InputOperationResult& result);
     [[nodiscard]] bool auto_scroll_drag(DragSession& session, InputOperationResult& result);
     void advance_widget_frames(InputOperationResult& result);
+    [[nodiscard]] bool schedule_widget_frame(
+        const RetainedNode& node, std::optional<WidgetFrameCost> cost, bool allow_same_time);
     void advance_behavior_frames(InputOperationResult& result);
     /** Runs widget `synchronize` hooks when the tree changed since they last ran. */
     void synchronize_widgets(InputOperationResult& result);
@@ -851,9 +600,9 @@ class InputRouter final {
                                                InputOperationResult& result,
                                                RetainedNode* hit_target);
     [[nodiscard]] InputOperationResult scroll(ScrollInputEvent event);
-    [[nodiscard]] std::optional<Point> scroll_limits(const RetainedNode& node) const;
     [[nodiscard]] bool set_scroll_offset(const RetainedNode& node, Point offset,
                                          InputOperationResult& result);
+    void notify_scroll(const RetainedNode& node, Point offset, InputOperationResult& result);
     /** Scrolls every scrolling ancestor so `node`, with `padding` around it, is in view. */
     void reveal_node(const RetainedNode& node, double padding, InputOperationResult& result);
     /** Scrolls every scrolling ancestor of `node` so `revealed`, with `padding`, is in view. */
@@ -864,17 +613,9 @@ class InputRouter final {
                              bool extend_selection, InputOperationResult& result);
     [[nodiscard]] std::optional<std::size_t>
     resolve_text_offset(const RetainedNode& node, std::string_view text, Point position) const;
-    [[nodiscard]] Point logical_pointer_position(const RetainedNode& node, Point position) const;
     void seed_pointer_text_navigation(const RetainedNode& node, std::string_view text,
                                       std::size_t caret, Point position);
-    [[nodiscard]] bool static_text_node(const RetainedNode& node) const noexcept;
-    [[nodiscard]] bool static_text_selectable(const RetainedNode& node) const noexcept;
     [[nodiscard]] RetainedNode* selectable_static_text_owner(RetainedNode* hit) const noexcept;
-    [[nodiscard]] std::optional<std::string_view>
-    static_text_value(const RetainedNode& node) const noexcept;
-    [[nodiscard]] std::optional<std::string_view>
-    static_text_container(const RetainedNode& node) const noexcept;
-    [[nodiscard]] std::vector<RetainedNode*> static_text_nodes(std::string_view container) const;
     void begin_static_text_selection(RetainedNode& node, InputOperationResult& result);
     void transition_static_text_selection_owner(RetainedNode* owner, InputOperationResult& result);
     [[nodiscard]] bool static_text_selection_owner_matches(const RetainedNode& node) const noexcept;
@@ -891,22 +632,6 @@ class InputRouter final {
                                                                            std::string_view key);
     [[nodiscard]] bool copy_static_text_selection(RetainedNode& owner);
     [[nodiscard]] bool select_all_static_text(RetainedNode& owner, InputOperationResult& result);
-    /**
-     * Where a selectable text in a selection container lies in its container's source: the
-     * nearest ancestor carrying the whole text as `$selectionSource`, and the text's own
-     * `$sourceOffset` into it. Texts placed so keep their selection as offsets into the source,
-     * which reaches texts that are not realized (rows of a virtual list scrolled away).
-     */
-    struct StaticTextSource final {
-        const RetainedNode* holder = nullptr;
-        std::string_view text;
-        std::size_t offset = 0U;
-    };
-    [[nodiscard]] std::optional<StaticTextSource>
-    static_text_source(const RetainedNode& node) const noexcept;
-    /** The realized texts of `container` placed in `holder`'s source, in tree order. */
-    [[nodiscard]] std::vector<RetainedNode*>
-    sourced_static_text_nodes(const RetainedNode& holder, std::string_view container) const;
     /** Gives each realized text of a sourced selection its share of the selected source range. */
     void apply_sourced_static_text_selection();
     /**
@@ -930,7 +655,6 @@ class InputRouter final {
                   const PointerInputEvent* pointer = nullptr,
                   RetainedNode* pointer_target = nullptr, std::size_t click_count = 0U,
                   std::optional<WidgetSubtarget> subtarget = std::nullopt);
-    [[nodiscard]] std::vector<RetainedNode*> focusable_nodes() const;
     [[nodiscard]] bool traverse_focus(bool backwards, InputOperationResult& result);
     [[nodiscard]] bool move_focus_spatial(std::string_view direction, InputOperationResult& result);
     [[nodiscard]] bool dismiss_topmost(InputOperationResult& result);
@@ -945,14 +669,6 @@ class InputRouter final {
     void synchronize_editor_text(RetainedNode& node, std::string_view value,
                                  bool move_caret_to_end);
     void commit_editor(RetainedNode& node, InputOperationResult& result);
-    struct EditorView final {
-        Rect viewport;
-        TextLayout layout;
-        bool multiline = false;
-    };
-    /** The laid-out text and viewport of an editable widget, as presentation computes them. */
-    [[nodiscard]] std::optional<EditorView> editor_view(const RetainedNode& node,
-                                                        std::string_view text) const;
     void update_editor_scroll();
     [[nodiscard]] bool scroll_editor(const RetainedNode& node, const ScrollInputEvent& event);
 
@@ -987,13 +703,6 @@ class InputRouter final {
         std::string subtarget_id;
     };
 
-    struct DragTarget final {
-        RetainedNode* node = nullptr;
-        const DescriptionBehavior* behavior = nullptr;
-        std::string operation;
-        std::string placement = "on";
-    };
-
     struct DragSession final {
         std::uint64_t source_identity = 0U;
         Point start;
@@ -1008,7 +717,7 @@ class InputRouter final {
         std::optional<std::string> operation;
         std::string placement = "on";
         Rect preview_bounds;
-        std::vector<RenderCommand> preview_commands;
+        std::shared_ptr<const std::vector<RenderCommand>> preview_commands;
     };
 
     struct PendingReveal final {
@@ -1024,38 +733,20 @@ class InputRouter final {
     /** Private collision-free identity used only at the runtime HostServices boundary. */
     std::string host_service_owner_;
     runtime::ApplicationContext& application_;
-    const WidgetRegistry& widgets_;
-    const BehaviorRegistry& behaviors_;
-    StatusFeedbackService& status_feedback_;
-    NotificationService& notifications_;
     SurfaceFrameworkExecutor surface_framework_executor_;
     DescriptionInvalidator description_invalidator_;
     FrameInvalidator frame_invalidator_;
-    HitBoundsResolver hit_bounds_resolver_;
     TextOffsetResolver text_offset_resolver_;
-    TextWidthResolver text_width_resolver_;
-    TextLayoutResolver text_layout_resolver_;
     ImeCursorRectResolver ime_cursor_rect_resolver_;
     DragPreviewResolver drag_preview_resolver_;
     ScrollMutationObserver scroll_mutation_observer_;
     InputProcessingConfig input_config_;
     runtime::HostServices fallback_host_services_;
     runtime::HostServices* host_services_ = nullptr;
-    RetainedTree* tree_ = nullptr;
-    const LayoutResult* layout_ = nullptr;
-    const MotionRuntime* motion_ = nullptr;
-    CommandIndex* commands_ = nullptr;
-    std::optional<std::uint64_t> focused_;
-    /** Whether the focused node took focus from a press rather than the keyboard. */
-    bool focused_by_pointer_ = false;
-    // Programmatic focus inherits the last real input modality. Initial focus remains visible.
-    bool focus_highlight_visible_ = true;
     std::optional<std::uint64_t> synchronized_modal_;
     std::optional<std::uint64_t> focus_before_modal_;
     bool dismissing_transient_popups_ = false;
-    std::optional<std::string> focus_containment_key_;
     std::optional<std::uint64_t> focus_before_containment_;
-    std::set<std::uint64_t> hovered_;
     /** Nodes with an `onHover` that hover entered or left, waiting for dispatch_hover. */
     std::vector<std::pair<std::uint64_t, bool>> pending_hover_;
     /** Nodes `strata.pointer` last told the pointer was over them. */
@@ -1073,7 +764,6 @@ class InputRouter final {
         std::int32_t count = 0;
     };
     PointerClick last_pointer_click_;
-    std::optional<Point> hover_position_;
     /** What the last post-layout hover refresh saw; a refresh with the same key is skipped. */
     struct HoverRefreshKey final {
         Point position;
@@ -1087,25 +777,7 @@ class InputRouter final {
     };
     std::optional<HoverRefreshKey> last_hover_refresh_;
     [[nodiscard]] std::uint64_t modal_identity() const noexcept;
-    // Whether the pointer is over the surface at hover_position_ (it has not left or cancelled).
-    bool hover_present_ = false;
     std::map<std::uint64_t, std::int64_t> hover_started_nanos_;
-    std::set<std::uint64_t> matured_command_tooltips_;
-    /** What the authored presentation state last synchronized from; equal inputs skip the pass. */
-    struct AuthoredPresentationInputs {
-        const RetainedTree* tree = nullptr;
-        std::uint64_t generation = 0U;
-        std::uint64_t structure_generation = 0U;
-        std::uint64_t render_generation = 0U;
-        /** Only controls with an authored template need interaction state projected into DSL. */
-        std::set<std::uint64_t> candidates;
-        std::optional<std::uint64_t> focused;
-        bool focus_visible = false;
-        std::optional<std::uint64_t> active;
-        std::set<std::uint64_t> hovered;
-    };
-    AuthoredPresentationInputs authored_presentation_inputs_;
-    std::optional<std::uint64_t> active_;
     std::optional<WidgetSubtarget> routed_subtarget_;
     /** A delayed action waiting for its time, run from the node that scheduled it. */
     struct PendingDelay final {
@@ -1162,18 +834,14 @@ class InputRouter final {
     /** Whether a running timer is waiting to fire, so frames must keep coming. */
     bool timers_waiting_ = false;
     void run_timers(InputOperationResult& result);
-    std::optional<std::pair<std::uint64_t, std::string>> hovered_subtarget_;
-    std::optional<WidgetSubtargetKind> hovered_subtarget_kind_;
-    /** The deepest node of the current hover route. */
-    std::optional<std::uint64_t> hover_target_;
     std::optional<std::uint64_t> hovered_notification_id_;
-    std::optional<std::pair<std::uint64_t, std::string>> active_subtarget_;
     std::map<std::int32_t, PointerPress> pressed_pointer_targets_;
     std::map<std::int32_t, DragSession> drag_sessions_;
     std::optional<ScrollbarDrag> scrollbar_drag_;
     struct RequestedWidgetFrame final {
         WidgetFrameCost cost;
         bool pending = true;
+        bool allow_same_time = false;
     };
     std::map<std::uint64_t, RequestedWidgetFrame> requested_widget_frames_;
     /** The tree generation widget `synchronize` hooks last ran against. */
@@ -1215,8 +883,6 @@ class InputRouter final {
     /** Whether the tree moved on since its watched widgets were last offered a frame. */
     [[nodiscard]] bool watched_frames_pending() const;
     void request_watched_widget_frames();
-    const resource::SvgImageRegistry* images_ = nullptr;
-    bool reduced_motion_ = false;
     std::optional<std::uint64_t> last_text_click_;
     Point last_text_click_position_;
     std::int64_t last_text_click_nanos_ = 0;
@@ -1230,19 +896,6 @@ class InputRouter final {
     std::vector<PendingReveal> pending_reveals_;
     std::vector<ScrollAnimationIntent> pending_scroll_animations_;
     std::map<std::uint64_t, TextEditor> editors_;
-    struct EditorScroll final {
-        Point offset;
-        /** Caret, text and viewport at the last caret reveal; any change reveals the caret again. */
-        std::size_t revealed_caret = static_cast<std::size_t>(-1);
-        std::size_t revealed_text = 0U;
-        Rect revealed_viewport;
-    };
-    std::map<std::uint64_t, EditorScroll> editor_scroll_;
-    struct StaticTextRange final {
-        std::size_t anchor = 0U;
-        std::size_t focus = 0U;
-    };
-    std::map<std::uint64_t, StaticTextRange> static_text_ranges_;
     /** A selection kept as offsets into a selection source (see StaticTextSource). */
     struct StaticTextSourceSelection final {
         std::uint64_t holder_identity = 0U;
@@ -1275,37 +928,9 @@ class InputRouter final {
     std::size_t dispatch_count_ = 0U;
     std::size_t coalesced_move_count_ = 0U;
     std::size_t behavior_dispatch_count_ = 0U;
-    mutable std::size_t pointer_geometry_rebuild_count_ = 0U;
-    mutable std::size_t subtarget_projection_count_ = 0U;
-    mutable bool preparing_pointer_geometry_ = false;
-    mutable const RetainedTree* pointer_geometry_tree_ = nullptr;
-    mutable const LayoutResult* pointer_geometry_layout_ = nullptr;
-    mutable const MotionRuntime* pointer_geometry_motion_ = nullptr;
-    mutable std::uint64_t pointer_geometry_tree_generation_ = 0U;
-    mutable std::uint64_t pointer_geometry_layout_generation_ = 0U;
-    mutable std::uint64_t pointer_geometry_generation_ = 0U;
-    mutable std::uint64_t pointer_geometry_render_generation_ = 0U;
-    mutable std::uint64_t pointer_geometry_notification_generation_ = 0U;
-    /** Toolbars and menus project their items from the commands: a rebuild redoes them. */
-    mutable std::uint64_t pointer_geometry_command_generation_ = 0U;
-    mutable DirtyGenerationSnapshot pointer_geometry_dirty_generations_;
-    mutable std::vector<PointerHitEntry> pointer_hit_entries_;
-    // Node identity to its entry in pointer_hit_entries_.
-    mutable std::map<std::uint64_t, std::size_t> pointer_hit_index_;
-    mutable std::vector<PointerAnchor> pointer_anchors_;
-    mutable std::unordered_map<std::uint64_t, PointerPlacement> pointer_placements_;
-    /** Root zero is surface space; every following root belongs to anchor index root - 1. */
-    mutable std::vector<PointerHitRoot> pointer_hit_roots_;
-    mutable std::vector<PointerHitBranch> pointer_hit_branches_;
-    mutable std::vector<std::size_t> pointer_hit_order_;
-    mutable std::map<std::uint64_t, std::vector<WidgetSubtarget>> projected_subtargets_;
-    mutable std::vector<WidgetSubtarget> detached_subtargets_;
-    mutable bool pointer_geometry_ready_ = false;
-    mutable bool detached_subtargets_ready_ = false;
     bool input_queue_overflow_reported_ = false;
     bool input_batch_split_ = false;
     std::vector<runtime::RuntimeDiagnostic> pending_diagnostics_;
-    std::int64_t frame_time_nanos_ = 0;
 };
 
 } // namespace strata::ui

@@ -61,7 +61,7 @@ class WidgetInputScope final {
     [[nodiscard]] const LayoutRecord* layout() const noexcept;
     [[nodiscard]] const LayoutRecord* layout(const RetainedNode& node) const noexcept;
     [[nodiscard]] const LayoutResult* layout_result() const noexcept;
-    [[nodiscard]] const InputRouter& input() const noexcept;
+    [[nodiscard]] const InputPresentation& input() const noexcept;
     [[nodiscard]] double scale() const noexcept;
     [[nodiscard]] const CommandIndex* command_index() const noexcept;
     [[nodiscard]] NotificationService& notifications() noexcept;
@@ -142,6 +142,8 @@ class WidgetInputScope final {
     InputRouter& router_;
     RetainedNode& node_;
     InputOperationResult& result_;
+    const InputPresentation& presentation_;
+    RetainedTree* tree_;
     std::string_view key_;
     KeyModifiers modifiers_;
     const PointerInputEvent* pointer_ = nullptr;

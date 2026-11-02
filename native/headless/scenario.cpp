@@ -238,6 +238,15 @@ void require_relative_resource(const std::filesystem::path& path, const std::str
             frames,
         };
     }
+    if (operation == "settle") {
+        static_cast<void>(as_object(argument, "settle"));
+        SettleStep result;
+        if (const JsonValue* timeout = optional(argument, "timeoutMilliseconds"); timeout != nullptr)
+            result.timeout_milliseconds = integer(*timeout, "settle.timeoutMilliseconds");
+        if (result.timeout_milliseconds <= 0 || result.timeout_milliseconds > 3'600'000)
+            throw std::invalid_argument("settle.timeoutMilliseconds must be between 1 and 3600000");
+        return result;
+    }
     if (operation == "capture") {
         const std::string name = text(argument, "capture");
         if (name.empty() || !std::ranges::all_of(name, [](const char character) {
@@ -349,6 +358,13 @@ Scenario load_scenario(const std::filesystem::path& path) {
     const std::int64_t version = integer(required(document, "version"), "version");
     if (version != 1)
         throw std::invalid_argument("headless scenario version must be 1");
+    if (const JsonValue* mode = optional(document, "taskExecution"); mode != nullptr) {
+        const std::string execution = text(*mode, "taskExecution");
+        if (execution == "asynchronous")
+            result.task_execution = TaskExecution::asynchronous;
+        else if (execution != "deterministic")
+            throw std::invalid_argument("taskExecution must be 'asynchronous' or 'deterministic'");
+    }
 
     const JsonValue& application = required(document, "application");
     static_cast<void>(as_object(application, "application"));

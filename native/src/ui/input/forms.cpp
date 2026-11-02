@@ -116,8 +116,8 @@ bool InputRouter::validate_field(RetainedNode& field, const bool mark_touched) {
                 *input, "value", "$value", "defaultValue"
             );
             if (value != nullptr && value->number() != nullptr) number = *value->number();
-        } else if (const auto editor = editors_.find(input->identity()); editor != editors_.end()) {
-            text = editor->second.text();
+        } else if (const TextEditor* editor = find_editor(input->identity()); editor != nullptr) {
+            text = editor->text();
         } else {
             const runtime::Value* value = effective_control_value(*input, "text", "$text", "text");
             if (value != nullptr && value->string() != nullptr) text = *value->string();

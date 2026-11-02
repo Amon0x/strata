@@ -33,20 +33,41 @@ strata_status Services::write(void*, const strata_string_view text) noexcept {
         return STRATA_STATUS_OUT_OF_MEMORY;
     }
 }
-strata_status Services::active(void*, const std::uint32_t active) noexcept {
-    if (active != 0)
+void Services::set_ime_owner(const bool owner) noexcept {
+    if (ime_owner_ == owner)
+        return;
+    ime_owner_ = owner;
+    if (ime_owner_ && ime_active_)
         SDL_StartTextInput();
     else
         SDL_StopTextInput();
+    if (ime_owner_ && caret_.has_value())
+        publish_caret();
+}
+strata_status Services::active(void* context, const std::uint32_t active) noexcept {
+    auto& self = *static_cast<Services*>(context);
+    self.ime_active_ = active != 0U;
+    if (self.ime_owner_) {
+        if (self.ime_active_)
+            SDL_StartTextInput();
+        else
+            SDL_StopTextInput();
+    }
     return STRATA_STATUS_OK;
 }
 strata_status Services::caret(void* context, const strata_rect rect) noexcept {
-    const double scale = static_cast<Services*>(context)->coordinate_scale;
-    const SDL_Rect target{static_cast<int>(std::floor(rect.x * scale)),
-                          static_cast<int>(std::floor(rect.y * scale)),
-                          std::max(1, static_cast<int>(std::ceil(rect.width * scale))),
-                          std::max(1, static_cast<int>(std::ceil(rect.height * scale)))};
-    SDL_SetTextInputRect(&target);
+    auto& self = *static_cast<Services*>(context);
+    self.caret_ = rect;
+    if (self.ime_owner_)
+        self.publish_caret();
     return STRATA_STATUS_OK;
+}
+void Services::publish_caret() const noexcept {
+    const strata_rect rect = *caret_;
+    const SDL_Rect target{static_cast<int>(std::floor(rect.x * coordinate_scale)),
+                          static_cast<int>(std::floor(rect.y * coordinate_scale)),
+                          std::max(1, static_cast<int>(std::ceil(rect.width * coordinate_scale))),
+                          std::max(1, static_cast<int>(std::ceil(rect.height * coordinate_scale)))};
+    SDL_SetTextInputRect(&target);
 }
 } // namespace strata::preview

@@ -31,16 +31,18 @@ namespace {
 
 
 SurfacePackets::SurfacePackets(std::string resource_namespace,
-                               std::vector<resource::EncodedTextureResource> static_textures)
-    : glyph_atlas_(resource_namespace), shape_atlas_(resource_namespace + ".shapes", shape_atlas_config()),
+                               std::vector<resource::TextureResource> static_textures,
+                               base::TaskOwner& tasks)
+    : glyph_atlas_(resource_namespace, {}, &tasks),
+      shape_atlas_(resource_namespace + ".shapes", shape_atlas_config()),
       vector_glyphs_("strata:vector-glyphs/" + std::to_string(resource_namespace.size()) + ":" +
-                     resource_namespace),
+                     resource_namespace, &tasks),
       textures_(resource_namespace, std::move(static_textures)) {
     cache_.set_shape_atlas(&shape_atlas_);
     cache_.set_vector_glyphs(&vector_glyphs_);
 }
 
-const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const SurfaceFrame& frame,
+const EncodedPacket& SurfacePackets::encode(Surface& surface, const SurfaceFrame& frame,
                                                         const resource::RuntimeImageStore& images) {
     if (release_prepared_) {
         throw std::logic_error("a released Surface cannot encode another packet");
@@ -48,7 +50,7 @@ const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const 
     const auto started = std::chrono::steady_clock::now();
     const resource::SvgImageRegistry* const registry = surface.svg_images();
     const bool textures_changed =
-        textures_.sync(images, registry != nullptr ? registry->lottie() : nullptr);
+        textures_.sync(images, registry);
     const bool settled = frame.operations.render.nodes_visited == 0U &&
                          frame.operations.render.commands_emitted == 0U && !textures_changed;
     unchanged_ = settled && cache_.reuse(frame.frame_index);
@@ -78,7 +80,7 @@ const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const 
     const HostRenderPacketTelemetry& packet = cache_.telemetry();
     runtime::Profiler& profiler = surface.profiler();
     profiler.record_counters({
-        {ProfilerCounter::packet_bytes, static_cast<std::uint64_t>(this->packet().size())},
+        {ProfilerCounter::packet_bytes, static_cast<std::uint64_t>(this->packet().bytes().size())},
         {ProfilerCounter::batch_texture_breaks, packet.texture_batch_breaks},
         {ProfilerCounter::batch_clip_breaks, packet.clip_batch_breaks},
         {ProfilerCounter::batch_material_breaks, packet.material_batch_breaks},
@@ -88,6 +90,8 @@ const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const 
         {ProfilerCounter::render_submission_nanos, static_cast<std::uint64_t>(packet_nanos)},
     });
     profiler.record_external_timing("packet-encode", packet_nanos);
+    if (!unchanged_)
+        profiler.record_external_timing("packet-serialization", packet.serialization_nanos);
     if (!packet.geometry_reused) {
         profiler.record_external_timing("packet-submission", packet.submission_nanos);
         profiler.record_external_timing("packet-submission-plan", packet.submission_planning_nanos);
@@ -97,7 +101,6 @@ const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const 
                                         packet.submission_text_preparation_nanos);
         profiler.record_external_timing("packet-submission-mesh",
                                         packet.submission_mesh_encoding_nanos);
-        profiler.record_external_timing("packet-geometry", packet.geometry_packet_nanos);
     }
     if (packet.cold_encode_profiled) {
         profiler.record_external_timing("packet-cold-submission", packet.cold_submission_nanos);
@@ -109,14 +112,15 @@ const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const 
                                         packet.cold_submission_text_preparation_nanos);
         profiler.record_external_timing("packet-cold-submission-mesh",
                                         packet.cold_submission_mesh_encoding_nanos);
-        profiler.record_external_timing("packet-cold-geometry", packet.cold_geometry_packet_nanos);
-        profiler.record_external_timing("packet-cold-resources", packet.cold_resource_packet_nanos);
+        profiler.record_external_timing("packet-cold-serialization", packet.cold_serialization_nanos);
     }
     raster_work_ = glyph_atlas_.take_raster_work();
+    surface.set_preparation_readiness(cache_.readiness());
+    surface.record_task_statistics();
     return this->packet();
 }
 
-const std::vector<std::uint8_t>& SurfacePackets::prepare_release(Surface& surface) {
+const EncodedPacket& SurfacePackets::prepare_release(Surface& surface) {
     if (!release_prepared_) {
         surface.cancel_interactions();
         const std::uint64_t last_frame = surface.last_frame().frame_index;
@@ -129,7 +133,7 @@ const std::vector<std::uint8_t>& SurfacePackets::prepare_release(Surface& surfac
     return packet();
 }
 
-const std::vector<std::uint8_t>& SurfacePackets::packet() const noexcept {
+const EncodedPacket& SurfacePackets::packet() const noexcept {
     return cache_.packet();
 }
 

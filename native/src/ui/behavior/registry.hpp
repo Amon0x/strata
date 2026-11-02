@@ -7,7 +7,7 @@
 
 namespace strata::ui {
 
-class InputRouter;
+class InputPresentation;
 class BehaviorInputScope;
 class RetainedNode;
 class WidgetRenderScope;
@@ -17,7 +17,7 @@ using BehaviorInputHook = std::function<bool(BehaviorInputScope& scope)>;
 using BehaviorOverlayPredicate = std::function<bool(
     const RetainedNode& node,
     const DescriptionBehavior& attachment,
-    const InputRouter& input
+    const InputPresentation& input
 )>;
 using BehaviorOverlayHook = std::function<void(
     const DescriptionBehavior& attachment,

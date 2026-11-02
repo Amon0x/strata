@@ -2491,16 +2491,21 @@ OpenTypeFont OpenTypeFont::parse(resource::ResourceBytes bytes) {
         std::uint64_t hash = 0U;
         std::weak_ptr<const Impl> implementation;
     };
-    static std::mutex cache_mutex;
-    static std::vector<CachedFont> cache;
+    struct Cache final {
+        std::mutex mutex;
+        std::vector<CachedFont> fonts;
+    };
+    // Detached font preparation can outlive static teardown. The process-lived index retains
+    // only weak faces; expired entries are removed on lookup, and font bytes keep their own owner.
+    static Cache& cache = *new Cache;
 
     const std::uint64_t hash = content_hash(bytes);
     {
-        const std::scoped_lock lock(cache_mutex);
-        for (auto iterator = cache.begin(); iterator != cache.end();) {
+        const std::scoped_lock lock(cache.mutex);
+        for (auto iterator = cache.fonts.begin(); iterator != cache.fonts.end();) {
             const std::shared_ptr<const Impl> existing = iterator->implementation.lock();
             if (existing == nullptr) {
-                iterator = cache.erase(iterator);
+                iterator = cache.fonts.erase(iterator);
                 continue;
             }
             if (iterator->hash == hash && std::ranges::equal(existing->font_bytes, bytes)) {
@@ -2512,13 +2517,13 @@ OpenTypeFont OpenTypeFont::parse(resource::ResourceBytes bytes) {
 
     auto parsed = std::make_shared<const Impl>(std::move(bytes));
     {
-        const std::scoped_lock lock(cache_mutex);
+        const std::scoped_lock lock(cache.mutex);
         // Parsing happens outside the lock. Resolve a concurrent identical parse deterministically
         // before publishing the candidate.
-        for (auto iterator = cache.begin(); iterator != cache.end();) {
+        for (auto iterator = cache.fonts.begin(); iterator != cache.fonts.end();) {
             const std::shared_ptr<const Impl> existing = iterator->implementation.lock();
             if (existing == nullptr) {
-                iterator = cache.erase(iterator);
+                iterator = cache.fonts.erase(iterator);
                 continue;
             }
             if (iterator->hash == hash &&
@@ -2527,7 +2532,7 @@ OpenTypeFont OpenTypeFont::parse(resource::ResourceBytes bytes) {
             }
             ++iterator;
         }
-        cache.push_back(CachedFont{hash, parsed});
+        cache.fonts.push_back(CachedFont{hash, parsed});
     }
     return OpenTypeFont(std::move(parsed));
 }

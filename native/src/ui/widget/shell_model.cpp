@@ -164,7 +164,7 @@ std::int64_t tooltip_hide_delay_nanos(const RetainedNode& node) noexcept {
 std::optional<TooltipProjection> project_tooltip(
     const RetainedNode& node,
     const LayoutResult& layout,
-    const InputRouter& input,
+    const InputPresentation& input,
     const ShellTextLayoutResolver& text_layout
 ) {
     if (!tooltip_disclosure_visible(node) || !text_layout) return std::nullopt;

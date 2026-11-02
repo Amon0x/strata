@@ -10,7 +10,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <exception>
 #include <functional>
 #include <limits>
 #include <map>
@@ -24,10 +23,11 @@
 #include <type_traits>
 #include <utility>
 
-#include "font/raster_pool.hpp"
+#include "base/process_lifetime.hpp"
+#include "base/task_pool.hpp"
 
 namespace strata::font {
-namespace {
+namespace atlas_detail {
 
 [[nodiscard]] std::string owner_token(const std::string_view owner_id) {
     // Length-prefixing is injective for arbitrary owner bytes; a fixed-width hash would make
@@ -79,6 +79,18 @@ struct RasterCacheIdentity final {
     RasterCacheKey key;
     std::shared_ptr<const void> font_owner;
 };
+
+} // namespace atlas_detail
+
+namespace {
+
+using atlas_detail::advance;
+using atlas_detail::bytes_per_pixel;
+using atlas_detail::format_for;
+using atlas_detail::owner_token;
+using atlas_detail::page_suffix;
+using atlas_detail::RasterCacheIdentity;
+using atlas_detail::RasterCacheKey;
 
 using SharedRaster = std::shared_ptr<const std::optional<GlyphRasterBitmap>>;
 
@@ -139,8 +151,9 @@ class SharedGlyphRasterCache final {
 };
 
 [[nodiscard]] SharedGlyphRasterCache& shared_raster_cache() {
-    static SharedGlyphRasterCache cache;
-    return cache;
+    // Independent runtime owners may still publish while the main thread is tearing down.
+    static base::ProcessLifetime<SharedGlyphRasterCache> cache;
+    return cache.get();
 }
 
 [[nodiscard]] std::array<std::uint64_t, 12U>
@@ -201,7 +214,8 @@ raster_cache_identity(const OpenTypeFont& font, const std::uint16_t glyph, const
 [[nodiscard]] std::optional<GlyphRasterBitmap>
 rasterize_color(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
                 const double display_scale, const SubpixelPhase phase,
-                const std::uint32_t font_style_flags, const CoverageRasterConfig& coverage) {
+                const std::uint32_t font_style_flags, const CoverageRasterConfig& coverage,
+                RasterContext* const context) {
     struct Layer final {
         GlyphRasterBitmap bitmap;
         std::uint32_t rgba = 0U;
@@ -213,7 +227,8 @@ rasterize_color(const OpenTypeFont& font, const std::uint16_t glyph, const doubl
     double bottom = std::numeric_limits<double>::infinity();
     for (const ColorGlyphLayer& layer : font.color_layers(glyph)) {
         std::optional<GlyphRasterBitmap> bitmap = rasterize_coverage(
-            font, layer.glyph, pixel_size, display_scale, phase, coverage, font_style_flags);
+            font, layer.glyph, pixel_size, display_scale, phase, coverage, font_style_flags,
+            context);
         if (!bitmap.has_value())
             continue;
         const RasterPlaneBounds& plane = bitmap->plane_bounds_layout_pixels;
@@ -294,16 +309,16 @@ rasterize_color(const OpenTypeFont& font, const std::uint16_t glyph, const doubl
 rasterize(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
           const double display_scale, const SubpixelPhase phase, const GlyphRasterMode mode,
           const std::uint32_t font_style_flags, const CoverageRasterConfig& coverage,
-          const MsdfRasterConfig& msdf, const SubpixelOrder order) {
+          const MsdfRasterConfig& msdf, const SubpixelOrder order, RasterContext* const context) {
     if (mode == GlyphRasterMode::color)
         return rasterize_color(font, glyph, pixel_size, display_scale, phase, font_style_flags,
-                               coverage);
+                               coverage, context);
     if (mode == GlyphRasterMode::subpixel)
         return rasterize_subpixel(font, glyph, pixel_size, display_scale, order, phase, coverage,
-                                  font_style_flags);
+                                  font_style_flags, context);
     return mode == GlyphRasterMode::coverage
                ? rasterize_coverage(font, glyph, pixel_size, display_scale, phase, coverage,
-                                    font_style_flags)
+                                    font_style_flags, context)
                : rasterize_msdf(font, glyph, pixel_size, msdf, font_style_flags);
 }
 
@@ -347,8 +362,69 @@ struct GlyphAtlas::Allocation final {
     AtlasPixelRect content;
 };
 
-GlyphAtlas::GlyphAtlas(const std::string_view owner_id, GlyphAtlasConfig config)
-    : owner_token_(owner_token(owner_id)), config_(std::move(config)) {
+/** Owner-side staging borrows a font only until prepare_missing captures its owned handle. */
+struct GlyphAtlas::PreparationRequest final {
+    Key key;
+    const OpenTypeFont* font = nullptr;
+    RasterCacheIdentity identity;
+    SharedRaster raster;
+    MsdfRasterConfig msdf;
+    CoverageRasterConfig coverage;
+};
+
+/** Only owner calls mutate slots/accounting; worker payloads contain no atlas or cache pointers. */
+struct GlyphAtlas::Preparations final {
+    struct Result final {
+        std::vector<SharedRaster> rasters;
+        std::uint64_t nanoseconds = 0U;
+    };
+    struct Batch final {
+        base::Pending<Result> pending;
+        bool accounted = false;
+
+        void account(RasterWork& work) {
+            if (accounted)
+                return;
+            const Result& result = *pending.get();
+            work.glyphs += result.rasters.size();
+            work.nanoseconds += result.nanoseconds;
+            accounted = true;
+        }
+    };
+    struct Slot final {
+        std::shared_ptr<Batch> batch;
+        std::size_t index = 0U;
+        RasterCacheIdentity identity;
+    };
+
+    [[nodiscard]] base::ResourceResult<SharedRaster> take(const Key& key, RasterWork& work) {
+        const auto found = slots.find(key);
+        if (found == slots.end())
+            return {};
+        Slot& slot = found->second;
+        const Result* result = slot.batch->pending.get();
+        if (result == nullptr)
+            return {{}, slot.batch->pending.readiness()};
+        slot.batch->account(work);
+        SharedRaster raster = shared_raster_cache().insert(
+            std::move(slot.identity), result->rasters[slot.index]);
+        slots.erase(found);
+        return {std::move(raster), {}};
+    }
+
+    ~Preparations() {
+        for (const auto& [key, slot] : slots) {
+            static_cast<void>(key);
+            slot.batch->pending.cancel();
+        }
+    }
+
+    std::map<Key, Slot> slots;
+};
+
+GlyphAtlas::GlyphAtlas(const std::string_view owner_id, GlyphAtlasConfig config,
+                       base::TaskOwner* const tasks)
+    : owner_token_(owner_token(owner_id)), config_(std::move(config)), tasks_(tasks) {
     if (owner_id.empty() || config_.page_size == 0U || config_.maximum_pages == 0U ||
         config_.maximum_cached_glyphs == 0U ||
         config_.maximum_generation_recycles_per_preparation == 0U ||
@@ -404,7 +480,7 @@ void GlyphAtlas::end_frame_preparation() noexcept {
     preparation_recycles_ = 0U;
 }
 
-std::optional<GlyphAtlasEntry>
+base::ResourceResult<GlyphAtlasEntry>
 GlyphAtlas::request_coverage(const std::string_view font_id, const OpenTypeFont& font,
                              const std::uint16_t glyph, const double pixel_size,
                              const SubpixelPhase phase, const std::uint32_t font_style_flags) {
@@ -412,7 +488,7 @@ GlyphAtlas::request_coverage(const std::string_view font_id, const OpenTypeFont&
                         font_style_flags);
 }
 
-std::optional<GlyphAtlasEntry>
+base::ResourceResult<GlyphAtlasEntry>
 GlyphAtlas::request(const std::string_view font_id, const OpenTypeFont& font,
                     const std::uint16_t glyph, const double pixel_size,
                     const SubpixelPhase coverage_phase, const std::uint32_t font_style_flags,
@@ -484,7 +560,7 @@ GlyphAtlas::Resolved GlyphAtlas::resolve(const std::string_view font_id, const O
     return result;
 }
 
-std::optional<GlyphAtlasEntry>
+base::ResourceResult<GlyphAtlasEntry>
 GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& font,
                          const std::uint16_t glyph, const double pixel_size,
                          const SubpixelPhase phase, const GlyphRasterMode mode,
@@ -493,27 +569,44 @@ GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& fon
     Resolved resolved = resolve(font_id, font, glyph, pixel_size, phase, mode, font_style_flags,
                                 reach, unhinted);
     Key& key = resolved.key;
-    const MsdfRasterConfig& msdf = resolved.msdf;
-    const GlyphRasterMode effective_mode = key.mode;
-    const std::uint32_t realized_style_flags = key.font_style_flags;
     if (const auto found = cache_.find(key); found != cache_.end()) {
         if (!frame_preparation_active_)
             flush_pending_uploads();
-        return found->second;
+        return {found->second, {}};
+    }
+    if (preparations_ != nullptr) {
+        const auto prepared = preparations_->take(key, raster_work_);
+        if (prepared.readiness.id() != 0U)
+            return {{}, prepared.readiness};
+        if (prepared.value.has_value()) {
+            const SharedRaster& bitmap = *prepared.value;
+            return {bitmap->has_value()
+                        ? std::optional<GlyphAtlasEntry>(insert_bitmap(key, bitmap->value()))
+                        : std::nullopt, {}};
+        }
     }
     RasterCacheIdentity identity =
-        raster_cache_identity(font, glyph, pixel_size, display_scale_, key.phase, effective_mode,
-                              realized_style_flags, resolved.coverage, msdf, subpixel_order_);
+        raster_cache_identity(font, glyph, pixel_size, display_scale_, key.phase, key.mode,
+                              key.font_style_flags, resolved.coverage, resolved.msdf,
+                              subpixel_order_);
     SharedRaster bitmap = shared_raster_cache().find(identity.key);
     if (bitmap == nullptr) {
-        bitmap = std::make_shared<const std::optional<GlyphRasterBitmap>>(
-            rasterize(font, glyph, pixel_size, display_scale_, key.phase, effective_mode,
-                      realized_style_flags, resolved.coverage, msdf, subpixel_order_));
-        bitmap = shared_raster_cache().insert(std::move(identity), std::move(bitmap));
+        std::vector<PreparationRequest> requests;
+        requests.push_back(PreparationRequest{std::move(key), &font, std::move(identity), {},
+                                               resolved.msdf, resolved.coverage});
+        constexpr std::array<std::size_t, 1U> missing{0U};
+        const base::Readiness readiness = prepare_missing(requests, missing);
+        PreparationRequest& request = requests.front();
+        if (request.raster == nullptr)
+            return {{}, readiness};
+        return {request.raster->has_value()
+                    ? std::optional<GlyphAtlasEntry>(
+                          insert_bitmap(request.key, request.raster->value()))
+                    : std::nullopt, {}};
     }
     if (!bitmap->has_value())
-        return std::nullopt;
-    return insert_bitmap(key, bitmap->value());
+        return {};
+    return {insert_bitmap(key, bitmap->value()), {}};
 }
 
 std::optional<GlyphAtlasEntry> GlyphAtlas::request_raster(
@@ -625,15 +718,7 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
         throw std::logic_error("glyph atlas warmup requires an active frame preparation");
     }
     const std::uint64_t initial_generation = generation_;
-    struct Pending final {
-        Key key;
-        const OpenTypeFont* font = nullptr;
-        RasterCacheIdentity identity;
-        SharedRaster raster;
-        MsdfRasterConfig msdf;
-        CoverageRasterConfig coverage;
-    };
-    std::vector<Pending> pending;
+    std::vector<PreparationRequest> pending;
     pending.reserve(requests.size());
     std::map<Key, std::size_t> unique;
 
@@ -648,12 +733,23 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
         Key& key = resolved.key;
         if (cache_.contains(key) || unique.contains(key))
             continue;
-        RasterCacheIdentity identity = raster_cache_identity(
-            *request.font, request.glyph, request.pixel_size, display_scale_, key.phase, key.mode,
-            key.font_style_flags, resolved.coverage, resolved.msdf, subpixel_order_);
-        SharedRaster raster = shared_raster_cache().find(identity.key);
         unique.emplace(key, pending.size());
-        pending.push_back(Pending{
+        SharedRaster raster;
+        if (preparations_ != nullptr) {
+            auto prepared = preparations_->take(key, raster_work_);
+            if (prepared.readiness.id() != 0U)
+                continue;
+            if (prepared.value.has_value())
+                raster = std::move(*prepared.value);
+        }
+        RasterCacheIdentity identity;
+        if (raster == nullptr) {
+            identity = raster_cache_identity(
+                *request.font, request.glyph, request.pixel_size, display_scale_, key.phase,
+                key.mode, key.font_style_flags, resolved.coverage, resolved.msdf, subpixel_order_);
+            raster = shared_raster_cache().find(identity.key);
+        }
+        pending.push_back(PreparationRequest{
             std::move(key),
             request.font,
             std::move(identity),
@@ -670,18 +766,6 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
             missing.push_back(index);
     }
 
-    // Raster misses are independent immutable results. Use a small fixed ceiling rather than a
-    // hardware-sized fan-out: one caller lane plus at most three pool lanes reduces a cold atlas
-    // stall without monopolizing a host's render/game worker pool. Coverage rasterization obtains
-    // one cached FT_Face per thread because FT_Face owns mutable size/transform state.
-    constexpr std::size_t maximum_raster_lanes = 4U;
-    constexpr std::size_t parallel_raster_threshold = 8U;
-    const std::size_t available_lanes =
-        std::max<std::size_t>(1U, static_cast<std::size_t>(std::thread::hardware_concurrency()));
-    const std::size_t raster_lanes =
-        missing.size() < parallel_raster_threshold
-            ? 1U
-            : std::min({maximum_raster_lanes, available_lanes, missing.size()});
     // Each lane leases a FreeType face per font and selects a size on it; grouping the misses by
     // font and size and handing lanes contiguous runs keeps a lane on one face and one size, so a
     // cold batch builds a few faces and runs each size's hinting program once, not per lane.
@@ -690,58 +774,10 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
         return std::tie(key.font_id, key.pixel_size, key.mode, key.font_style_flags, key.phase,
                         key.glyph);
     });
-    const std::size_t run = std::max<std::size_t>(1U, missing.size() / (raster_lanes * 4U));
-    std::atomic_size_t cursor{0U};
-    std::atomic_bool failed{false};
-    std::mutex failure_mutex;
-    std::exception_ptr failure;
-    const auto raster_lane = [&] {
-        while (!failed.load(std::memory_order_acquire)) {
-            const std::size_t first = cursor.fetch_add(run, std::memory_order_relaxed);
-            if (first >= missing.size())
-                return;
-            const std::size_t last = std::min(missing.size(), first + run);
-            for (std::size_t position = first; position < last; ++position) {
-                Pending& item = pending[missing[position]];
-                try {
-                    item.raster =
-                        std::make_shared<const std::optional<GlyphRasterBitmap>>(rasterize(
-                            *item.font, item.key.glyph, std::bit_cast<double>(item.key.pixel_size),
-                            display_scale_, item.key.phase, item.key.mode,
-                            item.key.font_style_flags, item.coverage, item.msdf,
-                            subpixel_order_));
-                } catch (...) {
-                    {
-                        const std::scoped_lock lock(failure_mutex);
-                        if (failure == nullptr)
-                            failure = std::current_exception();
-                    }
-                    failed.store(true, std::memory_order_release);
-                    return;
-                }
-            }
-        }
-    };
-    const auto raster_started = std::chrono::steady_clock::now();
-    if (raster_lanes == 1U) {
-        raster_lane();
-    } else {
-        RasterPool::shared().run(raster_lanes - 1U, std::function<void()>(raster_lane));
-    }
-    raster_work_.glyphs += missing.size();
-    raster_work_.nanoseconds += static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
-                                                             raster_started)
-            .count());
-    if (failure != nullptr)
-        std::rethrow_exception(failure);
-
-    for (const std::size_t index : missing) {
-        Pending& item = pending[index];
-        item.raster =
-            shared_raster_cache().insert(std::move(item.identity), std::move(item.raster));
-    }
-    for (Pending& item : pending) {
+    static_cast<void>(prepare_missing(pending, missing));
+    for (PreparationRequest& item : pending) {
+        if (item.raster == nullptr)
+            continue;
         if (item.key.generation != generation_)
             return false;
         if (!item.raster->has_value())
@@ -752,6 +788,113 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
     }
     flush_pending_uploads();
     return true;
+}
+
+base::Readiness GlyphAtlas::prepare_missing(std::vector<PreparationRequest>& requests,
+                                           const std::span<const std::size_t> missing) {
+    if (missing.empty())
+        return {};
+    struct Input final {
+        OpenTypeFont font;
+        std::uint16_t glyph;
+        double pixel_size;
+        SubpixelPhase phase;
+        GlyphRasterMode mode;
+        std::uint32_t style;
+        CoverageRasterConfig coverage;
+        MsdfRasterConfig msdf;
+    };
+    std::vector<Input> inputs;
+    inputs.reserve(missing.size());
+    bool needs_freetype = false;
+    for (const std::size_t index : missing) {
+        const PreparationRequest& request = requests[index];
+        const Key& key = request.key;
+        inputs.push_back(Input{*request.font, key.glyph, std::bit_cast<double>(key.pixel_size),
+                               key.phase, key.mode, key.font_style_flags, request.coverage,
+                               request.msdf});
+        needs_freetype |= key.mode != GlyphRasterMode::msdf;
+    }
+    if (tasks_ == nullptr)
+        tasks_ = &owned_tasks_.emplace(base::TaskExecution::deterministic);
+    auto batch = std::make_shared<Preparations::Batch>();
+    batch->pending = base::Pending<Preparations::Result>::start(
+        *tasks_, base::TaskKind::glyph_raster, base::TaskPriority::frame_critical,
+        "strata:glyph-rasters/" + owner_token_,
+        [inputs = std::move(inputs), scale = display_scale_, order = subpixel_order_,
+         context = needs_freetype ? shared_raster_context() : nullptr](
+            const base::TaskCancellation& cancellation) {
+            Preparations::Result result;
+            result.rasters.resize(inputs.size());
+            const auto started = std::chrono::steady_clock::now();
+            const std::size_t available =
+                std::max<std::size_t>(1U, std::thread::hardware_concurrency());
+            const std::size_t lanes =
+                inputs.size() < 8U ? 1U : std::min({std::size_t{4U}, available, inputs.size()});
+            const std::size_t run = std::max<std::size_t>(1U, inputs.size() / (lanes * 4U));
+            std::atomic_size_t cursor{0U};
+            const auto raster_lane = [&] {
+                while (!cancellation.cancelled()) {
+                    const std::size_t first = cursor.fetch_add(run, std::memory_order_relaxed);
+                    if (first >= inputs.size())
+                        return;
+                    const std::size_t last = std::min(inputs.size(), first + run);
+                    for (std::size_t index = first; index < last; ++index) {
+                        if (cancellation.cancelled())
+                            return;
+                        const Input& input = inputs[index];
+                        result.rasters[index] =
+                            std::make_shared<const std::optional<GlyphRasterBitmap>>(
+                                rasterize(input.font, input.glyph, input.pixel_size, scale,
+                                          input.phase, input.mode, input.style, input.coverage,
+                                          input.msdf, order, context.get()));
+                    }
+                }
+            };
+            if (lanes == 1U)
+                raster_lane();
+            else
+                base::TaskPool::shared().run(lanes - 1U, std::function<void()>(raster_lane));
+            result.nanoseconds = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - started).count());
+            return result;
+        });
+    if (const Preparations::Result* result = batch->pending.get(); result != nullptr) {
+        batch->account(raster_work_);
+        for (std::size_t position = 0U; position < missing.size(); ++position) {
+            PreparationRequest& request = requests[missing[position]];
+            request.raster = shared_raster_cache().insert(
+                std::move(request.identity), result->rasters[position]);
+        }
+        return {};
+    }
+    if (preparations_ == nullptr)
+        preparations_ = std::make_unique<Preparations>();
+    for (std::size_t position = 0U; position < missing.size(); ++position) {
+        PreparationRequest& request = requests[missing[position]];
+        preparations_->slots.emplace(
+            std::move(request.key),
+            Preparations::Slot{batch, position, std::move(request.identity)});
+    }
+    return batch->pending.readiness();
+}
+
+void GlyphAtlas::retain_preparations(const std::span<const std::uint64_t> resources) {
+    if (preparations_ == nullptr || preparations_->slots.empty())
+        return;
+    const std::unordered_set<std::uint64_t> retained(resources.begin(), resources.end());
+    std::unordered_set<std::uint64_t> cancelled;
+    for (auto slot = preparations_->slots.begin(); slot != preparations_->slots.end();) {
+        const auto& pending = slot->second.batch->pending;
+        if (retained.contains(pending.id())) {
+            ++slot;
+        } else {
+            if (cancelled.insert(pending.id()).second)
+                pending.cancel();
+            slot = preparations_->slots.erase(slot);
+        }
+    }
 }
 
 GlyphAtlas::RasterWork GlyphAtlas::take_raster_work() noexcept {

@@ -121,8 +121,8 @@ namespace {
 
 } // namespace
 
-std::optional<InputRouter::StaticTextSource>
-InputRouter::static_text_source(const RetainedNode& node) const noexcept {
+std::optional<InputPresentation::StaticTextSource>
+InputPresentation::static_text_source(const RetainedNode& node) const noexcept {
     if (!static_text_selectable(node) || !static_text_container(node).has_value())
         return std::nullopt;
     const runtime::Value* offset = scalar_property(node, "$sourceOffset");
@@ -149,7 +149,7 @@ InputRouter::static_text_source(const RetainedNode& node) const noexcept {
 }
 
 std::vector<RetainedNode*>
-InputRouter::sourced_static_text_nodes(const RetainedNode& holder,
+InputPresentation::sourced_static_text_nodes(const RetainedNode& holder,
                                        const std::string_view container) const {
     std::vector<RetainedNode*> result;
     const auto visit = [this, container, &result](const auto& self,
@@ -175,20 +175,27 @@ void InputRouter::apply_sourced_static_text_selection() {
         return;
     }
     StaticTextSourceSelection& selection = *static_text_selection_->source;
-    const RetainedNode* holder = tree_->find_identity(selection.holder_identity);
+    if (project_source_selection(selection.holder_identity, *static_text_selection_->container,
+                                  selection.anchor, selection.focus) && frame_invalidator_)
+        frame_invalidator_();
+}
+
+bool InputPresentation::project_source_selection(
+    const std::uint64_t holder_identity, const std::string_view container,
+    std::size_t& anchor, std::size_t& focus) {
+    const RetainedNode* holder = tree_ != nullptr ? tree_->find_identity(holder_identity) : nullptr;
     const runtime::Value* source =
         holder != nullptr ? scalar_property(*holder, "$selectionSource") : nullptr;
     if (source == nullptr || source->string() == nullptr)
-        return;
+        return false;
     const std::string_view whole = *source->string();
     // The source may have changed under the selection; its ends stay on character boundaries.
-    selection.anchor = text_boundary(whole, selection.anchor);
-    selection.focus = text_boundary(whole, selection.focus);
-    const std::size_t low = std::min(selection.anchor, selection.focus);
-    const std::size_t high = std::max(selection.anchor, selection.focus);
+    anchor = text_boundary(whole, anchor);
+    focus = text_boundary(whole, focus);
+    const std::size_t low = std::min(anchor, focus);
+    const std::size_t high = std::max(anchor, focus);
     bool changed = false;
-    for (RetainedNode* node :
-         sourced_static_text_nodes(*holder, *static_text_selection_->container)) {
+    for (RetainedNode* node : sourced_static_text_nodes(*holder, container)) {
         const std::optional<StaticTextSource> located = static_text_source(*node);
         const std::optional<std::string_view> text = static_text_value(*node);
         if (!located.has_value() || located->holder != holder || !text.has_value())
@@ -197,7 +204,7 @@ void InputRouter::apply_sourced_static_text_selection() {
         const std::size_t end = start + text->size();
         // A collapsed selection is a caret in the one text holding it; a range lights every
         // text it overlaps with that text's part of it.
-        const bool shares = low == high ? selection.focus >= start && selection.focus <= end
+        const bool shares = low == high ? focus >= start && focus <= end
                                         : high > start && low < end;
         const std::uint64_t identity = node->identity();
         if (!shares) {
@@ -208,8 +215,8 @@ void InputRouter::apply_sourced_static_text_selection() {
             continue;
         }
         const StaticTextRange next{
-            text_boundary(*text, std::clamp(selection.anchor, start, end) - start),
-            text_boundary(*text, std::clamp(selection.focus, start, end) - start),
+            text_boundary(*text, std::clamp(anchor, start, end) - start),
+            text_boundary(*text, std::clamp(focus, start, end) - start),
         };
         const auto current = static_text_ranges_.find(identity);
         if (current == static_text_ranges_.end() || current->second.anchor != next.anchor ||
@@ -219,8 +226,7 @@ void InputRouter::apply_sourced_static_text_selection() {
             changed = true;
         }
     }
-    if (changed && frame_invalidator_)
-        frame_invalidator_();
+    return changed;
 }
 
 void InputRouter::extend_sourced_static_text_selection(RetainedNode* candidate,

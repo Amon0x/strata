@@ -1,13 +1,14 @@
 #include "ui/svg_image.hpp"
 
-#include "ui/render/path_geometry.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <utility>
+#include <vector>
+
+#include "ui/render/path_geometry.hpp"
 
 namespace strata::ui {
 namespace {
@@ -243,7 +244,7 @@ void validate_svg_image_geometry(const svg::Document& document) {
                  (command.paint.has_stroke && command.paint.stroke_width > 0.0));
         }
     ));
-    std::vector<RenderCommand> commands;
+    RenderCommandBuffer commands;
     append_svg_image(
         commands,
         document,
@@ -253,7 +254,7 @@ void validate_svg_image_geometry(const svg::Document& document) {
         1.0
     );
     std::size_t validated_paths = 0U;
-    for (const RenderCommand& command : commands) {
+    for (const RenderCommand& command : commands.commands()) {
         const auto* path_command = std::get_if<PathRenderCommand>(&command);
         if (path_command == nullptr) continue;
         validated_paths += path_command->joined.size();
@@ -274,7 +275,7 @@ void validate_svg_image_geometry(const svg::Document& document) {
 }
 
 void append_svg_image(
-    std::vector<RenderCommand>& output,
+    RenderCommandBuffer& output,
     const svg::Document& document,
     const Rect bounds,
     const TextureRegion source,
@@ -296,7 +297,7 @@ void append_svg_image(
     if (!finite(full_viewport)) return;
     const svg::AffineTransform viewport = viewport_transform(document, full_viewport);
     if (!finite(viewport)) return;
-    output.emplace_back(ClipPushRenderCommand{bounds});
+    output.append(ClipPushRenderCommand{bounds});
     // Paths under one transform that meet along an edge (the pieces of an icon) draw as one
     // picture, so no hairline of what is behind shows between them.
     struct Piece final {
@@ -320,7 +321,7 @@ void append_svg_image(
                left.e == right.e && left.f == right.f;
     };
     const auto push = [&output](const svg::AffineTransform& transform) {
-        output.emplace_back(TransformPushRenderCommand{
+        output.append(TransformPushRenderCommand{
             transform.a,
             transform.c,
             transform.e,
@@ -355,8 +356,8 @@ void append_svg_image(
                 push(transform);
                 PathShape lead = std::move(joined.front());
                 joined.erase(joined.begin());
-                output.emplace_back(PathRenderCommand{frame, std::move(lead), std::move(joined)});
-                output.emplace_back(TransformPopRenderCommand{});
+                output.append(PathRenderCommand{frame, std::move(lead), std::move(joined)});
+                output.append(TransformPopRenderCommand{});
                 first = end;
                 continue;
             }
@@ -366,13 +367,13 @@ void append_svg_image(
                 svg_shape(*pieces[index].command, pieces[index].bounds, tint, opacity);
             if (shape.fill.has_value() || shape.stroke.has_value()) {
                 push(transform);
-                output.emplace_back(PathRenderCommand{pieces[index].bounds, std::move(shape)});
-                output.emplace_back(TransformPopRenderCommand{});
+                output.append(PathRenderCommand{pieces[index].bounds, std::move(shape)});
+                output.append(TransformPopRenderCommand{});
             }
         }
         first = end;
     }
-    output.emplace_back(ClipPopRenderCommand{});
+    output.append(ClipPopRenderCommand{});
 }
 
 } // namespace strata::ui

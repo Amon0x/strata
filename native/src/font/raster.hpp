@@ -3,12 +3,21 @@
 #include <cstddef>
 #include <compare>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <vector>
 
 #include "font/opentype.hpp"
 
 namespace strata::font {
+
+struct RasterContext;
+
+/**
+ * Shared, internally synchronized FreeType state. Queued jobs retain this handle and pass its
+ * context to rasterization, so cache/library lifetime never depends on a runtime or static teardown.
+ */
+[[nodiscard]] std::shared_ptr<RasterContext> shared_raster_context();
 
 [[nodiscard]] inline std::uint32_t synthetic_font_style_flags(
     const OpenTypeFont& font,
@@ -123,7 +132,8 @@ struct MsdfRasterConfig final {
     double display_scale,
     SubpixelPhase phase = {},
     const CoverageRasterConfig& config = {},
-    std::uint32_t font_style_flags = 0U
+    std::uint32_t font_style_flags = 0U,
+    RasterContext* context = nullptr
 );
 
 /**
@@ -141,7 +151,8 @@ struct MsdfRasterConfig final {
     SubpixelOrder order,
     SubpixelPhase phase = {},
     const CoverageRasterConfig& config = {},
-    std::uint32_t font_style_flags = 0U
+    std::uint32_t font_style_flags = 0U,
+    RasterContext* context = nullptr
 );
 
 /** Rasterizes one outline into an RGBA multi-channel signed-distance field. */

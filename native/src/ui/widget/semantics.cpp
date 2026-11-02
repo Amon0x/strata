@@ -81,7 +81,7 @@ using data::JsonValue;
 } // namespace
 
 WidgetSemanticsScope::WidgetSemanticsScope(const RetainedNode& node, const CommandIndex* commands,
-                                           const InputRouter* input, std::string default_role)
+                                           const InputPresentation* input, std::string default_role)
     : node_(node), commands_(commands), input_(input), explicit_semantics_(property("semantics")),
       role_(std::move(default_role)) {
     if (const auto explicit_role = text(explicit_field("role")); explicit_role.has_value()) {

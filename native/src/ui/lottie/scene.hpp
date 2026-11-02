@@ -1,15 +1,25 @@
 #pragma once
 
+#include <map>
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "resource/lottie.hpp"
 #include "ui/render.hpp"
 
+namespace strata::font {
+struct SystemFontCatalog;
+}
+
 namespace strata::ui::lottie {
 
+struct SceneData;
+
 /**
- * Draws one frame of `animation` as ordinary render commands: the composition's (0, 0)-(w, h) box
- * mapped onto `viewport`, everything cut to `clip`.
+ * An immutable animation with prepared layer topology and fully resolved text layout. Construction
+ * owns its document and catalog generation; projection reads no catalog or owner service. Its
+ * composition's (0, 0)-(w, h) box maps onto `viewport`, everything cut to `clip`.
  *
  * Each fill and stroke becomes one path command under its own transform, so a shape that only
  * moves, turns or scales keeps its outline (and the rasterized mask the backend caches for it).
@@ -27,7 +37,30 @@ namespace strata::ui::lottie {
  * it covers. An animation that blends or reaches past what it draws is itself one layer the box
  * cuts, so its layers blend with one another and not with the page.
  */
-void append_frame(std::vector<RenderCommand>& output, const resource::lottie::Animation& animation,
-                  double frame, Rect viewport, Rect clip);
+class Scene final {
+  public:
+    Scene(std::shared_ptr<const resource::lottie::Animation> animation,
+          std::shared_ptr<font::SystemFontCatalog> catalog);
+    void append_frame(std::vector<RenderCommand>& output, double frame, Rect viewport, Rect clip) const;
+
+  private:
+    std::shared_ptr<const SceneData> data_;
+};
+
+/** Surface-owned scene preparation; shared immutable results never retain this cache or its owner. */
+class SceneCache final {
+  public:
+    explicit SceneCache(base::TaskOwner& tasks) noexcept : tasks_(tasks) {}
+    ~SceneCache();
+    [[nodiscard]] base::Pending<Scene>
+    find(const std::shared_ptr<const resource::lottie::Animation>& animation);
+    [[nodiscard]] base::TaskOwner& tasks() const noexcept { return tasks_; }
+
+  private:
+    using Key = std::pair<std::shared_ptr<const resource::lottie::Animation>,
+                          std::shared_ptr<font::SystemFontCatalog>>;
+    base::TaskOwner& tasks_;
+    std::map<Key, base::Pending<Scene>> entries_;
+};
 
 } // namespace strata::ui::lottie

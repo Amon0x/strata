@@ -2,6 +2,7 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <set>
 #include <system_error>
@@ -360,11 +361,11 @@ private:
      */
     [[nodiscard]] std::optional<std::string> easing_curve(const Property& property,
                                                           const std::string& path) {
-        static const std::set<std::string, std::less<>> names{
+        static constexpr std::string_view names[]{
             "bouncy",  "cubic-in", "cubic-in-out", "cubic-out", "ease",
             "ease-in", "ease-out", "linear",       "snappy",    "spring"};
         const std::string expected =
-            expected_names(std::vector<std::string>(names.begin(), names.end())) +
+            expected_names(std::vector<std::string>(std::begin(names), std::end(names))) +
             ", cubic-bezier(x1, y1, x2, y2), spring(stiffness, damping)";
         const LiteralExpression* literal = static_literal(*property.value);
         const auto* string =
@@ -375,7 +376,7 @@ private:
                    property.value->span, path, expected);
             return std::nullopt;
         }
-        if (names.contains(string->value))
+        if (std::ranges::contains(names, string->value))
             return string->value;
         const auto call = [&](const std::string_view name) -> std::optional<std::vector<double>> {
             std::string_view text = string->value;

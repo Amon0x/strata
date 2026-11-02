@@ -25,6 +25,7 @@ class CaptureRenderer {
                         double logical_width, double logical_height) = 0;
     virtual void set_clear_color(std::array<std::uint8_t, 4U> rgba) noexcept = 0;
     virtual void declare_material(std::string_view id, std::string_view source) = 0;
+    virtual void release_programs(std::string_view prefix) = 0;
     virtual void declare_effect_pass(
         std::string_view effect_id,
         std::uint32_t index,

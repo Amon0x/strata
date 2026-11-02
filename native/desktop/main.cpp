@@ -24,6 +24,7 @@
 #include "data/json.hpp"
 #include "headless/scenario.hpp"
 #include "host.hpp"
+#include "host_json.hpp"
 #include "ime.hpp"
 #include "window_input.hpp"
 #include "window_placement.hpp"
@@ -65,6 +66,14 @@ struct WindowApplication final {
     /** Opened by a document (window.open): closing it never ends the application. */
     bool child = false;
     bool registered = false;
+    bool closing = false;
+    /** Owned by the window thread; requesters retain this token across HWND/id reuse. */
+    std::shared_ptr<bool> closed = std::make_shared<bool>(false);
+    struct PendingClose final {
+        strata::desktop::WindowRequest request;
+        std::shared_ptr<const bool> completed;
+    };
+    std::vector<PendingClose> pending_closes;
 
     [[nodiscard]] std::vector<strata::desktop::WindowRequest> take_window_requests() {
         if (host != nullptr)
@@ -90,11 +99,10 @@ struct WindowApplication final {
         return host != nullptr || application_host != nullptr;
     }
 
-    /** The last frame showed something new: its present already waited for the display. */
-    [[nodiscard]] bool presented() const noexcept {
+    [[nodiscard]] std::uint64_t present_count() const noexcept {
         if (host != nullptr)
-            return host->presented();
-        return application_host != nullptr && application_host->presented();
+            return host->present_count();
+        return application_host != nullptr ? application_host->present_count() : 0U;
     }
 
     /** The last frame left nothing to do until input or a host change. */
@@ -183,6 +191,14 @@ struct WindowApplication final {
     }
 
     void frame() {
+        if (closing) {
+            preview.reset();
+            const bool finished = host != nullptr ? host->close()
+                                : application_host != nullptr ? application_host->close() : true;
+            if (finished)
+                DestroyWindow(window_handle);
+            return;
+        }
         if (preview != nullptr)
             preview->poll();
         if (host != nullptr)
@@ -257,6 +273,10 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
     try {
         if (message == WM_EXITSIZEMOVE || message == WM_DESTROY)
             app->remember_placement();
+        if (app->closing && message == WM_CLOSE)
+            return 0;
+        if (app->closing && message != WM_DESTROY)
+            return DefWindowProcW(window, message, word, long_value);
         if (app->application_host != nullptr && message != WM_CLOSE && message != WM_DESTROY) {
             const std::optional<std::intptr_t> handled =
                 app->application_host->handle_window_message(message, word, long_value);
@@ -287,10 +307,12 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
             return 0;
         }
         case WM_CLOSE:
-            DestroyWindow(window);
+            app->closing = true;
             return 0;
         case WM_DESTROY:
+            app->closing = true;
             app->reset_host();
+            *app->closed = true;
             // The application lasts as long as a window it began with; the ones its documents
             // opened close with it.
             if (app->registered) {
@@ -322,6 +344,7 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
 struct WindowDefaults final {
     bool vsync = true;
     bool performance = false;
+    strata::host::PresentationExecution presentation = strata::host::PresentationExecution::threaded;
     /** Registers actions and publishes snapshots on an application window's host. */
     std::function<void(strata::desktop::ApplicationHost&)> configure_application;
 };
@@ -374,7 +397,8 @@ struct WindowDefaults final {
             app->host = parent.host->open_window(window, request);
         } else if (parent.application_host != nullptr) {
             app->application_host = parent.application_host->open_window(
-                window, request, strata::desktop::ApplicationOptions{.vsync = defaults.vsync});
+                window, request, strata::desktop::ApplicationOptions{
+                    .vsync = defaults.vsync, .presentation = defaults.presentation});
             if (defaults.configure_application)
                 defaults.configure_application(*app->application_host);
             app->application_host->activate();
@@ -404,6 +428,17 @@ void serve_window_requests(std::vector<std::unique_ptr<WindowApplication>>& appl
     // Opening appends to `applications`, so the askers are gathered first.
     std::vector<std::pair<WindowApplication*, strata::desktop::WindowRequest>> asked;
     for (const auto& app : applications) {
+        if (app->closing || !app->has_host())
+            continue;
+        for (auto pending = app->pending_closes.begin(); pending != app->pending_closes.end();) {
+            if (!*pending->completed) {
+                ++pending;
+                continue;
+            }
+            app->answer_window_request(pending->request,
+                answer_json({{"closed", JsonValue(true)}, {"id", JsonValue(pending->request.id)}}));
+            pending = app->pending_closes.erase(pending);
+        }
         for (strata::desktop::WindowRequest& request : app->take_window_requests())
             asked.emplace_back(app.get(), std::move(request));
     }
@@ -412,16 +447,21 @@ void serve_window_requests(std::vector<std::unique_ptr<WindowApplication>>& appl
         if (request.kind == Kind::open) {
             answer = open_window(applications, *asker, request, defaults);
         } else {
-            bool closed = false;
+            std::shared_ptr<const bool> completion;
             for (const auto& app : applications) {
                 if (app->window_id == request.id && app->has_host()) {
-                    PostMessageW(app->window_handle, WM_CLOSE, 0, 0);
-                    closed = true;
+                    app->closing = true;
+                    completion = app->closed;
+                    break;
                 }
             }
-            answer = answer_json({{"closed", JsonValue(closed)}, {"id", JsonValue(request.id)}});
+            if (completion != nullptr) {
+                asker->pending_closes.push_back({std::move(request), std::move(completion)});
+                continue;
+            }
+            answer = answer_json({{"closed", JsonValue(false)}, {"id", JsonValue(request.id)}});
         }
-        if (asker->has_host())
+        if (asker->has_host() && !asker->closing)
             asker->answer_window_request(request, std::move(answer));
     }
     std::erase_if(applications, [](const std::unique_ptr<WindowApplication>& app) {
@@ -544,6 +584,9 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         if (performance)
             uncapped = true;
         const bool headless = smoke || profile_showcase;
+        const auto presentation_execution = uncapped || headless
+            ? strata::host::PresentationExecution::caller
+            : strata::host::PresentationExecution::threaded;
         if (resources.empty())
             resources = default_resource_root();
         const std::optional<strata::desktop::PerformanceScenario> performance_scenario =
@@ -571,6 +614,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         WindowDefaults window_defaults{
             .vsync = !uncapped && !headless,
             .performance = performance,
+            .presentation = presentation_execution,
             .configure_application =
                 [&application_launch](strata::desktop::ApplicationHost& application) {
                     if (!application_launch.has_value())
@@ -586,8 +630,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                     for (const strata::headless::SnapshotConfig& snapshot :
                          application_launch->snapshots) {
                         application.publish(
-                            snapshot.id, strata::host::Value::parse(
-                                             strata::data::encode_canonical_json(snapshot.values)));
+                            snapshot.id, strata::host::from_json_value(snapshot.values));
                     }
                 },
         };
@@ -721,6 +764,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                         strata::desktop::ApplicationOptions{
                             .vsync = !uncapped && !headless,
                             .asynchronous_shader_compilation = !watch,
+                            .presentation = presentation_execution,
                         });
                     window_defaults.configure_application(*app->application_host);
                     app->application_host->activate();
@@ -741,6 +785,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                             .vsync = !uncapped && !headless,
                             .performance_hud = !performance,
                             .profile_sampling = !performance,
+                            .presentation = presentation_execution,
                         });
                     if (smoke)
                         app->host->key(VK_F7);
@@ -801,10 +846,8 @@ int wmain(const int argument_count, wchar_t** const arguments) {
             running = false;
         }
         bool profile_started = false;
-        std::size_t profile_frames_after_open = 0U;
-        // --fps reports the host loop's own cadence in the title bar: the mean interval between
-        // presented frames over the last half second. With --uncapped that is the full cost of a
-        // frame; without it the interval is the display's.
+        // Count the GPU owner's successful Present returns, not UI loop iterations. A display
+        // trace is still needed to establish which submitted images reached scan-out.
         std::wstring frame_time_title;
         if (show_frame_time && !applications.empty()) {
             frame_time_title.resize(256U);
@@ -813,7 +856,8 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                                static_cast<int>(frame_time_title.size()))));
         }
         auto frame_time_window_started = std::chrono::steady_clock::now();
-        std::size_t frame_time_window_frames = 0U;
+        std::uint64_t frame_time_window_presented =
+            applications.empty() ? 0U : applications.front()->present_count();
         while (running) {
             if (!dispatch_pending_messages(exit_code))
                 break;
@@ -831,23 +875,33 @@ int wmain(const int argument_count, wchar_t** const arguments) {
             }
             if (running)
                 serve_window_requests(applications, window_defaults);
-            if (show_frame_time && running) {
-                ++frame_time_window_frames;
+            if (show_frame_time && running && !applications.empty() &&
+                applications.front()->has_host()) {
                 const auto now = std::chrono::steady_clock::now();
                 const double seconds =
                     std::chrono::duration<double>(now - frame_time_window_started).count();
                 if (seconds >= 0.5) {
+                    const std::uint64_t presented = applications.front()->present_count();
+                    const std::uint64_t frames = presented - frame_time_window_presented;
                     const double frames_per_second =
-                        static_cast<double>(frame_time_window_frames) / seconds;
+                        static_cast<double>(frames) / seconds;
                     wchar_t suffix[64]{};
-                    static_cast<void>(swprintf_s(suffix, L"  —  %.2f ms  ·  %.0f fps",
-                                                 1000.0 / frames_per_second, frames_per_second));
+                    if (frames == 0U) {
+                        static_cast<void>(swprintf_s(suffix, L"  —  idle"));
+                    } else {
+                        static_cast<void>(swprintf_s(suffix, L"  —  %.2f ms  ·  %.0f fps",
+                                                     1000.0 / frames_per_second, frames_per_second));
+                    }
                     SetWindowTextW(applications.front()->window_handle,
                                    (frame_time_title + suffix).c_str());
-                    std::cout << "STRATA FRAME " << 1000.0 / frames_per_second << " ms "
-                              << frames_per_second << " fps" << std::endl;
+                    if (frames != 0U) {
+                        std::cout << "STRATA FRAME " << 1000.0 / frames_per_second << " ms "
+                                  << frames_per_second << " fps" << std::endl;
+                    } else {
+                        std::cout << "STRATA FRAME IDLE 0 fps" << std::endl;
+                    }
                     frame_time_window_started = now;
-                    frame_time_window_frames = 0U;
+                    frame_time_window_presented = presented;
                 }
             }
             if (profile_showcase && running) {
@@ -856,7 +910,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                     profile_host.reset_profile();
                     profile_host.key(VK_F7);
                     profile_started = true;
-                } else if (profile_started && ++profile_frames_after_open >= 1U) {
+                } else if (profile_started && profile_host.last_frame_sample().frame_index != 0U) {
                     std::cout << profile_host.profile_report();
                     running = false;
                 }
@@ -881,19 +935,12 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                 running = false;
             }
             if (!headless && !uncapped) {
-                // A window that drew waited for the display in its present, which paces what
-                // moves; waiting here as well would hold every frame for a second refresh. Only
-                // when no window drew does the loop wait, for input: a frame's length while
-                // something is still to do, longer when nothing is, waking for timers and async
-                // completions.
-                const bool drew = std::ranges::any_of(
-                    applications, [](const auto& app) { return app->presented(); });
-                if (!drew) {
-                    const bool idle = std::ranges::all_of(
-                        applications, [](const auto& app) { return app->idle(); });
-                    static_cast<void>(MsgWaitForMultipleObjectsEx(
-                        0U, nullptr, idle ? 50U : 16U, QS_ALLINPUT, MWMO_INPUTAVAILABLE));
-                }
+                // Presentation completion wakes this owner without blocking it in Present.
+                // The timeout also services watch scans and application timer work.
+                const bool idle = std::ranges::all_of(
+                    applications, [](const auto& app) { return app->idle(); });
+                static_cast<void>(MsgWaitForMultipleObjectsEx(
+                    0U, nullptr, idle ? 50U : 16U, QS_ALLINPUT, MWMO_INPUTAVAILABLE));
             }
         }
         // The windows documents opened go first: they share their opener's model.

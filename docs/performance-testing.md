@@ -3,6 +3,9 @@
 Strata's authoritative performance harness runs through the real visible Windows desktop path. It
 uses the Win32 window, D3D11 device, swap chain, render-packet decoder, GPU submission, and
 `Present(0, 0)` used by `strata_desktop --uncapped`. It is intentionally not a headless timing mode.
+These modes explicitly use caller-driven presentation: submission measurements include actual
+decoding, rendering and Present calls, not just the cost of enqueueing work for another thread.
+Interactive capped windows instead default to an independent presentation owner.
 
 ## Run the canonical showcase workload
 
@@ -39,10 +42,22 @@ Each phase reports:
 - every measured frame with its operation, counters, timings, and validity
 - an adaptive spike list and the threshold used for that phase
 
+Report version 2 includes immediate host input work in `totalMillis` and reports it separately as
+`inputMillis`. This includes overlay admission performed by a key handler, not just the following
+`frame()` call. `startedMillis` is the frame's host-side start relative to process startup;
+`preparationPending` records whether any shown Session still awaits adoption. Neither is a
+physical scan-out timestamp. Version-1 reports cannot serve as comparison baselines.
+
 Average FPS is uncapped host-loop throughput, not the monitor's physical scan-out rate. D3D11 GPU
 execution is asynchronous: `submit` and `present` are CPU wall durations for the real API calls,
 not forced GPU-completion timings. The harness deliberately does not insert a per-frame GPU flush,
 because that would change the user path it is measuring.
+
+The ordinary `--fps` counter counts successful presentation-owner Present returns. Neither that
+counter nor `PresentationFrame` CPU timestamps prove that a frame reached the display. For
+render-thread stall gates, correlate an external display trace (for example PresentMon ETW) with
+the UI-stall interval and inspect displayed frames, dropped frames and display intervals. Keep
+captures outside the measured stall; synchronous readback changes scheduling.
 
 Average FPS alone is not an acceptance criterion. Compare phase distributions and the timeline;
 an idle frame and a tab replacement intentionally perform very different work.
@@ -134,7 +149,7 @@ Desktop performance scenarios are JSON documents independent of headless scenari
     "maximumP99Percent": 20,
     "minimumAbsoluteMillis": 0.1
   },
-  "setup": [{"key": "f7"}, {"frames": 3}],
+  "setup": [{"key": "f7"}, {"settle": 0}],
   "phases": [
     {
       "name": "warm-idle",
@@ -157,10 +172,17 @@ Desktop performance scenarios are JSON documents independent of headless scenari
 }
 ```
 
-Supported steps are `frames`, `settle`, `click`, `move`, `drag`, `scroll`, and `key`. `settle` takes
-milliseconds and frames, unmeasured, until that much wall time has passed, so a transition the
-previous steps started has finished before a phase measures anything; uncapped frames are too fast
-for a frame count to do that. Pointer targets use the
+Supported steps include `frames`, `duration`, `settle`, `click`, `move`, `drag`, `scroll`, and `key`.
+`duration` takes positive milliseconds and measures every host frame across that wall-time
+interval. Use it after asynchronous admission to include the later adoption and resource-completion
+frames; a fixed uncapped frame count can finish before the worker runs.
+
+`settle` takes nonnegative milliseconds and frames, unmeasured, until that much wall time has passed
+and all shown Sessions have been adopted. Zero waits only for initial preparation, not perpetual
+animation work. Pending Sessions have a five-second allowance beyond the requested duration.
+Uncapped frame counts do not establish transition completion or display cadence. Startup scenarios
+that intentionally include a blank pending frame set `validity.requireDraws` to false; ordinary
+draw-requiring workloads retain that check. Pointer targets use the
 same joined semantic/inspection selector model as the headless browser: coordinates, `key`, `path`,
 or `role`/`name`. A drag resolves the selected element's bounds and alternates pointer moves between
 two fractions, providing a sustained worst-case control-update workload:

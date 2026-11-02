@@ -116,6 +116,7 @@ struct Renderer::Impl {
         std::vector<VkFramebuffer> framebuffers;
         std::vector<std::unique_ptr<Image>> retired_images;
         std::vector<std::unique_ptr<Buffer>> retired_buffers;
+        std::vector<VkPipeline> retired_pipelines;
         bool pending = false;
     };
     /** Draws into one target share a render pass until another operation needs the target. */
@@ -142,17 +143,23 @@ struct Renderer::Impl {
     /** Keyed by program, blend, format and whether it draws a full-target triangle. */
     std::map<std::tuple<std::string, Blend, VkFormat, bool>, VkPipeline, std::less<>> pipelines;
     std::map<std::string, std::vector<std::uint32_t>, std::less<>> programs;
-    std::map<std::string, std::string, std::less<>> materials;
+    /** References borrow stable program-map keys; pruning removes only unreferenced programs. */
+    struct Material {
+        std::string_view program;
+        bool live;
+    };
+    std::map<std::string, Material, std::less<>> materials;
     struct Pass {
         std::uint32_t kind;
         double radius;
         std::uint32_t downsample;
         std::uint32_t radius_parameter, downsample_parameter;
-        std::string program;
+        std::string_view program;
+        bool live;
     };
     std::map<std::string, std::map<std::uint32_t, Pass>, std::less<>> effects;
     /** The packet's material and effect tables resolved for the layer being rendered. */
-    std::vector<std::string_view> layer_materials;
+    std::vector<const Material*> layer_materials;
     std::vector<const std::map<std::uint32_t, Pass>*> layer_effects;
     std::map<std::string, std::unique_ptr<Image>, std::less<>> textures;
     /**
@@ -254,13 +261,14 @@ struct Renderer::Impl {
     /** Destroys a GPU object only after every frame that may still read it has completed. */
     void retire(std::unique_ptr<Image> image);
     void retire(std::unique_ptr<Buffer> buffer);
+    void retire(VkPipeline pipeline);
     void wait_idle();
     void release_frame(Frame& frame);
     /** Drops cached effect output for one layer, or for every layer when none is named. */
     void drop_effects(std::optional<std::string_view> layer = std::nullopt);
     void end_pass();
     void initialize();
-    void add_program(const std::string& name, const std::string& source);
+    std::string_view add_program(const std::string& name, const std::string& source);
     void prune_programs();
     void begin();
     void finish();

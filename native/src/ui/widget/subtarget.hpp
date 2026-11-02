@@ -21,7 +21,7 @@ struct ActionValue;
 namespace strata::ui {
 
 class CommandIndex;
-class InputRouter;
+class InputPresentation;
 class NotificationService;
 class RetainedNode;
 class RetainedTree;
@@ -143,7 +143,7 @@ struct WidgetSubtargetContext final {
     const LayoutResult& layout;
     /** The node's own layout record. */
     const LayoutRecord& record;
-    const InputRouter& input;
+    const InputPresentation& input;
     const CommandIndex* commands = nullptr;
     const WidgetTextWidthResolver* text_width = nullptr;
     const WidgetTextLayoutResolver* text_layout = nullptr;

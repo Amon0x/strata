@@ -325,9 +325,57 @@ void test_shader_cache(vulkan::detail::Offscreen& context) {
     draw(blue, {51, 102, 153, 255});
 }
 
+/** Reloading a program must leave submitted draws' pipelines alive until their fence completes. */
+void test_in_flight_program_replacement(vulkan::detail::Offscreen& context) {
+    context.resize(32, 32);
+    const auto create = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+        vkGetInstanceProcAddr(context.instance, "vkCreateDebugUtilsMessengerEXT"));
+    const auto destroy = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+        vkGetInstanceProcAddr(context.instance, "vkDestroyDebugUtilsMessengerEXT"));
+    require(create && destroy, "pipeline retirement requires Vulkan validation");
+    struct ValidationGuard {
+        VkInstance instance;
+        PFN_vkDestroyDebugUtilsMessengerEXT destroy;
+        VkDebugUtilsMessengerEXT messenger{};
+        ~ValidationGuard() {
+            if (messenger)
+                destroy(instance, messenger, nullptr);
+        }
+    } validation{context.instance, destroy};
+    VkDebugUtilsMessengerCreateInfoEXT info{VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
+    info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+    // A regression must fail validation, not pass an invalid destruction to the GPU driver.
+    info.pfnUserCallback = [](VkDebugUtilsMessageSeverityFlagBitsEXT,
+                             VkDebugUtilsMessageTypeFlagsEXT,
+                             const VkDebugUtilsMessengerCallbackDataEXT*, void*) -> VkBool32 {
+        return VK_TRUE;
+    };
+    vulkan::detail::check(create(context.instance, &info, nullptr, &validation.messenger),
+                           "create retirement validation guard");
+    vulkan::Renderer renderer(context.device);
+    renderer.declare_material("retirement",
+        "float4 material(PixelInput input) { return float4(0,1,0,1); }");
+    renderer.declare_material("replacement",
+        "float4 material(PixelInput input) { return float4(0,0,1,1); }");
+    auto packet = quad();
+    packet.materials = {"retirement"};
+    (void)renderer.render("retirement", packet, context.target(32, 32),
+                          {vulkan::TargetLoadAction::clear, {0, 0, 0, 0}, 0});
+    // No readback, fence observation or idle wait has retired the submitted commands.
+    renderer.declare_material("retirement",
+        "float4 material(PixelInput input) { return float4(0,0,1,1); }");
+    (void)renderer.render("retirement", packet, context.target(32, 32),
+                          {vulkan::TargetLoadAction::clear, {0, 0, 0, 0}, 0});
+    near(pixel(context.pixels(), 32, 16, 16), {0, 0, 255, 255},
+         "in-flight program replacement pixels");
+    require(context.validation_errors.load() == 0, "in-flight program replacement validation");
+}
+
 void run() {
     vulkan::detail::Offscreen context(true);
     std::cout << "Vulkan device: " << context.device_name << "\n";
+    test_in_flight_program_replacement(context);
     test_shader_cache(context);
     test_raster_jobs_match_the_reference(context);
     context.resize(32, 32);
@@ -671,6 +719,7 @@ void run() {
     {
         std::int64_t now = 123456;
         RuntimeOptions runtime_options;
+        runtime_options.task_execution = TaskExecution::deterministic;
         runtime_options.clock = [&now] { return now; };
         Runtime runtime(std::move(runtime_options));
         runtime.configure_application(ApplicationOptions{.id = "vulkan.presenter.test"});

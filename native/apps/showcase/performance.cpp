@@ -174,8 +174,11 @@ void require_object(const JsonValue& value, const std::string_view label) {
     if (operation == "frames") {
         return PerformanceFramesStep{positive_count(argument, std::string(label) + ".frames")};
     }
+    if (operation == "duration") {
+        return PerformanceDurationStep{positive_count(argument, std::string(label) + ".duration")};
+    }
     if (operation == "settle") {
-        return PerformanceSettleStep{positive_count(argument, std::string(label) + ".settle")};
+        return PerformanceSettleStep{positive_count(argument, std::string(label) + ".settle", true)};
     }
     if (operation == "click") return PerformanceClickStep{selector(argument, "click")};
     if (operation == "move") return PerformanceMoveStep{selector(argument, "move")};
@@ -583,6 +586,9 @@ struct PerformanceRunner::Impl final {
         std::uint32_t iteration = 0U;
         std::string operation;
         bool valid = true;
+        std::int64_t input_nanos = 0;
+        std::int64_t started_nanos = 0;
+        bool preparation_pending = false;
     };
 
     struct PhaseResult final {
@@ -651,22 +657,36 @@ struct PerformanceRunner::Impl final {
         const bool measured,
         PhaseResult* phase,
         const std::uint32_t iteration,
-        std::string operation
+        std::string operation,
+        const std::int64_t input_nanos = 0
     ) {
         if (!pump_messages()) {
             invalidate("The Windows message loop was interrupted during measurement.");
             throw std::runtime_error("performance benchmark message loop was interrupted");
         }
         const Clock::time_point frame_started = Clock::now();
+        const std::int64_t started_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            frame_started - startup.started_at).count() - input_nanos;
         host.frame();
         DesktopFrameSample sample = host.last_frame_sample();
-        sample.total_nanos = nanos_since(frame_started);
+        sample.total_nanos = input_nanos + nanos_since(frame_started);
         if (first_frame.total_nanos == 0 && sample.had_draws) first_frame = sample;
         if (!measured || phase == nullptr) return;
         const bool valid = frame_valid(sample);
         phase->frames.push_back(FrameRecord{
-            sample, ++sequence, iteration, std::move(operation), valid,
+            sample, ++sequence, iteration, std::move(operation), valid, input_nanos,
+            started_nanos, host.has_pending_preparation(),
         });
+    }
+
+    /** Immediate host input work, including overlay setup, belongs to the frame it triggers. */
+    template <typename Input>
+    void input_frame(const bool measured, PhaseResult* phase, const std::uint32_t iteration,
+                      std::string operation, Input&& input) {
+        const Clock::time_point started = Clock::now();
+        std::forward<Input>(input)();
+        const std::int64_t elapsed = nanos_since(started);
+        run_frame(measured, phase, iteration, std::move(operation), elapsed);
     }
 
     [[nodiscard]] std::pair<double, double> resolve(const host::Selector& selector) {
@@ -721,11 +741,27 @@ struct PerformanceRunner::Impl final {
         }
     }
 
+    void execute(const PerformanceDurationStep& step, const bool measured, PhaseResult* phase,
+                 const std::uint32_t iteration) {
+        const auto until = Clock::now() + std::chrono::milliseconds(step.milliseconds);
+        do {
+            run_frame(measured, phase, iteration, "duration");
+        } while (Clock::now() < until);
+    }
+
     void execute(const PerformanceSettleStep& step, const bool, PhaseResult*,
                  const std::uint32_t) {
         const auto until = Clock::now() + std::chrono::milliseconds(step.milliseconds);
-        while (Clock::now() < until)
+        const auto deadline = until + std::chrono::seconds(5);
+        do {
             run_frame(false, nullptr, 0U, "settle");
+            if (host.has_pending_preparation()) {
+                if (Clock::now() >= deadline)
+                    throw std::runtime_error("shown Session preparation exceeded the settle deadline");
+                static_cast<void>(
+                    MsgWaitForMultipleObjectsEx(0U, nullptr, 16U, QS_ALLINPUT, MWMO_INPUTAVAILABLE));
+            }
+        } while (Clock::now() < until || host.has_pending_preparation());
     }
 
     void execute(const PerformanceCaptureStep& step, const bool, PhaseResult*,
@@ -733,7 +769,7 @@ struct PerformanceRunner::Impl final {
         // The next frame, read from the swap chain before it is presented: Strata's pixels only.
         host.capture_next_frame();
         run_frame(false, nullptr, 0U, "capture");
-        const std::optional<FrameCapture> frame = host.take_capture();
+        const std::optional<host::PresentationCapture> frame = host.take_capture();
         if (!frame.has_value())
             throw std::runtime_error("capture found no presented frame");
         std::filesystem::create_directories(output_root);
@@ -747,11 +783,13 @@ struct PerformanceRunner::Impl final {
         std::string paths;
         for (const std::string& path : step.paths)
             paths += (paths.empty() ? "" : "\n") + path;
-        host.files(STRATA_INPUT_FILE_DRAG, x * scale, y * scale, paths);
-        run_frame(measured, phase, iteration, "files-over:" + selector_label(step.target));
+        input_frame(measured, phase, iteration, "files-over:" + selector_label(step.target), [&] {
+            host.files(STRATA_INPUT_FILE_DRAG, x * scale, y * scale, paths);
+        });
         if (step.drop) {
-            host.files(STRATA_INPUT_FILE_DROP, x * scale, y * scale, paths);
-            run_frame(measured, phase, iteration, "files-drop:" + selector_label(step.target));
+            input_frame(measured, phase, iteration, "files-drop:" + selector_label(step.target), [&] {
+                host.files(STRATA_INPUT_FILE_DROP, x * scale, y * scale, paths);
+            });
         }
     }
 
@@ -763,8 +801,9 @@ struct PerformanceRunner::Impl final {
     ) {
         const auto [x, y] = resolve(step.target);
         const double scale = host.scale();
-        host.pointer(STRATA_INPUT_POINTER_MOVE, 0, x * scale, y * scale);
-        run_frame(measured, phase, iteration, "move:" + selector_label(step.target));
+        input_frame(measured, phase, iteration, "move:" + selector_label(step.target), [&] {
+            host.pointer(STRATA_INPUT_POINTER_MOVE, 0, x * scale, y * scale);
+        });
     }
 
     void execute(
@@ -775,12 +814,15 @@ struct PerformanceRunner::Impl final {
     ) {
         const auto [x, y] = resolve(step.target);
         const double scale = host.scale();
-        host.pointer(STRATA_INPUT_POINTER_MOVE, 0, x * scale, y * scale);
-        run_frame(measured, phase, iteration, "click-move:" + selector_label(step.target));
-        host.pointer(STRATA_INPUT_POINTER_PRESS, 0, x * scale, y * scale);
-        run_frame(measured, phase, iteration, "click-press:" + selector_label(step.target));
-        host.pointer(STRATA_INPUT_POINTER_RELEASE, 0, x * scale, y * scale);
-        run_frame(measured, phase, iteration, "click-release:" + selector_label(step.target));
+        input_frame(measured, phase, iteration, "click-move:" + selector_label(step.target), [&] {
+            host.pointer(STRATA_INPUT_POINTER_MOVE, 0, x * scale, y * scale);
+        });
+        input_frame(measured, phase, iteration, "click-press:" + selector_label(step.target), [&] {
+            host.pointer(STRATA_INPUT_POINTER_PRESS, 0, x * scale, y * scale);
+        });
+        input_frame(measured, phase, iteration, "click-release:" + selector_label(step.target), [&] {
+            host.pointer(STRATA_INPUT_POINTER_RELEASE, 0, x * scale, y * scale);
+        });
     }
 
     void execute(
@@ -795,47 +837,26 @@ struct PerformanceRunner::Impl final {
         const auto x = [&bounds](const double fraction) {
             return bounds.x + bounds.width * fraction;
         };
-        host.pointer(
-            STRATA_INPUT_POINTER_MOVE,
-            0,
-            x(step.from_fraction) * scale,
-            y * scale
-        );
-        run_frame(measured, phase, iteration, "drag-hover:" + selector_label(step.target));
-        host.pointer(
-            STRATA_INPUT_POINTER_PRESS,
-            0,
-            x(step.from_fraction) * scale,
-            y * scale
-        );
-        run_frame(measured, phase, iteration, "drag-press:" + selector_label(step.target));
+        input_frame(measured, phase, iteration, "drag-hover:" + selector_label(step.target), [&] {
+            host.pointer(STRATA_INPUT_POINTER_MOVE, 0, x(step.from_fraction) * scale, y * scale);
+        });
+        input_frame(measured, phase, iteration, "drag-press:" + selector_label(step.target), [&] {
+            host.pointer(STRATA_INPUT_POINTER_PRESS, 0, x(step.from_fraction) * scale, y * scale);
+        });
         for (std::uint32_t move = 0U; move < step.moves; ++move) {
             const double fraction = move % 2U == 0U
                 ? step.to_fraction
                 : step.from_fraction;
-            host.pointer(
-                STRATA_INPUT_POINTER_MOVE,
-                0,
-                x(fraction) * scale,
-                y * scale
-            );
-            run_frame(
-                measured,
-                phase,
-                iteration,
-                "drag-move:" + selector_label(step.target)
-            );
+            input_frame(measured, phase, iteration, "drag-move:" + selector_label(step.target), [&] {
+                host.pointer(STRATA_INPUT_POINTER_MOVE, 0, x(fraction) * scale, y * scale);
+            });
         }
         const double release_fraction = (step.moves - 1U) % 2U == 0U
             ? step.to_fraction
             : step.from_fraction;
-        host.pointer(
-            STRATA_INPUT_POINTER_RELEASE,
-            0,
-            x(release_fraction) * scale,
-            y * scale
-        );
-        run_frame(measured, phase, iteration, "drag-release:" + selector_label(step.target));
+        input_frame(measured, phase, iteration, "drag-release:" + selector_label(step.target), [&] {
+            host.pointer(STRATA_INPUT_POINTER_RELEASE, 0, x(release_fraction) * scale, y * scale);
+        });
     }
 
     void execute(const PerformanceGestureStep& step, const bool measured, PhaseResult* phase,
@@ -844,22 +865,27 @@ struct PerformanceRunner::Impl final {
         const auto [to_x, to_y] = resolve(step.to);
         const double scale = host.scale();
         if (step.press) {
-            host.pointer(STRATA_INPUT_POINTER_MOVE, 0, from_x * scale, from_y * scale);
-            run_frame(measured, phase, iteration, "gesture-hover");
-            host.pointer(STRATA_INPUT_POINTER_PRESS, step.button, from_x * scale, from_y * scale);
-            run_frame(measured, phase, iteration, "gesture-press");
+            input_frame(measured, phase, iteration, "gesture-hover", [&] {
+                host.pointer(STRATA_INPUT_POINTER_MOVE, 0, from_x * scale, from_y * scale);
+            });
+            input_frame(measured, phase, iteration, "gesture-press", [&] {
+                host.pointer(STRATA_INPUT_POINTER_PRESS, step.button, from_x * scale, from_y * scale);
+            });
         }
         for (std::uint32_t move = 1U; move <= step.moves; ++move) {
             const double t = static_cast<double>(move) / static_cast<double>(step.moves);
-            host.pointer(STRATA_INPUT_POINTER_MOVE, step.button,
-                         (from_x + (to_x - from_x) * t) * scale,
-                         (from_y + (to_y - from_y) * t) * scale);
-            for (std::uint32_t frame = 0U; frame < step.frames_per_move; ++frame)
+            input_frame(measured, phase, iteration, "gesture-move", [&] {
+                host.pointer(STRATA_INPUT_POINTER_MOVE, step.button,
+                             (from_x + (to_x - from_x) * t) * scale,
+                             (from_y + (to_y - from_y) * t) * scale);
+            });
+            for (std::uint32_t frame = 1U; frame < step.frames_per_move; ++frame)
                 run_frame(measured, phase, iteration, "gesture-move");
         }
         if (step.release) {
-            host.pointer(STRATA_INPUT_POINTER_RELEASE, step.button, to_x * scale, to_y * scale);
-            run_frame(measured, phase, iteration, "gesture-release");
+            input_frame(measured, phase, iteration, "gesture-release", [&] {
+                host.pointer(STRATA_INPUT_POINTER_RELEASE, step.button, to_x * scale, to_y * scale);
+            });
         }
     }
 
@@ -871,8 +897,9 @@ struct PerformanceRunner::Impl final {
     ) {
         const auto [x, y] = resolve(step.target);
         const double scale = host.scale();
-        host.scroll(x * scale, y * scale, step.delta_x, step.delta_y);
-        run_frame(measured, phase, iteration, "scroll:" + selector_label(step.target));
+        input_frame(measured, phase, iteration, "scroll:" + selector_label(step.target), [&] {
+            host.scroll(x * scale, y * scale, step.delta_x, step.delta_y);
+        });
     }
 
     void execute(
@@ -881,8 +908,10 @@ struct PerformanceRunner::Impl final {
         PhaseResult* phase,
         const std::uint32_t iteration
     ) {
-        host.key(virtual_key(step.key));
-        run_frame(measured, phase, iteration, "key:" + step.key);
+        const std::uint32_t code = virtual_key(step.key);
+        input_frame(measured, phase, iteration, "key:" + step.key, [&] {
+            host.key(code);
+        });
     }
 
     void execute_steps(
@@ -956,13 +985,16 @@ struct PerformanceRunner::Impl final {
             {"frameMillis", JsonValue(millis(frame.sample.frame_time_nanos))},
             {"hadDraws", JsonValue(frame.sample.had_draws)},
             {"inputEvents", JsonValue(static_cast<std::int64_t>(frame.sample.input_events))},
+            {"inputMillis", JsonValue(millis(frame.input_nanos))},
             {"iteration", JsonValue(static_cast<std::int64_t>(frame.iteration))},
             {"operation", JsonValue(frame.operation)},
             {"packetBytes", JsonValue(static_cast<std::int64_t>(frame.sample.packet_bytes))},
+            {"preparationPending", JsonValue(frame.preparation_pending)},
             {"presented", JsonValue(frame.sample.presented)},
             {"presentMillis", JsonValue(millis(frame.sample.present_nanos))},
             {"renderCommands", JsonValue(static_cast<std::int64_t>(frame.sample.render_commands))},
             {"sequence", JsonValue(static_cast<std::int64_t>(frame.sequence))},
+            {"startedMillis", JsonValue(millis(frame.started_nanos))},
             {"submitMillis", JsonValue(millis(frame.sample.submit_nanos))},
             {"gpuMillis", JsonValue(millis(frame.sample.gpu_nanos))},
             {"toolingMillis", JsonValue(millis(frame.sample.tooling_nanos))},
@@ -1151,7 +1183,7 @@ struct PerformanceRunner::Impl final {
                 {"total", distribution_json(distribution(std::move(all_total)))},
             })},
             {"valid", JsonValue(invalid_reasons.empty())},
-            {"version", JsonValue(std::int64_t{1})},
+            {"version", JsonValue(std::int64_t{2})},
             {"workloadFingerprint", JsonValue(scenario.workload_fingerprint)},
         });
     }
@@ -1193,9 +1225,9 @@ struct PerformanceRunner::Impl final {
         std::vector<JsonValue> reasons;
         bool comparable = true;
         if (string_field(&baseline, "protocol") != "strata.desktop.performance" ||
-            integer_field(&baseline, "version") != std::optional<std::int64_t>{1} ||
+            integer_field(&baseline, "version") != std::optional<std::int64_t>{2} ||
             bool_field(&baseline, "valid") != std::optional<bool>{true}) {
-            reasons.emplace_back("Baseline is not a valid version-1 Strata desktop performance report.");
+            reasons.emplace_back("Baseline is not a valid version-2 Strata desktop performance report.");
             comparable = false;
         }
         if (string_field(&baseline, "scenario") != scenario.name ||

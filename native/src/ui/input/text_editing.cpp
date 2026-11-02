@@ -159,8 +159,8 @@ void InputRouter::record_editor_mutation(RetainedNode& node, const TextEditorMut
     if (lifecycle != nullptr && !lifecycle->input.editor_emits_change)
         return;
 
-    const auto editor = editors_.find(node.identity());
-    if (editor == editors_.end())
+    const TextEditor* const editor = find_editor(node.identity());
+    if (editor == nullptr)
         return;
     std::shared_ptr<const runtime::ActionValue> action;
     const auto property_action = node.description().properties.find("onChange");
@@ -183,7 +183,7 @@ void InputRouter::record_editor_mutation(RetainedNode& node, const TextEditorMut
             });
         }
     }
-    const std::string& text = editor->second.text();
+    const std::string& text = editor->text();
     if (numeric) {
         const std::optional<double> parsed = number_field_value(node, text);
         if (!parsed.has_value())
@@ -219,14 +219,14 @@ void InputRouter::record_editor_mutation(RetainedNode& node, const TextEditorMut
 
 bool InputRouter::insert_editor_text(RetainedNode& node, const std::string_view value,
                                      InputOperationResult& result) {
-    const auto editor = editors_.find(node.identity());
-    if (editor == editors_.end())
+    TextEditor* const editor = find_editor(node.identity());
+    if (editor == nullptr)
         return false;
     const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
     const TextEditorMutation mutation =
         text_read_only(node, lifecycle)
-            ? editor->second.cancel_preedit()
-            : editor->second.insert(value, editor_config(node, lifecycle), frame_time_nanos_);
+            ? editor->cancel_preedit()
+            : editor->insert(value, editor_config(node, lifecycle), frame_time_nanos_);
     if (mutation.text_changed || mutation.selection_changed) {
         text_navigation_.erase(node.identity());
     }
@@ -235,11 +235,11 @@ bool InputRouter::insert_editor_text(RetainedNode& node, const std::string_view 
 }
 
 bool InputRouter::clear_editor_text(RetainedNode& node, InputOperationResult& result) {
-    const auto editor = editors_.find(node.identity());
-    if (editor == editors_.end())
+    TextEditor* const editor = find_editor(node.identity());
+    if (editor == nullptr)
         return false;
-    TextEditorMutation mutation = editor->second.select_all();
-    mutation = mutation + editor->second.erase_selection(frame_time_nanos_);
+    TextEditorMutation mutation = editor->select_all();
+    mutation = mutation + editor->erase_selection(frame_time_nanos_);
     if (mutation.changed())
         text_navigation_.erase(node.identity());
     record_editor_mutation(node, mutation, result);
@@ -248,12 +248,12 @@ bool InputRouter::clear_editor_text(RetainedNode& node, InputOperationResult& re
 
 void InputRouter::synchronize_editor_text(RetainedNode& node, const std::string_view value,
                                           const bool move_caret_to_end) {
-    const auto editor = editors_.find(node.identity());
-    if (editor == editors_.end())
+    TextEditor* const editor = find_editor(node.identity());
+    if (editor == nullptr)
         return;
-    TextEditorMutation mutation = editor->second.reconcile_controlled(value);
+    TextEditorMutation mutation = editor->reconcile_controlled(value);
     if (move_caret_to_end)
-        mutation = mutation + editor->second.move_end(false);
+        mutation = mutation + editor->move_end(false);
     if (!mutation.changed())
         return;
     text_navigation_.erase(node.identity());
@@ -264,23 +264,23 @@ void InputRouter::synchronize_editor_text(RetainedNode& node, const std::string_
 }
 
 void InputRouter::commit_editor(RetainedNode& node, InputOperationResult& result) {
-    const auto editor = editors_.find(node.identity());
-    if (editor == editors_.end())
+    TextEditor* const editor = find_editor(node.identity());
+    if (editor == nullptr)
         return;
     const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
     TextEditorMutation mutation;
     if (text_read_only(node, lifecycle)) {
-        mutation = editor->second.cancel_preedit();
+        mutation = editor->cancel_preedit();
     } else if (lifecycle != nullptr &&
                lifecycle->input.text_edit_mode == WidgetTextEditMode::numeric) {
-        const std::optional<double> parsed = number_field_value(node, editor->second.text());
+        const std::optional<double> parsed = number_field_value(node, editor->text());
         const runtime::Value* current = effective_number_field_value(node);
         const double committed = parsed.value_or(
             current != nullptr && current->number() != nullptr ? *current->number() : 0.0);
         mutation =
-            editor->second.restore_controlled(runtime::display_string(runtime::Value(committed)));
+            editor->restore_controlled(runtime::display_string(runtime::Value(committed)));
     } else {
-        mutation = editor->second.commit_format(editor_config(node, lifecycle).commit_format);
+        mutation = editor->commit_format(editor_config(node, lifecycle).commit_format);
     }
     if (mutation.text_changed || mutation.selection_changed) {
         text_navigation_.erase(node.identity());
@@ -288,12 +288,33 @@ void InputRouter::commit_editor(RetainedNode& node, InputOperationResult& result
     record_editor_mutation(node, mutation, result);
 }
 
-Point InputRouter::editor_scroll(const std::uint64_t identity) const noexcept {
+Point InputPresentation::editor_scroll(const std::uint64_t identity) const noexcept {
     const auto state = editor_scroll_.find(identity);
     return state != editor_scroll_.end() ? state->second.offset : Point{};
 }
 
-std::optional<InputRouter::EditorView> InputRouter::editor_view(const RetainedNode& node,
+const runtime::Value* InputPresentation::editor_controlled_value(
+    const RetainedNode& node, const WidgetTextEditMode mode) noexcept {
+    if (mode == WidgetTextEditMode::numeric) {
+        const runtime::Value* value = scalar_property(node, "value");
+        if (value == nullptr || value->number() == nullptr)
+            value = node.retained_value("$value");
+        if (value == nullptr || value->number() == nullptr)
+            value = scalar_property(node, "defaultValue");
+        return value != nullptr && value->number() != nullptr ? value : nullptr;
+    }
+    const runtime::Value* value = scalar_property(node, "text");
+    if (value == nullptr || value->string() == nullptr)
+        value = node.retained_value("$text");
+    return value != nullptr && value->string() != nullptr ? value : nullptr;
+}
+
+bool InputPresentation::editor_read_only(const RetainedNode& node) noexcept {
+    const runtime::Value* value = scalar_property(node, "readOnly");
+    return value != nullptr && value->boolean() != nullptr && *value->boolean();
+}
+
+std::optional<InputPresentation::EditorView> InputPresentation::editor_view(const RetainedNode& node,
                                                                 const std::string_view text) const {
     if (layout_ == nullptr || !text_layout_resolver_)
         return std::nullopt;
@@ -312,25 +333,29 @@ std::optional<InputRouter::EditorView> InputRouter::editor_view(const RetainedNo
     };
 }
 
-void InputRouter::update_editor_scroll() {
+bool InputPresentation::project_editor_scroll() {
     if (tree_ == nullptr || layout_ == nullptr)
-        return;
-    if (focused_.has_value() && editors_.contains(*focused_))
+        return false;
+    if (focused_.has_value() && edited_text(*focused_) != nullptr)
         static_cast<void>(editor_scroll_.try_emplace(*focused_));
+    bool changed = false;
     for (auto state = editor_scroll_.begin(); state != editor_scroll_.end();) {
         RetainedNode* const node = tree_->find_identity(state->first);
-        const auto editor = editors_.find(state->first);
-        if (node == nullptr || editor == editors_.end()) {
+        const auto editor = editor_snapshot(state->first);
+        if (node == nullptr || !editor.has_value()) {
             state = editor_scroll_.erase(state);
             continue;
         }
         // Reveal what is presented: an IME composition sits at the caret and moves it.
-        const EditorSnapshot snapshot = editor->second.snapshot();
-        std::string presented(snapshot.text);
+        const TextEditorSnapshot& snapshot = *editor;
+        std::string composed;
+        std::string_view presented = snapshot.text;
         std::size_t caret = snapshot.caret;
-        if (snapshot.composition.has_value() && !snapshot.composition->empty()) {
-            presented.insert(std::min(caret, presented.size()), *snapshot.composition);
-            caret += std::min(snapshot.composition_selection_end, snapshot.composition->size());
+        if (snapshot.preedit.has_value() && !snapshot.preedit->empty()) {
+            composed = snapshot.text;
+            composed.insert(std::min(caret, composed.size()), *snapshot.preedit);
+            presented = composed;
+            caret += std::min(snapshot.preedit_selection_end, snapshot.preedit->size());
         }
         const std::optional<EditorView> view = editor_view(*node, presented);
         if (!view.has_value()) {
@@ -361,14 +386,19 @@ void InputRouter::update_editor_scroll() {
         if (next != scroll.offset) {
             scroll.offset = next;
             static_cast<void>(tree_->mark(node->identity(), DirtyReason::editor));
-            if (frame_invalidator_)
-                frame_invalidator_();
+            changed = true;
         }
         if (!focused && next == Point{})
             state = editor_scroll_.erase(state);
         else
             ++state;
     }
+    return changed;
+}
+
+void InputRouter::update_editor_scroll() {
+    if (project_editor_scroll() && frame_invalidator_)
+        frame_invalidator_();
 }
 
 bool InputRouter::scroll_editor(const RetainedNode& node, const ScrollInputEvent& event) {

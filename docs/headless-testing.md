@@ -25,6 +25,28 @@ The CLI enables persistent D3D11/SPIR-V shader caches in the user's Strata cache
 Sources and compiler settings identify entries; shader edits still compile immediately.
 The backend libraries themselves remain opt-in, so isolated renderer tests need not use disk caches.
 
+## Preparation execution
+
+Scenarios default to `TaskExecution::deterministic`: engine tasks prepare and adopt inline,
+independently of wall-clock worker scheduling. Existing scripted frame counts and golden captures
+therefore do not gain resource-loading frames. Set top-level `"taskExecution": "asynchronous"` to
+exercise worker preparation in the CLI. Native `ApplicationHostOptions::task_execution` can
+override the scenario's mode.
+
+Initial scenario snapshots always publish inline before activation. With asynchronous execution,
+later `publish` steps admit owned snapshot data and frame without waiting for parsing; use `settle`
+before inspecting the adopted values. Deterministic execution retains immediate publication.
+
+The batch/interactive operation `{"settle": {}}` calls
+`ApplicationHost::settle(time_nanoseconds, timeout)` (default timeout: five seconds). It frames,
+consumes every packet and renders until no finite engine preparation remains. All passes use the
+supplied caller timestamp; worker waits use a separate steady-clock deadline and completion
+notifications. It requires a live Surface and a positive timeout, and throws if preparation does
+not settle by the deadline. It does not advance animations or wait for arbitrary external host
+async requests. The interactive example's request ID `"settle"` below names an `advance`
+operation; it is not a `settle` operation. To set a wall-clock timeout explicitly, use
+`{"settle": {"timeoutMilliseconds": 1000}}`; accepted values are 1 through 3,600,000 milliseconds.
+
 ## Running a scenario
 
 After building the Windows preset, the production-renderer showcase scenario is:
@@ -186,6 +208,7 @@ Supported steps are:
 | Step | Behavior |
 | --- | --- |
 | `advance` | Advances the deterministic clock by `milliseconds`, distributed over `frames`, framing each sample. |
+| `settle` | Frames and consumes packets at the current caller time until engine preparation completes; waits on completion wakes, bounded by `timeoutMilliseconds` (default 5000). |
 | `capture` | Writes the current PNG and canonical frame JSON; creates the first frame if necessary. |
 | `click` | Resolves a target, then frames pointer move, press, and release through the normal input router. An optional `button` selects `primary`/`left`, `secondary`/`right`, or `middle`. |
 | `move` | Moves the fine pointer to a target. |
@@ -194,7 +217,7 @@ Supported steps are:
 | `key` | Frames a key press and release. Modifiers are `shift`, `control`, `alt`, and `super`. |
 | `text` | Sends committed UTF-8 text to the focused editor. |
 | `resize` | Adopts a new logical `width`, `height`, and `scale`, then frames it. |
-| `publish` | Publishes a new typed host snapshot and frames the resulting update. |
+| `publish` | Admits a new typed host snapshot and frames; asynchronous scenarios use `settle` to await adoption. |
 
 A pointer target can use logical coordinates:
 

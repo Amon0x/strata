@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -10,6 +11,10 @@
 #include <vector>
 
 namespace strata::resource {
+
+namespace codec {
+class FrameDecoder;
+}
 
 enum class TextureSampling : std::uint32_t { nearest = 0U, linear = 1U };
 /** How a texture's bytes are stored: an encoded file the core decodes, or decoded RGBA8 rows. */
@@ -40,27 +45,26 @@ struct TextureResourceDescriptor final {
 
 class ImageStream;
 
-/** Immutable, surface-owned encoded image transferred to a host render adapter. */
-struct EncodedTextureResource final {
+/** Usable RGBA8 pixels, or an owner-controlled stream; packet encoding never invokes a decoder. */
+struct TextureResource final {
     /** Author-facing id referenced by render commands. */
     std::string logical_id;
     /** Surface-scoped id used by host resource and draw records. */
     std::string host_id;
     TextureSampling sampling = TextureSampling::linear;
-    ImageEncoding encoding = ImageEncoding::png;
     ImageDimensions dimensions;
-    std::vector<std::uint8_t> bytes;
-    /** An animation played from its bytes as it goes: the texture shows its frame now. */
+    std::vector<std::uint8_t> pixels;
+    /** The stream owns the current canvas instead of pixels. Both are serialized owner views. */
     std::shared_ptr<ImageStream> stream{};
 
     [[nodiscard]] TextureResourceDescriptor descriptor() const {
         if (logical_id.empty() || host_id.empty()) {
             throw std::invalid_argument(
-                "encoded texture requires non-empty logical and surface host ids"
+                "texture requires non-empty logical and surface host ids"
             );
         }
         return TextureResourceDescriptor{
-            logical_id, host_id, sampling, encoding, dimensions,
+            logical_id, host_id, sampling, ImageEncoding::rgba8, dimensions,
         };
     }
 };
@@ -141,9 +145,6 @@ inline constexpr std::uint64_t maximum_animation_decode_pixels =
 [[nodiscard]] std::optional<ImageFormat>
 sniff_image_format(std::span<const std::uint8_t> bytes) noexcept;
 
-/** The texture encoding that carries bytes of `format`. */
-[[nodiscard]] ImageEncoding image_encoding(ImageFormat format) noexcept;
-
 /**
  * Validates a PNG, JPEG, GIF or WebP header and reads the canvas dimensions, refusing a canvas
  * beyond the portable texture limits or maximum_image_decode_pixels, as inspect_png does. Reads
@@ -179,6 +180,32 @@ using ImageFrameConsumer =
  */
 [[nodiscard]] std::uint32_t stream_image(std::span<const std::uint8_t> bytes,
                                          const ImageFrameConsumer& consumer);
+
+/**
+ * Owns encoded bytes and an exclusive resumable decoder. A next call produces one composited
+ * frame, never an animation-length allocation; callers can transfer this cursor between worker
+ * slices. Neither the cursor nor its continuation may be accessed concurrently.
+ */
+class ImageDecoder final {
+  public:
+    explicit ImageDecoder(std::vector<std::uint8_t> bytes);
+    ~ImageDecoder();
+    ImageDecoder(ImageDecoder&&) noexcept;
+    ImageDecoder& operator=(ImageDecoder&&) noexcept;
+    ImageDecoder(const ImageDecoder&) = delete;
+    ImageDecoder& operator=(const ImageDecoder&) = delete;
+
+    [[nodiscard]] ImageDimensions dimensions() const noexcept;
+    [[nodiscard]] std::optional<ImageFrame> next();
+    [[nodiscard]] std::uint32_t loop_count() const noexcept;
+    void rewind();
+
+  private:
+    std::vector<std::uint8_t> bytes_;
+    std::unique_ptr<codec::FrameDecoder> decoder_;
+    std::size_t frames_ = 0U;
+    bool ended_ = false;
+};
 
 /**
  * Decodes the first frame of an encoded image as decode_png_rgba8 decodes a PNG: RGBA8 rows of

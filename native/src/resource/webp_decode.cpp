@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -921,28 +922,63 @@ struct Placement final {
     }
 };
 
-[[nodiscard]] DecodedImage decode_animation(const Layout& file, const std::uint32_t frame_limit,
-                                            const ImageFrameConsumer* const consumer) {
-    FrameSink sink(file.canvas, frame_limit, "WebP", consumer);
-    const std::size_t canvas_bytes =
-        static_cast<std::size_t>(file.canvas.width) * file.canvas.height * 4U;
+/** Resumes at the next RIFF frame with the preceding frame's post-disposal canvas. */
+struct WebpDecoder final : FrameDecoder {
+    explicit WebpDecoder(const std::span<const std::uint8_t> bytes)
+        : file(layout(bytes)), chunks(file.chunks) {
+        validate_canvas(file.canvas, "WebP");
+        if (file.animated)
+            disposed.resize(static_cast<std::size_t>(file.canvas.width) * file.canvas.height * 4U);
+    }
+
+    [[nodiscard]] ImageDimensions dimensions() const noexcept override { return file.canvas; }
+    [[nodiscard]] std::uint32_t loop_count() const noexcept override {
+        return file.animated ? plays : 1U;
+    }
+    [[nodiscard]] bool next(FrameSink& sink) override;
+    void rewind() override {
+        chunks = Chunks(file.chunks);
+        std::ranges::fill(disposed, std::uint8_t{0U});
+        previous = {};
+        previous_disposes = false;
+        previous_was_key = false;
+        have_animation_header = false;
+        first = true;
+        plays = 0U;
+        ended = false;
+    }
+
+    const Layout file;
+    Chunks chunks;
     // The canvas after the previous frame and its disposal: what the next frame draws over.
-    std::vector<std::uint8_t> disposed(canvas_bytes, 0U);
+    std::vector<std::uint8_t> disposed;
     Placement previous;
     bool previous_disposes = false;
     bool previous_was_key = false;
     bool have_animation_header = false;
     bool first = true;
-    std::uint32_t loop_count = 0U;
-    Chunks chunks(file.chunks);
+    std::uint32_t plays = 0U;
+    bool ended = false;
+};
+
+bool WebpDecoder::next(FrameSink& sink) {
+    if (ended)
+        return false;
+    if (!file.animated) {
+        sink.reserve_next();
+        bool has_alpha = false;
+        sink.push(decode_frame(file.still, file.canvas, has_alpha), 0U);
+        ended = true;
+        return true;
+    }
     Chunk chunk;
-    while (sink.wants_more() && chunks.next(chunk)) {
+    while (chunks.next(chunk)) {
         if (chunk.tag == "ANIM") {
             if (chunk.data.size() < 6U)
                 fail("ANIM is malformed");
             // The background colour is only a hint; libwebp's animation decoder starts from, and
             // disposes to, transparent black, as browsers do.
-            loop_count = le16(chunk.data.data() + 4U);
+            plays = le16(chunk.data.data() + 4U);
             have_animation_header = true;
             continue;
         }
@@ -985,8 +1021,8 @@ struct Placement final {
             previous.width == file.canvas.width && previous.height == file.canvas.height;
         const bool key = first || ((!has_alpha || !blend) && full) ||
                          (previous_disposes && (previous_full || previous_was_key));
-        std::vector<std::uint8_t> canvas =
-            key ? std::vector<std::uint8_t>(canvas_bytes, 0U) : disposed;
+        if (key)
+            std::ranges::fill(disposed, std::uint8_t{0U});
         for (std::uint32_t row = 0U; row < placement.height; ++row) {
             const std::uint32_t y = placement.y + row;
             for (std::uint32_t column = 0U; column < placement.width; ++column) {
@@ -994,15 +1030,14 @@ struct Placement final {
                 const std::uint8_t* const source =
                     pixels.data() + (static_cast<std::size_t>(row) * placement.width + column) * 4U;
                 std::uint8_t* const target =
-                    canvas.data() + (static_cast<std::size_t>(y) * file.canvas.width + x) * 4U;
+                    disposed.data() + (static_cast<std::size_t>(y) * file.canvas.width + x) * 4U;
                 if (!key && blend && !(previous_disposes && previous.contains(x, y)))
                     blend_over(target, source);
                 else
                     std::copy_n(source, 4U, target);
             }
         }
-        disposed = canvas;
-        sink.push(std::move(canvas), duration);
+        sink.push(disposed, duration);
         if (dispose) {
             clear_rect(disposed, file.canvas.width, placement.x, placement.y, placement.width,
                        placement.height);
@@ -1011,8 +1046,10 @@ struct Placement final {
         previous_disposes = dispose;
         previous_was_key = key;
         first = false;
+        return true;
     }
-    return sink.finish(loop_count);
+    ended = true;
+    return false;
 }
 
 } // namespace
@@ -1025,13 +1062,12 @@ ImageDimensions inspect_webp(const std::span<const std::uint8_t> bytes) {
 
 DecodedImage decode_webp(const std::span<const std::uint8_t> bytes, const std::uint32_t frame_limit,
                          const ImageFrameConsumer* const consumer) {
-    const Layout file = layout(bytes);
-    if (file.animated)
-        return decode_animation(file, frame_limit, consumer);
-    FrameSink sink(file.canvas, frame_limit, "WebP", consumer);
-    bool has_alpha = false;
-    sink.push(decode_frame(file.still, file.canvas, has_alpha), 0U);
-    return sink.finish(1U);
+    WebpDecoder decoder(bytes);
+    return decode_frames(decoder, frame_limit, "WebP", consumer);
+}
+
+std::unique_ptr<FrameDecoder> open_webp(const std::span<const std::uint8_t> bytes) {
+    return std::make_unique<WebpDecoder>(bytes);
 }
 
 } // namespace strata::resource::codec

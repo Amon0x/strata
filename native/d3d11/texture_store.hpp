@@ -25,8 +25,9 @@ class TextureStore final {
     /**
      * Runs the live art jobs (raster jobs with art layers) at `seconds`: they draw again every
      * frame, until a release, a new texture or a write over their region replaces them.
+     * Returns whether retained jobs still need presentation, including pending art compilation.
      */
-    void run_live(double seconds);
+    [[nodiscard]] bool run_live(double seconds);
     void bind(const host::DrawBatch& batch) const;
 
   private:

@@ -48,7 +48,7 @@ const RenderSubmission& RenderSubmissionCache::resolve(
         shape_atlas == nullptr || (!shape_atlas->reclamation_pending() &&
                                    shape_atlas_generation_ == shape_atlas->generation());
     if (submission_.has_value() && text_resources_match && shape_resources_match &&
-        !preparation_cache_->raster_deferred && environment_ == environment &&
+        !preparation_cache_->raster_deferred && !resources_changed() && environment_ == environment &&
         (commands_.shares_storage(commands) || commands_.commands() == commands.commands()) &&
         std::ranges::equal(texture_descriptors_, textures)) {
         ++hits_;
@@ -75,6 +75,37 @@ const RenderSubmission& RenderSubmissionCache::resolve(
         *preparation_cache_,
         *submission_
     );
+    std::vector<std::uint64_t> resources;
+    NodeReadinessSnapshot node_reads;
+    resources.reserve(preparation_cache_->resource_text.size());
+    node_reads.reserve(preparation_cache_->resource_text.size());
+    for (const std::size_t index : preparation_cache_->resource_text) {
+        const auto& observed = preparation_cache_->text[index]->readiness;
+        for (const auto& dependency : observed)
+            resources.push_back(dependency.resource.id());
+        const std::uint64_t identity =
+            std::get<TextRunRenderCommand>(commands.commands()[index]).node_identity;
+        if (identity != 0U) {
+            for (const auto& dependency : observed)
+                node_reads.push_back(NodeReadinessRead{identity, dependency});
+        }
+    }
+    glyph_atlas.retain_preparations(resources);
+    if (preparation_cache_->vector_glyphs != nullptr)
+        preparation_cache_->vector_glyphs->retain_preparations(resources);
+    if (node_reads.empty()) {
+        readiness_.reset();
+    } else {
+        std::ranges::sort(node_reads, {}, [](const NodeReadinessRead& read) {
+            return std::pair(read.node_identity, read.dependency.resource.id());
+        });
+        node_reads.erase(std::ranges::unique(node_reads, [](const NodeReadinessRead& left,
+                                                            const NodeReadinessRead& right) {
+                             return left.node_identity == right.node_identity &&
+                                    left.dependency == right.dependency;
+                         }).begin(), node_reads.end());
+        readiness_ = std::make_shared<const NodeReadinessSnapshot>(std::move(node_reads));
+    }
     commands_ = commands;
     environment_ = environment;
     texture_descriptors_.assign(textures.begin(), textures.end());
@@ -115,6 +146,10 @@ bool RenderSubmissionCache::raster_deferred() const noexcept {
     return preparation_cache_->raster_deferred;
 }
 
+bool RenderSubmissionCache::resources_changed() const noexcept {
+    return preparation_cache_->resources_changed();
+}
+
 void RenderSubmissionCache::set_group_raster_scales(std::vector<GroupRasterScale> scales) {
     if (preparation_cache_->group_raster_scales == scales)
         return;
@@ -133,6 +168,7 @@ void RenderSubmissionCache::set_turned_groups(std::vector<std::uint32_t> groups)
 
 void RenderSubmissionCache::clear() noexcept {
     commands_.clear();
+    readiness_.reset();
     environment_.reset();
     texture_descriptors_.clear();
     glyph_atlas_ = nullptr;

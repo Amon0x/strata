@@ -247,7 +247,8 @@ std::shared_ptr<const DescriptionNode>
 DescriptionNode::create(std::string type, std::optional<std::string> key, std::string source_path,
                         std::string state_scope, Properties properties,
                         std::shared_ptr<const DescriptionChildren> children,
-                        std::vector<DescriptionBehavior> behaviors) {
+                        std::vector<DescriptionBehavior> behaviors,
+                        std::vector<base::ReadinessRead> readiness) {
     validate_text(type, "description type");
     if (key.has_value())
         validate_text(*key, "description key");
@@ -285,6 +286,10 @@ DescriptionNode::create(std::string type, std::optional<std::string> key, std::s
         std::move(behaviors),
         {},
         std::nullopt,
+        {},
+        {},
+        {},
+        std::move(readiness),
     });
 }
 
@@ -347,8 +352,9 @@ std::uint32_t DirtySet::bits() const noexcept {
 RetainedNode::RetainedNode(const std::uint64_t identity,
                            std::shared_ptr<const DescriptionNode> description,
                            RetainedNode* const parent, const std::size_t source_index,
-                           std::string structural_path)
-    : identity_(identity), description_(std::move(description)), parent_(parent),
+                           std::string structural_path, PreparationReads& preparation_reads)
+    : identity_(identity), description_(std::move(description)),
+      preparation_reads_(&preparation_reads), parent_(parent),
       source_index_(source_index), structural_path_(std::move(structural_path)) {
     mark_dirty(DirtyReason::structure);
     mark_dirty(DirtyReason::properties);
@@ -532,7 +538,7 @@ bool RetainedNode::set_retained_bytes(std::string name, const std::span<const st
     return true;
 }
 
-void RetainedNode::add_cleanup(Cleanup cleanup) {
+void RetainedNode::add_cleanup(Cleanup cleanup) const {
     if (!cleanup)
         throw std::invalid_argument("retained cleanup callback must not be empty");
     cleanups_.push_back(std::move(cleanup));
@@ -553,7 +559,33 @@ bool ReconcileStats::changed() const noexcept {
     return created != 0U || updated != 0U || detached != 0U;
 }
 
-RetainedTree::RetainedTree(const std::uint64_t identity_seed) : next_identity_(identity_seed) {}
+void RetainedNode::observe_preparation(const base::Readiness& resource) const {
+    preparation_reads_->observe(identity_, resource);
+}
+
+std::shared_ptr<const TextMeasurement>& RetainedNode::text_measurement_cache() const noexcept {
+    return text_measurement_;
+}
+
+std::shared_ptr<LottieFrameState>& RetainedNode::lottie_frame_cache() const noexcept {
+    return lottie_frame_;
+}
+
+void RetainedNode::observe_preparations(
+    const std::span<const base::ReadinessRead> resources) const {
+    preparation_reads_->observe(identity_, resources);
+}
+
+NodeReadinessSnapshot RetainedNode::preparation_readiness() const {
+    return preparation_reads_->snapshot(identity_);
+}
+
+std::weak_ptr<const PreparationReads> RetainedNode::preparation_owner() const noexcept {
+    return preparation_reads_->weak_from_this();
+}
+
+RetainedTree::RetainedTree(const std::uint64_t identity_seed)
+    : preparation_reads_(std::make_shared<PreparationReads>()), next_identity_(identity_seed) {}
 RetainedTree::~RetainedTree() {
     clear();
 }
@@ -762,6 +794,8 @@ bool RetainedTree::set_retained_value(const std::uint64_t identity, const std::s
     RetainedNode* node = find_identity(identity);
     if (node == nullptr || !node->set_retained_value(name, std::move(value)))
         return false;
+    if (reason == DirtyReason::text || reason == DirtyReason::editor)
+        preparation_reads_->erase(identity, PreparationUse::input);
     persist_retained_value(*node, name, *node->retained_value(name));
     invalidate_description_snapshot();
     static_cast<void>(mark(identity, reason));
@@ -962,6 +996,7 @@ void RetainedTree::detach(std::unique_ptr<RetainedNode> node,
 
 bool RetainedTree::retire(RetainedNode& node, ReconcileStats* const stats) noexcept {
     node.lifecycle_ = RetainedLifecycle::detached;
+    preparation_reads_->erase(node.identity_);
     bool held = detach_hold_ == node.identity_;
     for (const auto& child : node.children_)
         held = retire(*child, stats) || held;
@@ -1098,6 +1133,7 @@ bool description_content_equal(const DescriptionNode& left, const DescriptionNod
         left.virtual_sequence_generation != right.virtual_sequence_generation ||
         left.virtual_item_members != right.virtual_item_members ||
         left.virtual_item_extents != right.virtual_item_extents ||
+        left.readiness != right.readiness ||
         left.properties.size() != right.properties.size() ||
         !behaviors_equal(left.behaviors, right.behaviors)) {
         return false;

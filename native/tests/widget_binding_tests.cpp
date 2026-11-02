@@ -1476,7 +1476,7 @@ overlay Main { root PopupOnlyMenu() }
         "popup-only Menu did not preserve exact trigger and row hit geometry"
     );
     check(
-        strata::ui::widget_hit_bounds(surface, *menu, *menu_layout) ==
+        strata::ui::widget_hit_bounds(*menu, *menu_layout, surface.layout(), surface.input()) ==
             trigger_layout->bounds,
         "Menu owner hit geometry did not follow its custom trigger"
     );

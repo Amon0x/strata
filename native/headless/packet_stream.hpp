@@ -3,7 +3,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <span>
+#include <variant>
 #include <vector>
+
+#include <strata/render_packet.hpp>
 
 namespace strata::headless {
 
@@ -14,7 +17,13 @@ struct RecordedPacket final {
     std::uint32_t framebuffer_height = 0U;
     double logical_width = 0.0;
     double logical_height = 0.0;
-    std::vector<std::uint8_t> bytes;
+    /** Live recording retains the producer's handle; disk replay owns its bounded input bytes. */
+    std::variant<EncodedRenderPacket, std::vector<std::uint8_t>> payload;
+    [[nodiscard]] std::span<const std::uint8_t> bytes() const noexcept {
+        if (const auto* encoded = std::get_if<EncodedRenderPacket>(&payload))
+            return encoded->bytes();
+        return std::get<std::vector<std::uint8_t>>(payload);
+    }
 };
 
 /**

@@ -1,13 +1,10 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -15,6 +12,7 @@
 #include <variant>
 #include <vector>
 
+#include "base/pending.hpp"
 #include "resource/runtime_images.hpp"
 
 namespace strata::resource::lottie {
@@ -486,38 +484,29 @@ struct Animation final {
 namespace strata::resource {
 
 /**
- * The surface's Lottie animations by resource id, each loaded through the host's resource loader
- * and parsed once, the first time anything asks for it. A failure is remembered too, so a missing
- * or malformed file is read only once. An animation's images, embedded or in files beside it, are
- * decoded as it loads and kept as runtime images (`lottie:<id>#<asset>`), which Surfaces upload as
- * they do the host's. Safe to call from any thread.
+ * The surface's animations, prepared once on demand. Serialized owner calls acquire resource
+ * bytes and publish complete immutable animations and textures; workers only parse/decode owned
+ * inputs. Failed sources are cached, but a failed image leaves only that layer blank. Destruction
+ * cancels queued preparation without waiting for running work. The task owner outlives the library.
  */
 class LottieLibrary final {
   public:
     using Loader = std::function<std::vector<std::uint8_t>(std::string_view id)>;
 
-    explicit LottieLibrary(Loader loader);
+    LottieLibrary(base::TaskOwner& tasks, Loader loader);
 
-    /** The parsed animation, or null when it could not be loaded or parsed. */
-    [[nodiscard]] std::shared_ptr<const lottie::Animation> find(std::string_view id) const;
-    /** Why `find` gave null for `id`, or empty when it did not (or was not asked). */
+    /** Pending until the document and all usable images have been prepared and adopted. */
+    [[nodiscard]] base::ResourceResult<std::shared_ptr<const lottie::Animation>>
+    find(std::string_view id) const;
+    /** A terminal source failure, or empty while pending/ready (or not yet requested). */
     [[nodiscard]] std::string error(std::string_view id) const;
     /** The images decoded so far, and a generation that advances whenever one is added. */
     [[nodiscard]] std::vector<std::shared_ptr<const RuntimeImage>> images() const;
     [[nodiscard]] std::uint64_t image_generation() const noexcept;
 
   private:
-    struct Entry final {
-        std::shared_ptr<const lottie::Animation> animation;
-        std::string error;
-    };
-    /** Decodes the animation's images and names each by its texture id (under the lock). */
-    void load_images(std::string_view id, lottie::Animation& animation) const;
-    Loader loader_;
-    mutable std::mutex mutex_;
-    mutable std::map<std::string, Entry, std::less<>> entries_;
-    mutable std::vector<std::shared_ptr<const RuntimeImage>> images_;
-    mutable std::atomic<std::uint64_t> image_generation_{0U};
+    struct State;
+    std::shared_ptr<State> state_;
 };
 
 } // namespace strata::resource

@@ -21,6 +21,7 @@ constexpr wchar_t window_class_name[] = L"StrataInstalledDesktopExample";
 struct WindowState final {
     std::unique_ptr<strata::desktop::ApplicationHost> host;
     std::string failure;
+    bool closing = false;
 
     void fail(const std::exception& error) noexcept {
         try {
@@ -47,6 +48,10 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
     if (app == nullptr)
         return DefWindowProcW(window, message, word, long_value);
     try {
+        if (app->closing && message == WM_CLOSE)
+            return 0;
+        if (app->closing && message != WM_DESTROY)
+            return DefWindowProcW(window, message, word, long_value);
         if (app->host != nullptr && message != WM_CLOSE && message != WM_DESTROY) {
             const std::optional<std::intptr_t> handled =
                 app->host->handle_window_message(message, word, long_value);
@@ -55,9 +60,10 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
         }
         switch (message) {
         case WM_CLOSE:
-            DestroyWindow(window);
+            app->closing = true;
             return 0;
         case WM_DESTROY:
+            app->closing = true;
             app->host.reset();
             PostQuitMessage(0);
             return 0;
@@ -151,8 +157,15 @@ int wmain(const int argument_count, wchar_t** const arguments) {
             }
             if (!running)
                 break;
+            if (app.closing) {
+                if (app.host == nullptr || app.host->close())
+                    DestroyWindow(window);
+                static_cast<void>(
+                    MsgWaitForMultipleObjectsEx(0U, nullptr, 16U, QS_ALLINPUT, MWMO_INPUTAVAILABLE));
+                continue;
+            }
             app.host->frame();
-            if (smoke) {
+            if (smoke && app.host->has_frame()) {
                 std::cout << "STRATA_DESKTOP_SAMPLE_READY\n";
                 break;
             }

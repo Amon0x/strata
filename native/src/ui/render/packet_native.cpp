@@ -1,11 +1,13 @@
 #include "ui/render/packet.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <bit>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <span>
 #include <stdexcept>
@@ -22,6 +24,67 @@
 #include "ui/text.hpp"
 
 namespace strata::ui {
+
+struct EncodedPacket::Storage final {
+    std::atomic_size_t references{1U};
+    std::vector<std::uint8_t> bytes;
+};
+
+EncodedPacket::EncodedPacket(const EncodedPacket& other) noexcept : storage_(other.storage_) {
+    retain(storage_);
+}
+
+EncodedPacket& EncodedPacket::operator=(const EncodedPacket& other) noexcept {
+    retain(other.storage_);
+    release(storage_);
+    storage_ = other.storage_;
+    return *this;
+}
+
+EncodedPacket::EncodedPacket(EncodedPacket&& other) noexcept
+    : storage_(std::exchange(other.storage_, nullptr)) {}
+
+EncodedPacket& EncodedPacket::operator=(EncodedPacket&& other) noexcept {
+    if (this != &other) {
+        release(storage_);
+        storage_ = std::exchange(other.storage_, nullptr);
+    }
+    return *this;
+}
+
+EncodedPacket::~EncodedPacket() { release(storage_); }
+
+void EncodedPacket::retain(Storage* const storage) noexcept {
+    if (storage != nullptr &&
+        storage->references.fetch_add(1U, std::memory_order_relaxed) ==
+            std::numeric_limits<std::size_t>::max())
+        std::terminate();
+}
+
+void EncodedPacket::release(Storage* const storage) noexcept {
+    if (storage != nullptr && storage->references.fetch_sub(1U, std::memory_order_acq_rel) == 1U)
+        delete storage;
+}
+
+std::span<const std::uint8_t> EncodedPacket::bytes(const Storage* const storage) noexcept {
+    return storage != nullptr ? std::span<const std::uint8_t>(storage->bytes)
+                              : std::span<const std::uint8_t>{};
+}
+
+std::span<const std::uint8_t> EncodedPacket::bytes() const noexcept { return bytes(storage_); }
+
+EncodedPacket EncodedPacket::recycle(EncodedPacket spare) {
+    if (spare.storage_ == nullptr ||
+        spare.storage_->references.load(std::memory_order_acquire) != 1U) {
+        EncodedPacket replacement;
+        replacement.storage_ = new Storage;
+        return replacement;
+    }
+    return spare;
+}
+
+std::vector<std::uint8_t>& EncodedPacket::writable_bytes() noexcept { return storage_->bytes; }
+
 namespace {
 
 using Bytes = std::vector<std::uint8_t>;
@@ -29,6 +92,10 @@ using Bytes = std::vector<std::uint8_t>;
 class Writer final {
   public:
     explicit Writer(const std::size_t reserve = 0U) {
+        bytes_.reserve(reserve);
+    }
+    Writer(Bytes bytes, const std::size_t reserve) : bytes_(std::move(bytes)) {
+        bytes_.clear();
         bytes_.reserve(reserve);
     }
 
@@ -413,21 +480,11 @@ bool compose_groups(const std::span<const RenderGroup> relative, std::vector<Ren
     return true;
 }
 
-constexpr std::size_t frame_index_offset = 20U;
 constexpr std::uint32_t geometry_payload_flag = 1U;
 constexpr std::uint32_t geometry_patch_flag = 2U;
 
-void write_frame_index(Bytes& packet, const std::uint64_t frame_index) {
-    if (packet.size() < frame_index_offset + sizeof(frame_index)) {
-        throw std::logic_error("cached host render packet header is truncated");
-    }
-    for (std::size_t byte = 0U; byte < sizeof(frame_index); ++byte) {
-        packet[frame_index_offset + byte] = static_cast<std::uint8_t>(frame_index >> (byte * 8U));
-    }
-}
-
 [[nodiscard]] Bytes
-encode_packet(const RenderSubmission& submission, const std::uint64_t frame_index,
+encode_packet(Bytes storage, const RenderSubmission& submission, const std::uint64_t frame_index,
               const std::uint64_t geometry_epoch, const std::span<const RenderGroup> groups,
               const std::span<const TextureUpload> texture_uploads,
               const std::span<const font::AtlasOperation> resources,
@@ -436,7 +493,7 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
               const VectorGlyphAppend* const vector_append = nullptr) {
     const bool appends_vectors = vector_glyphs != nullptr && vector_append != nullptr &&
                                  !vector_append->empty();
-    std::size_t reserve = 60U + groups.size() * 44U;
+    std::size_t reserve = 60U + groups.size() * (4U + 11U * 8U);
     if (include_geometry && !patch_geometry) {
         reserve += submission.vertex_bytes.size() +
                    submission.indices.size() * sizeof(std::uint32_t) +
@@ -456,7 +513,7 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
     for (const font::AtlasOperation& operation : resources) {
         reserve += operation.bytes.size() + operation.texture.size() + 40U;
     }
-    Writer output(reserve);
+    Writer output(std::move(storage), reserve);
     constexpr std::string_view magic = "STRATARP";
     output.raw(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(magic.data()),
                                              magic.size()));
@@ -550,17 +607,19 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
 
 } // namespace
 
-const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
+const EncodedPacket& HostRenderPacketCache::encode(
     const RenderCommandBuffer& commands, const std::uint64_t frame_index,
     SurfaceTextures* const textures, font::GlyphAtlas& glyph_atlas,
     const TextEngine* const text_engine, const double display_scale,
     const std::int64_t framebuffer_width, const std::int64_t framebuffer_height,
     const double logical_width, const double logical_height) {
+    if (terminal_release_prepared_)
+        throw std::logic_error("a released packet stream cannot encode another frame");
     // Cleared only after geometry and every resource operation are retained. This prevents the
     // settled fast path from masking a prior allocation/planning failure on the next frame.
     const bool retrying_incomplete_frame = frame_encoding_incomplete_;
     frame_encoding_incomplete_ = true;
-    const bool profile_cold_encode = geometry_packet_.empty();
+    const bool profile_cold_encode = !has_geometry_;
     const auto cold_encode_started = profile_cold_encode ? std::chrono::steady_clock::now()
                                                          : std::chrono::steady_clock::time_point{};
     // A scaled group rasterizes its masks and text at its density, so a zoomed group stays sharp
@@ -718,11 +777,11 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     telemetry_.topology_change_item = submission.topology_change_item;
     telemetry_.previous_item_count = submission.previous_item_count;
     telemetry_.item_count = submission.item_count;
-    const bool groups_changed = compose_groups(commands.groups(), groups_);
+    static_cast<void>(compose_groups(commands.groups(), groups_));
     const bool geometry_changed =
-        retrying_incomplete_frame || !submission_reused || geometry_packet_.empty();
+        retrying_incomplete_frame || !submission_reused || !has_geometry_;
     const bool patch_geometry = geometry_changed && !retrying_incomplete_frame &&
-                                !geometry_packet_.empty() && submission.patch_from_previous;
+                                has_geometry_ && submission.patch_from_previous;
     telemetry_.geometry_patched = patch_geometry;
     if (patch_geometry) {
         for (const SubmissionGeometryPatch& patch : submission.vertex_patches) {
@@ -738,69 +797,35 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
             throw std::overflow_error("render geometry epoch exhausted");
         }
         encoded_geometry_epoch = geometry_epoch_ + 1U;
-        const auto geometry_encode_started = std::chrono::steady_clock::now();
-        std::vector<std::uint8_t> next_geometry = encode_packet(
-            submission, frame_index, encoded_geometry_epoch, groups_, {}, {}, true, patch_geometry);
-        static_assert(noexcept(geometry_packet_.swap(next_geometry)));
-        geometry_packet_.swap(next_geometry);
-        telemetry_.geometry_packet_nanos =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
-                                                                 geometry_encode_started)
-                .count();
-        reuse_packet_.clear();
-        if (profile_cold_encode) {
-            telemetry_.cold_geometry_packet_nanos =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - submission_finished)
-                    .count();
-        }
     }
-    if (texture_uploads.empty() && resources.empty() && vector_append.empty()) {
-        if (geometry_changed) {
-            current_packet_ = &geometry_packet_;
-        } else {
-            if (reuse_packet_.empty() || groups_changed) {
-                reuse_packet_ = encode_packet(submission, frame_index, encoded_geometry_epoch,
-                                              groups_, {}, {}, false);
-            } else {
-                write_frame_index(reuse_packet_, frame_index);
-            }
-            current_packet_ = &reuse_packet_;
-        }
-    } else {
-        const auto resource_encode_started = profile_cold_encode
-                                                 ? std::chrono::steady_clock::now()
-                                                 : std::chrono::steady_clock::time_point{};
-        std::vector<std::uint8_t> next_resources = encode_packet(
-            submission, frame_index, encoded_geometry_epoch, groups_, texture_uploads, resources,
-            geometry_changed, patch_geometry, vector_glyphs_, &vector_append);
-        static_assert(noexcept(resource_packet_.swap(next_resources)));
-        resource_packet_.swap(next_resources);
-        current_packet_ = &resource_packet_;
-        if (profile_cold_encode) {
-            telemetry_.cold_resource_packet_nanos =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - resource_encode_started)
-                    .count();
-        }
-    }
+    const auto serialization_started = std::chrono::steady_clock::now();
+    EncodedPacket next = EncodedPacket::recycle(std::move(spare_packet_));
+    next.writable_bytes() = encode_packet(
+        std::move(next.writable_bytes()), submission, frame_index, encoded_geometry_epoch, groups_,
+        texture_uploads, resources, geometry_changed, patch_geometry, vector_glyphs_, &vector_append);
+    telemetry_.serialization_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - serialization_started).count();
+    if (profile_cold_encode)
+        telemetry_.cold_serialization_nanos = telemetry_.serialization_nanos;
     if (textures != nullptr)
         textures->commit();
-    // This is the final state transition. All retained packet/cache operations above are complete
-    // and the noexcept commit merely consumes operations now owned by the host packet.
+    // All allocation, including texture residency, succeeded before publication or cursor draining.
+    spare_packet_ = std::move(current_packet_);
+    current_packet_ = std::move(next);
     glyph_atlas.commit_operations();
     if (shape_atlas_ != nullptr)
         shape_atlas_->commit_operations();
     if (vector_glyphs_ != nullptr)
         vector_glyphs_->commit();
-    planned_draws_ = submission.planned_draws;
+    telemetry_.planned_draws = submission.planned_draws;
     skipped_draws_ = submission.skipped_draws;
     geometry_epoch_ = encoded_geometry_epoch;
+    has_geometry_ = true;
     frame_encoding_incomplete_ = false;
-    return *current_packet_;
+    return current_packet_;
 }
 
-const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
+const EncodedPacket& HostRenderPacketCache::encode(
     const RenderCommandBuffer& commands, const std::uint64_t frame_index,
     SurfaceTextures* const textures, font::GlyphAtlas& glyph_atlas,
     const TextEngine& text_engine, const double display_scale,
@@ -816,27 +841,26 @@ bool HostRenderPacketCache::refining() const noexcept {
 }
 
 bool HostRenderPacketCache::reuse(const std::uint64_t frame_index) {
-    if (frame_encoding_incomplete_ || geometry_packet_.empty() || refining())
+    if (frame_encoding_incomplete_ || !has_geometry_ || refining() ||
+        submission_cache_.resources_changed())
         return false;
-    if (reuse_packet_.empty()) {
-        RenderSubmission retained_submission;
-        retained_submission.planned_draws = planned_draws_;
-        retained_submission.skipped_draws = skipped_draws_;
-        reuse_packet_ = encode_packet(retained_submission, frame_index, geometry_epoch_, groups_,
-                                      {}, {}, false);
-    } else {
-        write_frame_index(reuse_packet_, frame_index);
-    }
-    current_packet_ = &reuse_packet_;
+    RenderSubmission retained_submission;
+    retained_submission.planned_draws = telemetry_.planned_draws;
+    retained_submission.skipped_draws = skipped_draws_;
+    EncodedPacket next = EncodedPacket::recycle(std::move(spare_packet_));
+    next.writable_bytes() = encode_packet(std::move(next.writable_bytes()), retained_submission,
+                                         frame_index, geometry_epoch_, groups_, {}, {}, false);
+    spare_packet_ = std::move(current_packet_);
+    current_packet_ = std::move(next);
     telemetry_.geometry_reused = true;
     return true;
 }
 
-const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release(
+const EncodedPacket& HostRenderPacketCache::prepare_resource_release(
     const std::uint64_t frame_index, font::GlyphAtlas& glyph_atlas,
     const std::span<const std::string> textures) {
     if (terminal_release_prepared_)
-        return resource_packet_;
+        return current_packet_;
 
     // Snapshotting and encoding are deliberately non-mutating. An allocation failure therefore
     // leaves live pages and pending releases retryable.
@@ -855,22 +879,19 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release
         throw std::overflow_error("render geometry epoch exhausted");
     }
     const std::uint64_t next_geometry_epoch = geometry_epoch_ + 1U;
-    std::vector<std::uint8_t> next_packet =
-        encode_packet(empty_submission, frame_index, next_geometry_epoch, {}, {}, operations);
+    EncodedPacket next = EncodedPacket::recycle(std::move(spare_packet_));
+    next.writable_bytes() = encode_packet(std::move(next.writable_bytes()), empty_submission,
+                                         frame_index, next_geometry_epoch, {}, {}, operations);
 
-    // std::vector::swap with the standard allocator is noexcept: install the complete packet and
-    // make every remaining cache transition before irreversibly draining the atlas.
-    static_assert(noexcept(resource_packet_.swap(next_packet)));
-    resource_packet_.swap(next_packet);
+    // Owning-reference moves and the remaining resource transitions cannot allocate.
+    spare_packet_ = {};
+    current_packet_ = std::move(next);
     geometry_epoch_ = next_geometry_epoch;
-    current_packet_ = &resource_packet_;
     terminal_release_prepared_ = true;
     submission_cache_.clear();
-    geometry_packet_.clear();
-    reuse_packet_.clear();
+    has_geometry_ = false;
     groups_.clear();
     telemetry_ = {};
-    planned_draws_ = 0U;
     skipped_draws_ = 0U;
     frame_encoding_incomplete_ = false;
     glyph_atlas.commit_terminal_release();
@@ -878,7 +899,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release
         shape_atlas_->commit_terminal_release();
     if (vector_glyphs_ != nullptr)
         vector_glyphs_->clear();
-    return resource_packet_;
+    return current_packet_;
 }
 
 void HostRenderPacketCache::set_shape_atlas(font::GlyphAtlas* const atlas) noexcept {
@@ -896,20 +917,18 @@ void HostRenderPacketCache::clear() noexcept {
     if (vector_glyphs_ != nullptr)
         vector_glyphs_->resend();
     submission_cache_.clear();
-    geometry_packet_.clear();
-    reuse_packet_.clear();
-    resource_packet_.clear();
+    current_packet_ = {};
+    spare_packet_ = {};
+    has_geometry_ = false;
     groups_.clear();
-    current_packet_ = &geometry_packet_;
     telemetry_ = {};
-    planned_draws_ = 0U;
     skipped_draws_ = 0U;
     frame_encoding_incomplete_ = false;
     terminal_release_prepared_ = false;
 }
 
-const std::vector<std::uint8_t>& HostRenderPacketCache::packet() const noexcept {
-    return *current_packet_;
+const EncodedPacket& HostRenderPacketCache::packet() const noexcept {
+    return current_packet_;
 }
 
 const HostRenderPacketTelemetry& HostRenderPacketCache::telemetry() const noexcept {

@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "ui/surface.hpp"
+#include "ui/input/presentation.hpp"
 
 namespace strata::ui {
 namespace {
@@ -26,9 +26,11 @@ using data::JsonValue;
 
 } // namespace
 
-WidgetInspectionScope::WidgetInspectionScope(const Surface& surface, const RetainedNode& node,
-                                             const LayoutRecord& layout)
-    : surface_(surface), node_(node), layout_(layout), hit_bounds_(layout.hit_bounds) {
+WidgetInspectionScope::WidgetInspectionScope(const RetainedNode& node, const LayoutRecord& layout,
+                                             const LayoutResult& layout_result,
+                                             const InputPresentation& input)
+    : node_(node), layout_(layout), layout_result_(layout_result), input_(input),
+      hit_bounds_(layout.hit_bounds) {
     const runtime::CollectionViewValue* view = nullptr;
     for (const auto& [name, property_value] : node.description().properties) {
         static_cast<void>(name);
@@ -53,8 +55,11 @@ WidgetInspectionScope::WidgetInspectionScope(const Surface& surface, const Retai
     });
 }
 
-const Surface& WidgetInspectionScope::surface() const noexcept {
-    return surface_;
+const LayoutResult& WidgetInspectionScope::layout_result() const noexcept {
+    return layout_result_;
+}
+const InputPresentation& WidgetInspectionScope::input() const noexcept {
+    return input_;
 }
 const RetainedNode& WidgetInspectionScope::node() const noexcept {
     return node_;
@@ -130,10 +135,10 @@ bool WidgetInspectionScope::has_derived_collection() const noexcept {
     return !derived_collection_.is_null();
 }
 
-Rect widget_hit_bounds(const Surface& surface, const RetainedNode& node,
-                       const LayoutRecord& layout) {
-    WidgetInspectionScope scope(surface, node, layout);
-    const WidgetLifecycle* lifecycle = surface.widget_registry().find(node.description().type);
+Rect widget_hit_bounds(const RetainedNode& node, const LayoutRecord& layout,
+                       const LayoutResult& layout_result, const InputPresentation& input) {
+    WidgetInspectionScope scope(node, layout, layout_result, input);
+    const WidgetLifecycle* lifecycle = input.widget_registry().find(node.description().type);
     if (lifecycle != nullptr && lifecycle->inspection.derive != nullptr) {
         lifecycle->inspection.derive(scope);
     }

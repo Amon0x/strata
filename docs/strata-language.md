@@ -779,6 +779,12 @@ resource id; it is loaded through the host's resource loader the first time any 
 parsed once, and each frame is evaluated from the parsed keyframes and drawn as vector paths, sharp
 at any size and scale.
 
+Interactive runtimes prepare documents, images, font-backed scenes and projected frames
+asynchronously. Resource reads remain serialized on the runtime owner; workers use owned bytes and
+immutable scenes. Nothing draws before the first prepared frame. A missing or malformed source is a
+cached terminal failure; an unreadable image leaves only its image layer blank. Deterministic runtimes
+perform the same preparation inline.
+
 ```strata
 Lottie(source: "assets/app/success.json", loop: false, onComplete: action("state.set", name: "done", value: true))
 Lottie(source: "assets/app/spinner.json", speed: 1.5, fit: "COVER", layout: { width: 48, height: 48 })
@@ -798,16 +804,19 @@ Slider(min: 0, max: 1, step: 0.005, bind: scrub)
   playback (if playing) goes on from it. A `Slider` bound to it scrubs; `onProgress`, which runs
   with `{ frame, progress }` each frame the playhead moves, setting it keeps the slider moving with
   the animation, as a video's seek bar does.
-- Text layers in a font the file names by family wait for the system's font names, read once on a
-  worker the first time any is needed, as a page's text waits for a web font, so the first frame
-  with text never stalls.
+- Scene preparation resolves named and fallback fonts and lays out every text document on its worker.
+  A ready scene includes its text; it does not publish an incomplete frame while an unobserved font
+  prefetch runs.
 - `segment: [first, last]` plays only those composition frames (`last` exclusive, as a layer's out
   point is); `first > last` plays them backwards. Changing the segment or `source` starts over.
 - `fit` (`CONTAIN` by default, `COVER`, `FILL`, `NONE`, `SCALE_DOWN`) and `alignX`/`alignY` place
   the composition in the content box, as `Image` places an image; it is clipped to that box.
 
-Playback runs on the widget's own clock, frame by frame, at the display's rate; reduced motion
-holds the current frame.
+Playback starts when its first frame is drawable and does not count preparation or paused time.
+Each widget has at most one active frame projection and one newest desired request. A completed frame
+remains visible while the next prepares; an older completed time is usable if the source and viewport
+still match. Source replacement discards incompatible frames. Fixed-time and reduced-motion content
+settle without advancing the clock. Closing cancels adoption without waiting for running preparation.
 
 Supported: the composition's size, rate and in/out points; shape, solid, null, image, text and
 precomposition layers with parenting, in/out points, start time, stretch and time remapping;

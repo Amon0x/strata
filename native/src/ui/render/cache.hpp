@@ -195,7 +195,7 @@ struct RenderEngine::Impl final {
             bool hovered = false;
             bool active = false;
             LayoutSnapshot layout;
-            std::vector<RenderCommand> commands;
+            RenderCommandView commands;
             bool local_overlay_rendered = false;
         };
 
@@ -208,7 +208,7 @@ struct RenderEngine::Impl final {
         bool hovered = false;
         bool active = false;
         LayoutSnapshot layout;
-        std::vector<RenderCommand> commands;
+        RenderCommandView commands;
         Point presentation_translation;
         std::optional<PresentationPlan> presentation = std::nullopt;
         std::optional<CompositionPlan> composition = std::nullopt;
@@ -271,7 +271,7 @@ struct RenderEngine::Impl final {
     std::uint64_t journal_generation = 0U;
 
     [[nodiscard]] bool base_matches(const RetainedTree& tree, const LayoutResult& layout,
-                                    const InputRouter& input, const MotionRuntime& motion,
+                                    const InputPresentation& input, const MotionRuntime& motion,
                                     const RenderGenerationToken& generations) const noexcept;
     /**
      * A frame whose every change is presentation (a transform, an opacity or a tone) on a group,
@@ -279,11 +279,11 @@ struct RenderEngine::Impl final {
      * and only those groups' table entries are computed again. Returns whether it applied.
      */
     [[nodiscard]] bool presentation_frame(const RetainedTree& tree, const LayoutResult& layout,
-                                          const InputRouter& input, const MotionRuntime& motion,
+                                          const InputPresentation& input, const MotionRuntime& motion,
                                           const WidgetRegistry& widgets,
                                           const RenderGenerationToken& generations);
 
-    void retain_base(const RetainedTree& tree, const LayoutResult& layout, const InputRouter& input,
+    void retain_base(const RetainedTree& tree, const LayoutResult& layout, const InputPresentation& input,
                      const RenderGenerationToken& generations, const RenderCommandBuffer& commands);
 
     [[nodiscard]] static bool

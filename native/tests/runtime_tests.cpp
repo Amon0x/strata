@@ -178,6 +178,21 @@ void test_host_snapshots_are_lazy_and_generation_invalidated() {
     check(store.adopt(data) && *store.resolve("app.title")->string() == "Updated" &&
               *store.resolve("data.count")->number() == 5000.0 && store.snapshots().size() == 3U,
           "independent host roots did not compose across immutable snapshot ids");
+
+    HostStore mirror;
+    static_cast<void>(mirror.adopt(HostSnapshot::from_json("initial", 12U, first_json)));
+    const auto before = store.snapshot();
+    const auto stale = HostSnapshot::from_json("initial", 11U, first_json);
+    check_throws<std::invalid_argument>(
+        [&] { static_cast<void>(store.adopt(stale, &mirror)); },
+        "a mirrored snapshot bypassed the second store's generation check");
+    check(store.snapshot() == before && store.generation("initial") == 10U &&
+              mirror.generation("initial") == 12U,
+          "failed mirrored adoption partially changed visible producer state");
+    const auto newer = HostSnapshot::from_json("initial", 13U, first_json);
+    check(store.adopt(newer, &mirror) && store.snapshot() == mirror.snapshot() &&
+              *store.resolve("app.title")->string() == "Initial",
+          "mirrored adoption did not update both stores and overlapping-root precedence");
 }
 
 void test_host_color_schema_conversion() {
@@ -1841,9 +1856,10 @@ void test_declared_widget_persistence_is_exact() {
 
     ui::RetainedTree tree;
     tree.configure_persistence(
-        [](const std::string_view type) {
-            return type == "TreeView" ? std::vector<std::string>{"strata.tree.expanded"}
-                                      : std::vector<std::string>{};
+        [&widgets](const std::string_view type) {
+            const ui::WidgetLifecycle* lifecycle = widgets.find(type);
+            return lifecycle != nullptr ? lifecycle->persistence.retained_fields
+                                        : std::vector<std::string>{};
         },
         [&durable](const std::string_view, const std::string_view key,
                    const std::string_view field) -> std::optional<runtime::Value> {

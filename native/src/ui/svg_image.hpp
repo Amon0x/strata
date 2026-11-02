@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vector>
-
 #include <strata/svg.hpp>
 
 #include "ui/render.hpp"
@@ -17,7 +15,7 @@ void validate_svg_image_geometry(const svg::Document& document);
  * exact same render-packet path and require no SVG-specific backend feature.
  */
 void append_svg_image(
-    std::vector<RenderCommand>& output,
+    RenderCommandBuffer& output,
     const svg::Document& document,
     Rect bounds,
     TextureRegion source,

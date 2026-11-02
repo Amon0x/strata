@@ -19,9 +19,17 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
-/** set_shader_cache_directory's directory, read by every thread that compiles. */
-std::mutex cache_mutex;
-std::filesystem::path cache_directory;
+/** Compilers copy configuration under the lock; admission survives detached work at process exit. */
+struct CacheSettings final {
+    std::mutex mutex;
+    std::filesystem::path directory;
+};
+
+[[nodiscard]] CacheSettings& cache_settings() {
+    static CacheSettings& settings = *new CacheSettings;
+    return settings;
+}
+
 /** Tells apart the partial files of threads writing the same entry at once. */
 std::atomic<std::uint64_t> partial_serial{0U};
 
@@ -35,8 +43,9 @@ std::atomic<std::uint64_t> partial_serial{0U};
                                                const unsigned int flags) {
     std::filesystem::path directory;
     {
-        const std::lock_guard lock(cache_mutex);
-        directory = cache_directory;
+        auto& settings = cache_settings();
+        const std::lock_guard lock(settings.mutex);
+        directory = settings.directory;
     }
     if (directory.empty())
         return {};
@@ -131,8 +140,9 @@ ComPtr<ID3DBlob> compile_hlsl(const std::string_view source, const char* const n
 }
 
 void set_shader_cache_directory(std::filesystem::path directory) {
-    const std::lock_guard lock(cache_mutex);
-    cache_directory = std::move(directory);
+    auto& settings = cache_settings();
+    const std::lock_guard lock(settings.mutex);
+    settings.directory = std::move(directory);
 }
 
 } // namespace strata::d3d11

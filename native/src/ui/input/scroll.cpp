@@ -34,16 +34,16 @@ namespace {
     return motion_input_eligible(node);
 }
 
-[[nodiscard]] runtime::Value scroll_value(const Point offset) {
+} // namespace
+
+runtime::Value InputPresentation::scroll_value(const Point offset) {
     return runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{
         {"x", runtime::Value(offset.x)},
         {"y", runtime::Value(offset.y)},
     });
 }
 
-} // namespace
-
-std::optional<Point> InputRouter::scroll_limits(const RetainedNode& node) const {
+std::optional<Point> InputPresentation::scroll_limits(const RetainedNode& node) const {
     const LayoutRecord* layout = layout_ != nullptr ? layout_->find(node.identity()) : nullptr;
     if (layout == nullptr || layout->kind != LayoutKind::scroll || !layout->viewport.has_value()) {
         return std::nullopt;
@@ -64,25 +64,34 @@ bool InputRouter::set_scroll_offset(
     Point offset,
     InputOperationResult& result
 ) {
-    const LayoutRecord* layout = layout_ != nullptr ? layout_->find(node.identity()) : nullptr;
-    const std::optional<Point> limits = scroll_limits(node);
+    const InputPresentation& presentation = *this;
+    RetainedTree* const target_tree = presentation.tree_;
+    const LayoutRecord* layout = presentation.layout_ != nullptr
+        ? presentation.layout_->find(node.identity()) : nullptr;
+    const std::optional<Point> limits = presentation.scroll_limits(node);
     if (layout == nullptr || !limits.has_value()) return false;
     offset.x = std::clamp(offset.x, 0.0, limits->x);
     offset.y = std::clamp(offset.y, 0.0, limits->y);
     if (offset.x == layout->scroll_offset.x && offset.y == layout->scroll_offset.y) return false;
-    const bool changed = tree_->set_arrangement_value(
+    const bool changed = target_tree->set_arrangement_value(
         node.identity(),
         "strata.scroll.offset",
         scroll_value(offset)
     );
     if (!changed) return false;
+    notify_scroll(node, offset, result);
+    return true;
+}
+
+void InputRouter::notify_scroll(const RetainedNode& node, const Point offset,
+                                 InputOperationResult& result) {
     if (frame_invalidator_ != nullptr) frame_invalidator_();
     if (scroll_mutation_observer_ != nullptr && node.description().key.has_value()) {
         scroll_mutation_observer_(*node.description().key);
     }
 
     const std::shared_ptr<const runtime::ActionValue> action = activation_action(node, "onScroll");
-    if (action == nullptr || action->action == nullptr) return true;
+    if (action == nullptr || action->action == nullptr) return;
     JsonValue event_json = object({
         {"action", canonical_action(*action, node)},
         {"offset", object({{"x", JsonValue(offset.x)}, {"y", JsonValue(offset.y)}})},
@@ -90,10 +99,9 @@ bool InputRouter::set_scroll_offset(
         {"type", JsonValue("scroll-changed")},
     });
     emit(std::move(event_json), action, node, scroll_value(offset), result);
-    return true;
 }
 
-std::optional<Point> InputRouter::scroll_offset(const std::string_view key) const noexcept {
+std::optional<Point> InputPresentation::scroll_offset(const std::string_view key) const noexcept {
     const RetainedNode* node = tree_ != nullptr ? tree_->find_key(key) : nullptr;
     const LayoutRecord* layout = node != nullptr && layout_ != nullptr
                                      ? layout_->find(node->identity())
@@ -103,7 +111,7 @@ std::optional<Point> InputRouter::scroll_offset(const std::string_view key) cons
                : std::nullopt;
 }
 
-std::optional<Point> InputRouter::constrained_scroll_target(
+std::optional<Point> InputPresentation::constrained_scroll_target(
     const std::string_view key,
     Point target
 ) const noexcept {
@@ -288,8 +296,17 @@ void InputRouter::reveal_node(
 
 void InputRouter::reveal_rect(const RetainedNode& node, Rect revealed, const double padding,
                               InputOperationResult& result) {
+    static_cast<void>(visit_reveal_offsets(
+        node, revealed, padding, [this, &result](const RetainedNode& scroller, const Point offset) {
+            return set_scroll_offset(scroller, offset, result);
+        }));
+}
+
+bool InputPresentation::visit_reveal_offsets(
+    const RetainedNode& node, Rect revealed, const double padding,
+    const std::function<bool(const RetainedNode&, Point)>& apply) const {
     if (layout_ == nullptr)
-        return;
+        return false;
     if (const LayoutRecord* record = layout_->find(node.identity()); record != nullptr)
         revealed = layout_->surface_bounds(*record, revealed);
     // Every scroller moves the target by its own change: an outer scroller brings into view where
@@ -308,6 +325,7 @@ void InputRouter::reveal_rect(const RetainedNode& node, Rect revealed, const dou
         return offset;
     };
     const LayoutRecord* child = layout_->find(node.identity());
+    bool changed = false;
     for (const RetainedNode* current = node.parent(); current != nullptr; current = current->parent()) {
         if (child == nullptr || child->coordinate_parent == 0U)
             break;
@@ -332,10 +350,12 @@ void InputRouter::reveal_rect(const RetainedNode& node, Rect revealed, const dou
                 limits->y
             ),
         };
-        if (!set_scroll_offset(*current, next, result)) continue;
+        if (!apply(*current, next)) continue;
+        changed = true;
         revealed.x -= next.x - scroll->scroll_offset.x;
         revealed.y -= next.y - scroll->scroll_offset.y;
     }
+    return changed;
 }
 
 bool InputRouter::scroll_focused_ancestor(

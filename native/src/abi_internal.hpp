@@ -28,6 +28,31 @@ struct strata_surface;
 
 namespace strata::abi_detail {
 
+/**
+ * Wake callbacks run outside EntryGuard, possibly while another thread owns the runtime.
+ * A thread-local chain refuses callback reentry without touching that owner's admission fields.
+ */
+class WakeCallbackScope final {
+  public:
+    explicit WakeCallbackScope(const void* runtime) noexcept
+        : runtime_(runtime), previous_(active_) { active_ = this; }
+    ~WakeCallbackScope() { active_ = previous_; }
+    WakeCallbackScope(const WakeCallbackScope&) = delete;
+    WakeCallbackScope& operator=(const WakeCallbackScope&) = delete;
+    [[nodiscard]] static bool contains(const void* runtime) noexcept {
+        for (const WakeCallbackScope* scope = active_; scope != nullptr; scope = scope->previous_) {
+            if (scope->runtime_ == runtime)
+                return true;
+        }
+        return false;
+    }
+
+  private:
+    const void* runtime_;
+    const WakeCallbackScope* previous_;
+    inline static thread_local const WakeCallbackScope* active_ = nullptr;
+};
+
 /** Allocates a process-unique resource-owner identity without ever publishing zero. */
 inline std::uint64_t allocate_runtime_resource_owner_id() {
     static std::atomic<std::uint64_t> next{1U};
@@ -65,11 +90,25 @@ struct strata_runtime final {
         const strata::base::HostAllocator allocator,
         const strata_clock clock,
         const strata_diagnostic_sink diagnostics,
-        const std::uint64_t stable_identity_seed
+        const std::uint64_t stable_identity_seed,
+        const strata_task_execution task_execution,
+        const strata_frame_wake_adapter frame_wake
     )
         : resource_owner_id(strata::abi_detail::allocate_runtime_resource_owner_id()),
           core(allocator, strata::core::Clock{clock.user_data, clock.now_nanoseconds},
-               strata::abi_detail::diagnostic_sink(diagnostics), stable_identity_seed),
+               strata::abi_detail::diagnostic_sink(diagnostics), stable_identity_seed,
+               task_execution == STRATA_TASK_EXECUTION_DETERMINISTIC
+                   ? strata::base::TaskExecution::deterministic
+                   : strata::base::TaskExecution::asynchronous,
+               frame_wake.wake != nullptr
+                   ? strata::base::TaskOwner::Wake([this, frame_wake] {
+                         const strata::abi_detail::WakeCallbackScope callback(this);
+                         const strata_status status = frame_wake.wake(frame_wake.user_data);
+                         if (status != STRATA_STATUS_OK)
+                             throw std::runtime_error("runtime frame wake adapter returned status " +
+                                                      std::to_string(status));
+                     })
+                   : strata::base::TaskOwner::Wake{}),
           host_services(
               [this] { return clipboard.has_value(); },
               [this] {
@@ -209,7 +248,6 @@ struct strata_surface final {
         std::vector<strata_surface_image_binding> owned_image_bindings,
         std::shared_ptr<const strata::ui::TextEngine> text_engine,
         std::shared_ptr<const strata::resource::SvgImageRegistry> svg_images,
-        std::vector<strata::resource::EncodedTextureResource> texture_resources,
         strata::ui::WidgetRegistry widget_registry,
         strata::ui::BehaviorRegistry behavior_registry
     )
@@ -219,7 +257,7 @@ struct strata_surface final {
           host_service_owner_token(host_resource_namespace + "/host-owner"),
           fonts(std::move(font_bindings)),
           image_bindings(std::move(owned_image_bindings)),
-          packets(host_resource_namespace, std::move(texture_resources)),
+          packets(host_resource_namespace, {}, host_runtime->core.tasks()),
           core(
               std::move(id),
               host_runtime->core.application(),

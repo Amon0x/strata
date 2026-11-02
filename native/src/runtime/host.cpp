@@ -429,24 +429,64 @@ std::uint64_t HostSnapshot::evaluated_scalar_count() const noexcept {
 
 HostStore::HostStore(Invalidation invalidation) : invalidation_(std::move(invalidation)) {}
 
-bool HostStore::adopt(std::shared_ptr<const HostSnapshot> snapshot) {
+/** All allocating work precedes publication, including a new producer's map node and order slot. */
+struct HostStore::Adoption final {
+    std::shared_ptr<const HostSnapshot> snapshot;
+    decltype(snapshots_)::iterator previous;
+    decltype(snapshots_)::node_type inserted;
+    std::string order_id;
+    bool unchanged = false;
+};
+
+HostStore::Adoption HostStore::prepare_adoption(std::shared_ptr<const HostSnapshot> snapshot) {
     if (snapshot == nullptr) throw std::invalid_argument("host snapshot must not be null");
-    if (snapshot_ == snapshot) return false;
-    const std::string id = snapshot->id();
-    const auto previous = snapshots_.find(id);
+    if (snapshot_ == snapshot) return Adoption{.unchanged = true};
+    const auto previous = snapshots_.find(snapshot->id());
     if (previous != snapshots_.end() &&
         snapshot->generation() <= previous->second->generation()) {
         throw std::invalid_argument(
             "host snapshot generations must increase strictly within one snapshot id"
         );
     }
-    snapshots_.insert_or_assign(id, snapshot);
-    std::erase(adoption_order_, id);
-    adoption_order_.push_back(id);
-    snapshot_ = std::move(snapshot);
+    Adoption adoption{.snapshot = std::move(snapshot), .previous = previous};
+    if (previous == snapshots_.end()) {
+        adoption.order_id = adoption.snapshot->id();
+        decltype(snapshots_) insertion;
+        insertion.emplace(adoption.order_id, adoption.snapshot);
+        adoption.inserted = insertion.extract(insertion.begin());
+        if (adoption_order_.size() == adoption_order_.capacity())
+            adoption_order_.reserve(std::max<std::size_t>(8U, adoption_order_.size() * 2U));
+    }
+    return adoption;
+}
+
+void HostStore::commit_adoption(Adoption&& adoption) noexcept {
+    if (adoption.unchanged) return;
+    if (!adoption.inserted.empty()) {
+        snapshots_.insert(std::move(adoption.inserted));
+        adoption_order_.push_back(std::move(adoption.order_id));
+    } else {
+        adoption.previous->second = adoption.snapshot;
+        const auto order = std::ranges::find(adoption_order_, adoption.snapshot->id());
+        std::rotate(order, order + 1, adoption_order_.end());
+    }
+    snapshot_ = std::move(adoption.snapshot);
     ++invalidation_count_;
-    if (invalidation_) invalidation_(snapshot_->generation());
-    return true;
+}
+
+bool HostStore::adopt(std::shared_ptr<const HostSnapshot> snapshot, HostStore* const mirror) {
+    Adoption adoption = prepare_adoption(snapshot);
+    std::optional<Adoption> mirrored;
+    if (mirror != nullptr && mirror != this)
+        mirrored.emplace(mirror->prepare_adoption(std::move(snapshot)));
+    const bool changed = !adoption.unchanged;
+    const bool mirror_changed = mirrored.has_value() && !mirrored->unchanged;
+    commit_adoption(std::move(adoption));
+    if (mirrored.has_value()) mirror->commit_adoption(std::move(*mirrored));
+    if (changed && invalidation_) invalidation_(snapshot_->generation());
+    if (mirror_changed && mirror->invalidation_)
+        mirror->invalidation_(mirror->snapshot_->generation());
+    return changed;
 }
 
 const std::shared_ptr<const HostSnapshot>& HostStore::snapshot() const noexcept { return snapshot_; }
