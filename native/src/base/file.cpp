@@ -16,7 +16,10 @@ std::optional<std::vector<std::uint8_t>> read_file(const std::filesystem::path& 
 #endif
     if (opened == nullptr)
         return std::nullopt;
-    const std::unique_ptr<std::FILE, decltype(&std::fclose)> file(opened, &std::fclose);
+    struct Close final {
+        void operator()(std::FILE* const handle) const noexcept { static_cast<void>(std::fclose(handle)); }
+    };
+    const std::unique_ptr<std::FILE, Close> file(opened);
     // Unbuffered, a read of the whole file goes straight to the system.
     static_cast<void>(std::setvbuf(file.get(), nullptr, _IONBF, 0U));
     std::error_code error;

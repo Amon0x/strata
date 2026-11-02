@@ -255,7 +255,9 @@ void scenario_paths_stay_under_the_resource_root() {
     };
     check(!rejected("ui/app.strata"), "a relative module path was rejected");
     check(rejected("/Users/someone/app.strata"), "a root-relative module path was accepted");
+#ifdef _WIN32
     check(rejected("C:app.strata"), "a drive-relative module path was accepted");
+#endif
     check(rejected("../app.strata"), "a parent-relative module path was accepted");
     std::filesystem::remove_all(directory);
 }

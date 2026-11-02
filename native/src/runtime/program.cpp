@@ -387,7 +387,9 @@ class ProgramLowering final {
         result.script = source.find("script").boolean().value_or(!source.find("parameter"));
         std::vector<ProgramFunctionParameter> parameters;
         if (const JsonValue listed = source.find("parameters"); listed) {
-            for (const JsonValue parameter : *listed.array()) {
+            // Named first: compilers without C++23's range-for lifetime rule end the temporary here.
+            const auto items = *listed.array();
+            for (const JsonValue parameter : items) {
                 if (const std::optional<std::string_view> plain = parameter.string()) {
                     parameters.push_back(ProgramFunctionParameter{Symbol::intern(*plain)});
                 } else {
@@ -472,7 +474,8 @@ class ProgramLowering final {
             resolve_function_variables();
             return;
         }
-        for (const JsonValue source : *functions.array()) {
+        const auto items = *functions.array();
+        for (const JsonValue source : items) {
             const std::string_view name = string_field(source, "name");
             const std::uint32_t index = function(source, Symbol::intern(name));
             if (!program_.function_indexes_.emplace(std::string(name), index).second)

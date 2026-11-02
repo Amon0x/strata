@@ -2078,9 +2078,9 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
     pressed = pressed_pointer_targets_.find(event.pointer_id);
     const bool gesture_claimed = pressed != pressed_pointer_targets_.end() &&
                                  pressed->second.gesture == GestureClaimState::claimed;
-    const std::optional<std::uint64_t> widget_claim_owner =
-        gesture_claimed && pressed->second.widget_lifecycle_claim ? pressed->second.gesture_owner
-                                                                  : std::nullopt;
+    std::optional<std::uint64_t> widget_claim_owner;
+    if (gesture_claimed && pressed->second.widget_lifecycle_claim)
+        widget_claim_owner = pressed->second.gesture_owner;
     if (route_pointer_drag(event, result)) {
         if (event.type == PointerEventType::release || event.type == PointerEventType::cancel) {
             finish_capture();

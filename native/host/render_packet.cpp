@@ -322,7 +322,7 @@ void validate_geometry(const RenderPacket& packet) {
         -std::numeric_limits<double>::infinity(),
         -std::numeric_limits<double>::infinity(),
     };
-    for (const auto [corner_x, corner_y] : {std::pair{x, y}, std::pair{x + width, y},
+    for (const auto& [corner_x, corner_y] : {std::pair{x, y}, std::pair{x + width, y},
                                             std::pair{x, y + height},
                                             std::pair{x + width, y + height}}) {
         const double placed_x = group.place_x(corner_x, corner_y);

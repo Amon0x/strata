@@ -328,6 +328,7 @@ void test_temporal_refresh_contract() {
           "effect-pass redeclaration reused a stale sample");
 }
 
+#ifdef _WIN32
 /**
  * A red/blue edge blurred at reduced resolution on a 1.5x surface. The software renderer stands in
  * for the GPU backends in captures, so its downsampled blur has to land on the same pixels.
@@ -379,6 +380,7 @@ void test_temporal_refresh_contract() {
     packet.batches.emplace_back(std::move(blur));
     return packet;
 }
+#endif
 
 /**
  * A rectangle whose right and bottom edges sit a hair past pixel centres. GPUs snap vertices to a

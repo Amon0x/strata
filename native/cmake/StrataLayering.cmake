@@ -9,6 +9,9 @@
 # The check runs at configure time and again as the strata.layering test, which re-reads the
 # sources so an include added after configuring is still caught.
 
+# In script mode nothing has set a policy version yet, and IN_LIST needs this one.
+cmake_policy(SET CMP0057 NEW)
+
 # Writes "<directory>=<allowed directory or <strata/header>>;..." lines for every layer directory.
 function(strata_write_layer_rules output)
     get_property(targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)

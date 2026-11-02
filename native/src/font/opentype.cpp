@@ -1521,7 +1521,7 @@ struct OpenTypeFont::Impl final {
             if (format == 1U) {
                 const auto delta = static_cast<std::int16_t>(reader.u16(subtable + 4U));
                 for (const std::uint16_t glyph : covered) {
-                    forms.try_emplace(glyph, static_cast<std::uint16_t>((glyph + delta) & 0xFFFFU));
+                    forms.try_emplace(glyph, static_cast<std::uint16_t>(glyph + delta));
                 }
             } else if (format == 2U) {
                 const std::uint16_t glyph_count = reader.u16(subtable + 4U);

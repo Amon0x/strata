@@ -443,9 +443,9 @@ bool compose_groups(const std::span<const RenderGroup> relative, std::vector<Ren
                                                local.shear_y,   local.scale_y,   local.translate_y,
                                                local.project_x, local.project_y, local.project_w};
                 std::array<double, 9U> h{};
-                for (int row = 0; row < 3; ++row) {
-                    for (int column = 0; column < 3; ++column) {
-                        for (int k = 0; k < 3; ++k)
+                for (std::size_t row = 0U; row < 3U; ++row) {
+                    for (std::size_t column = 0U; column < 3U; ++column) {
+                        for (std::size_t k = 0U; k < 3U; ++k)
                             h[row * 3 + column] += p[row * 3 + k] * l[k * 3 + column];
                     }
                 }

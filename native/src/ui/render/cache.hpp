@@ -421,8 +421,13 @@ struct RenderEngine::Impl final {
     }
 
     [[nodiscard]] static LayoutSnapshot
+    snapshot(const RetainedNode& node, const LayoutRecord& record, const LayoutResult& layout) {
+        return snapshot(node, record, layout, LayoutSnapshot{}, false);
+    }
+
+    [[nodiscard]] static LayoutSnapshot
     snapshot(const RetainedNode& node, const LayoutRecord& record, const LayoutResult& layout,
-             LayoutSnapshot previous = {}, const bool children_match = false) {
+             LayoutSnapshot previous, const bool children_match) {
         LayoutSnapshot result{
             record.measured_size,
             record.bounds,

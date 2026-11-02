@@ -62,22 +62,6 @@ using data::JsonValue;
     return role == "text" ? std::vector<std::string>{"focus"} : std::vector<std::string>{};
 }
 
-[[nodiscard]] JsonValue semantic_state(const std::optional<bool> selected = std::nullopt) {
-    return object({
-        {"checked", JsonValue{}},
-        {"dirty", JsonValue{}},
-        {"disabled", JsonValue(false)},
-        {"expanded", JsonValue{}},
-        {"invalid", JsonValue{}},
-        {"readOnly", JsonValue{}},
-        {"required", JsonValue{}},
-        {"selected", nullable_boolean(selected)},
-        {"touched", JsonValue{}},
-        {"value", JsonValue{}},
-        {"valueText", JsonValue{}},
-    });
-}
-
 } // namespace
 
 WidgetSemanticsScope::WidgetSemanticsScope(const RetainedNode& node, const CommandIndex* commands,

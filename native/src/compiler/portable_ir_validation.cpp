@@ -20,11 +20,6 @@ using JsonValue = data::JsonView;
 using JsonArray = data::JsonArrayView;
 using JsonObject = data::JsonObjectView;
 
-[[nodiscard]] std::string operator+(std::string left, const std::string_view right) {
-    left.append(right);
-    return left;
-}
-
 [[nodiscard]] std::string operator+(const char* const left, const std::string_view right) {
     std::string result(left);
     result.append(right);

@@ -180,8 +180,8 @@ void retain_drawn_pages(PreparationCache& cache, const std::span<const CommandRa
         shape.previously_changed = shape.changed;
         shape.changed = serial;
     }
-    constexpr std::uint64_t volatile_lifetime = 120U;
     std::erase_if(cache.volatile_shapes, [serial](const auto& entry) {
+        constexpr std::uint64_t volatile_lifetime = 120U;
         return entry.second.changed + volatile_lifetime < serial;
     });
     // The changed draws' masks are about to be replaced: only the unchanged draws' pages stay.
