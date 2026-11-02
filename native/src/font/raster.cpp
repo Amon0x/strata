@@ -39,11 +39,10 @@ class FreeTypeLibrary final {
         const FT_Error error = FT_Init_FreeType(&library_);
         if (error != FT_Err_Ok)
             freetype_error("initialization", error);
-        // LCD rendering filters its subpixel samples with FreeType's default five-tap filter, as
-        // ClearType and Skia do, so colour fringes stay below what reads as colour. A FreeType
-        // built without that filter answers Unimplemented_Feature and renders LCD bitmaps with its
-        // Harmony method instead, which needs none.
-        static_cast<void>(FT_Library_SetLcdFilter(library_, FT_LCD_FILTER_DEFAULT));
+        // LCD rendering filters its subpixel samples with FreeType's light three-tap filter, as
+        // Skia does: a stem a pixel wide reaches full strength, which the five-tap default blurs
+        // short of, and its colour fringes stay below what reads as colour.
+        static_cast<void>(FT_Library_SetLcdFilter(library_, FT_LCD_FILTER_LIGHT));
     }
 
     ~FreeTypeLibrary() {
@@ -250,14 +249,14 @@ void validate(const CoverageRasterConfig& config) {
  * hand-drawn black-and-white bitmaps for small sizes (EBDT/CBDT strikes); FreeType would hand those
  * back instead, unantialiased and in a format the atlas does not take.
  */
-[[nodiscard]] FT_Int32 load_flags(const GlyphHinting hinting) noexcept {
+[[nodiscard]] FT_Int32 load_flags(const GlyphHinting hinting, const bool subpixel) noexcept {
     switch (hinting) {
     case GlyphHinting::none:
         return FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING | FT_LOAD_NO_AUTOHINT;
     case GlyphHinting::light:
         return FT_LOAD_NO_BITMAP | FT_LOAD_TARGET_LIGHT;
     case GlyphHinting::full:
-        return FT_LOAD_NO_BITMAP | FT_LOAD_TARGET_NORMAL;
+        return FT_LOAD_NO_BITMAP | (subpixel ? FT_LOAD_TARGET_LCD : FT_LOAD_TARGET_NORMAL);
     }
     return FT_LOAD_NO_BITMAP;
 }
@@ -434,7 +433,12 @@ rasterize_glyph(const OpenTypeFont& font, const std::uint16_t glyph, const doubl
     };
     FT_Set_Transform(face, &matrix, &translation);
 
-    const FT_Error load_error = FT_Load_Glyph(face, glyph, load_flags(config.hinting));
+    // Where FreeType is the system's text stack, it hints as the system is set to.
+    const GlyphHinting hinting = config.system_rasterizer && config.hinting != GlyphHinting::none
+                                     ? system_text_settings().hinting
+                                     : config.hinting;
+    const FT_Error load_error =
+        FT_Load_Glyph(face, glyph, load_flags(hinting, order != SubpixelOrder::none));
     if (load_error != FT_Err_Ok)
         freetype_error("glyph loading", load_error);
     if (face->glyph->format == FT_GLYPH_FORMAT_OUTLINE) {

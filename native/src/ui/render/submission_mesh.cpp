@@ -476,10 +476,20 @@ void text_geometry(
     RenderSubmission& output,
     const PreparedDraw& draw,
     const PreparedText& text,
-    const std::array<float, draw_data_float_count>& data,
+    const std::array<float, draw_data_float_count>& draw_values,
     const std::uint32_t batch_base_vertex,
     const SubmissionContext& context
 ) {
+    std::array<float, draw_data_float_count> data = draw_values;
+    // A Surface on the system's text stack blends as that stack does, on either route, so text
+    // keeps its weight as it starts or stops zooming. Otherwise 0: the same on every machine.
+    if (context.text_system_rasterizer) {
+        const font::TextCoverageCurve curve = font::system_text_curve(
+            text.mode == font::GlyphRasterMode::subpixel ||
+            text.vector_subpixel != font::SubpixelOrder::none);
+        data[9] = curve.contrast;
+        data[10] = curve.gamma;
+    }
     Point origin = text.origin;
     if (draw.transform.axis_aligned_translation() && !text.glyphs.empty()) {
         // Glyphs land on the grid they were rasterized for: a zoomed group's is finer. A vector

@@ -166,6 +166,16 @@ class DirectWrite final {
 
 } // namespace
 
+const SystemTextSettings& system_text_settings() {
+    // Windows hosts read ClearType's settings themselves, and DirectWrite asks each font.
+    static const SystemTextSettings settings{GlyphHinting::light, SubpixelOrder::none};
+    return settings;
+}
+
+TextCoverageCurve system_text_curve(const bool) noexcept {
+    return TextCoverageCurve{1.1F, 2.35F};
+}
+
 std::optional<SystemGlyphMask>
 rasterize_system_glyph(const OpenTypeFont& font, const std::uint16_t glyph,
                        const double physical_pixel_size, const double phase_offset,
@@ -197,12 +207,11 @@ rasterize_system_glyph(const OpenTypeFont& font, const std::uint16_t glyph,
     if (FAILED(factory->CreateGlyphRunAnalysis(
             &run, italic_shear != 0.0 ? &shear : nullptr, mode, DWRITE_MEASURING_MODE_NATURAL,
             DWRITE_GRID_FIT_MODE_DEFAULT,
-            subpixel ? DWRITE_TEXT_ANTIALIAS_MODE_CLEARTYPE : DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+            DWRITE_TEXT_ANTIALIAS_MODE_CLEARTYPE,
             static_cast<FLOAT>(phase_offset), 0.0F, &analysis))) {
         return std::nullopt;
     }
-    const DWRITE_TEXTURE_TYPE texture =
-        subpixel ? DWRITE_TEXTURE_CLEARTYPE_3x1 : DWRITE_TEXTURE_ALIASED_1x1;
+    const DWRITE_TEXTURE_TYPE texture = DWRITE_TEXTURE_CLEARTYPE_3x1;
     RECT bounds{};
     if (FAILED(analysis->GetAlphaTextureBounds(texture, &bounds)))
         return std::nullopt;
@@ -214,13 +223,20 @@ rasterize_system_glyph(const OpenTypeFont& font, const std::uint16_t glyph,
     mask.left = bounds.left;
     mask.top = -bounds.top;
     const std::size_t pixels = static_cast<std::size_t>(mask.width) * mask.height;
-    std::vector<std::uint8_t> samples(pixels * (subpixel ? 3U : 1U));
+    std::vector<std::uint8_t> samples(pixels * 3U);
     if (FAILED(analysis->CreateAlphaTexture(texture, &bounds, samples.data(),
                                             static_cast<UINT32>(samples.size())))) {
         return std::nullopt;
     }
+    // Gray text is ClearType's three samples averaged, as Skia makes it: DirectWrite's own gray mode
+    // draws glyphs measurably differently from what the rest of the system shows.
     if (!subpixel) {
-        mask.bytes = std::move(samples);
+        mask.bytes.resize(pixels);
+        for (std::size_t pixel = 0U; pixel < pixels; ++pixel) {
+            const std::uint8_t* const source = samples.data() + pixel * 3U;
+            mask.bytes[pixel] = static_cast<std::uint8_t>(
+                (static_cast<unsigned>(source[0U]) + source[1U] + source[2U] + 1U) / 3U);
+        }
         return mask;
     }
     mask.bytes.resize(pixels * 4U);
@@ -240,7 +256,82 @@ rasterize_system_glyph(const OpenTypeFont& font, const std::uint16_t glyph,
 
 #else
 
+#include <dlfcn.h>
+
 namespace strata::font {
+namespace {
+
+/**
+ * The little of fontconfig this needs, found at run time so nothing is required to build or run: a
+ * machine without it draws as most Linux desktops are set to, with light hinting and gray text.
+ */
+[[nodiscard]] SystemTextSettings read_system_text_settings() {
+    SystemTextSettings result{GlyphHinting::light, SubpixelOrder::none};
+#if defined(__linux__)
+    void* const library = dlopen("libfontconfig.so.1", RTLD_LAZY | RTLD_LOCAL);
+    if (library == nullptr)
+        return result;
+    using Create = void* (*)();
+    using Substitute = int (*)(void*, void*, int);
+    using Default = void (*)(void*);
+    using Match = void* (*)(void*, void*, int*);
+    using GetInteger = int (*)(void*, const char*, int, int*);
+    using GetBool = int (*)(void*, const char*, int, int*);
+    using Destroy = void (*)(void*);
+    const auto create = reinterpret_cast<Create>(dlsym(library, "FcPatternCreate"));
+    const auto substitute = reinterpret_cast<Substitute>(dlsym(library, "FcConfigSubstitute"));
+    const auto defaults = reinterpret_cast<Default>(dlsym(library, "FcDefaultSubstitute"));
+    const auto match = reinterpret_cast<Match>(dlsym(library, "FcFontMatch"));
+    const auto integer = reinterpret_cast<GetInteger>(dlsym(library, "FcPatternGetInteger"));
+    const auto boolean = reinterpret_cast<GetBool>(dlsym(library, "FcPatternGetBool"));
+    const auto destroy = reinterpret_cast<Destroy>(dlsym(library, "FcPatternDestroy"));
+    if (create == nullptr || substitute == nullptr || defaults == nullptr || match == nullptr ||
+        integer == nullptr || boolean == nullptr || destroy == nullptr) {
+        return result;
+    }
+    void* const pattern = create();
+    if (pattern == nullptr)
+        return result;
+    constexpr int match_pattern = 0;
+    substitute(nullptr, pattern, match_pattern);
+    defaults(pattern);
+    int status = 0;
+    void* const matched = match(nullptr, pattern, &status);
+    void* const answer = matched != nullptr ? matched : pattern;
+    int hinting = 1;
+    int style = 1;
+    if (boolean(answer, "hinting", 0, &hinting) == 0 && hinting == 0) {
+        result.hinting = GlyphHinting::none;
+    } else if (integer(answer, "hintstyle", 0, &style) == 0) {
+        // FC_HINT_NONE, SLIGHT, MEDIUM, FULL.
+        result.hinting = style <= 0   ? GlyphHinting::none
+                         : style == 1 ? GlyphHinting::light
+                                      : GlyphHinting::full;
+    }
+    int subpixels = 0;
+    if (integer(answer, "rgba", 0, &subpixels) == 0) {
+        // FC_RGBA_UNKNOWN, RGB, BGR, VRGB, VBGR, NONE: rows of subpixels have no filter here.
+        result.subpixel_order = subpixels == 1   ? SubpixelOrder::rgb
+                                : subpixels == 2 ? SubpixelOrder::bgr
+                                                 : SubpixelOrder::none;
+    }
+    if (matched != nullptr)
+        destroy(matched);
+    destroy(pattern);
+#endif
+    return result;
+}
+
+} // namespace
+
+const SystemTextSettings& system_text_settings() {
+    static const SystemTextSettings settings = read_system_text_settings();
+    return settings;
+}
+
+TextCoverageCurve system_text_curve(const bool subpixel) noexcept {
+    return subpixel ? TextCoverageCurve{0.7F, 1.5F} : TextCoverageCurve{0.1F, 1.2F};
+}
 
 std::optional<SystemGlyphMask> rasterize_system_glyph(const OpenTypeFont&, std::uint16_t, double, double,
                                                       double, SubpixelOrder) {

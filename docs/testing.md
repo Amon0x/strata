@@ -40,10 +40,12 @@ Each harness's header comment gives its input format and a typical command line.
 
 ## Text against Chrome
 
-`python tools/text_compare.py` draws the same lines in nine fonts in Chrome and in Strata on this
-machine, on dark and light, and reports each line's ink and pixel difference. Small text in the desktop's
-system route should stay within about 1% of Chrome's ink and under 0.3 of 255 once aligned; run it
-after changing rasterization, shaping or `host::text_coverage`.
+`python tools/text_compare.py` draws the same lines in Chromium and in Strata on this machine, on dark
+and light, and reports each line's ink and pixel difference. Small text on the system route should
+stay within about 1% of Chromium's ink, and once aligned under 0.3 of 255 on Windows and about 1.5 on
+Linux, where Chromium's masks hold fewer bits. Run it after changing rasterization, shaping or
+`host::text_coverage`, and add `--antialiasing grayscale --chrome-flag=--disable-lcd-text` to check
+gray text, which has a curve of its own on Linux.
 
 ## Threads
 

@@ -259,11 +259,17 @@ decoded into the host's layer table without the copy `SurfacePacketStream::frame
 **Small text that sits still comes from the system's text stack; everything else is not
 rasterized.** With `STRATA_TEXT_RASTERIZER_SYSTEM` (what a desktop host sets), an upright run at its
 laid-out size up to 28 physical pixels draws masks from `font::rasterize_system_glyph`, through the
-atlas at four horizontal placements as Skia does: DirectWrite on Windows, which runs the font's own
-hinting instructions and ClearType's filter, so at these sizes text matches Chromium's almost pixel
-for pixel. If a frame ever needs more distinct glyphs than the atlas holds, that Surface goes back to
-outlines rather than failing the frame. Coverage then blends through `host::text_coverage`: Skia's
-model of an opposite backdrop, with its contrast and gamma read off Chromium's pixels.
+atlas at four horizontal placements as Skia does. On Windows that is DirectWrite, which runs the
+font's own hinting instructions and ClearType's filter, with gray text being ClearType's samples
+averaged. On Linux it is FreeType with its light LCD filter, hinting as fontconfig says. At these
+sizes text matches Chromium's on the same machine almost pixel for pixel; Linux stays about 1.5 of
+255 off because Chromium keeps its subpixel masks in 5-6-5 bits. If a frame ever needs more distinct
+glyphs than the atlas holds, that Surface goes back to outlines rather than failing the frame.
+
+Coverage then blends through `host::text_coverage`: Skia's model of an opposite backdrop, at a
+contrast and gamma read off Chromium's pixels on each platform (`font::system_text_curve`). They
+travel with each text draw, on both routes, so text keeps its weight as it starts or stops zooming; a
+portable Surface's draws carry none and use fixed values, so captures match on any machine.
 
 Everything else, on every platform, is not rasterized. A glyph with a TrueType outline is flattened once into straight
 segments in font units, its overlapping contours merged into one boundary and its segments grouped

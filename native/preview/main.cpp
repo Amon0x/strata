@@ -127,7 +127,9 @@ int main(const int argc, char** argv) {
         if (backend == "vulkan")
             return preview::run_vulkan(manifest, smoke, uncapped, std::move(screenshot));
 #endif
-        const auto& scenario = manifest.application;
+        // A window draws text as the rest of this desktop does.
+        headless::Scenario scenario = manifest.application;
+        scenario.text_rasterizer = "system";
         const Uint32 flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
                              (smoke ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN);
         std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(

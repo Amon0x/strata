@@ -272,6 +272,9 @@ rectangle_snapping(const strata_rectangle_snap_policy value) {
     case STRATA_TEXT_ANTIALIASING_SUBPIXEL_BGR:
         result.text_subpixel = strata::font::SubpixelOrder::bgr;
         break;
+    case STRATA_TEXT_ANTIALIASING_SYSTEM:
+        result.text_subpixel = strata::font::system_text_settings().subpixel_order;
+        break;
     default:
         throw std::invalid_argument("surface text antialiasing is not a STRATA_TEXT_ANTIALIASING_*");
     }

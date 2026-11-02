@@ -895,6 +895,9 @@ typedef struct strata_surface_environment {
  * cannot work (into a translucent layer, turned or scaled) stays gray. */
 #define STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB UINT32_C(1)
 #define STRATA_TEXT_ANTIALIASING_SUBPIXEL_BGR UINT32_C(2)
+/* As the system is set to, where the library can read that itself (fontconfig on Linux); gray
+ * elsewhere. A Windows host reads ClearType's settings itself and passes one of the above. */
+#define STRATA_TEXT_ANTIALIASING_SYSTEM UINT32_C(3)
 
 /*
  * Who rasterizes small text that sits still and upright. PORTABLE draws it the same on every machine,

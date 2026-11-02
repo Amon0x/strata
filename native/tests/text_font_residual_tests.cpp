@@ -2251,6 +2251,16 @@ void test_text_coverage_follows_the_ink() {
             previous = next;
         }
     }
+    // A draw's own curve: no contrast at a gamma of 1 is coverage as it is, and a gamma of 0 means
+    // the fixed values, which a portable Surface's draws carry so captures match on any machine.
+    check(std::abs(text_coverage(0.3F, 0.83F, 0.0F, 1.0F) - 0.3F) < 1.0e-4F,
+          "an identity curve changed coverage");
+    check(text_coverage(0.3F, 0.83F, 0.0F, 0.0F) == text_coverage(0.3F, 0.83F),
+          "a draw with no curve of its own did not use the fixed one");
+    const strata::font::TextCoverageCurve subpixel = strata::font::system_text_curve(true);
+    const strata::font::TextCoverageCurve gray = strata::font::system_text_curve(false);
+    check(subpixel.gamma >= 1.0F && gray.gamma >= 1.0F, "a system curve had no gamma of its own");
+    static_cast<void>(strata::font::system_text_settings());
     // As read off Chromium's pixels for these inks.
     check(text_coverage(0.25F, 0.83F) > 0.40F, "light ink's faint edges were not lifted");
     check(text_coverage(0.25F, 0.135F) < 0.25F, "dark ink's faint edges were not thinned");
@@ -2288,6 +2298,11 @@ void test_system_rasterizer(const std::filesystem::path& resources) {
     const auto moved = font::rasterize_subpixel(face, glyph, 13.0, 1.0, font::SubpixelOrder::rgb,
                                                 font::SubpixelPhase{1U, 4U}, system);
     check(moved.has_value() && moved->bytes != drawn->bytes, "a subpixel phase did not change the mask");
+#ifdef _WIN32
+    // Gray is ClearType's samples averaged, as Skia makes it: no colour, same outline.
+    check(gray->width == drawn->width && gray->height == drawn->height,
+          "gray and subpixel system masks covered different pixels");
+#endif
 }
 
 void test_system_font_catalog_generations(const std::filesystem::path& resources) {

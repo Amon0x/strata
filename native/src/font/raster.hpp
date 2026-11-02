@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "font/opentype.hpp"
+#include "font/system_raster.hpp"
 
 namespace strata::font {
 

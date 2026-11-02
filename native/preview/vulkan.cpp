@@ -160,8 +160,10 @@ strata_surface_environment environment(const headless::Scenario& scenario,
     result.input_capabilities = STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD |
         STRATA_SURFACE_INPUT_TOUCH | STRATA_SURFACE_INPUT_IME | STRATA_SURFACE_INPUT_CLIPBOARD;
     result.reduced_motion = scenario.reduced_motion ? 1U : 0U;
-    result.text_antialiasing = scenario.text_antialiasing == "subpixel"
-        ? STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB : STRATA_TEXT_ANTIALIASING_GRAYSCALE;
+    result.text_antialiasing = scenario.text_antialiasing == "subpixel" ? STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB
+        : scenario.text_antialiasing == "grayscale"                     ? STRATA_TEXT_ANTIALIASING_GRAYSCALE
+                                                                        : STRATA_TEXT_ANTIALIASING_SYSTEM;
+    result.text_rasterizer = STRATA_TEXT_RASTERIZER_SYSTEM;
     return result;
 }
 } // namespace

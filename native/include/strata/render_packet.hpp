@@ -336,21 +336,28 @@ constexpr void tone_color(float& red, float& green, float& blue, const float ton
 inline constexpr float text_coverage_contrast = 1.1F;
 inline constexpr float text_coverage_gamma = 2.35F;
 
-inline float text_coverage(const float coverage, const float ink) noexcept {
+/**
+ * `contrast` and `gamma` are the draw's own (draw data 9 and 10), a platform's text stack's where a
+ * Surface draws with it; a gamma of 0 means the values above, the same on every machine.
+ */
+inline float text_coverage(const float coverage, const float ink, const float contrast = 0.0F,
+                           const float gamma = 0.0F) noexcept {
+    const bool fixed = gamma <= 0.0F;
+    const float exponent = fixed ? text_coverage_gamma : gamma;
+    const float boost = fixed ? text_coverage_contrast : contrast;
     const float source = ink < 0.0F ? 0.0F : ink > 1.0F ? 1.0F : ink;
     const float backdrop = 1.0F - source;
-    const float linear_source = std::pow(source, text_coverage_gamma);
-    const float linear_backdrop = std::pow(backdrop, text_coverage_gamma);
+    const float linear_source = std::pow(source, exponent);
+    const float linear_backdrop = std::pow(backdrop, exponent);
     const float clamped = coverage < 0.0F ? 0.0F : coverage > 1.0F ? 1.0F : coverage;
-    const float lifted =
-        clamped + (1.0F - clamped) * clamped * text_coverage_contrast * linear_backdrop;
+    const float lifted = clamped + (1.0F - clamped) * clamped * boost * linear_backdrop;
     const float boosted = lifted > 1.0F ? 1.0F : lifted;
     // Ink and backdrop nearly alike: the blend below tends to this, and would only divide noise.
     const float apart = source - backdrop;
     if (std::abs(apart) < 1.0F / 32.0F)
         return boosted;
     const float blended = linear_source * boosted + (1.0F - boosted) * linear_backdrop;
-    return (std::pow(blended, 1.0F / text_coverage_gamma) - backdrop) / apart;
+    return (std::pow(blended, 1.0F / exponent) - backdrop) / apart;
 }
 
 /** The brightness gray coverage answers to. */

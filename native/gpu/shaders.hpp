@@ -208,14 +208,16 @@ float median3(float r, float g, float b) {
  * model of blending against the opposite backdrop, at a contrast and gamma read off how Chromium
  * draws the same masks.
  */
-float strataTextCoverage(float coverage, float ink) {
-    const float gamma = 2.35;
+float strataTextCoverage(float coverage, float ink, float2 curve) {
+    bool fixedCurve = curve.y <= 0.0;
+    float gamma = fixedCurve ? 2.35 : curve.y;
+    float contrast = fixedCurve ? 1.1 : curve.x;
     float source = saturate(ink);
     float backdrop = 1.0 - source;
     float linearSource = pow(source, gamma);
     float linearBackdrop = pow(backdrop, gamma);
     float clamped = saturate(coverage);
-    float boosted = saturate(clamped + (1.0 - clamped) * clamped * 1.1 * linearBackdrop);
+    float boosted = saturate(clamped + (1.0 - clamped) * clamped * contrast * linearBackdrop);
     float apart = source - backdrop;
     if (abs(apart) < 1.0 / 32.0)
         return boosted;
@@ -614,14 +616,15 @@ float4 strataShade(PixelInput input) {
         float inner = strataRoundedEdge(distance + width, footprint, softness);
         color.a *= saturate(outer - inner);
     } else if (mode == 4) {
-        color.a *= strataTextCoverage(strataGlyphTexel(input.uv).r, strataTextLightness(color.rgb));
+        color.a *= strataTextCoverage(strataGlyphTexel(input.uv).r, strataTextLightness(color.rgb),
+                                      input.drawData2.yz);
     } else if (mode == 12) {
         // Subpixel text: each colour channel's coverage weighted as gray coverage is; alpha
         // carries the strongest, and strataOutput hands the rest to the blend.
         float3 sampled = strataGlyphTexel(input.uv).rgb;
-        strataSubpixelCoverage = float3(strataTextCoverage(sampled.r, color.r),
-                                        strataTextCoverage(sampled.g, color.g),
-                                        strataTextCoverage(sampled.b, color.b));
+        strataSubpixelCoverage = float3(strataTextCoverage(sampled.r, color.r, input.drawData2.yz),
+                                        strataTextCoverage(sampled.g, color.g, input.drawData2.yz),
+                                        strataTextCoverage(sampled.b, color.b, input.drawData2.yz));
         color.a *= max(strataSubpixelCoverage.r,
                        max(strataSubpixelCoverage.g, strataSubpixelCoverage.b));
     } else if (mode == 13 || mode == 14) {
@@ -640,11 +643,12 @@ float4 strataShade(PixelInput input) {
         float4 coverage = vectorTextCoverage((uint)floor(record + 0.5), input.uv, glyphAlongX,
                                              glyphAlongY, subpixel);
         if (subpixel == 0u) {
-            color.a *= strataTextCoverage(coverage.a, strataTextLightness(color.rgb));
+            color.a *= strataTextCoverage(coverage.a, strataTextLightness(color.rgb),
+                                          input.drawData2.yz);
         } else {
-            strataSubpixelCoverage = float3(strataTextCoverage(coverage.r, color.r),
-                                            strataTextCoverage(coverage.g, color.g),
-                                            strataTextCoverage(coverage.b, color.b));
+            strataSubpixelCoverage = float3(strataTextCoverage(coverage.r, color.r, input.drawData2.yz),
+                                            strataTextCoverage(coverage.g, color.g, input.drawData2.yz),
+                                            strataTextCoverage(coverage.b, color.b, input.drawData2.yz));
             color.a *= max(strataSubpixelCoverage.r,
                            max(strataSubpixelCoverage.g, strataSubpixelCoverage.b));
         }

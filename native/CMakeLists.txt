@@ -85,6 +85,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(freetype)
 set_target_properties(freetype PROPERTIES POSITION_INDEPENDENT_CODE ON)
+# The LCD filter text is antialiased per subpixel with, as Skia and fontconfig expect of FreeType.
+target_compile_definitions(freetype PRIVATE FT_CONFIG_OPTION_SUBPIXEL_RENDERING)
 
 # The runtime allocates thousands of small objects a frame (descriptions, styles, layout and
 # render records); the Windows heap serves them slowly. strata_c serves its own C++ allocations
@@ -426,6 +428,8 @@ strata_add_layer(strata_resource DIRECTORIES resource PUBLIC strata_base Strata:
 strata_add_layer(strata_font DIRECTORIES font PUBLIC strata_resource Strata::vector_text PRIVATE freetype)
 if(WIN32)
     target_link_libraries(strata_font PRIVATE dwrite)
+else()
+    target_link_libraries(strata_font PRIVATE ${CMAKE_DL_LIBS})
 endif()
 strata_add_layer(
     strata_ui

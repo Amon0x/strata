@@ -277,6 +277,9 @@ struct ApplicationHost::Impl final {
         // Headless runs are gray unless the scenario asks for subpixel text (an RGB display).
         result.text_antialiasing = scenario.text_antialiasing == "subpixel"
                                        ? STRATA_TEXT_ANTIALIASING_SUBPIXEL_RGB
+                                   : scenario.text_antialiasing == "system" &&
+                                           scenario.text_rasterizer == "system"
+                                       ? STRATA_TEXT_ANTIALIASING_SYSTEM
                                        : STRATA_TEXT_ANTIALIASING_GRAYSCALE;
         result.text_rasterizer = scenario.text_rasterizer == "system" ? STRATA_TEXT_RASTERIZER_SYSTEM
                                                                       : STRATA_TEXT_RASTERIZER_PORTABLE;
