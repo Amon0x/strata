@@ -85,6 +85,8 @@ const PresentationStatics& presentation_statics(const RetainedNode& node) noexce
 }
 
 bool motion_presentation_group(const RetainedNode& node, const MotionRuntime& motion) noexcept {
+    if (node.offstage_root())
+        return true;
     const MotionComputedValues* computed = motion.computed_values(node.identity());
     // Only while the motion runs: a settled node bakes its final presentation back into its
     // commands, so it keeps visibility culling and costs nothing per frame.
@@ -284,6 +286,8 @@ double local_presentation_opacity(
     const RetainedNode& node,
     const MotionRuntime* const motion
 ) noexcept {
+    if (node.offstage_root())
+        return 0.0;
     const MotionComputedValues* computed =
         motion != nullptr ? motion->computed_values(node.identity()) : nullptr;
     const std::optional<double> base = presentation_statics(node).opacity;

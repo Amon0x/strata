@@ -358,6 +358,11 @@ Scenario load_scenario(const std::filesystem::path& path) {
     const std::int64_t version = integer(required(document, "version"), "version");
     if (version != 1)
         throw std::invalid_argument("headless scenario version must be 1");
+    if (const JsonValue* slicing = optional(document, "frameSlicing"); slicing != nullptr) {
+        if (slicing->boolean() == nullptr)
+            throw std::invalid_argument("frameSlicing must be a boolean");
+        result.frame_slicing = *slicing->boolean();
+    }
     if (const JsonValue* mode = optional(document, "taskExecution"); mode != nullptr) {
         const std::string execution = text(*mode, "taskExecution");
         if (execution == "asynchronous")

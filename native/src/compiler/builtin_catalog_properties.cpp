@@ -338,6 +338,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
                           .type = declared_type_reference("animation")},
         DeclaredParameter{.name = "contentTransitionMode",
                           .type = declared_type_reference("contentTransitionModeEnum")},
+        DeclaredParameter{.name = "contentHold", .type = declared_type_reference("number")},
         DeclaredParameter{.name = "stagger", .type = declared_type_reference("duration")},
         DeclaredParameter{.name = "hitShape", .type = declared_type_reference("shape"),
                           .nullable = true},

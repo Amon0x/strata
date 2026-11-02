@@ -167,6 +167,11 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "usage: strata_core_benchmark <resource-root> <scenario.json> [scale|cold|switch|first|scroll|hover] [stress-frames]\n");
             return 2;
         }
+        // Comparing worker counts: the pool's size is fixed when it starts.
+        if (std::string_view(argv[argc - 1]).starts_with("--workers=")) {
+            static_cast<void>(strata_limit_task_workers(
+                static_cast<std::uint32_t>(std::atoi(argv[--argc] + 10))));
+        }
         const std::filesystem::path resources = argv[1];
         const bool cold_only = argc > 3 && std::string_view(argv[3]) == "cold";
         // "switch" measures only tab switching, at length: what profiling the cold path wants.
@@ -182,7 +187,9 @@ int main(int argc, char** argv) {
         scenario.steps.clear();
 
         const auto cold_started = Clock::now();
-        ApplicationHost host(scenario, resources);
+        strata::headless::ApplicationHostOptions host_options;
+        host_options.frame_slicing = first_opens;
+        ApplicationHost host(scenario, resources, host_options);
         const auto constructed = Clock::now();
         Driver driver(host, scenario.width, scenario.height);
         // An application's first frame captures no trace; the benchmark turns capture on only
@@ -250,11 +257,37 @@ int main(int argc, char** argv) {
             for (const auto& [name, at] : targets) {
                 Phase opened{std::string("first ") + name, {}};
                 Phase after{std::string("after ") + name, {}};
-                driver.click(at, opened, after, 30);
-                std::printf("%-12s open %8.3f ms   next 30 frames max %8.3f ms, total %8.3f ms\n",
-                            name, opened.frames.front(), *std::ranges::max_element(after.frames),
+                const auto clicked = Clock::now();
+                driver.click(at, opened, after, 1);
+                // Real time until every preparation the page started has been adopted.
+                Phase worst{std::string("worst ") + name, {}};
+                // The UI thread's share: decoding a packet is the render thread's in a real host.
+                const auto ui_time = [](const Phase& phase) {
+                    const auto section = [&phase](const char* const path) {
+                        const auto found = phase.sections.find(path);
+                        return found != phase.sections.end() ? found->second : 0.0;
+                    };
+                    return (section("frame") + section("frame/packet-encode")) / 1'000'000.0;
+                };
+                const auto frame_after = [&] {
+                    Phase sample{worst.name, {driver.frame()}};
+                    attribute(host, sample);
+                    if (worst.frames.empty() || ui_time(sample) > ui_time(worst))
+                        worst = std::move(sample);
+                };
+                while (host.pending_tasks() != 0U &&
+                       Clock::now() - clicked < std::chrono::seconds(3))
+                    frame_after();
+                const double settled =
+                    std::chrono::duration<double, std::milli>(Clock::now() - clicked).count();
+                for (int index = 0; index < 30; ++index)
+                    frame_after();
+                std::printf("%-12s open %8.3f ms   settled %8.3f ms   after max %8.3f ms, total %8.3f ms\n",
+                            name, ui_time(opened), settled, ui_time(worst),
                             std::accumulate(after.frames.begin(), after.frames.end(), 0.0));
                 breakdown(opened);
+                std::printf("%s frame:\n", worst.name.c_str());
+                breakdown(worst);
             }
             host.close();
             return 0;

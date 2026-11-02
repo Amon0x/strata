@@ -6756,6 +6756,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "stagger",
           "nullable": false,
           "required": false,
@@ -10030,6 +10038,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "stagger",
           "nullable": false,
           "required": false,
@@ -10614,6 +10630,14 @@
           "nullable": false,
           "required": false,
           "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
         },
         {
           "aliases": [],
@@ -11476,6 +11500,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "stagger",
           "nullable": false,
           "required": false,
@@ -12038,6 +12070,14 @@
           "nullable": false,
           "required": false,
           "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
         },
         {
           "aliases": [],
@@ -12667,6 +12707,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "stagger",
           "nullable": false,
           "required": false,
@@ -13015,6 +13063,14 @@
           "nullable": false,
           "required": false,
           "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
         },
         {
           "aliases": [],
@@ -13594,6 +13650,14 @@
           "nullable": false,
           "required": false,
           "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
         },
         {
           "aliases": [],
@@ -14678,6 +14742,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "stagger",
           "nullable": false,
           "required": false,
@@ -14930,6 +15002,14 @@
           "nullable": false,
           "required": false,
           "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
         },
         {
           "aliases": [],
@@ -16357,6 +16437,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "stagger",
           "nullable": false,
           "required": false,
@@ -16994,6 +17082,14 @@
           "nullable": false,
           "required": false,
           "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
         },
         {
           "aliases": [],
@@ -17947,6 +18043,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "stagger",
           "nullable": false,
           "required": false,
@@ -18477,6 +18581,14 @@
           "nullable": false,
           "required": false,
           "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
         },
         {
           "aliases": [],
@@ -19550,6 +19662,14 @@
           "nullable": false,
           "required": false,
           "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
         },
         {
           "aliases": [],
@@ -20662,6 +20782,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "stagger",
           "nullable": false,
           "required": false,
@@ -21732,6 +21860,14 @@
           "nullable": false,
           "required": false,
           "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
         },
         {
           "aliases": [],
@@ -22838,6 +22974,14 @@
           "nullable": false,
           "required": false,
           "type": "\"OUT_IN\" | \"TOGETHER\""
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentHold",
+          "nullable": false,
+          "required": false,
+          "type": "number"
         },
         {
           "aliases": [],

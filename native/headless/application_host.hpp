@@ -71,6 +71,8 @@ struct ApplicationHostOptions final {
     std::function<void(const RecordedPacket&)> packet_observer;
     /** When absent, use the scenario's mode (deterministic unless explicitly configured). */
     std::optional<TaskExecution> task_execution;
+    /** A real window's budgeted frames; a frame may then finish in the next. */
+    bool frame_slicing = false;
     /** Optional window-event notification for interactive hosts; called from workers too. */
     std::function<void()> frame_wake;
 };
@@ -87,6 +89,8 @@ class ApplicationHost final {
 
     void frame(std::int64_t time_nanoseconds);
     /** Frames/adopts until engine preparation is complete, preserving packet consumption order. */
+    /** Preparation work the runtime has not adopted yet. */
+    [[nodiscard]] std::uint64_t pending_tasks() const;
     void settle(std::int64_t time_nanoseconds,
                 std::chrono::milliseconds timeout = std::chrono::seconds(5));
     void enqueue(std::span<const strata_input_event> events);

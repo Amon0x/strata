@@ -50,6 +50,20 @@ class PreparationReads final : public std::enable_shared_from_this<PreparationRe
     void invalidate(RetainedTree& tree, InputRouter* input = nullptr);
     [[nodiscard]] bool references(const base::Readiness& resource) const noexcept;
     [[nodiscard]] NodeReadinessSnapshot snapshot(std::uint64_t node) const;
+    /** Whether a node `selected` accepts still waits on preparation; visits only watching nodes. */
+    template <typename Selected>
+    [[nodiscard]] bool pending_for(const Selected& selected) const {
+        for (const Key& key : watched_) {
+            const auto found = reads_.find(key);
+            if (found == reads_.end() || !selected(key.first))
+                continue;
+            for (const base::ReadinessRead& read : found->second.resources) {
+                if (read.resource.status() == base::PendingStatus::pending)
+                    return true;
+            }
+        }
+        return false;
+    }
 
   private:
     friend class PreparationReadScope;

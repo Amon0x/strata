@@ -623,6 +623,129 @@ void Surface::set_preparation_readiness(const std::shared_ptr<const NodeReadines
         preparation_readiness_ = reads;
 }
 
+void Surface::note_packet_encoded() noexcept {
+    packet_frame_index_ = last_frame_.frame_index;
+    slicing_ = !rendered_once_ || !held_content_.empty();
+    slice_stage_ = SliceStage::none;
+    late_slice_used_ = false;
+}
+
+bool Surface::slice_frame(const SliceStage stage) {
+    if (!frame_slicing_ || application_.tasks().execution() != base::TaskExecution::asynchronous)
+        return false;
+    // A stage can cost 5-7 ms on a large page. Content nobody sees yet stops early enough for the
+    // next to fit 8 ms; any other frame stops only once it has spent most of them already.
+    const auto spent = std::chrono::steady_clock::now() - frame_clock_started_;
+    if (spent < (slicing_ ? std::chrono::microseconds(1500) : std::chrono::microseconds(5000)))
+        return false;
+    // Each stage stops once per packet, and one more when already late, so a busy page still draws.
+    if (stage <= slice_stage_) {
+        if (spent < std::chrono::microseconds(5000) || late_slice_used_)
+            return false;
+        late_slice_used_ = true;
+    }
+    frame_invalidated_ = true;
+    frame_sliced_ = stage != SliceStage::rendered;
+    slice_stage_ = stage;
+    return true;
+}
+
+bool Surface::defers_packet() {
+    return slice_frame(SliceStage::rendered);
+}
+
+bool Surface::retain_for_exit(const RetainedNode& node) {
+    // Content never shown has nothing to leave with.
+    if (node.content_hold() == ContentHold::incoming)
+        return false;
+    if (!motion_.should_retain_for_exit(node))
+        return false;
+    // Inline preparation is ready at once, so nothing needs holding and frames stay exact.
+    const auto hold = node.description().properties.find("$contentHold");
+    if (hold == node.description().properties.end() || node.parent() == nullptr ||
+        hold->second.value() == nullptr || hold->second.value()->number() == nullptr ||
+        application_.tasks().execution() != base::TaskExecution::asynchronous) {
+        return true;
+    }
+    const auto nanos = static_cast<std::int64_t>(
+        std::max(0.0, *hold->second.value()->number()) * 1'000'000.0);
+    const std::uint64_t coordinator = node.parent()->identity();
+    // A second change while held keeps the first deadline and what is on screen.
+    if (!held_content_.contains(coordinator)) {
+        slicing_ = true;
+        held_content_.emplace(coordinator,
+                              HeldContent{node.identity(), frame_started_nanos_ + nanos,
+                                          last_frame_.frame_index + 1U});
+    }
+    return true;
+}
+
+void Surface::apply_content_holds() {
+    for (auto held = held_content_.begin(); held != held_content_.end();) {
+        const RetainedNode* const coordinator = tree_.find_identity(held->first);
+        const RetainedNode* const outgoing = tree_.find_identity(held->second.outgoing);
+        if (coordinator == nullptr || outgoing == nullptr ||
+            outgoing->lifecycle() != RetainedLifecycle::exiting) {
+            // Back to what was showing: nothing is on its way.
+            if (outgoing != nullptr && outgoing->content_hold() != ContentHold::none)
+                tree_.set_content_hold(outgoing->identity(), ContentHold::none);
+            held = held_content_.erase(held);
+            continue;
+        }
+        if (outgoing->content_hold() != ContentHold::outgoing)
+            tree_.set_content_hold(outgoing->identity(), ContentHold::outgoing);
+        for (const auto& child : coordinator->children()) {
+            if (child->lifecycle() == RetainedLifecycle::attached &&
+                child->content_hold() != ContentHold::incoming) {
+                tree_.set_content_hold(child->identity(), ContentHold::incoming);
+            }
+        }
+        ++held;
+    }
+}
+
+bool Surface::incoming_pending(const RetainedNode& coordinator) const {
+    const auto incoming = [this, &coordinator](const std::uint64_t identity) {
+        const RetainedNode* node = tree_.find_identity(identity);
+        if (node == nullptr || node->content_hold() != ContentHold::incoming)
+            return false;
+        while (node != nullptr && node != &coordinator)
+            node = node->parent();
+        return node != nullptr;
+    };
+    if (tree_.preparation_reads()->pending_for(incoming))
+        return true;
+    return preparation_readiness_ != nullptr &&
+           std::ranges::any_of(*preparation_readiness_, [&incoming](const NodeReadinessRead& read) {
+               return read.dependency.resource.status() == base::PendingStatus::pending &&
+                      incoming(read.node_identity);
+           });
+}
+
+void Surface::release_content_holds(const std::int64_t frame_time_nanos) {
+    for (auto held = held_content_.begin(); held != held_content_.end();) {
+        const RetainedNode* const coordinator = tree_.find_identity(held->first);
+        if (coordinator != nullptr && frame_time_nanos < held->second.deadline_nanos &&
+            (packet_frame_index_ < held->second.held_frame || incoming_pending(*coordinator))) {
+            frame_invalidated_ = true;
+            ++held;
+            continue;
+        }
+        if (coordinator != nullptr) {
+            // Starts both transitions now, from the frame the content is whole.
+            std::vector<std::uint64_t> children;
+            for (const auto& child : coordinator->children()) {
+                if (child->content_hold() != ContentHold::none)
+                    children.push_back(child->identity());
+            }
+            for (const std::uint64_t child : children)
+                tree_.set_content_hold(child, ContentHold::none);
+        }
+        frame_invalidated_ = true;
+        held = held_content_.erase(held);
+    }
+}
+
 std::span<const NodeReadinessRead>
 Surface::preparation_readiness(const std::uint64_t node_identity) const noexcept {
     if (preparation_readiness_ == nullptr)
@@ -997,7 +1120,7 @@ bool Surface::idle() const {
                                    pending_lifecycle_input_.processed_events != 0U;
     // Expressions on their way (`animate`) want every frame until they arrive.
     return !frame_invalidated_ && tree_.root() != nullptr && input_.queued_event_count() == 0U &&
-           !descriptions_.reads_frame_time() &&
+           !descriptions_.reads_frame_time() && held_content_.empty() &&
            observe_dirty(last_frame_.frame_time_nanos, false, pending_lifecycle).settled();
 }
 
@@ -1199,8 +1322,9 @@ bool Surface::rebuild_tree(SurfaceFrame& frame, std::optional<std::string_view>&
         auto reconcile_profile = profiler_.section("reconcile");
         static_cast<void>(
             tree_.reconcile(std::move(materialized), [this](const RetainedNode& node) {
-                return motion_.should_retain_for_exit(node);
+                return retain_for_exit(node);
             }));
+        apply_content_holds();
     }
     // Preserve the old viewport across an application/theme rebuild, but refresh its rows against
     // the newly authored provider before input or layout can observe stale source indices.
@@ -1746,6 +1870,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     }
     pending_lazy_materializations_.clear();
     frame_started_nanos_ = frame_time_nanos;
+    frame_clock_started_ = std::chrono::steady_clock::now();
     frame_task_baseline_ = task_statistics_;
     auto profiler_frame = profiler_.frame(last_frame_.frame_index + 1U);
     status_feedback_.advance_frame(frame_time_nanos);
@@ -1757,6 +1882,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     if (svg_images_ != nullptr)
         svg_images_->sync_metadata();
     tree_.preparation_reads()->invalidate(tree_, &input_);
+    release_content_holds(frame_time_nanos);
     application_.async().advance(frame_time_nanos);
     const std::uint64_t wake_generation = application_.tasks().wake_generation();
     if (wake_generation != observed_wake_generation_) {
@@ -1924,6 +2050,8 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         record_profiler_counters(next);
         input_profile.close();
     }
+    if (next.operations.rebuilds != 0U && slice_frame(SliceStage::built))
+        return complete_frame(std::move(next));
 
     // Layout to a fixed point: layout_tree converges virtual realization itself.
     layout();
@@ -1942,6 +2070,8 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         if (input_rebuilt) {
             frame_phases_.push_back(FramePhase::build);
             prepare_input(next, InputPrepareReason::input_rebuild, input_restore_focus);
+            if (slice_frame(SliceStage::built))
+                return complete_frame(std::move(next));
         }
         // Queued pointer/key processing can change interaction channels after the first layout
         // pass. Discover those targets at the current timestamp without advancing active
@@ -1978,6 +2108,8 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         laid_out_generation = tree_.layout_invalidation_generation();
         post_layout();
     }
+    if (slice_frame(SliceStage::laid_out))
+        return complete_frame(std::move(next));
     const LayoutResult& laid_out = layout_engine_.result();
     frame_phases_.push_back(FramePhase::semantics);
     next.operations.injected_events = next.lifecycle_input.injected_events;
@@ -1989,6 +2121,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         record_profiler_counters(next);
     }
     frame_phases_.push_back(FramePhase::render);
+    rendered_once_ = true;
     {
         auto render_profile = profiler_.section("render");
         next.operations.render =
@@ -2058,8 +2191,10 @@ SurfaceFrame Surface::complete_frame(SurfaceFrame next) {
     input_.settle_pointer_geometry();
     if (text_engine_ != nullptr)
         text_engine_->retain_preparations();
-    tree_.clear_dirty();
-    frame_invalidated_ = false;
+    if (!std::exchange(frame_sliced_, false)) {
+        tree_.clear_dirty();
+        frame_invalidated_ = false;
+    }
     const std::size_t publication_count =
         std::max(next.lifecycle_input.events.size(), next.lifecycle_input.action_outcomes.size());
     constexpr std::size_t maximum_published_events = 512U;

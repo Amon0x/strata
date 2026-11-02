@@ -1917,6 +1917,11 @@ expanded target, collapsed extent, clipping, and immediate descendant input/focu
 container size coordinate. Replacement defaults to `contentTransitionMode: "OUT_IN"`, which uses
 the authored duration as one sequence and prevents outgoing/incoming text from sharing a baseline.
 Use `"TOGETHER"` explicitly for image/surface crossfades where simultaneous presentation is wanted.
+`contentHold: 200` keeps showing the outgoing child for up to that many milliseconds while the
+incoming one prepares offstage: laid out and painted so its fonts, glyphs and images load, drawing
+nothing and taking no input. The transition starts when everything it needs is ready, or at the
+bound, so a page appears whole instead of with its text missing. The outgoing child takes no input
+during the hold. A runtime with inline (deterministic) preparation never holds.
 Fixed/fill/percentage axes remain owned by layout and cannot be silently
 overridden by content-size motion. All named `policy` values resolve through the effective theme's
 `UiMotionPolicy`; reduced motion reaches the same final style and layout in the same frame.

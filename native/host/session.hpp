@@ -57,6 +57,8 @@ struct SessionOptions final {
     TaskExecution task_execution = TaskExecution::asynchronous;
     /** Thread-safe notification only; callback storage is owned by this Session. */
     std::function<void()> frame_wake;
+    /** For a host framing continuously: a frame may finish in the next (Surface::set_frame_slicing). */
+    bool frame_slicing = false;
 };
 
 /**

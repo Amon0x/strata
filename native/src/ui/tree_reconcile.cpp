@@ -228,6 +228,8 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
         existing = std::unique_ptr<RetainedNode>(new RetainedNode(
             next_identity(), description, parent, source_index, std::move(structural_path),
             *preparation_reads_));
+        if (parent != nullptr)
+            existing->content_hold_ = parent->content_hold_;
         hydrate_persistence(*existing);
         ++stats.created;
         bump_dirty_generation(DirtyReason::structure);
@@ -717,6 +719,19 @@ ReconcileStats RetainedTree::realize_children(
     }
     stats.generation = generation_;
     return stats;
+}
+
+void RetainedTree::set_content_hold(const std::uint64_t identity, const ContentHold hold) {
+    if (RetainedNode* const node = find_identity(identity); node != nullptr)
+        mark_subtree_hold(*node, hold);
+}
+
+void RetainedTree::mark_subtree_hold(RetainedNode& node, const ContentHold hold) {
+    node.content_hold_ = hold;
+    static_cast<void>(mark(node.identity(), DirtyReason::animation));
+    static_cast<void>(mark(node.identity(), DirtyReason::input));
+    for (auto& child : node.children_)
+        mark_subtree_hold(*child, hold);
 }
 
 void RetainedTree::mark_subtree_lifecycle(RetainedNode& node,

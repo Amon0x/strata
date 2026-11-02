@@ -130,13 +130,36 @@ bool TaskCancellation::cancelled() const noexcept {
            !owner->open.load(std::memory_order_acquire);
 }
 
+namespace {
+
+std::atomic_size_t shared_worker_limit{0U};
+std::atomic_bool shared_pool_started{false};
+
+} // namespace
+
+std::size_t TaskPool::default_workers() noexcept {
+    const std::size_t cores = std::thread::hardware_concurrency();
+    return std::max<std::size_t>(3U, cores / 2U > 0U ? cores / 2U - 1U : 0U);
+}
+
+bool TaskPool::limit_shared_workers(const std::size_t limit) noexcept {
+    if (limit == 0U || shared_pool_started.load(std::memory_order_acquire))
+        return false;
+    shared_worker_limit.store(limit, std::memory_order_release);
+    return true;
+}
+
 TaskPool& TaskPool::shared() {
-    static TaskPool* const pool = new TaskPool();
+    static TaskPool* const pool = [] {
+        shared_pool_started.store(true, std::memory_order_release);
+        const std::size_t limit = shared_worker_limit.load(std::memory_order_acquire);
+        return new TaskPool(limit != 0U ? std::min(limit, default_workers()) : default_workers());
+    }();
     return *pool;
 }
 
 TaskPool::TaskPool(const std::size_t worker_count) {
-    if (worker_count == 0U || worker_count > helpers)
+    if (worker_count == 0U)
         throw std::invalid_argument("task pool worker count is outside the supported range");
     threads_.reserve(worker_count);
     for (std::size_t index = 0U; index < worker_count; ++index)
@@ -193,7 +216,8 @@ void TaskPool::run(const std::size_t count, const std::function<void()>& lane) {
             first_batch_ = &batch;
         last_batch_ = &batch;
     }
-    work_.notify_all();
+    for (std::size_t helper = 0U; helper < used; ++helper)
+        work_.notify_one();
     try {
         lane();
     } catch (...) {
@@ -511,7 +535,8 @@ void parallel_for(const std::size_t count, const std::size_t parallel_threshold,
     };
     const std::size_t available =
         std::max<std::size_t>(1U, static_cast<std::size_t>(std::thread::hardware_concurrency()));
-    TaskPool::shared().run(std::min({TaskPool::helpers, available - 1U, count - 1U}), lane);
+    TaskPool& pool = TaskPool::shared();
+    pool.run(std::min({pool.workers(), available - 1U, count - 1U}), lane);
 }
 
 } // namespace strata::base

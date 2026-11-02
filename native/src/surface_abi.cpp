@@ -830,6 +830,21 @@ strata_surface_enqueue_input(strata_surface* const surface, const strata_input_e
     });
 }
 
+strata_result strata_surface_set_frame_slicing(strata_surface* const surface,
+                                               const uint32_t enabled) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
+    if (surface == nullptr)
+        return invalid_argument();
+    if (surface->packets.release_prepared())
+        return terminal_surface_failure(*surface);
+    return surface_call(surface, AbiCall{"Frame slicing"}, [&] {
+        surface->core.set_frame_slicing(enabled != 0U);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
+    });
+}
+
 strata_result strata_surface_cancel_interactions(strata_surface* const surface) noexcept {
     const EntryGuard entry(surface, Reentry::rejected);
     if (entry.refused())

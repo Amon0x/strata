@@ -830,7 +830,9 @@ base::Readiness GlyphAtlas::prepare_missing(std::vector<PreparationRequest>& req
             const std::size_t available =
                 std::max<std::size_t>(1U, std::thread::hardware_concurrency());
             const std::size_t lanes =
-                inputs.size() < 8U ? 1U : std::min({std::size_t{4U}, available, inputs.size()});
+                inputs.size() < 8U
+                    ? 1U
+                    : std::min({base::TaskPool::shared().workers() + 1U, available, inputs.size()});
             const std::size_t run = std::max<std::size_t>(1U, inputs.size() / (lanes * 4U));
             std::atomic_size_t cursor{0U};
             const auto raster_lane = [&] {

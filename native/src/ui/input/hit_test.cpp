@@ -1001,7 +1001,8 @@ void InputPresentation::prepare_pointer_geometry() const {
                               const MotionTransform inherited, const double inherited_opacity,
                               const std::optional<Rect> traversal_clip, const Anchored anchored,
                               const ClipChain& clips) -> void {
-        if (node.lifecycle() == RetainedLifecycle::exiting)
+        if (node.lifecycle() == RetainedLifecycle::exiting ||
+            node.content_hold() == ContentHold::incoming)
             return;
         const LayoutRecord* record = layout_->find(node.identity());
         if (record == nullptr)

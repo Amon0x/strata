@@ -53,8 +53,11 @@ const EncodedPacket& SurfacePackets::encode(Surface& surface, const SurfaceFrame
         textures_.sync(images, registry);
     const bool settled = frame.operations.render.nodes_visited == 0U &&
                          frame.operations.render.commands_emitted == 0U && !textures_changed;
-    unchanged_ = settled && cache_.reuse(frame.frame_index);
+    const bool deferred = (!settled || encode_pending_) && surface.defers_packet();
+    unchanged_ = ((settled && !encode_pending_) || deferred) && cache_.reuse(frame.frame_index);
+    encode_pending_ = deferred && unchanged_;
     if (!unchanged_) {
+        surface.note_packet_encoded();
         // Text left at an earlier scale, or a zoom settling, is drawn exact by a later frame.
         struct Refine final {
             Surface& surface;

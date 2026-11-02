@@ -1761,6 +1761,10 @@ class Surface final {
         require(strata_surface_cancel_interactions(value_), "surface interaction cancellation");
     }
 
+    void set_frame_slicing(const bool enabled) {
+        require(strata_surface_set_frame_slicing(value_, enabled ? 1U : 0U), "surface frame slicing");
+    }
+
     /** Replays retained entry motion from the next frame when a hidden Surface is shown again. */
     void reveal() { require(strata_surface_reveal(value_), "surface reveal"); }
 

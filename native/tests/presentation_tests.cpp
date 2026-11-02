@@ -260,6 +260,8 @@ void ordered_packets_and_idle_feedback(const std::string_view backend) {
         const auto resized_capture = presentation.capture_next_frame();
         static_cast<void>(commit());
         require(commit().unchanged != 0U, "resized image did not produce a compact successor");
+        require(!presentation.ready_for_frame(),
+                "the owner was told to frame while its last commit waited for the render thread");
         frame_gate.open();
         capture.reset();
         while (!capture.has_value()) {
@@ -278,6 +280,12 @@ void ordered_packets_and_idle_feedback(const std::string_view backend) {
                     capture->rgba[outside] == 9U && capture->rgba[outside + 1U] == 11U &&
                     capture->rgba[outside + 2U] == 15U && capture->rgba[outside + 3U] == 255U,
                 "compact successor discarded an undrawn geometry update");
+        const auto ready_deadline = Clock::now() + std::chrono::seconds(10);
+        while (!presentation.ready_for_frame()) {
+            presentation.rethrow_failure();
+            require(Clock::now() < ready_deadline, "a consumed commit never released the owner");
+            std::this_thread::yield();
+        }
     }
 
     presentation.resize({});

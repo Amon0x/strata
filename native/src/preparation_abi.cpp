@@ -201,7 +201,7 @@ extern "C" strata_result strata_preparation_start(
         const std::weak_ptr<Publication> publication = preparation->publication;
         preparation->pending = strata::base::Pending<void>::start(
             preparation->tasks, strata::base::TaskKind::other,
-            strata::base::TaskPriority::frame_critical, "host preparation",
+            strata::base::TaskPriority::prefetch, "host preparation",
             [work](const strata::base::TaskCancellation& cancellation) {
                 execute(*work, cancellation);
             },

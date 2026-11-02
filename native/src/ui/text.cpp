@@ -580,6 +580,24 @@ bool text_layout_projection_equal(const runtime::Value* current,
     return true;
 }
 
+[[nodiscard]] std::uint32_t decode(const std::string_view value, std::size_t& offset) {
+    const auto lead = static_cast<unsigned char>(value[offset++]);
+    if ((lead & 0x80U) == 0U)
+        return static_cast<std::uint32_t>(lead);
+    std::size_t count = 0U;
+    std::uint32_t result = 0U;
+    if ((lead & 0xE0U) == 0xC0U)
+        count = 1U, result = lead & 0x1FU;
+    else if ((lead & 0xF0U) == 0xE0U)
+        count = 2U, result = lead & 0x0FU;
+    else
+        count = 3U, result = lead & 0x07U;
+    for (std::size_t index = 0U; index < count && offset < value.size(); ++index) {
+        result = (result << 6U) | (static_cast<unsigned char>(value[offset++]) & 0x3FU);
+    }
+    return result;
+}
+
 /** Node-owned measurement identity prevents two trees' local ids from sharing a wrap constraint. */
 struct TextMeasurement final {
     std::weak_ptr<const TextEngine::FontRegistry> fonts;
@@ -616,7 +634,9 @@ struct TextEngine::FontPreparations final {
     base::TaskOwner* owner = nullptr;
     base::Pending<std::shared_ptr<const FontRegistry>> initial;
     std::map<std::string, base::Pending<std::optional<font::SystemFont>>, std::less<>> named;
-    std::map<std::uint32_t, base::Pending<std::optional<font::SystemFont>>> fallback;
+    /** Every character of a batch shares its one preparation. */
+    using FallbackFonts = std::map<std::uint32_t, std::optional<font::SystemFont>>;
+    std::map<std::uint32_t, base::Pending<FallbackFonts>> fallback;
     std::map<std::string, base::Pending<font::OpenTypeFont>, std::less<>> instances;
     std::vector<std::weak_ptr<const PreparationReads>> readers;
 };
@@ -700,24 +720,43 @@ TextEngine::PreparedFont TextEngine::prepare_named_font(const std::string& id) c
     return {result, {}};
 }
 
-TextEngine::PreparedFont TextEngine::prepare_fallback_font(const std::uint32_t code_point) const {
+TextEngine::PreparedFont TextEngine::prepare_fallback_font(const std::uint32_t code_point,
+                                                          const std::string_view run) const {
     FontPreparations& requests = preparations();
     auto found = requests.fallback.find(code_point);
     if (found == requests.fallback.end()) {
-        auto pending = base::Pending<std::optional<font::SystemFont>>::start(
+        // The run's later characters are asked together. One a named font turns out to cover is a
+        // wasted lookup on a worker, and cheaper than a task per character.
+        std::vector<std::uint32_t> wanted{code_point};
+        for (std::size_t offset = 0U; offset < run.size();) {
+            const std::uint32_t next = decode(run, offset);
+            if (next >= 0x80U && !requests.fallback.contains(next) &&
+                !std::ranges::contains(wanted, next))
+                wanted.push_back(next);
+        }
+        auto pending = base::Pending<FontPreparations::FallbackFonts>::start(
             requests.tasks(), base::TaskKind::font, base::TaskPriority::frame_critical,
             "system:U+" + hexadecimal(code_point),
-            [catalog = font_catalog_, code_point](const base::TaskCancellation&) {
-                return font::system_font_for(catalog, code_point);
+            [catalog = font_catalog_, wanted](const base::TaskCancellation& cancellation) {
+                FontPreparations::FallbackFonts fonts;
+                for (const std::uint32_t character : wanted) {
+                    if (cancellation.cancelled())
+                        break;
+                    fonts.emplace(character, font::system_font_for(catalog, character));
+                }
+                return fonts;
             });
-        found = requests.fallback.emplace(code_point, std::move(pending)).first;
+        for (const std::uint32_t character : wanted)
+            requests.fallback.insert_or_assign(character, pending);
+        found = requests.fallback.find(code_point);
     }
     const auto* ready = found->second.get();
     if (ready == nullptr)
         return {{}, found->second.readiness()};
-    if (!ready->has_value())
+    const auto font = ready->find(code_point);
+    if (font == ready->end() || !font->second.has_value())
         return {};
-    const font::SystemFont& selected = ready->value();
+    const font::SystemFont& selected = *font->second;
     const std::scoped_lock lock(system_fonts_mutex_);
     return {&*system_fonts_.try_emplace(selected.id, selected.face).first, {}};
 }
@@ -1219,23 +1258,6 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         });
         return value;
     };
-    const auto decode = [](const std::string_view value, std::size_t& offset) {
-        const auto lead = static_cast<unsigned char>(value[offset++]);
-        if ((lead & 0x80U) == 0U)
-            return static_cast<std::uint32_t>(lead);
-        std::size_t count = 0U;
-        std::uint32_t result = 0U;
-        if ((lead & 0xE0U) == 0xC0U)
-            count = 1U, result = lead & 0x1FU;
-        else if ((lead & 0xF0U) == 0xE0U)
-            count = 2U, result = lead & 0x0FU;
-        else
-            count = 3U, result = lead & 0x07U;
-        for (std::size_t index = 0U; index < count && offset < value.size(); ++index) {
-            result = (result << 6U) | (static_cast<unsigned char>(value[offset++]) & 0x3FU);
-        }
-        return result;
-    };
 
     // A variable face at the axes asked for, and at the weight on `wght` unless they name it.
     const auto vary = [this, &observe](const FontCandidate* candidate, const std::string& variation,
@@ -1467,7 +1489,8 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
             // No font the text names has it (an emoji, Arabic, Han): the system's, if any does.
             if (!fonts_->empty() && unit.glyph_id == 0U && !unit.whitespace &&
                 code_point >= 0x20U) {
-                const PreparedFont system = prepare_fallback_font(code_point);
+                const PreparedFont system = prepare_fallback_font(
+                    code_point, std::string_view(key.text).substr(byte_offset));
                 observe(system.readiness);
                 unit.unresolved = system.status() != base::PendingStatus::ready;
                 if (system.value.has_value()) {

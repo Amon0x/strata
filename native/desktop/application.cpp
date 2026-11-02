@@ -203,6 +203,7 @@ struct ApplicationHost::Impl final {
         host::SessionOptions& options = setup->session;
         options.application_id = config.application_id;
         options.stable_identity_seed = 0x5354524154414150ULL;
+        options.frame_slicing = true;
         options.frame_wake = [target = window] {
             if (!PostMessageW(target, WM_NULL, 0U, 0))
                 throw std::runtime_error("could not wake the desktop window");
@@ -452,9 +453,11 @@ struct ApplicationHost::Impl final {
         }
         if (session == nullptr && !preparation.has_value())
             throw std::logic_error("desktop application must be activated before framing");
+        adopt_rendering();
+        if (!renderer->ready_for_frame())
+            return;
         clock.begin_frame();
         last_frame_presented = false;
-        adopt_rendering();
         adopt_prepared();
         if (session == nullptr) {
             if (!background_presented) {

@@ -29,8 +29,13 @@ namespace {
     const InputPresentation& input
 ) noexcept {
     switch (trigger) {
-    case MotionTrigger::enter: return node.lifecycle() == RetainedLifecycle::attached;
-    case MotionTrigger::exit: return node.lifecycle() == RetainedLifecycle::exiting;
+    // A held boundary starts its transition when it lets go, from the top.
+    case MotionTrigger::enter:
+        return node.lifecycle() == RetainedLifecycle::attached &&
+               node.content_hold() != ContentHold::incoming;
+    case MotionTrigger::exit:
+        return node.lifecycle() == RetainedLifecycle::exiting &&
+               node.content_hold() != ContentHold::outgoing;
     case MotionTrigger::hover:
         return node.lifecycle() == RetainedLifecycle::attached && input.hovered(node.identity());
     case MotionTrigger::pressed:

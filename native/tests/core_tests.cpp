@@ -326,6 +326,19 @@ void test_task_owner_close_does_not_wait_for_preparation() {
           "owner close waited for preparation, adopted a result or called a dead wake adapter");
 }
 
+void test_pool_size_follows_request_and_cores() {
+    using namespace strata::base;
+    check(TaskPool::default_workers() >= 3U, "the default pool cannot serve blocking I/O");
+    TaskPool wide(8U);
+    check(wide.workers() == 8U, "a local pool ignored its requested size");
+    std::atomic_size_t ran{0U};
+    wide.run(8U, [&ran] { ran.fetch_add(1U); });
+    check(ran.load() >= 1U && ran.load() <= 9U, "a batch ran outside its caller and helpers");
+    check(!TaskPool::limit_shared_workers(0U), "a zero worker limit was accepted");
+    static_cast<void>(TaskPool::shared());
+    check(!TaskPool::limit_shared_workers(1U), "a started pool accepted a new limit");
+}
+
 void test_blocking_batches_do_not_wait_for_unclaimed_helpers() {
     using namespace strata::base;
     TaskPool pool(1U);
@@ -488,6 +501,7 @@ int strata_test_core() {
         test_task_priorities_cancellation_and_owner_adoption();
         test_task_inline_and_late_cancellation();
         test_task_owner_close_does_not_wait_for_preparation();
+        test_pool_size_follows_request_and_cores();
         test_blocking_batches_do_not_wait_for_unclaimed_helpers();
         test_pending_resources_publish_on_owner();
         test_pending_owner_transfer();

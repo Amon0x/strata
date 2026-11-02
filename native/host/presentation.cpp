@@ -256,9 +256,20 @@ struct Presentation::Impl final {
     void publish(PresentationFrame frame) {
         {
             std::scoped_lock lock(mutex);
+            // A stalled owner sees recent feedback; captures and resource frames are never dropped.
+            if (frames.size() >= retained_feedback) {
+                const auto oldest = std::ranges::find_if(frames, [](const PresentationFrame& held) {
+                    return !held.capture.has_value() && held.capture_requests.empty() &&
+                           std::ranges::all_of(held.layers, [](const auto& layer) {
+                               return layer.backdrop.empty();
+                           });
+                });
+                if (oldest != frames.end())
+                    frames.erase(oldest);
+            }
             frames.push_back(std::move(frame));
         }
-        notify_owner();
+        notify_feedback();
     }
 
     void publish_undrawn(const PresentationStream id, Stream& source) {
@@ -414,6 +425,12 @@ struct Presentation::Impl final {
         messages.clear();
     }
 
+    /** One wake until the owner next takes its feedback, however many frames pass meanwhile. */
+    void notify_feedback() noexcept {
+        if (!wake_pending.exchange(true, std::memory_order_acq_rel))
+            notify_owner();
+    }
+
     void notify_owner() noexcept {
         if (execution != PresentationExecution::threaded || !wake)
             return;
@@ -443,6 +460,9 @@ struct Presentation::Impl final {
                 for (Message& message : batch)
                     consume(message);
                 batch.clear();
+                consumed.store(sequence, std::memory_order_release);
+                if (owner_waiting.exchange(false, std::memory_order_acq_rel))
+                    notify_owner();
                 if (dirty || live || needs_ui_frames || redraw)
                     draw_frame();
             }
@@ -485,6 +505,11 @@ struct Presentation::Impl final {
     bool closing = false;
     std::atomic_bool ended{false};
     std::atomic<std::uint64_t> presented{0U};
+    std::atomic<std::uint64_t> consumed{0U};
+    std::atomic<std::uint64_t> committed{0U};
+    std::atomic_bool owner_waiting{false};
+    std::atomic_bool wake_pending{false};
+    static constexpr std::size_t retained_feedback = 64U;
     std::uint64_t next_stream = 1U;
     std::uint64_t next_sequence = 1U;
     std::uint64_t next_capture = 1U;
@@ -530,8 +555,27 @@ void Presentation::set_pointer(const std::optional<std::array<double, 2U>> posit
 void Presentation::set_transparent(const bool transparent) {
     impl_->post<Impl::Transparent>(transparent);
 }
+bool Presentation::ready_for_frame() noexcept {
+    if (impl_->execution != PresentationExecution::threaded)
+        return true;
+    const auto caught_up = [this] {
+        return impl_->consumed.load(std::memory_order_acquire) >=
+               impl_->committed.load(std::memory_order_relaxed);
+    };
+    if (caught_up())
+        return true;
+    impl_->owner_waiting.store(true, std::memory_order_release);
+    // The consumer may have finished between the check and the flag.
+    if (!caught_up())
+        return false;
+    impl_->owner_waiting.store(false, std::memory_order_release);
+    return true;
+}
 std::uint64_t Presentation::commit(PresentationCommit&& commit) {
-    return impl_->post_numbered<Impl::Commit>(impl_->next_sequence, std::move(commit));
+    const std::uint64_t sequence =
+        impl_->post_numbered<Impl::Commit>(impl_->next_sequence, std::move(commit));
+    impl_->committed.store(sequence, std::memory_order_relaxed);
+    return sequence;
 }
 PresentationReceipt Presentation::retire(const PresentationStream stream,
                                           EncodedRenderPacket terminal) {
@@ -544,6 +588,7 @@ std::uint64_t Presentation::capture_next_frame() {
 }
 void Presentation::take_frames(std::vector<PresentationFrame>& output) {
     output.clear();
+    impl_->wake_pending.store(false, std::memory_order_release);
     std::scoped_lock lock(impl_->mutex);
     output.swap(impl_->frames);
 }

@@ -214,6 +214,16 @@ handlers, diagnostic observers and live durability writers remain owner-only. St
 uses an owned reader; adoption installs its writer without reloading or replacing restored state.
 Retiring preparation quiesces notification callbacks without joining heavy work.
 
+The engine's worker pool uses half the logical cores (at least three). An embedder keeping cores
+for itself calls `strata_limit_task_workers` before creating anything.
+
+A host that frames continuously, as a window does, should enable
+`strata_surface_set_frame_slicing` (`SessionOptions::frame_slicing`). A frame may then stop at a
+stage boundary and finish in the next: while a first frame or `contentHold` content prepares, and
+whenever a frame has spent 5 ms. It is off by default, so a host that frames once and reads the
+result gets a whole frame. A threaded host asks `Presentation::ready_for_frame` before framing,
+which paces the UI to the display and coalesces input while a commit waits for the render thread.
+
 ## Minimal C setup
 
 Initialize structures to zero, set `struct_size`, and require only capabilities the host uses:

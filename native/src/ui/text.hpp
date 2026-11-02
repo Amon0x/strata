@@ -206,7 +206,9 @@ class TextEngine final {
     void record_font_diagnostics() const;
     void observe_layout(const RetainedNode& node, const TextLayout& layout) const;
     [[nodiscard]] PreparedFont prepare_named_font(const std::string& id) const;
-    [[nodiscard]] PreparedFont prepare_fallback_font(std::uint32_t code_point) const;
+    /** One request covers the run's other unresolved characters, not one task per character. */
+    [[nodiscard]] PreparedFont prepare_fallback_font(std::uint32_t code_point,
+                                                     std::string_view run) const;
     [[nodiscard]] PreparedFont prepare_font_instance(
         const FontCandidate& candidate, std::string id,
         std::vector<std::pair<std::string, double>> settings) const;

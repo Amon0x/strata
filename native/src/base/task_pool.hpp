@@ -88,14 +88,21 @@ struct TaskOutcome final {
  */
 class TaskPool final {
   public:
-    static constexpr std::size_t helpers = 3U;
+    /**
+     * Half the logical cores less the caller, and at least three for blocking I/O. Measured on 16
+     * threads: 3 and 7 workers settle first opens alike, 15 cost the UI thread 2-3 ms per open.
+     */
+    [[nodiscard]] static std::size_t default_workers() noexcept;
+    /** Caps the shared pool for an embedder keeping cores; only before it is first used. */
+    [[nodiscard]] static bool limit_shared_workers(std::size_t limit) noexcept;
 
-    explicit TaskPool(std::size_t worker_count = helpers);
+    explicit TaskPool(std::size_t worker_count = default_workers());
     ~TaskPool();
     TaskPool(const TaskPool&) = delete;
     TaskPool& operator=(const TaskPool&) = delete;
 
     [[nodiscard]] static TaskPool& shared();
+    [[nodiscard]] std::size_t workers() const noexcept { return threads_.size(); }
     /** Runs the caller and up to count helpers; propagates failure after every running lane leaves. */
     void run(std::size_t count, const std::function<void()>& lane);
 

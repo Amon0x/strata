@@ -704,6 +704,7 @@ struct Host::Impl final {
         host::SessionOptions& options = setup.session;
         options.application_id = result.id;
         options.stable_identity_seed = 0x5354524154414445ULL;
+        options.frame_slicing = true;
         options.frame_wake = [target = window] {
             if (!PostMessageW(target, WM_NULL, 0U, 0))
                 throw std::runtime_error("could not wake the showcase window");
@@ -1902,12 +1903,14 @@ struct Host::Impl final {
             static_cast<void>(close());
             return;
         }
+        adopt_rendering();
+        if (!renderer->ready_for_frame())
+            return;
         const auto host_frame_started = std::chrono::steady_clock::now();
         clock.begin_frame();
         last_frame_presented = false;
         last_frame_had_draws = false;
         last_present_nanos = 0;
-        adopt_rendering();
         for (Layer* const layer : layers())
             adopt_prepared(*layer);
         answer_platform_requests();
@@ -2360,7 +2363,9 @@ bool Host::has_pending_preparation() const noexcept {
 }
 
 bool Host::smoke_ready() const noexcept {
-    return (!impl_->showcase_enabled || impl_->showcase.live()) &&
+    // The layer inspected next must have drawn: a first frame may take several turns to prepare.
+    const Impl::Layer& layer = impl_->showcase.live() ? impl_->showcase : impl_->debug;
+    return (!impl_->showcase_enabled || impl_->showcase.live()) && layer.live() && layer.drew &&
            impl_->rendered_frames >= 2U && impl_->last_frame_had_draws;
 }
 

@@ -115,6 +115,7 @@ Children: `false` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -605,6 +606,7 @@ Children: `true` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -696,6 +698,7 @@ Children: `false` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -825,6 +828,7 @@ Children: `true` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -910,6 +914,7 @@ Children: `false` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -1001,6 +1006,7 @@ Children: `true` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `onSelect` | action | false | false | — |
@@ -1051,6 +1057,7 @@ Children: `false` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -1144,6 +1151,7 @@ Children: `false` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -1310,6 +1318,7 @@ Children: `true` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `movement` | boolean \| { bounds?: "none" \| "parent", clampToBounds?: boolean, enabled?: boolean, handleKey?: key } | false | true | — |
@@ -1347,6 +1356,7 @@ Children: `true` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `onDismiss` | action | false | false | — |
@@ -1565,6 +1575,7 @@ Children: `false` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -1657,6 +1668,7 @@ Children: `true` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `onChange` | action | false | false | — |
@@ -1801,6 +1813,7 @@ Children: `true` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -1882,6 +1895,7 @@ Children: `true` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -2037,6 +2051,7 @@ Children: `false` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -2190,6 +2205,7 @@ Children: `true` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -2351,6 +2367,7 @@ Children: `true` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |
@@ -2511,6 +2528,7 @@ Children: `true` · Capabilities: —
 | `contentKey` | key | false | false | — |
 | `contentTransition` | animation | false | false | — |
 | `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `contentHold` | number | false | false | — |
 | `stagger` | duration | false | false | — |
 | `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
 | `textStyle` | style | false | false | — |

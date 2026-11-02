@@ -178,6 +178,11 @@ class Presentation final {
     void resize(PresentationViewport viewport);
     void set_pointer(std::optional<std::array<double, 2U>> position);
     void set_transparent(bool transparent);
+    /**
+     * Whether the owner should frame now: false while its last commit waits for the render thread,
+     * which then wakes it. Input coalesces meanwhile, so the UI runs at the display's rate at most.
+     */
+    [[nodiscard]] bool ready_for_frame() noexcept;
     /** Admission moves the commit only after queue storage exists. */
     [[nodiscard]] std::uint64_t commit(PresentationCommit&& commit);
     [[nodiscard]] PresentationReceipt retire(PresentationStream stream,

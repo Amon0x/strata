@@ -551,6 +551,177 @@ overlay Filled {
           "table rows kept the content their caller no longer passes");
 }
 
+/** Outgoing content has left the key index but is still in the tree. */
+[[nodiscard]] const ui::RetainedNode* mounted(const ui::Surface& surface, const std::string_view key) {
+    const auto find = [key](const auto& self, const ui::RetainedNode& node) -> const ui::RetainedNode* {
+        if (node.description().key == key)
+            return &node;
+        for (const auto& child : node.children()) {
+            if (const ui::RetainedNode* const found = self(self, *child); found != nullptr)
+                return found;
+        }
+        return nullptr;
+    };
+    return surface.tree().root() != nullptr ? find(find, *surface.tree().root()) : nullptr;
+}
+
+/** A `contentHold` boundary shows what it has until what replaces it is whole, within a bound. */
+void test_content_hold_keeps_outgoing_until_incoming_is_ready() {
+    base::TaskPool pool(1U);
+    base::TaskOwner owner(base::TaskExecution::asynchronous, {}, &pool);
+    runtime::ApplicationContext application(
+        "content-hold", runtime::ApplicationBundle::create(), {}, &owner);
+    activate(application, "content-hold", R"(
+animation Swap {
+  from { opacity: 0 }
+  to { opacity: 1 }
+  duration: 100ms;
+}
+overlay Main {
+  state page = "a";
+  root Panel(key: "host", contentKey: page, contentTransition: Swap, contentHold: 200,
+             contentTransitionMode: "TOGETHER",
+             layout: { kind: "COLUMN", width: 200, height: 100 }) {
+    if page == "a" {
+      Panel(key: "a", layout: { width: 200, height: 100 })
+    } else if page == "b" {
+      Panel(key: "b", layout: { width: 200, height: 100 })
+    } else {
+      Panel(key: "c", layout: { width: 200, height: 100 })
+    }
+  }
+}
+)");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 200;
+    environment.framebuffer_height = 100;
+    environment.logical_width = 200.0;
+    environment.logical_height = 100.0;
+    ui::Surface surface("content-hold", application, runtime::LayerRole::overlay, "Main",
+                        environment, {}, ui::WidgetRegistry{});
+    std::int64_t now = 0;
+    const auto frame = [&surface, &now](const std::int64_t advance_ms, const bool packet = true) {
+        now += advance_ms * 1'000'000;
+        static_cast<void>(surface.frame(now));
+        if (packet)
+            surface.note_packet_encoded();
+    };
+    const auto hold_of = [&surface](const std::string_view key) {
+        const ui::RetainedNode* const node = mounted(surface, key);
+        check(node != nullptr, "held content is not mounted: " + std::string(key));
+        return node->content_hold();
+    };
+    const auto settle = [&frame] {
+        for (int pass = 0; pass < 40; ++pass)
+            frame(16);
+    };
+    settle();
+    const std::string scope("overlay Main");
+
+    // Nothing has reached a packet yet: the old page stays and the new one is offstage, to the bound.
+    write_state(application, scope, "page", runtime::Value("b"));
+    frame(0, false);
+    frame(1, false);
+    check(hold_of("a") == ui::ContentHold::outgoing && hold_of("b") == ui::ContentHold::incoming,
+          "a changed key did not hold its outgoing content");
+    check(mounted(surface, "b")->offstage_root(), "held content has no offstage root");
+    frame(100, false);
+    check(hold_of("b") == ui::ContentHold::incoming, "a hold ended before its deadline");
+    frame(100, false);
+    check(hold_of("b") == ui::ContentHold::none, "a hold outlived its deadline");
+    settle();
+    check(mounted(surface, "a") == nullptr, "outgoing content outlived its transition");
+
+    // A packet that found nothing pending lets go on the next frame.
+    write_state(application, scope, "page", runtime::Value("a"));
+    frame(0, false);
+    frame(1, false);
+    check(hold_of("a") == ui::ContentHold::incoming, "the second change did not hold");
+    frame(1);
+    frame(1);
+    check(hold_of("a") == ui::ContentHold::none, "a ready page was still held");
+    settle();
+
+    // Pending preparation under the incoming content keeps holding, past any packet.
+    std::promise<void> finish;
+    auto prepared = base::Pending<int>::start(
+        owner, base::TaskKind::image, base::TaskPriority::frame_critical, "incoming",
+        [done = finish.get_future().share()](const base::TaskCancellation&) {
+            done.wait();
+            return 1;
+        });
+    write_state(application, scope, "page", runtime::Value("b"));
+    frame(0, false);
+    frame(1, false);
+    mounted(surface, "b")->observe_preparation(prepared.readiness());
+    frame(1);
+    frame(1);
+    check(hold_of("b") == ui::ContentHold::incoming, "a hold ended with preparation pending");
+    finish.set_value();
+    check(owner.wait_for_completion(std::chrono::seconds(10)), "preparation did not complete");
+    frame(1);
+    frame(1);
+    check(hold_of("b") == ui::ContentHold::none, "a hold outlived its preparation");
+    settle();
+
+    // Replaced again while held: what never showed goes at once, and what shows is kept.
+    write_state(application, scope, "page", runtime::Value("c"));
+    frame(0, false);
+    frame(1, false);
+    write_state(application, scope, "page", runtime::Value("a"));
+    frame(1, false);
+    frame(1, false);
+    check(mounted(surface, "c") == nullptr, "content never shown was kept for an exit");
+    check(hold_of("b") == ui::ContentHold::outgoing && hold_of("a") == ui::ContentHold::incoming,
+          "a second change lost what was showing");
+
+    // Back to what is showing: nothing was on its way.
+    write_state(application, scope, "page", runtime::Value("b"));
+    frame(1, false);
+    frame(1, false);
+    check(hold_of("b") == ui::ContentHold::none &&
+              mounted(surface, "b")->lifecycle() == ui::RetainedLifecycle::attached,
+          "returning to the page on screen did not end its hold");
+}
+
+/** Inline preparation has nothing to wait for, so deterministic frames never hold. */
+void test_content_hold_needs_asynchronous_preparation() {
+    runtime::ApplicationContext application("content-hold", runtime::ApplicationBundle::create());
+    activate(application, "content-hold", R"(
+animation Swap {
+  from { opacity: 0 }
+  to { opacity: 1 }
+  duration: 100ms;
+}
+overlay Main {
+  state page = "a";
+  root Panel(key: "host", contentKey: page, contentTransition: Swap, contentHold: 200,
+             layout: { kind: "COLUMN", width: 200, height: 100 }) {
+    if page == "a" {
+      Panel(key: "a", layout: { width: 200, height: 100 })
+    } else {
+      Panel(key: "b", layout: { width: 200, height: 100 })
+    }
+  }
+}
+)");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 200;
+    environment.framebuffer_height = 100;
+    environment.logical_width = 200.0;
+    environment.logical_height = 100.0;
+    ui::Surface surface("content-hold", application, runtime::LayerRole::overlay, "Main",
+                        environment, {}, ui::WidgetRegistry{});
+    static_cast<void>(surface.frame(0));
+    write_state(application, "overlay Main", "page", runtime::Value("b"));
+    static_cast<void>(surface.frame(16'000'000));
+    static_cast<void>(surface.frame(32'000'000));
+    const ui::RetainedNode* const incoming = mounted(surface, "b");
+    check(incoming != nullptr, "the changed key did not mount its content");
+    check(incoming->content_hold() == ui::ContentHold::none,
+          "deterministic preparation held content");
+}
+
 void test_readiness_reaches_cached_widgets_and_each_surface() {
     for (const bool fail : {false, true}) {
         base::TaskPool pool(1U);
@@ -999,6 +1170,8 @@ int strata_test_description_invalidation() {
         test_a_retained_write_beside_a_repeater_describes_only_its_reader();
         test_a_slot_in_lazy_rows_takes_the_callers_content();
         test_a_slot_in_a_widgets_generated_rows_takes_the_callers_content();
+        test_content_hold_keeps_outgoing_until_incoming_is_ready();
+        test_content_hold_needs_asynchronous_preparation();
         test_readiness_reaches_cached_widgets_and_each_surface();
         test_preparation_reaches_cached_paint_without_redescribing();
         test_runtime_image_metadata_reaches_cached_fit();

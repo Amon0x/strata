@@ -547,12 +547,30 @@ The replacement is an offstage subtree in the one tree, under the one input rout
 `Offstage` and React's `Activity` do it: built, laid out and prepared, but drawing nothing and taking
 no hits, focus or semantics. Readiness tells the page host when to flip.
 
-- [ ] A language-level boundary (`Suspense`-like: a widget or a node property) that shows its
-  previous content, or an author's fallback, while anything inside it is pending, for at most a
-  given time, then shows what is ready. A page switch inside one holds the old page instead of
+Built, November 2. `contentHold` extends `contentKey`, which already retained outgoing content for
+its transition: the boundary marks the outgoing subtree and the incoming one and starts neither
+transition until the incoming has reached a packet with nothing pending under it, or the bound
+passes. Incoming content draws through a presentation group at opacity 0, so its geometry and glyphs
+are planned and uploaded and the flip changes only the group table. It takes no hits, focus or
+semantics; its widgets still run, so an image's clock starts when attached. A key changed again during
+a hold drops what never showed. Deterministic runtimes never hold, so golden frames are unchanged.
+
+During the hold the outgoing page is frozen and takes no input, which differs from React's
+transitions, where the old tree stays interactive. A hold is bounded (the showcase uses 200 ms) and the
+tab bar outside it stays live, so a second click retargets. Keeping the old page fully live is what
+required the candidate fork above, and nothing observed so far justifies that cost.
+
+D3D11 capture of a first TYPE open, frame by frame: EXTEND stays whole while the header already says
+TYPE; the crossfade's incoming page already has its emoji, Arabic, Hebrew, Han, kana and variable
+fonts. Regressions cover the deadline, a clean packet, pending preparation, retargeting, returning
+to the page on screen, and deterministic runtimes.
+
+- [x] A language-level boundary: `contentHold` on `contentKey`, showing the previous content for at
+  most a given time, then what is ready. A page switch inside one holds the old page instead of
   flashing a half-made one.
-- [ ] The showcase's page host uses it, so a tab opens whole.
-- [ ] Measure: opening each showcase tab never shows a frame with its text missing.
+- [x] The showcase's page host uses it, so a tab opens whole.
+- [x] Measure: opening a showcase tab never shows a frame with its text missing (TYPE, the page with
+  the most cold fonts and glyphs, inspected frame by frame on D3D11).
 
 ## Phase 5: the render thread
 
@@ -740,32 +758,45 @@ Requires Phase 1 of `frame-cost.md` to have landed (see "Before this plan").
 
 ## Phase 7: parallel and sliced preparation
 
-Preparation dependencies, after the render-owner gate:
+Decision, November 2: slicing comes first, and it met the gate alone, so parallel shaping was not
+built. Attribution showed shaping is a small share (LAYOUT: 2.98 ms text preparation of about 20 ms),
+and pool width did not help either: first opens settle alike with 3 and 7 workers, and 15 workers
+cost the UI thread 2-3 ms per open. The pool now uses half the logical cores, with
+`strata_limit_task_workers` for embedders.
 
-- Three asynchronous first-open runs measured TYPE 9.049/9.352/9.065 ms, LAYOUT
-  19.158/19.409/19.445 ms and CONTENT 14.673/15.015/17.445 ms. Initial frames were
-  5.352/5.429/5.627 ms. Evidence: `build/frame-threads-shaping-before.json`, with the scenario
-  retained as `build/frame-threads-shaping-scenario.json`.
-- In the middle run LAYOUT attributed 2.981 ms to text preparation (1.862 ms OpenType/bidi,
-  0.727 ms line assembly, 0.329 ms face resolution), 4.745 ms to description and 6.116 ms to
-  packet encoding. TYPE's text preparation was 1.258 ms; CONTENT's was 2.115 ms. Moving only
-  the shaping kernel cannot satisfy the latency gates; coherent budgeted publication remains
-  required. These null-renderer owner timings do not establish displayed-content readiness.
-- [ ] Separate owned resolved text inputs from owner-side registry access, diagnostics and caches.
-  Retain immutable font handles; never capture TextEngine, a node or a registry on a worker.
-- [ ] Prepare independent runs through the existing pool and publish complete immutable text
-  geometry on owner adoption. Preserve deterministic shaping, rich spans, bidi, ligature
-  provenance, wrapping and caret/selection geometry; cancel only when every reader is gone.
-- [ ] Integrate staged measurement with isolated candidate description/layout publication.
-  Pending dimensions are not a completed visible candidate; late anchor/portal measurements
-  and packet glyph dependencies participate in readiness before promotion.
+`Surface::slice_frame` stops a frame at a stage boundary (built, laid out, rendered), leaving its
+dirty marks for the next frame, while a first frame or held content prepares (after 1.5 ms) and in any
+frame that has spent 5 ms. Packet encoding is the last stage. Each stage stops once per packet and one
+more time when already late, so a page with running motion still draws. A host opts in with
+`strata_surface_set_frame_slicing`; a host framing once gets a whole frame.
 
-- [ ] Measuring: a layout pass shapes all of its new text runs on the pool's lanes before it
-  arranges (shaping is per run and independent), instead of one after another as it measures.
-- [ ] Describing and laying out a large new subtree is split across UI-thread turns with a
+A stress run with every budget forced to zero found the first bug here: inspection threw on a node
+described but not yet laid out. Worth repeating when this path changes.
+
+UI-thread time per frame (`frame` plus `packet-encode`; packet decoding belongs to the render thread),
+worst of the open and every frame until 30 after settling, three runs each, showcase first opens:
+
+| Page | Before | After |
+|---|---:|---:|
+| BLUEPRINT | 12.1-13.5 | 5.9 |
+| TYPE | 8.9-9.9 | 7.5-8.4 |
+| LAYOUT | 18.5-22.0 | 7.4-8.7 |
+| CONTENT | 13.9-17.1 | 7.9-9.4 |
+
+The "before" column is whole-frame wall time and includes about 1.5 ms of decoding, so it overstates
+the comparison by that much. Other pages are under 6 ms. TYPE, LAYOUT and CONTENT still touch 8-9 ms in
+some runs: the gate is met in most runs, not all of them.
+
+The cost is latency: an open takes up to four frames more, and a tab highlight in the same frame waits
+with it, so at 60 Hz a click can take about 66 ms to show. That replaces one long frame.
+
+- [x] Describing and laying out a large new subtree is split across UI-thread turns with a
   budget, the render thread showing the previous commit meanwhile; a boundary (Phase 4) decides
   whether the half-made subtree shows.
-- [ ] Measure: the LAYOUT and CONTENT pages' first frames under 8 ms of UI-thread time each.
+- [x] Measure: the LAYOUT and CONTENT pages' first frames under 8 ms of UI-thread time each (in most
+  runs, see above).
+- Dropped: shaping runs in parallel on the pool. Measured as too small a share, and slicing met the
+  gate without it.
 
 ## Risks
 

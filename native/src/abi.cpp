@@ -225,6 +225,10 @@ strata_result strata_runtime_request_frame(strata_runtime* const runtime) noexce
     return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
+uint32_t strata_limit_task_workers(const uint32_t limit) noexcept {
+    return strata::base::TaskPool::limit_shared_workers(limit) ? 1U : 0U;
+}
+
 strata_result strata_runtime_get_task_info(
     const strata_runtime* const runtime,
     strata_runtime_task_info* const out_info

@@ -122,6 +122,8 @@ struct Scenario final {
     /** Writes the Surface's render packet stream to packets.strp for backend replay. */
     bool record_packets = false;
     TaskExecution task_execution = TaskExecution::deterministic;
+    /** Frames budgeted as in a real window: one may finish in the next. */
+    bool frame_slicing = false;
 };
 
 [[nodiscard]] Scenario load_scenario(const std::filesystem::path& path);

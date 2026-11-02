@@ -267,6 +267,7 @@ int run_vulkan(const desktop::LaunchManifest& manifest, const bool smoke, const 
         options.session.task_execution = smoke ? TaskExecution::deterministic : TaskExecution::asynchronous;
         options.session.extension_packages = scenario.packages;
         options.session.extension_search_paths = scenario.extension_search_paths;
+        options.session.frame_slicing = true;
         options.session.frame_wake = [wake_event] { wake(wake_event); };
         options.session.on_diagnostic = [](const strata_diagnostic& diagnostic) {
             std::cerr << std::string_view(diagnostic.code.data, diagnostic.code.size) << ": "
@@ -353,6 +354,10 @@ int run_vulkan(const desktop::LaunchManifest& manifest, const bool smoke, const 
         }
         if (minimized) {
             static_cast<void>(SDL_WaitEventTimeout(nullptr, 30));
+            continue;
+        }
+        if (!presentation.ready_for_frame()) {
+            static_cast<void>(SDL_WaitEventTimeout(nullptr, 4));
             continue;
         }
         int next_width = 0, next_height = 0, next_pixel_width = 0, next_pixel_height = 0;

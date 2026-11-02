@@ -1258,7 +1258,8 @@ component PageViewport(selectedPage: string, chrome: Binding<string>) {
     style: PageHost,
     contentKey: selectedPage,
     contentTransition: ContentMotion,
-    contentTransitionMode: "TOGETHER"
+    contentTransitionMode: "TOGETHER",
+    contentHold: 200
   ) {
     if selectedPage == "STATE" {
       Scroll(key: "targets.page.scroll.state", persistenceKey: "showcase.page.scroll.state", vertical: true, horizontal: false, style: PageScroll) { StatePage() }

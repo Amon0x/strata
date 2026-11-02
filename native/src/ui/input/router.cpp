@@ -148,7 +148,7 @@ bool InputPresentation::node_participates(const RetainedNode& node) const noexce
 }
 
 bool InputPresentation::node_input_enabled(const RetainedNode& node) const noexcept {
-    if (!node_participates(node))
+    if (!node_participates(node) || node.content_hold() == ContentHold::incoming)
         return false;
     const runtime::Value* enabled = scalar_property(node, "enabled");
     if (enabled != nullptr && enabled->boolean() != nullptr && !*enabled->boolean())

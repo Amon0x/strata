@@ -495,7 +495,9 @@ action_policy_name(const runtime::ActionDispatchPolicy policy) noexcept {
     if (depth > 0U) {
         children.reserve(node.children().size());
         for (const auto& child : node.children()) {
-            children.push_back(node_inspection(surface, *child, depth - 1U));
+            // A sliced frame may have described a child it has not laid out yet.
+            if (surface.layout().find(child->identity()) != nullptr)
+                children.push_back(node_inspection(surface, *child, depth - 1U));
         }
     }
     DirtySet descendant_dirty;
@@ -625,7 +627,8 @@ JsonValue inspect_surface(const Surface& surface) {
          })},
         {"pendingNavigationTargets", array(std::move(pending_navigation))},
         {"root",
-         root != nullptr ? node_inspection(surface, *root,
+         root != nullptr && surface.layout().find(root->identity()) != nullptr
+             ? node_inspection(surface, *root,
                                                      std::numeric_limits<std::size_t>::max())
                                    : JsonValue{}},
         {"selectedKey", selected != nullptr && selected->description().key.has_value()

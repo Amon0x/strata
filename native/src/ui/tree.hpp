@@ -299,6 +299,12 @@ struct DirtyGenerationSnapshot final {
 
 enum class RetainedLifecycle { attached, exiting, detached };
 
+/**
+ * A `contentHold` boundary keeps showing its outgoing content while the incoming content prepares
+ * offstage: laid out and painted so its resources load, drawing nothing and taking no input.
+ */
+enum class ContentHold : std::uint8_t { none, outgoing, incoming };
+
 /** Immutable retained-value view safe to keep in generated description factories. */
 class RetainedDescriptionSnapshot final {
   public:
@@ -361,6 +367,12 @@ class RetainedNode final {
     [[nodiscard]] std::uint64_t presentation_generation() const noexcept;
     [[nodiscard]] std::uint64_t subtree_presentation_generation() const noexcept;
     [[nodiscard]] RetainedLifecycle lifecycle() const noexcept;
+    [[nodiscard]] ContentHold content_hold() const noexcept { return content_hold_; }
+    /** The topmost incoming node: the one presentation group a held subtree draws through. */
+    [[nodiscard]] bool offstage_root() const noexcept {
+        return content_hold_ == ContentHold::incoming &&
+               (parent_ == nullptr || parent_->content_hold_ != ContentHold::incoming);
+    }
     /** Whether this node and every one below it are attached: none of them is exiting. */
     [[nodiscard]] bool subtree_all_attached() const noexcept;
     [[nodiscard]] const DirtySet& dirty() const noexcept;
@@ -444,6 +456,7 @@ class RetainedNode final {
     std::uint64_t subtree_presentation_generation_ = 0U;
     std::uint64_t render_dirty_epoch_ = 0U;
     RetainedLifecycle lifecycle_ = RetainedLifecycle::attached;
+    ContentHold content_hold_ = ContentHold::none;
     DirtySet dirty_;
     std::array<std::uint64_t, 11U> dirty_generations_{};
     std::map<std::string, runtime::Value, std::less<>> retained_values_;
@@ -592,6 +605,8 @@ class RetainedTree final {
     /** A node of a subtree kept by hold_on_detach, or null. */
     [[nodiscard]] RetainedNode* find_detached(std::uint64_t identity) const noexcept;
     void release_detached() noexcept;
+    /** Marks a subtree held or released; its motion and geometry are dirtied. */
+    void set_content_hold(std::uint64_t identity, ContentHold hold);
 
   private:
     [[nodiscard]] std::unique_ptr<RetainedNode>
@@ -599,6 +614,7 @@ class RetainedTree final {
                    std::shared_ptr<const DescriptionNode> description, RetainedNode* parent,
                    std::size_t source_index, std::string structural_path, ReconcileStats& stats,
                    bool& layout_invalidated, const ExitRetention& exit_retention);
+    void mark_subtree_hold(RetainedNode& node, ContentHold hold);
     static void mark_subtree_lifecycle(RetainedNode& node, RetainedLifecycle lifecycle) noexcept;
     static void rebase_subtree(RetainedNode& node, RetainedNode* parent, std::size_t source_index,
                                std::string structural_path);

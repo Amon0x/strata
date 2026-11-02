@@ -442,6 +442,7 @@ void Session::create_surface(const SessionSurface& surface) {
     config.images = images.empty() ? nullptr : images.data();
     config.image_count = images.size();
     impl_->surface.emplace(runtime().create_surface(config));
+    impl_->surface->set_frame_slicing(impl_->options.frame_slicing);
 }
 
 bool Session::has_surface() const noexcept {

@@ -70,6 +70,8 @@ class SurfacePackets final {
     bool release_prepared_ = false;
     font::GlyphAtlas::RasterWork raster_work_;
     bool unchanged_ = false;
+    /** A sliced frame left its commands for the next packet. */
+    bool encode_pending_ = false;
 };
 
 } // namespace strata::ui

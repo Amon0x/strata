@@ -1645,6 +1645,11 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_widget_call(con
                                                        transition_mode->string() != nullptr
                                                    ? *transition_mode->string()
                                                    : "OUT_IN")));
+            if (const auto hold = properties.find("contentHold"); hold != properties.end() &&
+                hold->second.value() != nullptr && hold->second.value()->number() != nullptr) {
+                item_properties.emplace("$contentHold",
+                                        ExpressionValue(*hold->second.value()));
+            }
             auto item = DescriptionNode::create(
                 "AnimatedContentItem", *content_key, source_path, scope.instance_path(),
                 std::move(item_properties),
@@ -1683,6 +1688,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_widget_call(con
     properties.erase("contentKey");
     properties.erase("contentTransition");
     properties.erase("contentTransitionMode");
+    properties.erase("contentHold");
     std::shared_ptr<const DescriptionNode> result = DescriptionNode::create(
         type, key, source_path, scope.instance_path(), std::move(properties),
         generated_children != nullptr

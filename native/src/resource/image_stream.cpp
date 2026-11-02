@@ -93,7 +93,7 @@ struct ImageStream::State final : std::enable_shared_from_this<State> {
         in_flight = true;
         try {
             auto task = base::Pending<void>::start(
-                owner, base::TaskKind::image, base::TaskPriority::frame_critical, label,
+                owner, base::TaskKind::image, base::TaskPriority::prefetch, label,
                 [batch, slots](const base::TaskCancellation& cancellation) {
                     try {
                         while (batch->count < slots) {

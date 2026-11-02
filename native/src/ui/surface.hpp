@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -306,6 +307,10 @@ class Surface final {
     [[nodiscard]] const SurfaceEnvironment& environment() const noexcept;
     [[nodiscard]] runtime::Profiler& profiler() noexcept;
     [[nodiscard]] const runtime::Profiler& profiler() const noexcept;
+    /** Packet preparation this frame would overrun; the next frame encodes these commands. */
+    [[nodiscard]] bool defers_packet();
+    /** New commands reached a packet, so what they wait for is now known. */
+    void note_packet_encoded() noexcept;
     /** Extends this frame's task accounting through packet preparation without consuming totals. */
     void record_task_statistics();
     /** Packet preparation reports dependencies after framing, without changing the retained tree. */
@@ -328,6 +333,7 @@ class Surface final {
     [[nodiscard]] bool idle() const;
     /** Releases all surface-owned interaction state; lifecycle output is published next frame. */
     void cancel_interactions();
+    void set_frame_slicing(bool enabled) noexcept { frame_slicing_ = enabled; }
     /**
      * Replays entry motion for the retained tree from the next frame, for hosts that show a hidden
      * surface again. Nothing is rebuilt: state, focus, scroll, and layout are preserved.
@@ -506,6 +512,35 @@ class Surface final {
     std::map<std::string, std::int64_t, std::less<>> pending_scroll_snaps_;
     std::int64_t frame_started_nanos_ = 0;
     void settle_scroll_snaps(std::int64_t frame_time_nanos);
+    /** A boundary showing outgoing content while the incoming prepares, by its coordinator. */
+    struct HeldContent final {
+        std::uint64_t outgoing = 0U;
+        std::int64_t deadline_nanos = 0;
+        std::uint64_t held_frame = 0U;
+    };
+    [[nodiscard]] bool retain_for_exit(const RetainedNode& node);
+    void apply_content_holds();
+    void release_content_holds(std::int64_t frame_time_nanos);
+    [[nodiscard]] bool incoming_pending(const RetainedNode& coordinator) const;
+    std::map<std::uint64_t, HeldContent> held_content_;
+    /** The frame last encoded with new commands: planning finds what text still needs. */
+    std::uint64_t packet_frame_index_ = 0U;
+    /**
+     * Whether this frame stops at its next stage. Nothing new is on screen to keep whole while the
+     * first frame or held content prepares, so one over its budget continues in the next frame.
+     */
+    enum class SliceStage : std::uint8_t { none, built, laid_out, rendered };
+    [[nodiscard]] bool slice_frame(SliceStage stage);
+    /** The furthest stage cut since the last packet. */
+    SliceStage slice_stage_ = SliceStage::none;
+    /** This frame stopped early: what it left dirty is the next frame's work. */
+    bool frame_sliced_ = false;
+    bool late_slice_used_ = false;
+    std::chrono::steady_clock::time_point frame_clock_started_{};
+    bool frame_slicing_ = false;
+    bool rendered_once_ = false;
+    /** Open until the first frame and any let-go content have reached a packet. */
+    bool slicing_ = true;
     std::optional<std::uint64_t> inspected_identity_;
     std::uint64_t scale_context_generation_ = 0U;
     /** Surface frame index whose temporal motion clocks were sampled; discovery is separate. */

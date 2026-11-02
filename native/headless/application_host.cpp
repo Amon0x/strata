@@ -294,6 +294,8 @@ struct ApplicationHost::Impl final {
         session_options.application_id = scenario.application_id;
         session_options.stable_identity_seed = 0x484541444C455353ULL;
         session_options.task_execution = options.task_execution.value_or(scenario.task_execution);
+        session_options.frame_slicing = options.frame_slicing || scenario.frame_slicing;
+        slicing = session_options.frame_slicing;
         session_options.frame_wake = [this] {
             {
                 const std::scoped_lock lock(wake_mutex);
@@ -485,15 +487,20 @@ struct ApplicationHost::Impl final {
                           std::chrono::steady_clock::time_point::max() - started))
             throw std::invalid_argument("settle timeout exceeds the steady clock range");
         const auto deadline = started + timeout;
-        for (;;) {
+        // A sliced frame finishes in later turns, with no preparation left to wake this loop.
+        constexpr int sliced_turns = 8;
+        for (int turn = 0;;) {
             std::uint64_t observed;
             {
                 const std::scoped_lock lock(wake_mutex);
                 observed = wake_generation;
             }
             frame(time_nanoseconds);
-            if (session->runtime().task_info().pending_tasks == 0U)
-                return;
+            if (session->runtime().task_info().pending_tasks == 0U) {
+                if (!slicing || ++turn >= sliced_turns)
+                    return;
+                continue;
+            }
             if (std::chrono::steady_clock::now() >= deadline)
                 throw std::runtime_error("engine preparation did not settle before its deadline");
             std::unique_lock lock(wake_mutex);
@@ -554,6 +561,7 @@ struct ApplicationHost::Impl final {
     std::string durable;
     std::string last_frame_json;
     data::JsonValue last_frame_document;
+    bool slicing = false;
     std::uint64_t next_snapshot_generation = 1U;
     std::uint64_t environment_generation = 1U;
     double logical_width = 0.0;
@@ -596,6 +604,10 @@ strata::ProfilerSnapshot ApplicationHost::surface_profiler() const {
 
 void ApplicationHost::frame(const std::int64_t time_nanoseconds) {
     impl_->frame(time_nanoseconds);
+}
+
+std::uint64_t ApplicationHost::pending_tasks() const {
+    return impl_->session.has_value() ? impl_->session->runtime().task_info().pending_tasks : 0U;
 }
 
 void ApplicationHost::settle(const std::int64_t time_nanoseconds,

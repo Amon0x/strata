@@ -117,6 +117,8 @@ void SemanticsEngine::append_children(
     JsonValue::Array& children
 ) const {
     for (const auto& child : node.children()) {
+        if (child->content_hold() == ContentHold::incoming)
+            continue;
         const WidgetLifecycle* lifecycle = widgets_.find(child->description().type);
         const bool hidden = widget_semantic_hidden(*child) ||
                             (lifecycle != nullptr && lifecycle->semantics.hidden) ||

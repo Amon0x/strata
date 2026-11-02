@@ -17,6 +17,14 @@ namespace strata::ui {
 using namespace layout_detail;
 namespace {
 
+/** Content a container's target size ignores: leaving, or still held offstage. */
+[[nodiscard]] bool superseded(const RetainedNode& node) noexcept {
+    return node.content_hold() == ContentHold::incoming ||
+           (node.lifecycle() == RetainedLifecycle::exiting &&
+            node.content_hold() != ContentHold::outgoing);
+}
+
+
 [[nodiscard]] std::string layout_number(const double value) {
     char buffer[64];
     const auto encoded =
@@ -520,7 +528,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
             child_sizes.reserve(measured.flow_child_count);
             for (std::size_t index = 0U; index < measured.flow_child_count; ++index) {
                 const MeasuredNodePtr& child = measured.children[index];
-                if (attached_only && child->node->lifecycle() == RetainedLifecycle::exiting) {
+                if (attached_only && superseded(*child->node)) {
                     continue;
                 }
                 child_sizes.push_back(child->measured_size);
@@ -543,7 +551,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
             Size extent;
             for (std::size_t index = 0U; index < measured.flow_child_count; ++index) {
                 const MeasuredNode& child = *measured.children[index];
-                if (attached_only && child.node->lifecycle() == RetainedLifecycle::exiting)
+                if (attached_only && superseded(*child.node))
                     continue;
                 extent.width = std::max(extent.width, child.style.inset.left.value_or(0.0) +
                                                           child.measured_size.width);
@@ -556,7 +564,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         std::size_t count = 0U;
         for (std::size_t index = 0U; index < measured.flow_child_count; ++index) {
             const MeasuredNodePtr& child = measured.children[index];
-            if (attached_only && child->node->lifecycle() == RetainedLifecycle::exiting)
+            if (attached_only && superseded(*child->node))
                 continue;
             ++count;
             if (measured.style.kind == LayoutKind::scroll) {
@@ -651,7 +659,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
                                                   measured.style.kind == LayoutKind::portal;
             if (filters_exiting_children &&
                 std::ranges::any_of(measured.children, [](const MeasuredNodePtr& child) {
-                    return child->node->lifecycle() == RetainedLifecycle::exiting;
+                    return superseded(*child->node);
                 })) {
                 const Size target_children = intrinsic_children(true);
                 target =

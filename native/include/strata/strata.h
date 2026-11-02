@@ -2275,6 +2275,11 @@ typedef struct strata_resource_handle {
 } strata_resource_handle;
 
 STRATA_API uint32_t strata_abi_version(void) STRATA_NOEXCEPT;
+/*
+ * Caps the engine-wide worker pool, which otherwise scales with the cores. An embedder keeping
+ * cores for itself calls this before creating anything; returns 0 once the pool has started.
+ */
+STRATA_API uint32_t strata_limit_task_workers(uint32_t limit) STRATA_NOEXCEPT;
 STRATA_API strata_capabilities strata_capability_bits(void) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_get_api_info(uint32_t requested_abi,
                                              strata_api_info* out_info) STRATA_NOEXCEPT;
@@ -2569,6 +2574,13 @@ STRATA_API strata_result strata_surface_adopt_environment(
 STRATA_API strata_result strata_surface_enqueue_input(
     strata_surface* surface, const strata_input_event* events, size_t event_count,
     strata_surface_input_batch_info* out_info) STRATA_NOEXCEPT;
+/*
+ * Lets a frame stop at a stage boundary and finish in the next, when it would overrun or when what
+ * it prepares is not on screen yet. For hosts that frame continuously (a window); off by default,
+ * so a host that frames once and reads the result gets a whole frame. Needs asynchronous tasks.
+ */
+STRATA_API strata_result strata_surface_set_frame_slicing(strata_surface* surface,
+                                                          uint32_t enabled) STRATA_NOEXCEPT;
 STRATA_API strata_result strata_surface_cancel_interactions(strata_surface* surface)
     STRATA_NOEXCEPT;
 /* Replays entry motion (`enter` and `transition` insertion timelines, with authored delay and
