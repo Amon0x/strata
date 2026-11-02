@@ -282,11 +282,11 @@ everywhere else, without shipping the system font:
 ]
 ```
 
-`surface.textAntialiasing` chooses how small text is antialiased: `"system"` (the default) follows
-the operating system, which on Windows is ClearType's setting and subpixel order; `"grayscale"`
-always antialiases in gray; `"subpixel"` always antialiases per subpixel, in the system's order when
-it has one and RGB otherwise. A C++ host sets `ApplicationConfig::text_antialiasing` the same way.
-Headless runs treat `"system"` as gray, so captures do not depend on the machine.
+`surface.textAntialiasing` chooses how small text is antialiased: `"grayscale"` (the default) always
+antialiases in gray; `"system"` follows the operating system, which on Windows is ClearType's setting
+and subpixel order; `"subpixel"` always antialiases per subpixel, in the system's order when it has
+one and RGB otherwise. A C++ host sets `ApplicationConfig::text_antialiasing` the same way. Headless
+runs treat `"system"` as gray, so captures do not depend on the machine.
 
 Small text that sits still is rasterized by the platform's text stack: DirectWrite on Windows with
 each font's own hinting, and FreeType on Linux, hinted as fontconfig says. A desktop host always asks

@@ -91,7 +91,7 @@ struct ApplicationConfig final {
         {"strata:ui/icons/chevron-up", "assets/strata/images/ui/icons/chevron-up.svg"},
     };
     bool reduced_motion = false;
-    TextAntialiasing text_antialiasing = TextAntialiasing::system;
+    TextAntialiasing text_antialiasing = TextAntialiasing::grayscale;
 };
 
 struct ApplicationOptions final {

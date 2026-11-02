@@ -140,6 +140,27 @@ Rect LayoutResult::surface_bounds(const LayoutRecord& record, Rect bounds) const
     return bounds;
 }
 
+LayoutRecord LayoutResult::on_surface(const LayoutRecord& record) const {
+    const Point offset = surface_offset(record);
+    const auto moved = [offset](Rect value) {
+        value.x += offset.x;
+        value.y += offset.y;
+        return value;
+    };
+    const auto moved_optional = [&moved](const std::optional<Rect>& value) {
+        return value.has_value() ? std::optional<Rect>(moved(*value)) : std::nullopt;
+    };
+    LayoutRecord placed = record;
+    placed.bounds = moved(record.bounds);
+    placed.snapped_bounds = moved(record.snapped_bounds);
+    placed.hit_bounds = moved(record.hit_bounds);
+    placed.content_bounds = moved(record.content_bounds);
+    placed.local_clip = moved_optional(record.local_clip);
+    placed.scroll_frame = moved_optional(record.scroll_frame);
+    placed.viewport = moved_optional(record.viewport);
+    return placed;
+}
+
 std::optional<Rect> LayoutResult::surface_clip(const LayoutRecord& record) const noexcept {
     std::optional<Rect> result;
     for (const LayoutRecord* current = &record; current != nullptr;

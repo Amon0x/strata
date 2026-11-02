@@ -869,8 +869,8 @@ typedef struct strata_surface_environment {
      * STRATA_SYSTEM_APPEARANCE_ACCENT. */
     strata_color system_accent;
     /* Since version 3: how small text is antialiased, STRATA_TEXT_ANTIALIASING_*. A desktop host
-     * follows the system (ClearType on Windows) unless the application overrides it; an older
-     * caller's layout ends before this field and reads as grayscale. */
+     * antialiases in gray unless the application asks for subpixel or the system's setting; an
+     * older caller's layout ends before this field and reads as grayscale. */
     uint32_t text_antialiasing;
     /* Since version 4: who rasterizes small text, STRATA_TEXT_RASTERIZER_*. A desktop host chooses the
      * system's; an older caller's layout ends before this field and reads as portable. */

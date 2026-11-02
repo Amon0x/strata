@@ -9851,6 +9851,30 @@ overlay Nullable {
           "a nullable state did not describe the value it took");
 }
 
+void test_record_on_surface_includes_its_scrollers() {
+    namespace ui = strata::ui;
+    ui::LayoutResult layout;
+    ui::LayoutRecord scroller;
+    scroller.identity = 1U;
+    scroller.scroll_offset = ui::Point{0.0, 300.0};
+    ui::LayoutRecord node;
+    node.identity = 2U;
+    node.coordinate_parent = 1U;
+    node.scroll_content = true;
+    node.bounds = ui::Rect{10.0, 500.0, 100.0, 40.0};
+    node.content_bounds = node.bounds;
+    node.viewport = node.bounds;
+    layout.records.emplace(scroller.identity, scroller);
+    layout.records.emplace(node.identity, node);
+    const ui::LayoutRecord placed = layout.on_surface(node);
+    check_near(placed.bounds.x, 10.0, "placing a record on the surface moved it sideways");
+    check_near(placed.bounds.y, 200.0, "a record on the surface ignored its scroller");
+    check_near(placed.content_bounds.y, 200.0, "a record's content stayed in scroll content");
+    check(placed.viewport.has_value() && std::abs(placed.viewport->y - 200.0) < 1.0e-9,
+          "a record's viewport stayed in scroll content");
+    check_near(node.bounds.y, 500.0, "placing a record on the surface changed the record");
+}
+
 void test_forwarded_slot_is_the_shorthand_target() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -10038,6 +10062,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_surfaces_keep_their_own_state_scope_bindings();
             test_state_types_follow_declarations_not_values();
             test_forwarded_slot_is_the_shorthand_target();
+            test_record_on_surface_includes_its_scrollers();
         }
         std::cout << "strata_ui_tests: OK\n";
         return 0;

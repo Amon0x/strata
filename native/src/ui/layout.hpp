@@ -405,6 +405,8 @@ struct LayoutResult final {
     /** Scroll-only translation from a record's stable content coordinates to the surface. */
     [[nodiscard]] Point surface_offset(const LayoutRecord& record) const noexcept;
     [[nodiscard]] Rect surface_bounds(const LayoutRecord& record, Rect bounds) const noexcept;
+    /** A record's geometry placed on the surface, for what draws outside its scrollers. */
+    [[nodiscard]] LayoutRecord on_surface(const LayoutRecord& record) const;
     /** Intersects ancestor clips only after placing each in surface coordinates. */
     [[nodiscard]] std::optional<Rect> surface_clip(const LayoutRecord& record) const noexcept;
 };

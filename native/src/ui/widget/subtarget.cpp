@@ -108,6 +108,14 @@ std::vector<DetachedOverlayRoot> detached_overlay_roots(
             laid_out = layout.find(current->identity()) != nullptr;
         }
         if (!laid_out) continue;
+        // It sits above everything, but only while what it belongs to can be seen, as a popover
+        // with `position-visibility: anchors-visible` does.
+        const LayoutRecord& anchor = *layout.find(node->identity());
+        if (const std::optional<Rect> visible = layout.surface_clip(anchor);
+            visible.has_value() &&
+            !visible->intersection(layout.surface_bounds(anchor, anchor.bounds)).has_value()) {
+            continue;
+        }
         result.push_back(DetachedOverlayRoot{
             node,
             detached_overlay_z_index(widgets, *node),

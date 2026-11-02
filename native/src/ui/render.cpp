@@ -657,8 +657,11 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             const LayoutRecord* record = layout.find(node->identity());
             if (record == nullptr)
                 continue;
-            RenderCommandBuffer overlay = build_widget_overlay(
-                widgets, *node, *record, layout, input, commands, text, svg_images, &motion, 1.0);
+            // Drawn over the whole surface, past the scrollers its node sits in, so it reads where
+            // its node is on the surface rather than where it is in their content.
+            RenderCommandBuffer overlay =
+                build_widget_overlay(widgets, *node, layout.on_surface(*record), layout, input,
+                                     commands, text, svg_images, &motion, 1.0);
             append_behavior_overlays(behaviors, *node, *record, layout, input, commands, text,
                                      svg_images, &motion, 1.0, true, overlay);
             if (overlay.empty())
@@ -776,6 +779,12 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             plan.child_lengths.size() != plan.ordered_children.size() ||
             plan.child_contributions.size() != plan.ordered_children.size() ||
             plan.ordered_child_layout_generations.size() != plan.ordered_children.size())
+            return std::nullopt;
+        // The journal only says what changed since the last frame. An ancestor moved as a whole
+        // draws this plan under its own translation without visiting it, so a plan not where its
+        // node now is holds children that moved without a journal entry of their own.
+        const LayoutRecord* const placed = layout.find(node.identity());
+        if (placed == nullptr || placed->bounds != plan.subtree_layout.bounds)
             return std::nullopt;
         std::vector<std::size_t> positions;
         if (const auto changed = changed_children.find(node.identity());

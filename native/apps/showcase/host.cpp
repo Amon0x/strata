@@ -634,6 +634,7 @@ struct Host::Impl final {
             0U,
         };
         platform.appearance().apply(result);
+        result.text_antialiasing = STRATA_TEXT_ANTIALIASING_GRAYSCALE;
         return result;
     }
 
